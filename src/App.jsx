@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import axios from "axios";
+import apiClient from "./api";
 import { useTheme } from "@mui/material/styles";
 import {
   Button,
@@ -44,6 +44,7 @@ import { Pagination, Navigation } from "swiper/modules";
 import RecipientAutocomplete from "./RecipientAutocomplete";
 import BtnGroupLocation from "./btngroupLocation";
 import CollectionsIcon from '@mui/icons-material/Collections';
+import MonthlyCounter from "./MonthlyCounter";
 
 // Регистрация модулей
 SwiperCore.use([Pagination, Navigation]);
@@ -122,6 +123,7 @@ const App = () => {
   const scannerTransportationRef = useRef(null); // Ссылка на экземпляр сканера
   const qrReaderRef = useRef(null); // Ссылка на элемент с ID qr-reader
   const [selectedRadioValue, setSelectedRadioValue] = useState("");
+  const monthlyCounterRef = useRef(null);
 
   const handleRadioChange = (e) => {
     setSelectedRadioValue(e.target.value);
@@ -219,11 +221,17 @@ const App = () => {
   const canvasRef = useRef(null);
   const scannerRef = useRef(null);
   const timer = useRef();
+  const isSubmittingRef = useRef(false);
 
 
   // Настройка Dropzone
+  const accept = {
+    'image/jpeg': ['.jpg', '.jpeg'],
+    'image/png': ['.png'],
+    'image/heic': ['.heic', '.heif'],
+  };
   const { getRootProps, getInputProps } = useDropzone({
-    accept: 'image/*',
+    accept,
     multiple: true,
     onDrop: (acceptedFiles) => {
       const newPhotos = acceptedFiles.map((file) => URL.createObjectURL(file));
@@ -285,8 +293,8 @@ const App = () => {
       officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
 
     try {
-      const response = await axios.get(
-        `https://portal.lenta.com/sites/obrazceo/_api/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eoNumber}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}')`,
+      const response = await apiClient.get(
+        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eoNumber}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}')`,
         {
           headers: { Accept: "application/json;odata=verbose" },
         }
@@ -326,18 +334,11 @@ const App = () => {
   // Получение вариантов для выбора из SharePoint
   const fetchChoices = async () => {
     try {
-      const response = await fetch(
-        `https://portal.lenta.com/sites/obrazceo/_api/web/lists/getbytitle('ProblemsPallet')/fields?$filter=InternalName eq 'Problems'`,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json;odata=verbose",
-          },
-        }
+      const { data } = await apiClient.get(
+        `/web/lists/getbytitle('ProblemsPallet')/fields?$filter=InternalName eq 'Problems'`
       );
-      const data = await response.json();
-      const field = data.d.results[0];
-      if (field && field.Choices) {
+      const field = data?.d?.results?.[0];
+      if (field?.Choices?.results) {
         setChoices(field.Choices.results);
       } else {
         console.error("Поле выбора не найдено или не содержит значений");
@@ -346,13 +347,12 @@ const App = () => {
       console.error("Ошибка при получении вариантов выбора для поля:", error);
     }
   };
-
   // Функция для получения профиля текущего пользователя
   const fetchUserProfile = async () => {
     try {
       // Запрос для получения данных профиля текущего пользователя
-      const response = await axios.get(
-        "https://portal.lenta.com/sites/obrazceo/_api/SP.UserProfiles.PeopleManager/GetMyProperties",
+      const response = await apiClient.get(
+        "/SP.UserProfiles.PeopleManager/GetMyProperties",
         {
           headers: {
             Accept: "application/json;odata=verbose",
@@ -472,174 +472,258 @@ const App = () => {
     closeCameraModal();
   };
 
-  const handleFormSubmit = async (e) => {
-    e.preventDefault();
 
-    // Сбрасываем ошибки
-    setErrors({
-      eoNumber: "",
-      selectedRecipient: "",
-      location: "",
-      problems: "",
-      transportation: "",
-      selectedRadioValue: "",
 
-    });
 
-    // Проверка обязательных полей
-    let formIsValid = true;
-    const newErrors = {};
+const LIST_TITLE = "ProblemsPallet";
+// --- ПОЛНАЯ ЗАМЕНА handleFormSubmit ---
 
-    const validEoNumberPattern = /^(ЕО отсутствует|\d{17}|\d{18})$/;
-    if (!eoNumber) {
-      newErrors.eoNumber = "Поле Номер ЕО обязательно для заполнения";
-      formIsValid = false;
-    } else if (!validEoNumberPattern.test(eoNumber)) {
-      newErrors.eoNumber = "Введите 17 или 18 цифр или 'ЕО отсутствует'";
-      formIsValid = false;
-    }
-    if (isEOMissing && !selectedRadioValue) { // Валидация для радиокнопок, если "ЕО отсутствует"
-      newErrors.selectedWarehouse = "Пожалуйста, выберите склад";
-      formIsValid = false;
-    }
-    if (!selectedRecipient) {
-      newErrors.selectedRecipient = "Пожалуйста, выберите получателя";
-      formIsValid = false;
-    }
-    if (!location) {
-      newErrors.location = "Поле Местоположение обязательно для заполнения";
-      formIsValid = false;
-    }
-    if (isTransportationRequired && !transportation) {
-      newErrors.transportation = "Поле Транспортировка обязательно для заполнения";
-      formIsValid = false;
-    }
-    if (problems.length === 0) {
-      newErrors.problems = "Пожалуйста, выберите хотя бы одну проблему";
-      formIsValid = false;
-    }
+// универсальный загрузчик вложений: слать ровно байты (Blob/ArrayBuffer)
+async function uploadAttachmentRaw(listTitle, itemId, fileName, dataBlob) {
+  // dataBlob: Blob | ArrayBuffer
+  // если используете digest вручную — оставьте; иначе можно убрать (интерсептор + прокси)
+  const digest = await getRequestDigest();
 
-    if (!formIsValid) {
-      setErrors(newErrors);
-      return; // Прекращаем выполнение, если поля не заполнены
+  return apiClient.post(
+    `/web/lists/getbytitle('${encodeURIComponent(listTitle)}')/items(${itemId})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName)}')`,
+    dataBlob,
+    {
+      headers: {
+        Accept: "application/json;odata=verbose",
+        "Content-Type": "application/octet-stream",
+        "X-RequestDigest": digest, // можно оставить — не мешает
+      },
+      // очень важно: НЕ трогать тело, отдать как есть
+      transformRequest: [(d) => d],
+      // иногда браузер/прокси возвращают text — не страшно
+      responseType: "text",
     }
+  );
+}
 
-    // new
-    // Проверка на наличие фотографий, если проблема не "Не найдена"
-    if (!problems.includes("Не найдена")) {
-      if (cameraPhotos.length === 0 && galleryPhotos.length === 0) {
-        alert("Добавьте фото!");
-        return;
+// корректное удаление элемента по ID (POST + X-HTTP-Method: DELETE)
+async function deleteListItemById(listTitle, itemId) {
+  return apiClient.post(
+    `/web/lists/getbytitle('${encodeURIComponent(listTitle)}')/items(${itemId})`,
+    null,
+    {
+      headers: {
+        "IF-MATCH": "*",
+        "X-HTTP-Method": "DELETE",
+        // без JSON для тела
+        "Content-Type": undefined,
+      },
+      transformRequest: [(d) => d],
+    }
+  );
+}
+
+// хелпер: привести любую запись фото к Blob
+async function toBlob(src) {
+  // cameraPhotos: dataURL (data:image/png;base64,....)
+  // galleryPhotos: сейчас у вас blob:URL из createObjectURL(file)
+  // оба варианта можно получить через fetch(...).blob()
+  if (src instanceof Blob) return src;
+  if (typeof src === "string") {
+    const resp = await fetch(src);
+    return await resp.blob();
+  }
+  // если вдруг File
+  if (src && src.arrayBuffer) {
+    return new Blob([await src.arrayBuffer()], { type: src.type || "application/octet-stream" });
+  }
+  throw new Error("Невозможно преобразовать фото к Blob");
+}
+
+const handleFormSubmit = async (e) => {
+  e.preventDefault();
+
+  // защита от двойного входа
+  if (isSubmittingRef.current) return;
+  isSubmittingRef.current = true;
+
+  // сбрасываем ошибки
+  setErrors({
+    eoNumber: "",
+    selectedRecipient: "",
+    location: "",
+    problems: "",
+    transportation: "",
+    selectedRadioValue: "",
+  });
+
+  // валидации
+  let formIsValid = true;
+  const newErrors = {};
+
+  const validEoNumberPattern = /^(ЕО отсутствует|\d{17}|\d{18})$/;
+  if (!eoNumber) {
+    newErrors.eoNumber = "Поле Номер ЕО обязательно для заполнения";
+    formIsValid = false;
+  } else if (!validEoNumberPattern.test(eoNumber)) {
+    newErrors.eoNumber = "Введите 17 или 18 цифр или 'ЕО отсутствует'";
+    formIsValid = false;
+  }
+  if (isEOMissing && !selectedRadioValue) {
+    newErrors.selectedWarehouse = "Пожалуйста, выберите склад";
+    formIsValid = false;
+  }
+  if (!selectedRecipient) {
+    newErrors.selectedRecipient = "Пожалуйста, выберите получателя";
+    formIsValid = false;
+  }
+  if (!location) {
+    newErrors.location = "Поле Местоположение обязательно для заполнения";
+    formIsValid = false;
+  }
+  if (isTransportationRequired && !transportation) {
+    newErrors.transportation = "Поле Транспортировка обязательно для заполнения";
+    formIsValid = false;
+  }
+  if (problems.length === 0) {
+    newErrors.problems = "Пожалуйста, выберите хотя бы одну проблему";
+    formIsValid = false;
+  }
+  // фото обязательны, если проблема не "Не найдена"
+  if (!problems.includes("Не найдена")) {
+    if (cameraPhotos.length === 0 && galleryPhotos.length === 0) {
+      newErrors.problems = newErrors.problems || "Добавьте фото!";
+      formIsValid = false;
+    }
+  }
+
+  if (!formIsValid) {
+    setErrors(newErrors);
+    isSubmittingRef.current = false;
+    return;
+  }
+
+  let createdItemId = null;
+
+  try {
+    setSuccess(false);
+    setLoading(true);
+
+    const officeParts = userProfile.userOffice.split("-");
+    const officeSuffix =
+      officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+
+    // при желании можно удалить явный digest — у вас есть интерсептор + прокси
+    const digest = await getRequestDigest();
+
+    // 1) Создание элемента
+    const createResp = await apiClient.post(
+      `/web/lists/getbytitle('${LIST_TITLE}')/items`,
+      {
+        __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+        THU: eoNumber,
+        DC_THU: officeSuffix,
+        RecipientId: selectedRecipient,
+        Location1: location,
+        Shipment: transportation,
+        WhNotEO: selectedRadioValue,
+        Problems: {
+          __metadata: { type: "Collection(Edm.String)" },
+          results: problems,
+        },
+      },
+      {
+        headers: {
+          Accept: "application/json;odata=verbose",
+          "Content-Type": "application/json;odata=verbose",
+          "X-RequestDigest": digest,
+        },
       }
+    );
+
+    createdItemId = createResp?.data?.d?.Id;
+    if (!createdItemId) {
+      throw new Error("SharePoint не вернул Id созданного элемента.");
     }
-    // new
 
-    if (!loading) {
-      setSuccess(false);
-      setLoading(true);
+    // 2) Вложения — готовим список Blob'ов
+    const allSources = [...cameraPhotos, ...galleryPhotos];
 
-      const officeParts = userProfile.userOffice.split("-");
-      const officeSuffix =
-        officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+    for (let i = 0; i < allSources.length; i++) {
+      const src = allSources[i];
+      const blob = await toBlob(src);
 
-      try {
-        const digest = await getRequestDigest();
+      // имя файла: png для камер, а для файлов можно попытаться выцепить расширение; если неизвестно — .bin
+      let ext = "png";
+      if (blob && blob.type && blob.type.includes("jpeg")) ext = "jpg";
+      if (blob && blob.type && blob.type.includes("png")) ext = "png";
+      if (blob && blob.type && blob.type.includes("heic")) ext = "heic";
+      if (blob && blob.type && blob.type.includes("heif")) ext = "heif";
+      if (!blob.type) ext = "bin";
 
-        // Создаем новый элемент
-        const createItemResponse = await axios.post(
-          `https://portal.lenta.com/sites/obrazceo/_api/web/lists/getbytitle('ProblemsPallet')/items`,
-          {
-            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
-            THU: eoNumber,
-            DC_THU: officeSuffix,
-            RecipientId: selectedRecipient,
-            Location1: location,
-            Shipment: transportation,
-            WhNotEO: selectedRadioValue,
-            Problems: {
-              __metadata: { type: "Collection(Edm.String)" },
-              results: problems,
-            },
-          },
-          {
-            headers: {
-              Accept: "application/json;odata=verbose",
-              "Content-Type": "application/json;odata=verbose",
-              "X-RequestDigest": digest,
-            },
-          }
-        );
+      const fileName = `photo_${i + 1}_${Date.now()}.${ext}`;
 
-        const itemId = createItemResponse.data.d.Id;
+      // ключевой момент: слать бинарь «как есть», без JSON
+      await uploadAttachmentRaw(LIST_TITLE, createdItemId, fileName, blob);
+    }
 
-        // Собираем все фото
-        const allPhotos = [...cameraPhotos, ...galleryPhotos];
-
-        // Отправка фотографий в SharePoint
-        for (let i = 0; i < allPhotos.length; i++) {
-          const photo = allPhotos[i];
-          const blob = await fetch(photo).then((res) => res.blob());
-          const fileName = `photo_${i + 1}.png`;
-
-          await axios.post(
-            `https://portal.lenta.com/sites/obrazceo/_api/web/lists/getbytitle('ProblemsPallet')/items(${itemId})/AttachmentFiles/add(FileName='${fileName}')`,
-            blob,
-            {
-              headers: {
-                Accept: "application/json;odata=verbose",
-                "X-RequestDigest": digest,
-                "Content-Type": "application/octet-stream",
-              },
-            }
-          );
-        }
-
-        // Обновление статуса элемента
-        await axios.post(
-          `https://portal.lenta.com/sites/obrazceo/_api/web/lists/getbytitle('ProblemsPallet')/items(${itemId})`,
-          {
-            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
-            Status: "Выполнено",
-          },
-          {
-            headers: {
-              Accept: "application/json;odata=verbose",
-              "Content-Type": "application/json;odata=verbose",
-              "X-RequestDigest": digest,
-              "IF-MATCH": "*",
-              "X-HTTP-Method": "MERGE",
-            },
-          }
-        );
-
-        // Успешное завершение
-        setSuccess(true);
-        setLoading(false);
-        resetButtonState(); // Возврат кнопки к обычному состоянию
-
-        // Сброс всех полей
-        setEoNumber("");
-        setIsEOMissing(false);
-        setCameraPhotos([]);
-        setGalleryPhotos([]);
-        setProblems([]);
-        setSelectedRecipient(null);
-        setLocation("");
-        setTransportation("");
-        setKey((prevKey) => prevKey + 1); // Сброс Autocomplete
-        setSelectedRadioValue("");
-
-      } catch (error) {
-        console.error("Ошибка отправки данных:", error);
-        setSuccess(false);
-        setLoading(false);
+    // 3) MERGE статуса
+    await apiClient.post(
+      `/web/lists/getbytitle('${LIST_TITLE}')/items(${createdItemId})`,
+      {
+        __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+        Status: "Выполнено",
+      },
+      {
+        headers: {
+          Accept: "application/json;odata=verbose",
+          "Content-Type": "application/json;odata=verbose",
+          "IF-MATCH": "*",
+          "X-HTTP-Method": "MERGE",
+        },
       }
+    );
+
+    // 4) успех
+    setSuccess(true);
+    setLoading(false);
+    resetButtonState();
+
+        // 👉 Обновляем счётчик месяца
+    if (monthlyCounterRef.current?.refresh) {
+      monthlyCounterRef.current.refresh();
     }
-  };
+
+    // сброс формы
+    setEoNumber("");
+    setIsEOMissing(false);
+    setCameraPhotos([]);
+    setGalleryPhotos([]);
+    setProblems([]);
+    setSelectedRecipient(null);
+    setLocation("");
+    setTransportation("");
+    setKey((prevKey) => prevKey + 1);
+    setSelectedRadioValue("");
+  } catch (err) {
+    console.error("Ошибка отправки данных:", err);
+
+    // откат: удаляем созданный элемент, если успели создать
+    try {
+      if (createdItemId) {
+        await deleteListItemById(LIST_TITLE, createdItemId);
+        console.warn(`Созданный элемент #${createdItemId} удалён из-за ошибки.`);
+      }
+    } catch (rollbackErr) {
+      console.error("Откат (удаление элемента) не удался:", rollbackErr);
+    }
+
+    setSuccess(false);
+    setLoading(false);
+  } finally {
+    isSubmittingRef.current = false;
+  }
+};
+
 
   const getRequestDigest = async () => {
-    const response = await axios.post(
-      "https://portal.lenta.com/sites/obrazceo/_api/contextinfo",
+    const response = await apiClient.post(
+      "/contextinfo",
       {},
       {
         headers: {
@@ -747,7 +831,17 @@ const App = () => {
 
   return (
     <ThemeProvider theme={theme}>
-      <Container component="primary" maxWidth="sm" sx={{ p: 0 }}>
+      {/* Фиксированная «пилюля» в левом верхнем углу экрана */}
+      <MonthlyCounter
+        ref={monthlyCounterRef}
+        listTitle="ProblemsPallet"
+        authorId={userProfile.userId}   // можно не передавать — возьмёт /web/currentuser
+        position="fixed"                // фиксируем к левому верхнему углу окна
+      // initialMonth={new Date()}
+      // onMonthChange={(d) => {}}
+      />
+      <Container maxWidth="sm" sx={{ p: 0 }}>
+        <Box sx={{ height: 64 }} />
         <Typography
           variant="h5"
           gutterBottom
@@ -1221,20 +1315,6 @@ const App = () => {
                   sx={buttonSx}
                   disabled={loading}
                   type="submit"
-                  onClick={(e) => {
-
-                    // new
-                    // Проверка на наличие фотографий, если проблема не "Не найдена"
-                    if (!problems.includes("Не найдена")) {
-                      if (cameraPhotos.length === 0 && galleryPhotos.length === 0) {
-                        e.preventDefault();
-                        alert("Добавьте фото!");
-                        return;
-                      }
-                    }
-                    // new
-                    handleFormSubmit(e);
-                  }}
                   endIcon={loading ? "" : <SendIcon />}
                 >
                   {loading ? (
@@ -1425,19 +1505,18 @@ const App = () => {
                       <LoopIcon />
                     </IconButton>
                   </Button>
-                  <Button sx={{ flex: 1 }} onClick={capturePhoto}>
-                    <IconButton
-                      sx={{
-                        height: "48px",
-                        width: "48px",
-                        color: "white",
-                        bgcolor: "#171c8f",
-                        "&:hover": { bgcolor: "#0f154d" },
-                        "&:focus": { outline: "none" }, // убираем бордер при клике
-                      }}
-                    >
-                      <CameraIcon />
-                    </IconButton>
+                  <Button
+                    onClick={capturePhoto}
+                    sx={{
+                      flex: 1,
+                      minHeight: 48,
+                      color: "white",
+                      bgcolor: "#171c8f",
+                      "&:hover": { bgcolor: "#0f154d" },
+                      "&:focus": { outline: "none" },
+                    }}
+                  >
+                    <CameraIcon sx={{ fontSize: 40 }} />
                   </Button>
                   <Button sx={{ flex: 1 }} onClick={handleApplyPhotos}>
                     <Box sx={{ "&:hover": { bgcolor: "#0f154d" } }}>

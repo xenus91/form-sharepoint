@@ -4,6 +4,9 @@ import Autocomplete from "@mui/material/Autocomplete";
 import CircularProgress from "@mui/material/CircularProgress";
 import FormHelperText from "@mui/material/FormHelperText";
 
+import apiClient from "./api";
+import { normalizeNextUrl } from "./api"; // помнишь, мы добавили эту утилиту в api.js
+
 const RecipientAutocomplete = ({
   onSelect,
   value,
@@ -24,30 +27,32 @@ const RecipientAutocomplete = ({
     let items = [];
     let hasNext = true;
     let nextUrl =
-      "https://portal.lenta.com/sites/obrazceo/_api/web/lists/getbytitle('SCList')/items?$select=ID,Title,SCNumberText,SCNumber&$top=1000&$orderby=SCNumber asc";
+      "/web/lists/getbytitle('SCList')/items?$select=ID,Title,SCNumberText,SCNumber&$top=1000&$orderby=SCNumber asc";
 
     try {
       // Постраничная загрузка данных
       while (hasNext) {
-        const response = await fetch(nextUrl, {
+       /* const response = await fetch(nextUrl, {
           method: "GET",
           headers: {
             Accept: "application/json;odata=verbose",
           },
         });
 
-        const data = await response.json();
-        const fetchedItems = data.d.results.map((item) => ({
-          id: item.ID,
-          title: item.SCNumber, // Название подстановки
-          description: item.Title || "", // Поле описания
-        }));
+        const data = await response.json();*/
+        const { data } = await apiClient.get(nextUrl);
+ const fetchedItems = data.d.results.map((item) => ({
+   id: item.ID,
+   title: String(item.SCNumber), // ← сразу делаем строкой
+   description: item.Title || "",
+ }));
 
         items = [...items, ...fetchedItems];
 
         // Проверка на наличие следующей страницы
         if (data.d.__next) {
-          nextUrl = data.d.__next; // Ссылка на следующую страницу данных
+          nextUrl = normalizeNextUrl(data.d.__next); // переводим в относительный для прокси
+          hasNext = !!nextUrl;
         } else {
           hasNext = false; // Если нет следующей страницы
         }
@@ -94,7 +99,13 @@ const RecipientAutocomplete = ({
         disableClearable
         disabled={isEOMissing || disabled}
         options={lookupItems}
-        getOptionLabel={(option) => option.title}
+         getOptionLabel={(option) => {
+   // При freeSolo option может быть строкой
+   if (typeof option === 'string') return option;
+   // Защита, если вдруг title снова окажется числом/undefined
+   const t = option?.title;
+   return t == null ? '' : String(t);
+ }}
         loading={loading}
         value={selectedValue ? lookupItems.find((item) => item.id === selectedValue) : null} // Используем состояние selectedValue
         inputValue={inputValue} // Управляем текстовым значением
