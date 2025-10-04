@@ -1,4 +1,4 @@
-// server.js (или ваш файл прокси)
+// proxy-server.cjs (или ваш файл прокси)
 
 const express = require("express");
 const cors = require("cors");

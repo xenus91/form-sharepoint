@@ -163,119 +163,125 @@ const MonthlyCounterBar = forwardRef(
     };
 
     const positionSx =
-      position === "sticky"
-        ? { position: "sticky", top: 0, left: 0 }
-        : { position: "fixed", top: 8, left: 8, right: 8 };
+      position === "fixed"
+        ? { position: "fixed", top: 8, left: 8, right: 8 } // контент уедет ПОД панель
+        : { position: "sticky", top: 0, left: 0 };          // если всё же нужен sticky
 
-    return (
-      <Box
-        sx={{
-          ...positionSx,
-          zIndex: 1200,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 2,
-          // полностью без подложки/границы/тени
-          background: "transparent",
-          px: 0,
-          py: 0,
-          border: "none",
-          boxShadow: "none",
-        }}
-      >
-        {/* СЛЕВА: ← | [фикс. ширина текста] | → */}
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <IconButton aria-label="Предыдущий месяц" onClick={prevMonth} size="small">
-            <ChevronLeftIcon />
-          </IconButton>
+   return (
+  <Box
+    sx={{
+      ...positionSx,
+      zIndex: 1200,
 
-          <Box
-            sx={{
-              width: labelWidth,
-              textAlign: "center",
-              px: 1,
-              py: 0.25,
-              borderRadius: 999,
-              border: "none",
-              boxShadow: "none",
-              // лёгкая прозрачная подложка только под надпись месяца, чтобы стрелки не «ездили»
-              background: "rgba(23, 28, 143, 0.07)",
-              color: "#171c8f",
-            }}
-          >
-            <Typography
-              variant="body2"
-              sx={{
-                fontWeight: 700,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-              title={label}
-            >
-              {label}
-            </Typography>
-          </Box>
+      // 🔴 ключ к liquid-glass
+      background: "rgba(255,255,255,0.55)",           // полупрозрачный фон
+      backdropFilter: "blur(10px) saturate(160%)",
+      WebkitBackdropFilter: "blur(10px) saturate(160%)", // Safari
 
-          <IconButton aria-label="Следующий месяц" onClick={nextMonth} size="small">
-            <ChevronRightIcon />
-          </IconButton>
-        </Box>
+      border: "1px solid rgba(23,28,143,0.12)",
+      boxShadow: "0 8px 24px rgba(23,28,143,0.10)",
+      borderRadius: 2,
 
-        {/* СПРАВА: число — кликабельно; по клику показываем tooltip с подсказкой */}
-        <Tooltip
-          title="Кол-во отправленных фотоотчетов за выбранный месяц"
-          placement="bottom"
-          open={tipOpen}
-          onClose={() => setTipOpen(false)}
-          disableFocusListener
-          disableHoverListener
-          enterTouchDelay={0}
-          leaveTouchDelay={1200}
+      // панель висит над контентом и НЕ мешает прокрутке под ней
+      pointerEvents: "none",
+
+      // внутренние отступы и флексы как были
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 2,
+      px: 3,   // лёгкая «воздушка»
+      py: 0.5,
+    }}
+  >
+    {/* всё интерактивное внутри — снова включаем события */}
+    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, width: "100%", pointerEvents: "auto" }}>
+      {/* СЛЕВА: ← | [месяц] | → */}
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+        <IconButton aria-label="Предыдущий месяц" onClick={prevMonth} size="small">
+          <ChevronLeftIcon />
+        </IconButton>
+
+        <Box
+          sx={{
+            width: labelWidth,
+            textAlign: "center",
+            px: 1,
+            py: 0.25,
+            borderRadius: 999,
+            background: "rgba(23, 28, 143, 0.07)",
+            color: "#171c8f",
+          }}
         >
           <Typography
-            component="div"
-            role="button"
-            onClick={handleCountClick}
-            title={loading ? "Загрузка..." : `${count}`}
+            variant="body2"
             sx={{
-              cursor: "pointer",
-              userSelect: "none",
-              fontFamily: `'Poppins', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`,
-              fontWeight: 900,
-              fontSize: "clamp(28px, 4.8vw, 48px)",
-              lineHeight: 1,
-              letterSpacing: 0.5,
-              fontVariantNumeric: "tabular-nums",
-
-              // БОЛЕЕ ПРОЗРАЧНЫЙ «liquid-glass» градиент в тонах #171c8f
-              background: `
-                linear-gradient(
-                  180deg,
-                  rgba(23, 28, 143, 0.55) 0%,
-                  rgba(23, 28, 143, 0.34) 52%,
-                  rgba(23, 28, 143, 0.20) 100%
-                )
-              `,
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-
-              // мягкий полуобъём и лёгкая подсветка
-              textShadow: `
-                0 0 12px rgba(23,28,143,0.16),
-                0 2px 10px rgba(23,28,143,0.10),
-                -1px -1px 0 rgba(255,255,255,0.35)
-              `,
-              WebkitTextStroke: "0.5px rgba(23,28,143,0.22)",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
+            title={label}
           >
-            {prettyCount}
+            {label}
           </Typography>
-        </Tooltip>
+        </Box>
+
+        <IconButton aria-label="Следующий месяц" onClick={nextMonth} size="small">
+          <ChevronRightIcon />
+        </IconButton>
       </Box>
-    );
+
+      {/* СПРАВА: число + tooltip */}
+      <Tooltip
+        title="Кол-во отправленных фотоотчетов за выбранный месяц"
+        placement="bottom"
+        open={tipOpen}
+        onClose={() => setTipOpen(false)}
+        disableFocusListener
+        disableHoverListener
+        enterTouchDelay={0}
+        leaveTouchDelay={1200}
+        sx={{ mr: 2 }} // отступ от правого края
+      >
+        <Typography
+          component="div"
+          role="button"
+          onClick={handleCountClick}
+          sx={{
+            cursor: "pointer",
+            userSelect: "none",
+            fontFamily: `'Poppins','Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`,
+            fontWeight: 900,
+            fontSize: "clamp(28px, 4.8vw, 48px)",
+            lineHeight: 1,
+            letterSpacing: 0.5,
+            fontVariantNumeric: "tabular-nums",
+            background: `
+              linear-gradient(
+                180deg,
+                rgba(23, 28, 143, 0.55) 0%,
+                rgba(23, 28, 143, 0.34) 52%,
+                rgba(23, 28, 143, 0.20) 100%
+              )
+            `,
+            WebkitBackgroundClip: "text",
+            backgroundClip: "text",
+            color: "transparent",
+            textShadow: `
+              0 0 12px rgba(23,28,143,0.16),
+              0 2px 10px rgba(23,28,143,0.10),
+              -1px -1px 0 rgba(255,255,255,0.35)
+            `,
+            WebkitTextStroke: "0.5px rgba(23,28,143,0.22)",
+          }}
+        >
+          {prettyCount}
+        </Typography>
+      </Tooltip>
+    </Box>
+  </Box>
+);
   }
 );
 

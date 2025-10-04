@@ -4,8 +4,16 @@ import Autocomplete from "@mui/material/Autocomplete";
 import CircularProgress from "@mui/material/CircularProgress";
 import FormHelperText from "@mui/material/FormHelperText";
 
-import apiClient from "./api";
-import { normalizeNextUrl } from "./api"; // помнишь, мы добавили эту утилиту в api.js
+import apiClient, { normalizeNextUrl } from "./api";
+
+const MENU_PROPS = {
+  PaperProps: {
+    sx: {
+      borderRadius: 1, // 16px ~ твои 14 достаточно близко, можно 1.75 для 14px
+      boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+    },
+  },
+};
 
 const RecipientAutocomplete = ({
   onSelect,
@@ -19,9 +27,8 @@ const RecipientAutocomplete = ({
   const [lookupItems, setLookupItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
-  const [selectedValue, setSelectedValue] = useState(value); // Состояние для выбранного значения
+  const [selectedValue, setSelectedValue] = useState(value);
 
-  // Функция для получения данных подстановки с учетом пагинации и добавления поля описания
   const fetchLookupValues = async () => {
     setLoading(true);
     let items = [];
@@ -30,37 +37,26 @@ const RecipientAutocomplete = ({
       "/web/lists/getbytitle('SCList')/items?$select=ID,Title,SCNumberText,SCNumber&$top=1000&$orderby=SCNumber asc";
 
     try {
-      // Постраничная загрузка данных
       while (hasNext) {
-       /* const response = await fetch(nextUrl, {
-          method: "GET",
-          headers: {
-            Accept: "application/json;odata=verbose",
-          },
-        });
-
-        const data = await response.json();*/
         const { data } = await apiClient.get(nextUrl);
- const fetchedItems = data.d.results.map((item) => ({
-   id: item.ID,
-   title: String(item.SCNumber), // ← сразу делаем строкой
-   description: item.Title || "",
- }));
+        const fetchedItems = data.d.results.map((item) => ({
+          id: item.ID,
+          title: String(item.SCNumber ?? ""), // страхуемся от null
+          description: item.Title || "",
+        }));
 
         items = [...items, ...fetchedItems];
 
-        // Проверка на наличие следующей страницы
         if (data.d.__next) {
-          nextUrl = normalizeNextUrl(data.d.__next); // переводим в относительный для прокси
+          nextUrl = normalizeNextUrl(data.d.__next);
           hasNext = !!nextUrl;
         } else {
-          hasNext = false; // Если нет следующей страницы
+          hasNext = false;
         }
       }
-
-      setLookupItems(items); // Обновление состояния с результатами
-    } catch (error) {
-      console.error("Ошибка при получении данных подстановки:", error);
+      setLookupItems(items);
+    } catch (e) {
+      console.error("Ошибка при получении данных подстановки:", e);
     } finally {
       setLoading(false);
     }
@@ -68,29 +64,29 @@ const RecipientAutocomplete = ({
 
   useEffect(() => {
     fetchLookupValues();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Автовыбор при "Нет ЕО"
   useEffect(() => {
     if (isEOMissing) {
-      const itemToSelect = lookupItems.find(item => item.id === 1373); // Замените 1373 на нужный id
+      const itemToSelect = lookupItems.find((item) => item.id === 1373); // при необходимости поменяй id
       if (itemToSelect) {
-        setSelectedValue(itemToSelect.id); // Устанавливаем выбранный id
-        onSelect(itemToSelect.id); // Устанавливаем выбранное значение в родительский компонент
+        setSelectedValue(itemToSelect.id);
+        onSelect(itemToSelect.id);
       }
     } else {
-      // Если isEOMissing = false, только обновляем выбранное значение, если оно изменилось
       if (value !== selectedValue) {
-        setSelectedValue(value); // Сбрасываем значение только если оно отличается от текущего
-        onSelect(value); // Передаем новое значение в родительский компонент
+        setSelectedValue(value ?? "");
+        onSelect(value ?? "");
       }
     }
-  }, [isEOMissing, lookupItems, onSelect, value, selectedValue]); // Зависимости обновляются при изменении isEOMissing, lookupItems или selectedValue
+  }, [isEOMissing, lookupItems, onSelect, value, selectedValue]);
 
+  // Очистка видимого ввода, когда isEOMissing = false
   useEffect(() => {
-    if (!isEOMissing) {
-      setInputValue(""); // Очистить inputValue только при isEOMissing = false
-    }
-  }, [isEOMissing]); // Очистка inputValue при смене isEOMissing
+    if (!isEOMissing) setInputValue("");
+  }, [isEOMissing]);
 
   return (
     <div>
@@ -99,71 +95,77 @@ const RecipientAutocomplete = ({
         disableClearable
         disabled={isEOMissing || disabled}
         options={lookupItems}
-         getOptionLabel={(option) => {
-   // При freeSolo option может быть строкой
-   if (typeof option === 'string') return option;
-   // Защита, если вдруг title снова окажется числом/undefined
-   const t = option?.title;
-   return t == null ? '' : String(t);
- }}
-        loading={loading}
-        value={selectedValue ? lookupItems.find((item) => item.id === selectedValue) : null} // Используем состояние selectedValue
-        inputValue={inputValue} // Управляем текстовым значением
-        onInputChange={(_, newInputValue) => {
-          setInputValue(newInputValue); // Обновляем текст при вводе
+        getOptionLabel={(option) => {
+          if (typeof option === "string") return option;
+          const t = option?.title;
+          return t == null ? "" : String(t);
         }}
+        loading={loading}
+        value={selectedValue ? lookupItems.find((it) => it.id === selectedValue) ?? null : null}
+        inputValue={inputValue}
+        onInputChange={(_, newVal) => setInputValue(newVal)}
         onChange={(_, newValue) => {
           if (newValue) {
-            setSelectedValue(newValue.id); // Обновляем выбранное значение
-            onSelect(newValue.id); // Передаем значение в родительский компонент
+            setSelectedValue(newValue.id);
+            onSelect(newValue.id);
           } else {
-            setSelectedValue(''); // Если значение сбрасывается
-            onSelect(''); // Сбрасываем значение в родительский компонент
+            setSelectedValue("");
+            onSelect("");
           }
         }}
         filterOptions={(options, { inputValue }) => {
-          const regex = new RegExp(`\\b${inputValue}`, 'i'); // Регулярное выражение для поиска вхождений
-          return options.filter((option) =>
-            regex.test(option.title) // Проверка на соответствие регулярному выражению
-          );
+          if (!inputValue) return options;
+          const regex = new RegExp(`\\b${inputValue}`, "i");
+          return options.filter((o) => regex.test(o.title));
+        }}
+        // единый вид контейнера (OutlinedInput) — прямо здесь
+        sx={{
+          "& .MuiOutlinedInput-root": {
+            borderRadius: 1,
+            height: 56,
+            backgroundColor: "rgba(23,28,143,0.03)",
+            "& .MuiOutlinedInput-notchedOutline": {
+              borderColor: "rgba(23,28,143,0.25)",
+            },
+            "&:hover .MuiOutlinedInput-notchedOutline": {
+              borderColor: "rgba(23,28,143,0.45)",
+            },
+            "&.Mui-focused .MuiOutlinedInput-notchedOutline": {
+              borderColor: "#171c8f",
+            },
+            "&.Mui-error .MuiOutlinedInput-notchedOutline": {
+              borderColor: "rgba(229,57,53,0.8)",
+            },
+            "& input": {
+              padding: "0 14px",
+              height: "100%",
+              boxSizing: "border-box",
+            },
+          },
         }}
         renderInput={(params) => (
           <TextField
             required
             {...params}
             label="Номер получателя"
-            sx={{
-              '& .MuiOutlinedInput-root': {
-                '& fieldset': {
-                  borderColor: 'rgba(23, 28, 143, 0.5)', // Цвет по умолчанию
-                },
-                '&:hover fieldset': {
-                  borderColor: '#171c8f', // Цвет при наведении
-                },
-                '&.Mui-focused fieldset': {
-                  borderColor: '#171c8f', // Цвет при фокусе
-                },
-              },
-            }}
             error={error}
+            onFocus={onFocus}
             InputProps={{
-              inputMode: "numeric",
               ...params.InputProps,
+              inputMode: "numeric",
               endAdornment: (
                 <>
-                  {loading ? (
-                    <CircularProgress color="inherit" size={20} />
-                  ) : null}
+                  {loading ? <CircularProgress color="inherit" size={20} /> : null}
                   {params.InputProps.endAdornment}
                 </>
               ),
             }}
-            onFocus={onFocus}
           />
         )}
+        ListboxProps={{ style: { maxHeight: 280 } }}
+        slotProps={{ paper: MENU_PROPS.PaperProps }}
       />
-      {error && <FormHelperText error>{helperText}</FormHelperText>}{" "}
-      {/* Отображаем текст ошибки */}
+      {error && <FormHelperText error>{helperText}</FormHelperText>}
     </div>
   );
 };
