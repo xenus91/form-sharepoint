@@ -929,7 +929,7 @@ const App = () => {
             onClick={handleOpenDcThuModal}
             sx={{ borderRadius: 1 }}
           >
-            DC_THU: {getEffectiveDcThu() || "—"}
+            РЦ: {getEffectiveDcThu() || "—"}
             {dcThuOverride ? " (локально)" : ""}
           </Button>
         </Box>
@@ -1549,13 +1549,13 @@ const App = () => {
             gap: 2,
           }}
         >
-          <Typography variant="h6">Локальный DC_THU</Typography>
+          <Typography variant="h6">Локальный РЦ</Typography>
           <Typography variant="body2" color="text.secondary">
             Укажите код РЦ (например, 8114). Значение сохранится в браузере и будет
             использовано вместо данных профиля.
           </Typography>
           <TextField
-            label="DC_THU"
+            label="РЦ"
             value={dcThuDraft}
             onChange={(event) => setDcThuDraft(event.target.value)}
             fullWidth
