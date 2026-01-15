@@ -49,6 +49,7 @@ import { useNotifications } from './NotificationsProvider';
 SwiperCore.use([Pagination, Navigation]);
 
 const INPUT_HEIGHT = 56;
+const DC_THU_CACHE_KEY = "dcThuOverride";
 
 const figmaTheme = createTheme({
   palette: {
@@ -345,6 +346,11 @@ const App = () => {
     userDisplayName: "",
     userTitle: "",
   });
+  const [dcThuOverride, setDcThuOverride] = useState(
+    () => localStorage.getItem(DC_THU_CACHE_KEY) || ""
+  );
+  const [dcThuModalOpen, setDcThuModalOpen] = useState(false);
+  const [dcThuDraft, setDcThuDraft] = useState("");
 
   const [errors, setErrors] = useState({
     eoNumber: "",
@@ -414,6 +420,14 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (dcThuOverride) {
+      localStorage.setItem(DC_THU_CACHE_KEY, dcThuOverride);
+    } else {
+      localStorage.removeItem(DC_THU_CACHE_KEY);
+    }
+  }, [dcThuOverride]);
+
+  useEffect(() => {
     return () => clearTimeout(timer.current);
   }, []);
 
@@ -436,9 +450,7 @@ const App = () => {
 
   const checkEoNumberInRecentRecords = async (eoNumber) => {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const officeParts = userProfile.userOffice.split("-");
-    const officeSuffix =
-      officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+    const officeSuffix = getEffectiveDcThu();
 
     try {
       const response = await apiClient.get(
@@ -508,6 +520,34 @@ const App = () => {
     } catch (error) {
       console.error("Ошибка при получении профиля пользователя:", error);
     }
+  };
+
+  const getOfficeSuffix = (office) => {
+    if (!office) return "";
+    const officeParts = office.split("-");
+    return officeParts.length > 1 ? officeParts[1].trim() : office.trim();
+  };
+
+  const normalizeDcThu = (value) => getOfficeSuffix(value);
+
+  const getEffectiveDcThu = () =>
+    dcThuOverride ? normalizeDcThu(dcThuOverride) : getOfficeSuffix(userProfile.userOffice);
+
+  const handleOpenDcThuModal = () => {
+    const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
+    setDcThuDraft(baseValue);
+    setDcThuModalOpen(true);
+  };
+
+  const handleSaveDcThu = () => {
+    setDcThuOverride(normalizeDcThu(dcThuDraft));
+    setDcThuModalOpen(false);
+  };
+
+  const handleClearDcThu = () => {
+    setDcThuOverride("");
+    setDcThuDraft(getOfficeSuffix(userProfile.userOffice));
+    setDcThuModalOpen(false);
   };
 
   const openCameraModal = () => {
@@ -688,9 +728,7 @@ const App = () => {
       setSuccess(false);
       setLoading(true);
 
-      const officeParts = userProfile.userOffice.split("-");
-      const officeSuffix =
-        officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+      const officeSuffix = getEffectiveDcThu();
 
       const digest = await getRequestDigest();
 
@@ -885,6 +923,16 @@ const App = () => {
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
+        <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={handleOpenDcThuModal}
+            sx={{ borderRadius: 1 }}
+          >
+            DC_THU: {getEffectiveDcThu() || "—"}
+            {dcThuOverride ? " (локально)" : ""}
+          </Button>
+        </Box>
 
         {/* Контейнер формы без «овала» — без фона и рамки */}
         <Box sx={{ p: 0, border: "none", background: "transparent" }}>
@@ -1480,6 +1528,48 @@ const App = () => {
                 </IconButton>
               </Box>
             </ButtonGroup>
+          </Box>
+        </Box>
+      </Modal>
+      <Modal open={dcThuModalOpen} onClose={() => setDcThuModalOpen(false)}>
+        <Box
+          sx={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            bgcolor: "background.paper",
+            boxShadow: 24,
+            p: 3,
+            borderRadius: 2,
+            width: "90%",
+            maxWidth: 420,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <Typography variant="h6">Локальный DC_THU</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Укажите код РЦ (например, 8114). Значение сохранится в браузере и будет
+            использовано вместо данных профиля.
+          </Typography>
+          <TextField
+            label="DC_THU"
+            value={dcThuDraft}
+            onChange={(event) => setDcThuDraft(event.target.value)}
+            fullWidth
+          />
+          <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
+            <Button variant="text" onClick={() => setDcThuModalOpen(false)}>
+              Отмена
+            </Button>
+            <Button variant="outlined" onClick={handleClearDcThu}>
+              Сбросить
+            </Button>
+            <Button variant="contained" onClick={handleSaveDcThu}>
+              Сохранить
+            </Button>
           </Box>
         </Box>
       </Modal>
