@@ -49,6 +49,47 @@ import { useNotifications } from './NotificationsProvider';
 SwiperCore.use([Pagination, Navigation]);
 
 const INPUT_HEIGHT = 56;
+const DC_THU_CACHE_KEY = "dcThuOverride";
+const DC_THU_DURATION_OPTIONS = [
+  { value: "1h", label: "1 час", ms: 60 * 60 * 1000 },
+  { value: "4h", label: "4 часа", ms: 4 * 60 * 60 * 1000 },
+  { value: "8h", label: "8 часов", ms: 8 * 60 * 60 * 1000 },
+  { value: "12h", label: "12 часов", ms: 12 * 60 * 60 * 1000 },
+  { value: "24h", label: "24 часа", ms: 24 * 60 * 60 * 1000 },
+  { value: "72h", label: "3 дня", ms: 72 * 60 * 60 * 1000 },
+  { value: "none", label: "Без срока", ms: null },
+];
+
+const readDcThuCache = () => {
+  const raw = localStorage.getItem(DC_THU_CACHE_KEY);
+  if (!raw) return { value: "", expiresAt: null };
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "string") {
+      return { value: parsed, expiresAt: null };
+    }
+    const value = parsed?.value ?? "";
+    const expiresAt = parsed?.expiresAt ?? null;
+    if (expiresAt && Date.now() >= expiresAt) {
+      return { value: "", expiresAt: null };
+    }
+    return { value, expiresAt };
+  } catch (error) {
+    return { value: raw, expiresAt: null };
+  }
+};
+
+const formatRemainingTime = (ms) => {
+  if (ms <= 0) return "Истекло";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+};
 
 const figmaTheme = createTheme({
   palette: {
@@ -345,6 +386,17 @@ const App = () => {
     userDisplayName: "",
     userTitle: "",
   });
+  const initialDcThuCacheRef = useRef(readDcThuCache());
+  const [dcThuOverride, setDcThuOverride] = useState(
+    initialDcThuCacheRef.current.value
+  );
+  const [dcThuExpiresAt, setDcThuExpiresAt] = useState(
+    initialDcThuCacheRef.current.expiresAt
+  );
+  const [dcThuModalOpen, setDcThuModalOpen] = useState(false);
+  const [dcThuDraft, setDcThuDraft] = useState("");
+  const [dcThuDuration, setDcThuDuration] = useState("8h");
+  const [dcThuNow, setDcThuNow] = useState(Date.now());
 
   const [errors, setErrors] = useState({
     eoNumber: "",
@@ -414,6 +466,44 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (dcThuOverride) {
+      localStorage.setItem(
+        DC_THU_CACHE_KEY,
+        JSON.stringify({ value: dcThuOverride, expiresAt: dcThuExpiresAt })
+      );
+    } else {
+      localStorage.removeItem(DC_THU_CACHE_KEY);
+    }
+  }, [dcThuOverride, dcThuExpiresAt]);
+
+  useEffect(() => {
+    if (!dcThuExpiresAt || !dcThuOverride) return;
+    if (Date.now() >= dcThuExpiresAt) {
+      setDcThuOverride("");
+      setDcThuExpiresAt(null);
+    }
+  }, [dcThuExpiresAt, dcThuOverride]);
+
+  useEffect(() => {
+    if (!dcThuExpiresAt || !dcThuOverride) return;
+    const remaining = dcThuExpiresAt - Date.now();
+    if (remaining <= 0) return;
+    const timeoutId = setTimeout(() => {
+      setDcThuOverride("");
+      setDcThuExpiresAt(null);
+    }, remaining);
+    return () => clearTimeout(timeoutId);
+  }, [dcThuExpiresAt, dcThuOverride]);
+
+  useEffect(() => {
+    if (!dcThuModalOpen || !dcThuExpiresAt) return;
+    const intervalId = setInterval(() => {
+      setDcThuNow(Date.now());
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [dcThuModalOpen, dcThuExpiresAt]);
+
+  useEffect(() => {
     return () => clearTimeout(timer.current);
   }, []);
 
@@ -436,9 +526,7 @@ const App = () => {
 
   const checkEoNumberInRecentRecords = async (eoNumber) => {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const officeParts = userProfile.userOffice.split("-");
-    const officeSuffix =
-      officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+    const officeSuffix = getEffectiveDcThu();
 
     try {
       const response = await apiClient.get(
@@ -508,6 +596,57 @@ const App = () => {
     } catch (error) {
       console.error("Ошибка при получении профиля пользователя:", error);
     }
+  };
+
+  const getOfficeSuffix = (office) => {
+    if (!office) return "";
+    const officeParts = office.split("-");
+    return officeParts.length > 1 ? officeParts[1].trim() : office.trim();
+  };
+
+  const normalizeDcThu = (value) => getOfficeSuffix(value);
+
+  const isDcThuActive =
+    dcThuOverride && (!dcThuExpiresAt || dcThuExpiresAt > Date.now());
+
+  const getEffectiveDcThu = () =>
+    isDcThuActive
+      ? normalizeDcThu(dcThuOverride)
+      : getOfficeSuffix(userProfile.userOffice);
+
+  const handleOpenDcThuModal = () => {
+    const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
+    setDcThuDraft(baseValue);
+    setDcThuNow(Date.now());
+    setDcThuModalOpen(true);
+  };
+
+  const handleSaveDcThu = () => {
+    const normalized = normalizeDcThu(dcThuDraft);
+    const selectedOption = DC_THU_DURATION_OPTIONS.find(
+      (option) => option.value === dcThuDuration
+    );
+    const expiresAt = selectedOption?.ms ? Date.now() + selectedOption.ms : null;
+    if (normalized) {
+      setDcThuOverride(normalized);
+      setDcThuExpiresAt(expiresAt);
+    } else {
+      setDcThuOverride("");
+      setDcThuExpiresAt(null);
+    }
+    setDcThuModalOpen(false);
+  };
+
+  const handleClearDcThu = () => {
+    setDcThuOverride("");
+    setDcThuExpiresAt(null);
+    setDcThuDraft(getOfficeSuffix(userProfile.userOffice));
+    setDcThuModalOpen(false);
+  };
+
+  const getDcThuRemainingMs = () => {
+    if (!dcThuExpiresAt) return null;
+    return dcThuExpiresAt - dcThuNow;
   };
 
   const openCameraModal = () => {
@@ -688,9 +827,7 @@ const App = () => {
       setSuccess(false);
       setLoading(true);
 
-      const officeParts = userProfile.userOffice.split("-");
-      const officeSuffix =
-        officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+      const officeSuffix = getEffectiveDcThu();
 
       const digest = await getRequestDigest();
 
@@ -885,6 +1022,16 @@ const App = () => {
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
+        <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={handleOpenDcThuModal}
+            sx={{ borderRadius: 1 }}
+          >
+            РЦ: {getEffectiveDcThu() || "—"}
+            {isDcThuActive ? " (локально)" : ""}
+          </Button>
+        </Box>
 
         {/* Контейнер формы без «овала» — без фона и рамки */}
         <Box sx={{ p: 0, border: "none", background: "transparent" }}>
@@ -1480,6 +1627,69 @@ const App = () => {
                 </IconButton>
               </Box>
             </ButtonGroup>
+          </Box>
+        </Box>
+      </Modal>
+      <Modal open={dcThuModalOpen} onClose={() => setDcThuModalOpen(false)}>
+        <Box
+          sx={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            bgcolor: "background.paper",
+            boxShadow: 24,
+            p: 3,
+            borderRadius: 2,
+            width: "90%",
+            maxWidth: 420,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <Typography variant="h6">Локальный РЦ</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Укажите код РЦ (например, 8114). Значение сохранится в браузере и будет
+            использовано вместо данных профиля.
+          </Typography>
+          <TextField
+            label="РЦ"
+            value={dcThuDraft}
+            onChange={(event) => setDcThuDraft(event.target.value)}
+            fullWidth
+          />
+          <FormControl fullWidth>
+            <InputLabel id="dc-thu-duration-label">Срок хранения</InputLabel>
+            <Select
+              labelId="dc-thu-duration-label"
+              value={dcThuDuration}
+              label="Срок хранения"
+              onChange={(event) => setDcThuDuration(event.target.value)}
+            >
+              {DC_THU_DURATION_OPTIONS.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {dcThuExpiresAt && (
+            <Typography variant="body2" color="text.secondary">
+              До окончания хранения:{" "}
+              {formatRemainingTime(getDcThuRemainingMs())}
+            </Typography>
+          )}
+          <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
+            <Button variant="text" onClick={() => setDcThuModalOpen(false)}>
+              Отмена
+            </Button>
+            <Button variant="outlined" onClick={handleClearDcThu}>
+              Сбросить
+            </Button>
+            <Button variant="contained" onClick={handleSaveDcThu}>
+              Сохранить
+            </Button>
           </Box>
         </Box>
       </Modal>
