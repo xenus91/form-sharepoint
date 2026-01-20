@@ -1808,7 +1808,7 @@ const App = () => {
           </Box>
         </Box>
       </Modal>
-      <Modal open={operationDateModalOpen} onClose={() => {}} disableEscapeKeyDown>
+      <Modal open={operationDateModalOpen} onClose={() => { }} disableEscapeKeyDown>
         <Box
           sx={{
             position: "absolute",
@@ -1827,11 +1827,10 @@ const App = () => {
           }}
         >
           <Typography variant="h6" sx={{ textAlign: "center" }}>
-            Выберите дату смены
+            Выберите дату начала смены
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Выберите сегодняшнюю или вчерашнюю дату. Значение хранится 11 часов и
-            применяется при создании каждого элемента.
+            Выберите дату начала смены. Необходимо для корректного учета операций.
           </Typography>
           <Typography variant="body2" sx={{ textAlign: "center" }}>
             Сейчас: {operationDateNowLabel}
@@ -1849,17 +1848,6 @@ const App = () => {
               }}
             >
               <Button
-                onClick={() => handleSelectOperationDate(todayShiftDate)}
-                sx={{ py: 0.5 }}
-              >
-                <Box sx={{ display: "flex", flexDirection: "column" }}>
-                  <Typography variant="button">Сегодня</Typography>
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    {formatShiftDate(todayShiftDate)}
-                  </Typography>
-                </Box>
-              </Button>
-              <Button
                 onClick={() => handleSelectOperationDate(yesterdayShiftDate)}
                 sx={{ py: 0.5 }}
               >
@@ -1870,6 +1858,18 @@ const App = () => {
                   </Typography>
                 </Box>
               </Button>
+              <Button
+                onClick={() => handleSelectOperationDate(todayShiftDate)}
+                sx={{ py: 0.5 }}
+              >
+                <Box sx={{ display: "flex", flexDirection: "column" }}>
+                  <Typography variant="button">Сегодня</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                    {formatShiftDate(todayShiftDate)}
+                  </Typography>
+                </Box>
+              </Button>
+
             </ButtonGroup>
           </Box>
         </Box>
