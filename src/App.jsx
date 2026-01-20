@@ -1158,9 +1158,6 @@ const App = () => {
               justifyContent: "center",
             }}
           >
-            <Typography variant="body2" sx={{ fontWeight: 600, color: "#171c8f" }}>
-              Дата смены:
-            </Typography>
             <Button
               variant="text"
               onClick={() => setOperationDateModalOpen(true)}
@@ -1808,11 +1805,10 @@ const App = () => {
           }}
         >
           <Typography variant="h6" sx={{ textAlign: "center" }}>
-            Выберите дату смены
+            Выберите дату начала смены
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Выберите сегодняшнюю или вчерашнюю дату. Значение хранится 11 часов и
-            применяется при создании каждого элемента.
+            Выберите дату начала смены. Необходимо для корректного учета операций.
           </Typography>
           <Box sx={{ display: "flex", justifyContent: "center" }}>
             <ButtonGroup
