@@ -49,6 +49,96 @@ import { useNotifications } from './NotificationsProvider';
 SwiperCore.use([Pagination, Navigation]);
 
 const INPUT_HEIGHT = 56;
+const DC_THU_CACHE_KEY = "dcThuOverride";
+const SHIFT_DATE_CACHE_KEY = "shiftDate";
+const SHIFT_DATE_TTL_MS = 11 * 60 * 60 * 1000;
+const DC_THU_DURATION_OPTIONS = [
+  { value: "1h", label: "1 час", ms: 60 * 60 * 1000 },
+  { value: "4h", label: "4 часа", ms: 4 * 60 * 60 * 1000 },
+  { value: "8h", label: "8 часов", ms: 8 * 60 * 60 * 1000 },
+  { value: "12h", label: "12 часов", ms: 12 * 60 * 60 * 1000 },
+  { value: "24h", label: "24 часа", ms: 24 * 60 * 60 * 1000 },
+  { value: "72h", label: "3 дня", ms: 72 * 60 * 60 * 1000 },
+  { value: "none", label: "Без срока", ms: null },
+];
+
+const readDcThuCache = () => {
+  const raw = localStorage.getItem(DC_THU_CACHE_KEY);
+  if (!raw) return { value: "", expiresAt: null };
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "string") {
+      return { value: parsed, expiresAt: null };
+    }
+    const value = parsed?.value ?? "";
+    const expiresAt = parsed?.expiresAt ?? null;
+    if (expiresAt && Date.now() >= expiresAt) {
+      return { value: "", expiresAt: null };
+    }
+    return { value, expiresAt };
+  } catch (error) {
+    return { value: raw, expiresAt: null };
+  }
+};
+
+const formatDateKey = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getShiftDateOptions = () => {
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  return {
+    today: formatDateKey(today),
+    yesterday: formatDateKey(yesterday),
+  };
+};
+
+const isValidShiftDate = (value) => {
+  const options = getShiftDateOptions();
+  return value === options.today || value === options.yesterday;
+};
+
+const readShiftDateCache = () => {
+  const raw = localStorage.getItem(SHIFT_DATE_CACHE_KEY);
+  if (!raw) return { value: "", expiresAt: null };
+
+  try {
+    const parsed = JSON.parse(raw);
+    const value = parsed?.value ?? "";
+    const expiresAt = parsed?.expiresAt ?? null;
+    if (!value || !isValidShiftDate(value)) {
+      return { value: "", expiresAt: null };
+    }
+    if (expiresAt && Date.now() >= expiresAt) {
+      return { value: "", expiresAt: null };
+    }
+    return { value, expiresAt };
+  } catch (error) {
+    return { value: "", expiresAt: null };
+  }
+};
+
+const formatOperationDate = (dateKey) => {
+  if (!dateKey) return null;
+  return `${dateKey}T00:00:00`;
+};
+
+const formatRemainingTime = (ms) => {
+  if (ms <= 0) return "Истекло";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((value) => String(value).padStart(2, "0"))
+    .join(":");
+};
 
 const figmaTheme = createTheme({
   palette: {
@@ -345,6 +435,30 @@ const App = () => {
     userDisplayName: "",
     userTitle: "",
   });
+  const initialDcThuCacheRef = useRef(readDcThuCache());
+  const [dcThuOverride, setDcThuOverride] = useState(
+    initialDcThuCacheRef.current.value
+  );
+  const [dcThuExpiresAt, setDcThuExpiresAt] = useState(
+    initialDcThuCacheRef.current.expiresAt
+  );
+  const [dcThuModalOpen, setDcThuModalOpen] = useState(false);
+  const [dcThuDraft, setDcThuDraft] = useState("");
+  const [dcThuDuration, setDcThuDuration] = useState("8h");
+  const [dcThuNow, setDcThuNow] = useState(Date.now());
+  const initialShiftDateCacheRef = useRef(readShiftDateCache());
+  const [shiftDate, setShiftDate] = useState(
+    initialShiftDateCacheRef.current.value
+  );
+  const [shiftDateExpiresAt, setShiftDateExpiresAt] = useState(
+    initialShiftDateCacheRef.current.expiresAt
+  );
+  const [shiftDateModalOpen, setShiftDateModalOpen] = useState(
+    !initialShiftDateCacheRef.current.value
+  );
+  const [shiftDateDraft, setShiftDateDraft] = useState(
+    initialShiftDateCacheRef.current.value
+  );
 
   const [errors, setErrors] = useState({
     eoNumber: "",
@@ -414,6 +528,80 @@ const App = () => {
   }, []);
 
   useEffect(() => {
+    if (dcThuOverride) {
+      localStorage.setItem(
+        DC_THU_CACHE_KEY,
+        JSON.stringify({ value: dcThuOverride, expiresAt: dcThuExpiresAt })
+      );
+    } else {
+      localStorage.removeItem(DC_THU_CACHE_KEY);
+    }
+  }, [dcThuOverride, dcThuExpiresAt]);
+
+  useEffect(() => {
+    if (!dcThuExpiresAt || !dcThuOverride) return;
+    if (Date.now() >= dcThuExpiresAt) {
+      setDcThuOverride("");
+      setDcThuExpiresAt(null);
+    }
+  }, [dcThuExpiresAt, dcThuOverride]);
+
+  useEffect(() => {
+    if (shiftDate) {
+      localStorage.setItem(
+        SHIFT_DATE_CACHE_KEY,
+        JSON.stringify({ value: shiftDate, expiresAt: shiftDateExpiresAt })
+      );
+    } else {
+      localStorage.removeItem(SHIFT_DATE_CACHE_KEY);
+    }
+  }, [shiftDate, shiftDateExpiresAt]);
+
+  useEffect(() => {
+    if (!shiftDateExpiresAt || !shiftDate) return;
+    if (Date.now() >= shiftDateExpiresAt) {
+      setShiftDate("");
+      setShiftDateExpiresAt(null);
+    }
+  }, [shiftDate, shiftDateExpiresAt]);
+
+  useEffect(() => {
+    if (!shiftDateExpiresAt || !shiftDate) return;
+    const remaining = shiftDateExpiresAt - Date.now();
+    if (remaining <= 0) return;
+    const timeoutId = setTimeout(() => {
+      setShiftDate("");
+      setShiftDateExpiresAt(null);
+    }, remaining);
+    return () => clearTimeout(timeoutId);
+  }, [shiftDateExpiresAt, shiftDate]);
+
+  useEffect(() => {
+    if (!shiftDate) {
+      setShiftDateModalOpen(true);
+    }
+  }, [shiftDate]);
+
+  useEffect(() => {
+    if (!dcThuExpiresAt || !dcThuOverride) return;
+    const remaining = dcThuExpiresAt - Date.now();
+    if (remaining <= 0) return;
+    const timeoutId = setTimeout(() => {
+      setDcThuOverride("");
+      setDcThuExpiresAt(null);
+    }, remaining);
+    return () => clearTimeout(timeoutId);
+  }, [dcThuExpiresAt, dcThuOverride]);
+
+  useEffect(() => {
+    if (!dcThuModalOpen || !dcThuExpiresAt) return;
+    const intervalId = setInterval(() => {
+      setDcThuNow(Date.now());
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [dcThuModalOpen, dcThuExpiresAt]);
+
+  useEffect(() => {
     return () => clearTimeout(timer.current);
   }, []);
 
@@ -436,9 +624,7 @@ const App = () => {
 
   const checkEoNumberInRecentRecords = async (eoNumber) => {
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const officeParts = userProfile.userOffice.split("-");
-    const officeSuffix =
-      officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+    const officeSuffix = getEffectiveDcThu();
 
     try {
       const response = await apiClient.get(
@@ -508,6 +694,83 @@ const App = () => {
     } catch (error) {
       console.error("Ошибка при получении профиля пользователя:", error);
     }
+  };
+
+  const getOfficeSuffix = (office) => {
+    if (!office) return "";
+    const officeParts = office.split("-");
+    return officeParts.length > 1 ? officeParts[1].trim() : office.trim();
+  };
+
+  const normalizeDcThu = (value) => getOfficeSuffix(value);
+
+  const isDcThuActive =
+    dcThuOverride && (!dcThuExpiresAt || dcThuExpiresAt > Date.now());
+
+  const getEffectiveDcThu = () =>
+    isDcThuActive
+      ? normalizeDcThu(dcThuOverride)
+      : getOfficeSuffix(userProfile.userOffice);
+
+  const handleOpenDcThuModal = () => {
+    const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
+    setDcThuDraft(baseValue);
+    setDcThuNow(Date.now());
+    setDcThuModalOpen(true);
+  };
+
+  const handleSaveDcThu = () => {
+    const normalized = normalizeDcThu(dcThuDraft);
+    const selectedOption = DC_THU_DURATION_OPTIONS.find(
+      (option) => option.value === dcThuDuration
+    );
+    const expiresAt = selectedOption?.ms ? Date.now() + selectedOption.ms : null;
+    if (normalized) {
+      setDcThuOverride(normalized);
+      setDcThuExpiresAt(expiresAt);
+    } else {
+      setDcThuOverride("");
+      setDcThuExpiresAt(null);
+    }
+    setDcThuModalOpen(false);
+  };
+
+  const handleClearDcThu = () => {
+    setDcThuOverride("");
+    setDcThuExpiresAt(null);
+    setDcThuDraft(getOfficeSuffix(userProfile.userOffice));
+    setDcThuModalOpen(false);
+  };
+
+  const handleOpenShiftDateModal = () => {
+    if (shiftDate) {
+      setShiftDateDraft(shiftDate);
+    } else {
+      setShiftDateDraft("");
+    }
+    setShiftDateModalOpen(true);
+  };
+
+  const handleSaveShiftDate = () => {
+    if (!shiftDateDraft || !isValidShiftDate(shiftDateDraft)) return;
+    setShiftDate(shiftDateDraft);
+    setShiftDateExpiresAt(Date.now() + SHIFT_DATE_TTL_MS);
+    setShiftDateModalOpen(false);
+  };
+
+  const getShiftDateLabel = () => {
+    if (!shiftDate) return "—";
+    const { today, yesterday } = getShiftDateOptions();
+    if (shiftDate === today) return "Сегодня";
+    if (shiftDate === yesterday) return "Вчера";
+    return shiftDate;
+  };
+
+  const getOperationDate = () => formatOperationDate(shiftDate);
+
+  const getDcThuRemainingMs = () => {
+    if (!dcThuExpiresAt) return null;
+    return dcThuExpiresAt - dcThuNow;
   };
 
   const openCameraModal = () => {
@@ -688,9 +951,16 @@ const App = () => {
       setSuccess(false);
       setLoading(true);
 
-      const officeParts = userProfile.userOffice.split("-");
-      const officeSuffix =
-        officeParts.length > 1 ? officeParts[1].trim() : userProfile.userOffice;
+      const officeSuffix = getEffectiveDcThu();
+      const operationDate = getOperationDate();
+
+      if (!operationDate) {
+        notify("Выберите дату смены.", { severity: "error" });
+        setShiftDateModalOpen(true);
+        isSubmittingRef.current = false;
+        setLoading(false);
+        return;
+      }
 
       const digest = await getRequestDigest();
 
@@ -700,6 +970,7 @@ const App = () => {
           __metadata: { type: "SP.Data.ProblemsPalletListItem" },
           THU: eoNumber,
           DC_THU: officeSuffix,
+          OperationDate: operationDate,
           RecipientId: selectedRecipient,
           Location1: location,
           Shipment: transportation,
@@ -885,6 +1156,23 @@ const App = () => {
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
+        <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={handleOpenDcThuModal}
+            sx={{ borderRadius: 1 }}
+          >
+            DC_THU: {getEffectiveDcThu() || "—"}
+            {isDcThuActive ? " (локально)" : ""}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={handleOpenShiftDateModal}
+            sx={{ borderRadius: 1, ml: 1 }}
+          >
+            Дата смены: {getShiftDateLabel()}
+          </Button>
+        </Box>
 
         {/* Контейнер формы без «овала» — без фона и рамки */}
         <Box sx={{ p: 0, border: "none", background: "transparent" }}>
@@ -1480,6 +1768,130 @@ const App = () => {
                 </IconButton>
               </Box>
             </ButtonGroup>
+          </Box>
+        </Box>
+      </Modal>
+      <Modal
+        open={shiftDateModalOpen || !shiftDate}
+        onClose={() => {
+          if (!shiftDate) return;
+          setShiftDateModalOpen(false);
+        }}
+        disableEscapeKeyDown={!shiftDate}
+      >
+        <Box
+          sx={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            bgcolor: "background.paper",
+            boxShadow: 24,
+            p: 3,
+            borderRadius: 2,
+            width: "90%",
+            maxWidth: 420,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <Typography variant="h6">Выбор даты смены</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Выберите дату смены (сегодня или вчера). Значение хранится 11 часов и
+            используется при создании элементов.
+          </Typography>
+          <RadioGroup
+            value={shiftDateDraft || ""}
+            onChange={(event) => setShiftDateDraft(event.target.value)}
+          >
+            <FormControlLabel
+              value={getShiftDateOptions().today}
+              control={<Radio />}
+              label="Сегодня"
+            />
+            <FormControlLabel
+              value={getShiftDateOptions().yesterday}
+              control={<Radio />}
+              label="Вчера"
+            />
+          </RadioGroup>
+          <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
+            {shiftDate && (
+              <Button variant="text" onClick={() => setShiftDateModalOpen(false)}>
+                Отмена
+              </Button>
+            )}
+            <Button
+              variant="contained"
+              onClick={handleSaveShiftDate}
+              disabled={!shiftDateDraft}
+            >
+              Сохранить
+            </Button>
+          </Box>
+        </Box>
+      </Modal>
+      <Modal open={dcThuModalOpen} onClose={() => setDcThuModalOpen(false)}>
+        <Box
+          sx={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            bgcolor: "background.paper",
+            boxShadow: 24,
+            p: 3,
+            borderRadius: 2,
+            width: "90%",
+            maxWidth: 420,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <Typography variant="h6">Локальный DC_THU</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Укажите код РЦ (например, 8114). Значение сохранится в браузере и будет
+            использовано вместо данных профиля.
+          </Typography>
+          <TextField
+            label="DC_THU"
+            value={dcThuDraft}
+            onChange={(event) => setDcThuDraft(event.target.value)}
+            fullWidth
+          />
+          <FormControl fullWidth>
+            <InputLabel id="dc-thu-duration-label">Срок хранения</InputLabel>
+            <Select
+              labelId="dc-thu-duration-label"
+              value={dcThuDuration}
+              label="Срок хранения"
+              onChange={(event) => setDcThuDuration(event.target.value)}
+            >
+              {DC_THU_DURATION_OPTIONS.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          {dcThuExpiresAt && (
+            <Typography variant="body2" color="text.secondary">
+              До окончания хранения:{" "}
+              {formatRemainingTime(getDcThuRemainingMs())}
+            </Typography>
+          )}
+          <Box sx={{ display: "flex", gap: 1, justifyContent: "flex-end" }}>
+            <Button variant="text" onClick={() => setDcThuModalOpen(false)}>
+              Отмена
+            </Button>
+            <Button variant="outlined" onClick={handleClearDcThu}>
+              Сбросить
+            </Button>
+            <Button variant="contained" onClick={handleSaveDcThu}>
+              Сохранить
+            </Button>
           </Box>
         </Box>
       </Modal>
