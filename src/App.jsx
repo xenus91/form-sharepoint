@@ -474,6 +474,7 @@ const App = () => {
   const [operationDateModalOpen, setOperationDateModalOpen] = useState(
     !initialOperationDateCacheRef.current.value
   );
+  const [operationDateNow, setOperationDateNow] = useState(Date.now());
 
   const [errors, setErrors] = useState({
     eoNumber: "",
@@ -587,6 +588,14 @@ const App = () => {
     }, remaining);
     return () => clearTimeout(timeoutId);
   }, [operationDateExpiresAt, operationDateIso]);
+
+  useEffect(() => {
+    if (!operationDateModalOpen) return;
+    const intervalId = setInterval(() => {
+      setOperationDateNow(Date.now());
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [operationDateModalOpen]);
 
   useEffect(() => {
     if (!dcThuExpiresAt || !dcThuOverride) return;
@@ -730,6 +739,16 @@ const App = () => {
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
     getShiftDateOptions();
   const operationDateLabel = formatShiftDateShort(operationDate);
+  const operationDateNowLabel = new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+    .format(new Date(operationDateNow))
+    .replace(" г.", "");
 
   const handleOpenDcThuModal = () => {
     const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
@@ -1158,6 +1177,9 @@ const App = () => {
               justifyContent: "center",
             }}
           >
+            <Typography variant="body2" sx={{ fontWeight: 600, color: "#171c8f" }}>
+              Дата смены:
+            </Typography>
             <Button
               variant="text"
               onClick={() => setOperationDateModalOpen(true)}
@@ -1810,6 +1832,9 @@ const App = () => {
           <Typography variant="body2" color="text.secondary">
             Выберите дату начала смены. Необходимо для корректного учета операций.
           </Typography>
+          <Typography variant="body2" sx={{ textAlign: "center" }}>
+            Сейчас: {operationDateNowLabel}
+          </Typography>
           <Box sx={{ display: "flex", justifyContent: "center" }}>
             <ButtonGroup
               fullWidth
@@ -1822,7 +1847,6 @@ const App = () => {
                 },
               }}
             >
-
               <Button
                 onClick={() => handleSelectOperationDate(yesterdayShiftDate)}
                 sx={{ py: 0.5 }}
@@ -1845,6 +1869,7 @@ const App = () => {
                   </Typography>
                 </Box>
               </Button>
+
             </ButtonGroup>
           </Box>
         </Box>
