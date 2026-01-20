@@ -25,6 +25,7 @@ import apiClient, { normalizeNextUrl } from "./api";
  * - onMonthChange?: (date: Date) => void
  * - position?: "fixed" | "sticky" // позиционирование панели (fixed по умолчанию)
  * - labelWidth?: number           // фиксированная ширина области месяца (по умолчанию 120)
+ * - extraContent?: React.ReactNode // контент между переключателем месяца и счётчиком
  *
  * Дополнительно:
  * - через ref доступен метод .refresh(), чтобы снаружи принудительно обновить счётчик.
@@ -38,6 +39,7 @@ const MonthlyCounterBar = forwardRef(
       onMonthChange,
       position = "fixed",
       labelWidth = 120,
+      extraContent = null,
     },
     ref
   ) => {
@@ -195,7 +197,16 @@ const MonthlyCounterBar = forwardRef(
     }}
   >
     {/* всё интерактивное внутри — снова включаем события */}
-    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, width: "100%", pointerEvents: "auto" }}>
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 2,
+        width: "100%",
+        pointerEvents: "auto",
+      }}
+    >
       {/* СЛЕВА: ← | [месяц] | → */}
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
         <IconButton aria-label="Предыдущий месяц" onClick={prevMonth} size="small">
@@ -232,53 +243,68 @@ const MonthlyCounterBar = forwardRef(
         </IconButton>
       </Box>
 
-      {/* СПРАВА: число + tooltip */}
-      <Tooltip
-        title="Кол-во отправленных фотоотчетов за выбранный месяц"
-        placement="bottom"
-        open={tipOpen}
-        onClose={() => setTipOpen(false)}
-        disableFocusListener
-        disableHoverListener
-        enterTouchDelay={0}
-        leaveTouchDelay={1200}
-        sx={{ mr: 2 }} // отступ от правого края
-      >
-        <Typography
-          component="div"
-          role="button"
-          onClick={handleCountClick}
+      {extraContent && (
+        <Box
           sx={{
-            cursor: "pointer",
-            userSelect: "none",
-            fontFamily: `'Poppins','Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`,
-            fontWeight: 900,
-            fontSize: "clamp(28px, 4.8vw, 48px)",
-            lineHeight: 1,
-            letterSpacing: 0.5,
-            fontVariantNumeric: "tabular-nums",
-            background: `
-              linear-gradient(
-                180deg,
-                rgba(23, 28, 143, 0.55) 0%,
-                rgba(23, 28, 143, 0.34) 52%,
-                rgba(23, 28, 143, 0.20) 100%
-              )
-            `,
-            WebkitBackgroundClip: "text",
-            backgroundClip: "text",
-            color: "transparent",
-            textShadow: `
-              0 0 12px rgba(23,28,143,0.16),
-              0 2px 10px rgba(23,28,143,0.10),
-              -1px -1px 0 rgba(255,255,255,0.35)
-            `,
-            WebkitTextStroke: "0.5px rgba(23,28,143,0.22)",
+            flex: 1,
+            display: "flex",
+            justifyContent: "center",
+            minWidth: 0,
           }}
         >
-          {prettyCount}
-        </Typography>
-      </Tooltip>
+          {extraContent}
+        </Box>
+      )}
+
+      {/* СПРАВА: число + tooltip */}
+      <Box sx={{ display: "flex", alignItems: "center" }}>
+        <Tooltip
+          title="Кол-во отправленных фотоотчетов за выбранный месяц"
+          placement="bottom"
+          open={tipOpen}
+          onClose={() => setTipOpen(false)}
+          disableFocusListener
+          disableHoverListener
+          enterTouchDelay={0}
+          leaveTouchDelay={1200}
+          sx={{ mr: 2 }} // отступ от правого края
+        >
+          <Typography
+            component="div"
+            role="button"
+            onClick={handleCountClick}
+            sx={{
+              cursor: "pointer",
+              userSelect: "none",
+              fontFamily: `'Poppins','Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif`,
+              fontWeight: 900,
+              fontSize: "clamp(28px, 4.8vw, 48px)",
+              lineHeight: 1,
+              letterSpacing: 0.5,
+              fontVariantNumeric: "tabular-nums",
+              background: `
+                linear-gradient(
+                  180deg,
+                  rgba(23, 28, 143, 0.55) 0%,
+                  rgba(23, 28, 143, 0.34) 52%,
+                  rgba(23, 28, 143, 0.20) 100%
+                )
+              `,
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+              textShadow: `
+                0 0 12px rgba(23,28,143,0.16),
+                0 2px 10px rgba(23,28,143,0.10),
+                -1px -1px 0 rgba(255,255,255,0.35)
+              `,
+              WebkitTextStroke: "0.5px rgba(23,28,143,0.22)",
+            }}
+          >
+            {prettyCount}
+          </Typography>
+        </Tooltip>
+      </Box>
     </Box>
   </Box>
 );
