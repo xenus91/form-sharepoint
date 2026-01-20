@@ -1155,8 +1155,8 @@ const App = () => {
               variant="text"
               onClick={() => setOperationDateModalOpen(true)}
               sx={{
-                px: 1,
-                py: 0.5,
+                px: 0.5,
+                py: 0.25,
                 borderRadius: 2,
                 fontWeight: 700,
               }}
@@ -1797,7 +1797,9 @@ const App = () => {
             gap: 2,
           }}
         >
-          <Typography variant="h6">Выберите дату смены</Typography>
+          <Typography variant="h6" sx={{ textAlign: "center" }}>
+            Выберите дату смены
+          </Typography>
           <Typography variant="body2" color="text.secondary">
             Выберите сегодняшнюю или вчерашнюю дату. Значение хранится 11 часов и
             применяется при создании каждого элемента.
@@ -1811,7 +1813,10 @@ const App = () => {
                 },
               }}
             >
-              <Button onClick={() => handleSelectOperationDate(todayShiftDate)}>
+              <Button
+                onClick={() => handleSelectOperationDate(todayShiftDate)}
+                sx={{ py: 0.5 }}
+              >
                 <Box sx={{ display: "flex", flexDirection: "column" }}>
                   <Typography variant="button">Сегодня</Typography>
                   <Typography variant="caption" sx={{ opacity: 0.8 }}>
@@ -1819,7 +1824,10 @@ const App = () => {
                   </Typography>
                 </Box>
               </Button>
-              <Button onClick={() => handleSelectOperationDate(yesterdayShiftDate)}>
+              <Button
+                onClick={() => handleSelectOperationDate(yesterdayShiftDate)}
+                sx={{ py: 0.5 }}
+              >
                 <Box sx={{ display: "flex", flexDirection: "column" }}>
                   <Typography variant="button">Вчера</Typography>
                   <Typography variant="caption" sx={{ opacity: 0.8 }}>
