@@ -1182,9 +1182,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
               justifyContent: "center",
             }}
           >
-            <Typography variant="body2" sx={{ fontWeight: 600, color: "#171c8f" }}>
-              Дата смены:
-            </Typography>
             <Button
               variant="text"
               onClick={() => setOperationDateModalOpen(true)}
