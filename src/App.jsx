@@ -110,6 +110,16 @@ const formatShiftDate = (date) => {
     .replace(" г.", "");
 };
 
+const formatShiftDateShort = (date) => {
+  if (!date) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "short",
+  })
+    .format(date)
+    .replace(".", "");
+};
+
 const getShiftDateOptions = () => {
   const today = new Date();
   const todayLocal = new Date(
@@ -719,7 +729,7 @@ const App = () => {
   const operationDate = operationDateIso ? new Date(operationDateIso) : null;
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
     getShiftDateOptions();
-  const operationDateLabel = formatShiftDate(operationDate);
+  const operationDateLabel = formatShiftDateShort(operationDate);
 
   const handleOpenDcThuModal = () => {
     const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
