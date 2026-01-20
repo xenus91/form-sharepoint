@@ -50,6 +50,8 @@ SwiperCore.use([Pagination, Navigation]);
 
 const INPUT_HEIGHT = 56;
 const DC_THU_CACHE_KEY = "dcThuOverride";
+const OPERATION_DATE_CACHE_KEY = "operationDateSelection";
+const OPERATION_DATE_CACHE_DURATION_MS = 11 * 60 * 60 * 1000;
 const DC_THU_DURATION_OPTIONS = [
   { value: "1h", label: "1 час", ms: 60 * 60 * 1000 },
   { value: "4h", label: "4 часа", ms: 4 * 60 * 60 * 1000 },
@@ -78,6 +80,61 @@ const readDcThuCache = () => {
   } catch (error) {
     return { value: raw, expiresAt: null };
   }
+};
+
+const readOperationDateCache = () => {
+  const raw = localStorage.getItem(OPERATION_DATE_CACHE_KEY);
+  if (!raw) return { value: null, expiresAt: null };
+
+  try {
+    const parsed = JSON.parse(raw);
+    const value = parsed?.value ?? null;
+    const expiresAt = parsed?.expiresAt ?? null;
+    if (!value || !expiresAt || Date.now() >= expiresAt) {
+      return { value: null, expiresAt: null };
+    }
+    return { value, expiresAt };
+  } catch (error) {
+    return { value: null, expiresAt: null };
+  }
+};
+
+const formatShiftDate = (date) => {
+  if (!date) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })
+    .format(date)
+    .replace(" г.", "");
+};
+
+const getShiftDateOptions = () => {
+  const today = new Date();
+  const todayLocal = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
+  const yesterdayLocal = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate() - 1
+  );
+
+  return {
+    today: todayLocal,
+    yesterday: yesterdayLocal,
+  };
+};
+
+const toOperationDateIso = (date) => {
+  if (!date) return null;
+  const utcMidnight = new Date(
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0)
+  );
+  return utcMidnight.toISOString();
 };
 
 const formatRemainingTime = (ms) => {
@@ -397,6 +454,16 @@ const App = () => {
   const [dcThuDraft, setDcThuDraft] = useState("");
   const [dcThuDuration, setDcThuDuration] = useState("8h");
   const [dcThuNow, setDcThuNow] = useState(Date.now());
+  const initialOperationDateCacheRef = useRef(readOperationDateCache());
+  const [operationDateIso, setOperationDateIso] = useState(
+    initialOperationDateCacheRef.current.value
+  );
+  const [operationDateExpiresAt, setOperationDateExpiresAt] = useState(
+    initialOperationDateCacheRef.current.expiresAt
+  );
+  const [operationDateModalOpen, setOperationDateModalOpen] = useState(
+    !initialOperationDateCacheRef.current.value
+  );
 
   const [errors, setErrors] = useState({
     eoNumber: "",
@@ -475,6 +542,41 @@ const App = () => {
       localStorage.removeItem(DC_THU_CACHE_KEY);
     }
   }, [dcThuOverride, dcThuExpiresAt]);
+
+  useEffect(() => {
+    if (operationDateIso) {
+      localStorage.setItem(
+        OPERATION_DATE_CACHE_KEY,
+        JSON.stringify({
+          value: operationDateIso,
+          expiresAt: operationDateExpiresAt,
+        })
+      );
+    } else {
+      localStorage.removeItem(OPERATION_DATE_CACHE_KEY);
+    }
+  }, [operationDateIso, operationDateExpiresAt]);
+
+  useEffect(() => {
+    if (!operationDateExpiresAt || !operationDateIso) return;
+    if (Date.now() >= operationDateExpiresAt) {
+      setOperationDateIso(null);
+      setOperationDateExpiresAt(null);
+      setOperationDateModalOpen(true);
+    }
+  }, [operationDateExpiresAt, operationDateIso]);
+
+  useEffect(() => {
+    if (!operationDateExpiresAt || !operationDateIso) return;
+    const remaining = operationDateExpiresAt - Date.now();
+    if (remaining <= 0) return;
+    const timeoutId = setTimeout(() => {
+      setOperationDateIso(null);
+      setOperationDateExpiresAt(null);
+      setOperationDateModalOpen(true);
+    }, remaining);
+    return () => clearTimeout(timeoutId);
+  }, [operationDateExpiresAt, operationDateIso]);
 
   useEffect(() => {
     if (!dcThuExpiresAt || !dcThuOverride) return;
@@ -614,6 +716,13 @@ const App = () => {
       ? normalizeDcThu(dcThuOverride)
       : getOfficeSuffix(userProfile.userOffice);
 
+  const operationDate = operationDateIso ? new Date(operationDateIso) : null;
+  const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
+    getShiftDateOptions();
+  const operationDateLabel = formatShiftDate(operationDate);
+  const todayShiftIso = toOperationDateIso(todayShiftDate);
+  const yesterdayShiftIso = toOperationDateIso(yesterdayShiftDate);
+
   const handleOpenDcThuModal = () => {
     const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
     setDcThuDraft(baseValue);
@@ -647,6 +756,13 @@ const App = () => {
   const getDcThuRemainingMs = () => {
     if (!dcThuExpiresAt) return null;
     return dcThuExpiresAt - dcThuNow;
+  };
+
+  const handleSelectOperationDate = (date) => {
+    const iso = toOperationDateIso(date);
+    setOperationDateIso(iso);
+    setOperationDateExpiresAt(Date.now() + OPERATION_DATE_CACHE_DURATION_MS);
+    setOperationDateModalOpen(false);
   };
 
   const openCameraModal = () => {
@@ -815,6 +931,13 @@ const App = () => {
       }
     }
 
+    if (!operationDateIso) {
+      setOperationDateModalOpen(true);
+      setErrors(newErrors);
+      isSubmittingRef.current = false;
+      return;
+    }
+
     if (!formIsValid) {
       setErrors(newErrors);
       isSubmittingRef.current = false;
@@ -841,6 +964,7 @@ const App = () => {
           Location1: location,
           Shipment: transportation,
           WhNotEO: selectedRadioValue,
+          OperationDate: operationDateIso,
           Problems: {
             __metadata: { type: "Collection(Edm.String)" },
             results: problems,
@@ -1016,6 +1140,38 @@ const App = () => {
         listTitle="ProblemsPallet"
         authorId={userProfile.userId}
         position="fixed"
+        extraContent={
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 1,
+              justifyContent: "center",
+            }}
+          >
+            <Typography variant="body2" sx={{ fontWeight: 600, color: "#171c8f" }}>
+              Дата смены:
+            </Typography>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+              {operationDateLabel}
+            </Typography>
+            <ButtonGroup size="small" variant="outlined">
+              <Button
+                variant={operationDateIso === todayShiftIso ? "contained" : "outlined"}
+                onClick={() => handleSelectOperationDate(todayShiftDate)}
+              >
+                Сегодня
+              </Button>
+              <Button
+                variant={operationDateIso === yesterdayShiftIso ? "contained" : "outlined"}
+                onClick={() => handleSelectOperationDate(yesterdayShiftDate)}
+              >
+                Вчера
+              </Button>
+            </ButtonGroup>
+          </Box>
+        }
       />
 
       <Container maxWidth="sm" sx={{ p: 2, pt: 7 }}>
@@ -1626,6 +1782,51 @@ const App = () => {
                   )}
                 </IconButton>
               </Box>
+            </ButtonGroup>
+          </Box>
+        </Box>
+      </Modal>
+      <Modal open={operationDateModalOpen} onClose={() => {}} disableEscapeKeyDown>
+        <Box
+          sx={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            bgcolor: "background.paper",
+            boxShadow: 24,
+            p: 3,
+            borderRadius: 2,
+            width: "90%",
+            maxWidth: 420,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <Typography variant="h6">Выберите дату смены</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Выберите сегодняшнюю или вчерашнюю дату. Значение хранится 11 часов и
+            применяется при создании каждого элемента.
+          </Typography>
+          <Box sx={{ display: "flex", justifyContent: "center" }}>
+            <ButtonGroup fullWidth>
+              <Button onClick={() => handleSelectOperationDate(todayShiftDate)}>
+                <Box sx={{ display: "flex", flexDirection: "column" }}>
+                  <Typography variant="button">Сегодня</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                    {formatShiftDate(todayShiftDate)}
+                  </Typography>
+                </Box>
+              </Button>
+              <Button onClick={() => handleSelectOperationDate(yesterdayShiftDate)}>
+                <Box sx={{ display: "flex", flexDirection: "column" }}>
+                  <Typography variant="button">Вчера</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                    {formatShiftDate(yesterdayShiftDate)}
+                  </Typography>
+                </Box>
+              </Button>
             </ButtonGroup>
           </Box>
         </Box>
