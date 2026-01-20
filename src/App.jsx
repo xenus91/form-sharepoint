@@ -1786,7 +1786,7 @@ const App = () => {
           </Box>
         </Box>
       </Modal>
-      <Modal open={operationDateModalOpen} onClose={() => {}} disableEscapeKeyDown>
+      <Modal open={operationDateModalOpen} onClose={() => { }} disableEscapeKeyDown>
         <Box
           sx={{
             position: "absolute",
@@ -1822,17 +1822,7 @@ const App = () => {
                 },
               }}
             >
-              <Button
-                onClick={() => handleSelectOperationDate(todayShiftDate)}
-                sx={{ py: 0.5 }}
-              >
-                <Box sx={{ display: "flex", flexDirection: "column" }}>
-                  <Typography variant="button">Сегодня</Typography>
-                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
-                    {formatShiftDate(todayShiftDate)}
-                  </Typography>
-                </Box>
-              </Button>
+
               <Button
                 onClick={() => handleSelectOperationDate(yesterdayShiftDate)}
                 sx={{ py: 0.5 }}
@@ -1841,6 +1831,17 @@ const App = () => {
                   <Typography variant="button">Вчера</Typography>
                   <Typography variant="caption" sx={{ opacity: 0.8 }}>
                     {formatShiftDate(yesterdayShiftDate)}
+                  </Typography>
+                </Box>
+              </Button>
+              <Button
+                onClick={() => handleSelectOperationDate(todayShiftDate)}
+                sx={{ py: 0.5 }}
+              >
+                <Box sx={{ display: "flex", flexDirection: "column" }}>
+                  <Typography variant="button">Сегодня</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>
+                    {formatShiftDate(todayShiftDate)}
                   </Typography>
                 </Box>
               </Button>
