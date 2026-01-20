@@ -1810,6 +1810,9 @@ const App = () => {
               sx={{
                 "& .MuiButtonBase-root": {
                   borderRadius: 2,
+                  minWidth: 0,
+                  flex: 1,
+                  px: 1,
                 },
               }}
             >
