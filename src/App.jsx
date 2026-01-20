@@ -720,8 +720,6 @@ const App = () => {
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
     getShiftDateOptions();
   const operationDateLabel = formatShiftDate(operationDate);
-  const todayShiftIso = toOperationDateIso(todayShiftDate);
-  const yesterdayShiftIso = toOperationDateIso(yesterdayShiftDate);
 
   const handleOpenDcThuModal = () => {
     const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
@@ -1153,23 +1151,18 @@ const App = () => {
             <Typography variant="body2" sx={{ fontWeight: 600, color: "#171c8f" }}>
               Дата смены:
             </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            <Button
+              variant="text"
+              onClick={() => setOperationDateModalOpen(true)}
+              sx={{
+                px: 1,
+                py: 0.5,
+                borderRadius: 2,
+                fontWeight: 700,
+              }}
+            >
               {operationDateLabel}
-            </Typography>
-            <ButtonGroup size="small" variant="outlined">
-              <Button
-                variant={operationDateIso === todayShiftIso ? "contained" : "outlined"}
-                onClick={() => handleSelectOperationDate(todayShiftDate)}
-              >
-                Сегодня
-              </Button>
-              <Button
-                variant={operationDateIso === yesterdayShiftIso ? "contained" : "outlined"}
-                onClick={() => handleSelectOperationDate(yesterdayShiftDate)}
-              >
-                Вчера
-              </Button>
-            </ButtonGroup>
+            </Button>
           </Box>
         }
       />
@@ -1810,7 +1803,14 @@ const App = () => {
             применяется при создании каждого элемента.
           </Typography>
           <Box sx={{ display: "flex", justifyContent: "center" }}>
-            <ButtonGroup fullWidth>
+            <ButtonGroup
+              fullWidth
+              sx={{
+                "& .MuiButtonBase-root": {
+                  borderRadius: 2,
+                },
+              }}
+            >
               <Button onClick={() => handleSelectOperationDate(todayShiftDate)}>
                 <Box sx={{ display: "flex", flexDirection: "column" }}>
                   <Typography variant="button">Сегодня</Typography>
