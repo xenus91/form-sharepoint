@@ -739,16 +739,21 @@ const App = () => {
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
     getShiftDateOptions();
   const operationDateLabel = formatShiftDateShort(operationDate);
-  const operationDateNowLabel = new Intl.DateTimeFormat("ru-RU", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
-    .format(new Date(operationDateNow))
-    .replace(" г.", "");
+  const d = new Date(operationDateNow);
+
+const datePart = new Intl.DateTimeFormat("ru-RU", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+}).format(d).replace(" г.", "");
+
+const timePart = new Intl.DateTimeFormat("ru-RU", {
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+}).format(d);
+
+const operationDateNowLabel = `${datePart} ${timePart}`;
 
   const handleOpenDcThuModal = () => {
     const baseValue = dcThuOverride || getOfficeSuffix(userProfile.userOffice);
