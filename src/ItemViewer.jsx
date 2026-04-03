@@ -1,601 +1,510 @@
-// ItemViewer.jsx
 import React from "react";
 import apiClient from "./api";
 import { API_BASE_URL } from "../config";
 import {
-    Box, Chip, CircularProgress, Grid, Paper, Stack, Typography,
-    IconButton, Tooltip, Divider,
+  Box,
+  Chip,
+  CircularProgress,
+  Divider,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
 } from "@mui/material";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import { Swiper, SwiperSlide } from "swiper/react";
-import { Navigation, Pagination, Zoom, Thumbs, FreeMode } from "swiper/modules";
+import { Navigation, Pagination, Zoom } from "swiper/modules";
 import "swiper/css";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
 import "swiper/css/zoom";
 
-const DEBUG = false;
-const log = (...a) => DEBUG && console.log("[ItemViewer]", ...a);
-
-// ЕДИНЫЙ МАСШТАБ ШРИФТОВ
-const FONT = { xs: 18, sm: 20, md: 22, lg: 24 };
-const LINE = 1.2;
-
-// ───────── helpers ─────────
 function getIdFromQuery() {
-    const usp = new URLSearchParams(window.location.search || "");
-    return usp.get("ID") || usp.get("Id") || usp.get("id");
+  const usp = new URLSearchParams(window.location.search || "");
+  return usp.get("ID") || usp.get("Id") || usp.get("id");
 }
+
 const prettyDate = (iso) => (iso ? new Date(iso).toLocaleString("ru-RU") : "—");
-const isImageByName = (name = "") =>
-    /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif)$/i.test(name);
-function pickServerRelUrl(file) {
-    return file?.ServerRelativeUrl || file?.ServerRelativePath?.DecodedUrl || "";
-}
-function fileValueUrl(serverRelativeUrl = "") {
-    const enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/gi, "/");
-    return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${enc}')/$value`;
-}
-
-// компактное поле: ЛЕЙБЛ и ЗНАЧЕНИЕ — ОДИНАКОВЫЕ размеры
-const FieldCompact = ({ label, value, mono, maxCh, minCh, forceFull = false }) => {
-    const valueSx = forceFull
-        ? {
-            whiteSpace: "nowrap",
-            overflow: "visible",
-            textOverflow: "clip",
-            minWidth: minCh ? `${minCh}ch` : undefined,
-            maxWidth: "none",
-        }
-        : {
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            minWidth: minCh ? `${minCh}ch` : undefined,
-            maxWidth: maxCh ? `${maxCh}ch` : undefined,
-        };
-
-    return (
-        <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
-            <Typography
-                sx={{
-                    fontSize: FONT,
-                    lineHeight: LINE,
-                    color: "rgba(255,255,255,0.9)",
-                    letterSpacing: 0.2,
-                    whiteSpace: "nowrap",
-                    textShadow: "0 1px 1px rgba(0,0,0,0.25)",
-                    fontWeight: 700,
-                }}
-            >
-                {label}:
-            </Typography>
-            <Typography
-                sx={{
-                    fontWeight: 800,
-                    fontSize: FONT,
-                    lineHeight: LINE,
-                    color: "#fff",
-                    textShadow: "0 1px 1px rgba(0,0,0,0.25)",
-                    ...(mono ? { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas" } : {}),
-                    minWidth: 0,
-                    ...valueSx,
-                }}
-                title={!forceFull ? String(value || "") : undefined}
-            >
-                {value ?? "—"}
-            </Typography>
-        </Stack>
-    );
+const toMonthValue = (iso) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+};
+const getMonthBoundaries = (monthValue) => {
+  const [y, m] = monthValue.split("-").map(Number);
+  const start = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
+  const end = new Date(Date.UTC(y, m, 1, 0, 0, 0));
+  return { startIso: start.toISOString(), endIso: end.toISOString() };
 };
 
+const isImageByName = (name = "") =>
+  /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif)$/i.test(name);
+
+function pickServerRelUrl(file) {
+  return file?.ServerRelativeUrl || file?.ServerRelativePath?.DecodedUrl || "";
+}
+
+function fileValueUrl(serverRelativeUrl = "") {
+  const enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/gi, "/");
+  return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${enc}')/$value`;
+}
+
+function escapeOdataString(value = "") {
+  return String(value).replace(/'/g, "''");
+}
+
+function isAllowedProfile(profile) {
+  const title = String(profile?.title || "").trim().toLowerCase();
+  const department = String(profile?.department || "").trim().toLowerCase();
+  return title === "начальник смены" && department.includes("группа отгрузки");
+}
+
 export default function ItemViewer() {
-    const id = React.useMemo(() => getIdFromQuery(), []);
-    const [loading, setLoading] = React.useState(true);
-    const [item, setItem] = React.useState(null);
-    const [images, setImages] = React.useState([]);
-    const [error, setError] = React.useState("");
+  const queryId = React.useMemo(() => getIdFromQuery(), []);
+  const [isDesktop, setIsDesktop] = React.useState(window.matchMedia("(min-width: 1200px)").matches);
 
-    // Swiper fullscreen + thumbs
-    const swiperRef = React.useRef(null);
-    const [isFs, setIsFs] = React.useState(false);
-    const [fsFallback, setFsFallback] = React.useState(false);
-    const [thumbsSwiper, setThumbsSwiper] = React.useState(null);
+  const [profile, setProfile] = React.useState({ title: "", department: "" });
+  const [accessLoading, setAccessLoading] = React.useState(true);
+  const [accessError, setAccessError] = React.useState("");
 
-    // Инфо-панель
-    const [expanded, setExpanded] = React.useState(false);
+  const [monthValue, setMonthValue] = React.useState("");
+  const [authorFilter, setAuthorFilter] = React.useState("all");
+  const [authorOptions, setAuthorOptions] = React.useState([]);
+  const [listLoading, setListLoading] = React.useState(false);
+  const [listItems, setListItems] = React.useState([]);
 
-    // refs для измерений
-    const handleRef = React.useRef(null);  // «ручка»
-    const headerRef = React.useRef(null);  // 2 строки + ПРОБЛЕМЫ (всегда видимы)
-    const bodyRef = React.useRef(null);  // скрываемый блок (в DOM всегда)
-    const contentRef = React.useRef(null);
+  const [itemLoading, setItemLoading] = React.useState(true);
+  const [itemError, setItemError] = React.useState("");
+  const [activeItemId, setActiveItemId] = React.useState(null);
+  const [item, setItem] = React.useState(null);
+  const [images, setImages] = React.useState([]);
 
-    // высоты панели
-    const [collapsedH, setCollapsedH] = React.useState(112);
-    const [expandedH, setExpandedH] = React.useState(360);
+  const swiperRef = React.useRef(null);
+  const [isFs, setIsFs] = React.useState(false);
 
-    // отступы и «страховки»
-    const BODY_GAP_EXP = 10;
-    const PB_COLL = 10;     // паддинг снизу в коллапсе — чтобы чипы/текст не подрезались
-    const PB_EXP = 14;
-    const MIN_COLLAPSED = 96;
-    const MIN_EXPANDED = 140;
-    const SAFETY = 2;
+  React.useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1200px)");
+    const onChange = (e) => setIsDesktop(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
-    const toggleFullscreen = () => {
-        const el = swiperRef.current;
-        if (!document.fullscreenElement) {
-            if (el?.requestFullscreen) el.requestFullscreen().catch(() => setFsFallback(true));
-            else setFsFallback(true);
-        } else document.exitFullscreen?.();
+  React.useEffect(() => {
+    const onFs = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
+  const loadItemById = React.useCallback(async (id) => {
+    setItemLoading(true);
+    setItemError("");
+    try {
+      const { data } = await apiClient.get(
+        `/web/lists/getbytitle('ProblemsPallet')/items(${id})` +
+          `?$select=Id,THU,DC_THU,Location1,Shipment,WhNotEO,Problems,Warehouse,Created,` +
+          `Recipient/Id,Recipient/Title,Recipient/SCNumberText,Author/Title&$expand=Recipient,Author`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+
+      const d = data?.d;
+      if (!d) throw new Error("Элемент не найден");
+
+      const problemsArr = Array.isArray(d?.Problems?.results)
+        ? d.Problems.results
+        : d?.Problems
+          ? [d.Problems]
+          : [];
+
+      setItem({
+        Id: d?.Id,
+        THU: d?.THU ?? "",
+        DC_THU: d?.DC_THU ?? "",
+        RecipientRegion: d?.Recipient?.Title ?? "",
+        Recipient: d?.Recipient?.SCNumberText ?? "",
+        Warehouse: d?.Warehouse ?? "",
+        Location1: d?.Location1 ?? "",
+        Shipment: d?.Shipment ?? "",
+        WhNotEO: d?.WhNotEO ?? "",
+        Problems: problemsArr,
+        Author: d?.Author?.Title ?? "",
+        Created: d?.Created ?? "",
+      });
+
+      const a = await apiClient.get(
+        `/web/lists/getbytitle('ProblemsPallet')/items(${id})/AttachmentFiles`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const results = a?.data?.d?.results ?? [];
+      const imgs = results
+        .filter((f) => isImageByName(f?.FileName))
+        .map((f) => {
+          const rel = pickServerRelUrl(f);
+          return { name: f?.FileName || "", src: rel ? fileValueUrl(rel) : "" };
+        })
+        .filter((x) => x.src);
+
+      setImages(imgs);
+      setActiveItemId(d?.Id ?? null);
+
+      return d;
+    } catch (error) {
+      console.error(error);
+      setItemError("Не удалось загрузить элемент или вложения.");
+      return null;
+    } finally {
+      setItemLoading(false);
+    }
+  }, []);
+
+  const loadMonthItems = React.useCallback(async (selectedMonth) => {
+    if (!selectedMonth) return;
+
+    setListLoading(true);
+    try {
+      const { startIso, endIso } = getMonthBoundaries(selectedMonth);
+      const { data } = await apiClient.get(
+        `/web/lists/getbytitle('ProblemsPallet')/items` +
+          `?$select=Id,THU,Created,Problems,Attachments,Author/Title` +
+          `&$expand=Author` +
+          `&$filter=(Created ge datetime'${startIso}' and Created lt datetime'${endIso}' and Attachments eq 1)` +
+          `&$orderby=Created desc&$top=500`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+
+      const rows = (data?.d?.results ?? []).map((row) => ({
+        Id: row?.Id,
+        THU: row?.THU ?? "",
+        Author: row?.Author?.Title ?? "Не указан",
+        Created: row?.Created ?? "",
+        Problems: Array.isArray(row?.Problems?.results)
+          ? row.Problems.results
+          : row?.Problems
+            ? [row.Problems]
+            : [],
+      }));
+
+      const authors = Array.from(new Set(rows.map((r) => r.Author).filter(Boolean))).sort((a, b) =>
+        a.localeCompare(b, "ru-RU")
+      );
+
+      setListItems(rows);
+      setAuthorOptions(authors);
+    } catch (error) {
+      console.error(error);
+      setListItems([]);
+      setAuthorOptions([]);
+    } finally {
+      setListLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    let ignore = false;
+
+    async function bootstrap() {
+      setAccessLoading(true);
+      setAccessError("");
+      try {
+        const response = await apiClient.get("/SP.UserProfiles.PeopleManager/GetMyProperties", {
+          headers: { Accept: "application/json;odata=verbose" },
+        });
+
+        const profileProps = response?.data?.d?.UserProfileProperties?.results ?? [];
+        const department = profileProps.find((p) => p.Key === "Department")?.Value || "";
+        const title = response?.data?.d?.Title || "";
+
+        if (ignore) return;
+        setProfile({ title, department });
+
+        if (!queryId) {
+          setAccessError("Не передан параметр ID в URL.");
+          return;
+        }
+
+        const loaded = await loadItemById(queryId);
+        if (!loaded || ignore) return;
+
+        const initialMonth = toMonthValue(loaded?.Created) || toMonthValue(new Date().toISOString());
+        setMonthValue(initialMonth);
+      } catch (error) {
+        console.error(error);
+        if (!ignore) setAccessError("Не удалось получить профиль пользователя.");
+      } finally {
+        if (!ignore) setAccessLoading(false);
+      }
+    }
+
+    bootstrap();
+    return () => {
+      ignore = true;
     };
-    React.useEffect(() => {
-        const onFs = () => setIsFs(!!document.fullscreenElement);
-        document.addEventListener("fullscreenchange", onFs);
-        return () => document.removeEventListener("fullscreenchange", onFs);
-    }, []);
+  }, [queryId, loadItemById]);
 
-    // загрузка данных
-    React.useEffect(() => {
-        let cancelled = false;
-        async function load() {
-            if (!id) { setError("Не передан параметр ID в URL."); setLoading(false); return; }
-            setLoading(true);
-            try {
-                const { data } = await apiClient.get(
-                    `/web/lists/getbytitle('ProblemsPallet')/items(${id})` +
-                    `?$select=Id,THU,DC_THU,Location1,Shipment,WhNotEO,Problems,Warehouse,Created,` +
-                    `Recipient/Id,Recipient/Title,Recipient/SCNumberText,Author/Title&$expand=Recipient,Author`,
-                    { headers: { Accept: "application/json;odata=verbose" } }
-                );
-                if (cancelled) return;
+  React.useEffect(() => {
+    loadMonthItems(monthValue);
+  }, [monthValue, loadMonthItems]);
 
-                const d = data?.d;
-                const problemsArr = Array.isArray(d?.Problems?.results)
-                    ? d.Problems.results
-                    : d?.Problems ? [d.Problems] : [];
+  const filteredItems = React.useMemo(() => {
+    if (authorFilter === "all") return listItems;
+    return listItems.filter((row) => row.Author === authorFilter);
+  }, [listItems, authorFilter]);
 
-                setItem({
-                    Id: d?.Id,
-                    THU: d?.THU ?? "",
-                    DC_THU: d?.DC_THU ?? "",
-                    RecipientRegion: d?.Recipient?.Title ?? "",
-                    Recipient: d?.Recipient?.SCNumberText ?? "",
-                    Warehouse: d?.Warehouse ?? "",
-                    Location1: d?.Location1 ?? "",
-                    Shipment: d?.Shipment ?? "",
-                    WhNotEO: d?.WhNotEO ?? "",
-                    Problems: problemsArr,
-                    Author: d?.Author?.Title ?? "",
-                    Created: d?.Created ?? "",
-                });
+  const allowed = isAllowedProfile(profile);
 
-                const a = await apiClient.get(
-                    `/web/lists/getbytitle('ProblemsPallet')/items(${id})/AttachmentFiles`,
-                    { headers: { Accept: "application/json;odata=verbose" } }
-                );
-                if (cancelled) return;
-                const results = a?.data?.d?.results ?? [];
-                const imgs = results
-                    .filter((f) => isImageByName(f?.FileName))
-                    .map((f) => {
-                        const rel = pickServerRelUrl(f);
-                        return { name: f?.FileName || "", src: rel ? fileValueUrl(rel) : "" };
-                    }).filter((x) => x.src);
-                setImages(imgs);
-                setError("");
-            } catch (e) {
-                console.error(e);
-                if (!cancelled) setError("Не удалось загрузить элемент или вложения.");
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        }
-        load();
-        return () => { cancelled = true; };
-    }, [id]);
-
-    // расчёт высот
-    const computeHeightsNow = React.useCallback(() => {
-        const wH = window.innerHeight || 600;
-        const handleH = handleRef.current?.offsetHeight || 0;
-        const headerH = headerRef.current?.scrollHeight || 0;
-        const bodyH = bodyRef.current?.scrollHeight || 0;
-
-        if (headerH < 12 || handleH < 4) {
-            const collapsedFinal = Math.max(MIN_COLLAPSED, 112);
-            const expandedFinal = Math.max(MIN_EXPANDED, Math.min(wH - 8, collapsedFinal + 280));
-            log("computeHeightsNow (fallback)", { wH, handleH, headerH, bodyH, collapsedFinal, expandedFinal });
-            return { collapsedFinal, expandedFinal };
-        }
-
-        const collapsedFinal = Math.round(handleH + headerH + PB_COLL + SAFETY);
-        const full = Math.round(handleH + headerH + BODY_GAP_EXP + bodyH + PB_EXP + SAFETY);
-        const viewportMax = Math.max(wH - 8, collapsedFinal + 1);
-        const expandedFinal = Math.min(full, viewportMax);
-
-        log("computeHeightsNow", { wH, handleH, headerH, bodyH, collapsedFinal, expandedFinal });
-        return {
-            collapsedFinal: Math.max(collapsedFinal, MIN_COLLAPSED),
-            expandedFinal: Math.max(expandedFinal, MIN_EXPANDED),
-        };
-    }, []);
-
-    const applyHeights = React.useCallback(() => {
-        const { collapsedFinal, expandedFinal } = computeHeightsNow();
-        setCollapsedH(collapsedFinal);
-        setExpandedH(expandedFinal);
-    }, [computeHeightsNow]);
-
-    // первый цикл: несколько rAF-тиков до валидного замера
-    React.useLayoutEffect(() => {
-        if (!item) return;
-        let raf = 0;
-        let tries = 0;
-        const tick = () => {
-            tries += 1;
-            applyHeights();
-            const headerH = headerRef.current?.scrollHeight || 0;
-            if (headerH < 20 && tries < 24) {
-                raf = requestAnimationFrame(tick);
-            }
-        };
-        tick();
-        return () => cancelAnimationFrame(raf);
-    }, [item, applyHeights]);
-
-    // ресайз/шрифты
-    React.useEffect(() => {
-        const onResize = () => applyHeights();
-        window.addEventListener("resize", onResize);
-        document.fonts?.ready?.then(applyHeights).catch(() => { });
-        return () => window.removeEventListener("resize", onResize);
-    }, [applyHeights]);
-
-    // ResizeObserver
-    React.useEffect(() => {
-        const ro = new ResizeObserver(() => applyHeights());
-        handleRef.current && ro.observe(handleRef.current);
-        headerRef.current && ro.observe(headerRef.current);
-        bodyRef.current && ro.observe(bodyRef.current);
-        return () => ro.disconnect();
-    }, [applyHeights]);
-
-    const handleToggle = React.useCallback(() => {
-        applyHeights();
-        setExpanded((v) => !v);
-    }, [applyHeights]);
-
-    if (loading) {
-        return (
-            <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center" }}>
-                <CircularProgress />
-            </Box>
-        );
+  const toggleFullscreen = () => {
+    const el = swiperRef.current;
+    if (!document.fullscreenElement) {
+      el?.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
     }
-    if (error || !item) {
-        return (
-            <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
-                <Paper sx={{ p: 2 }}>
-                    <Typography color="error">{error || "Элемент не найден."}</Typography>
-                </Paper>
-            </Box>
-        );
-    }
+  };
 
+  if (accessLoading) {
     return (
-        <>
-            {/* SWIPER: 100vw × 100vh */}
-            <Box ref={swiperRef} sx={{ position: "fixed", inset: 0, bgcolor: "black", zIndex: 0 }}>
-                {images.length === 0 ? (
-                    <Box sx={{ width: "100vw", height: "100vh", display: "grid", placeItems: "center" }}>
-                        <Typography sx={{ color: "white", opacity: 0.7, fontSize: FONT, lineHeight: LINE }}>
-                            Вложений-изображений нет
-                        </Typography>
-                    </Box>
-                ) : (
-                    <Swiper
-                        modules={[Navigation, Pagination, Zoom, Thumbs]}
-                        navigation
-                        pagination={{ clickable: true }}
-                        zoom={{ maxRatio: 3 }}
-                        spaceBetween={12}
-                        slidesPerView={1}
-                        style={{ width: "100vw", height: "100vh" }}
-                        thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : null }}
-                    >
-                        {images.map((f, i) => (
-                            <SwiperSlide key={i}>
-                                <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
-                                    <img alt={f.name || `Фото ${i + 1}`} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                                </div>
-                            </SwiperSlide>
-                        ))}
-                    </Swiper>
-                )}
-
-                <Tooltip title={isFs ? "Выйти из полноэкранного" : "Открыть на весь экран"}>
-                    <IconButton
-                        onClick={toggleFullscreen}
-                        sx={{
-                            position: "fixed", top: 12, right: 12, zIndex: 6,
-                            bgcolor: "rgba(0,0,0,0.4)", color: "#fff",
-                            "&:hover": { bgcolor: "rgba(0,0,0,0.55)" },
-                        }}
-                        size="large"
-                    >
-                        {isFs ? <FullscreenExitIcon fontSize="large" /> : <FullscreenIcon fontSize="large" />}
-                    </IconButton>
-                </Tooltip>
-            </Box>
-
-            {/* Пояс миниатюр (thumbs) — СВЕРХУ, по центру */}
-            {images.length > 1 && (
-                <Box
-                    sx={{
-                        position: "fixed",
-                        left: 0,
-                        right: 0,
-                        top: 12,
-                        zIndex: 5,
-                        display: "flex",
-                        justifyContent: "center",
-                        pointerEvents: "none",
-                    }}
-                >
-                    <Box
-                        sx={{
-                            pointerEvents: "auto",
-                            bgcolor: "rgba(0,0,0,0.35)",
-                            border: "1px solid rgba(255,255,255,0.35)",
-                            backdropFilter: "blur(8px) saturate(140%)",
-                            WebkitBackdropFilter: "blur(8px) saturate(140%)",
-                            borderRadius: "12px",
-                            px: 1,
-                            py: 0.5,
-                            maxWidth: "min(90vw, 680px)",
-                        }}
-                    >
-                        <Swiper
-                            className="thumbs-swiper"
-                            onSwiper={setThumbsSwiper}
-                            modules={[FreeMode, Thumbs]}
-                            watchSlidesProgress
-                            freeMode
-                            slidesPerView="auto"
-                            spaceBetween={8}
-                            style={{ padding: "6px 4px" }}
-                        >
-                            {images.map((f, i) => (
-                                <SwiperSlide key={`thumb-${i}`} style={{ width: 72, height: 72 }}>
-                                    <img
-                                        src={f.src}
-                                        alt={f.name || `Миниатюра ${i + 1}`}
-                                        style={{
-                                            width: "100%",
-                                            height: "100%",
-                                            objectFit: "cover",
-                                            borderRadius: 8,
-                                            display: "block",
-                                        }}
-                                    />
-                                </SwiperSlide>
-                            ))}
-                        </Swiper>
-                    </Box>
-                </Box>
-            )}
-
-            {/* Стили для активного thumb */}
-            <style>{`
-        .thumbs-swiper .swiper-slide {
-          opacity: 0.65;
-          outline: 1px solid rgba(255,255,255,0.35);
-          border-radius: 8px;
-          overflow: hidden;
-        }
-        .thumbs-swiper .swiper-slide-thumb-active {
-          opacity: 1;
-          outline: 2px solid #fff;
-        }
-      `}</style>
-
-            {/* СТЕКЛЯННЫЙ БЛОК: 100% на мобильных, 70% на остальных */}
-            <Box
-                sx={{
-                    position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 4,
-                    display: "flex", justifyContent: "center", pb: 0, pointerEvents: "none",
-                }}
-            >
-                <Box
-                    role="button"
-                    aria-expanded={expanded}
-                    onClick={handleToggle}
-                    sx={{
-                        pointerEvents: "auto",
-                        width: { xs: "100%", sm: "70vw" }, // ВСЯ ширина на мобильных, 70% на остальных
-                        height: expanded
-                            ? `${Math.round(Math.max(expandedH, MIN_EXPANDED))}px`
-                            : `${Math.round(Math.max(collapsedH, MIN_COLLAPSED))}px`,
-                        transition: "height 280ms ease",
-                        willChange: "height",
-                        borderRadius: "28px 28px 0 0",
-                        border: "1px solid rgba(255,255,255,0.40)",
-                        backdropFilter: "blur(20px) saturate(150%) contrast(1.05)",
-                        WebkitBackdropFilter: "blur(20px) saturate(150%) contrast(1.05)",
-                        background: "rgba(10, 10, 10, 0.25)",
-                        boxShadow: "0 16px 44px rgba(0,0,0,0.25)",
-                        overflow: "hidden",
-                        cursor: "pointer",
-                        boxSizing: "border-box",
-                    }}
-                >
-                    {/* ручка — крупнее */}
-                    <Box ref={handleRef} sx={{ display: "flex", justifyContent: "center", pt: 1, pb: 1.25 }}>
-                        <Box
-                            sx={{
-                                width: { xs: 52, md: 60 },
-                                height: { xs: 6, md: 7 },
-                                borderRadius: 8,
-                                bgcolor: "rgba(255,255,255,0.85)",
-                            }}
-                        />
-                    </Box>
-
-                    {/* контент */}
-                    <Box ref={contentRef} sx={{ px: { xs: 1.5, md: 2 }, pb: expanded ? `${PB_EXP}px` : `${PB_COLL}px`, color: "#fff" }}>
-                        {/* HEADER — 2 строки + ПРОБЛЕМЫ (видны в коллапсе) */}
-                        <Box ref={headerRef}>
-                            {/* строка 1 */}
-                            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
-                                <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                                    <FieldCompact label="РЦ" value={item.DC_THU} mono minCh={4} maxCh={5} />
-                                </Box>
-                                <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                                    {/* ← minCh добавлен: поле «Склад» не сжимается до 1 символа */}
-                                    <FieldCompact label="Склад" value={item.Warehouse} mono minCh={0} maxCh={8} />
-                                </Box>
-                                <Box sx={{ flex: "0 0 auto", minWidth: { xs: "18ch", md: "20ch" } }}>
-                                    <FieldCompact label="ЕО" value={item.THU} mono maxCh={18} forceFull />
-                                </Box>
-                            </Box>
-
-                            {/* строка 2 */}
-                            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center", mb: 1 }}>
-                                <Box sx={{ flex: "0 auto", minWidth: 0 }}>
-                                    <FieldCompact label="Получатель" value={item.Recipient} />
-                                </Box>
-                                <Box sx={{ flex: "1 auto", minWidth: 0 }}>
-                                    <FieldCompact label="Регион" value={item.RecipientRegion} />
-                                </Box>
-                            </Box>
-
-                            <Divider sx={{ my: { xs: 0.75, md: 1 }, borderColor: "rgba(255,255,255,0.35)" }} />
-
-                            {/* ПРОБЛЕМЫ — label + chips в одной строке, при нехватке ширины чипы переносятся */}
-                            <Box
-                                sx={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    flexWrap: "wrap",
-                                    columnGap: 0.6,   // расстояние по горизонтали
-                                    rowGap: 0.6,      // расстояние между переносами
-                                }}
-                            >
-                                <Typography
-                                    sx={{
-                                        fontSize: FONT,
-                                        lineHeight: LINE,
-                                        color: "rgba(255,255,255,0.95)",
-                                        textShadow: "0 1px 1px rgba(0,0,0,0.25)",
-                                        fontWeight: 800,
-                                        letterSpacing: 0.2,
-                                        mb: 0,          // важно: не даём отступ вниз, иначе чипы "сползут"
-                                        mr: 0.5,        // тонкий отступ справа от надписи
-                                    }}
-                                >
-                                    Проблемы:
-                                </Typography>
-
-                                {item.Problems?.length ? (
-                                    item.Problems.map((v, i) => (
-                                        <Chip
-                                            key={`${v}-${i}`}
-                                            label={v}
-                                            variant="outlined"
-                                            sx={{
-                                                color: "#fff",
-                                                borderColor: "rgba(255,255,255,0.55)",
-                                                background: "transparent",
-                                                backdropFilter: "inherit",
-                                                WebkitBackdropFilter: "inherit",
-                                                height: "auto",
-                                                "& .MuiChip-label": {
-                                                    px: 1.25,
-                                                    py: 0.3,
-                                                    fontSize: FONT,
-                                                    lineHeight: LINE,
-                                                    fontWeight: 700,
-                                                },
-                                            }}
-                                        />
-                                    ))
-                                ) : (
-                                    <Typography sx={{ opacity: 0.8, fontSize: FONT, lineHeight: LINE }}>—</Typography>
-                                )}
-                            </Box>
-                        </Box>
-
-                        {/* BODY — в DOM для измерений, в коллапсе невидим */}
-                        <Box
-                            ref={bodyRef}
-                            sx={{
-                                mt: expanded ? `${BODY_GAP_EXP}px` : 0,
-                                visibility: expanded ? "visible" : "hidden",
-                                pointerEvents: expanded ? "auto" : "none",
-                                background: "transparent",
-                            }}
-                        >
-                            <Grid container spacing={1}>
-                                <Grid item xs={12} sm={6}><FieldCompact label="Автор" value={item.Author} /></Grid>
-                                <Grid item xs={12} sm={6}><FieldCompact label="Создан" value={prettyDate(item.Created)} /></Grid>
-                            </Grid>
-
-                            <Divider sx={{ my: { xs: 0.75, md: 1 }, borderColor: "rgba(255,255,255,0.35)" }} />
-
-                            {(item.Location1 || item.Shipment || item.WhNotEO) && (
-                                <Box sx={{ mt: 1 }}>
-                                    {/* ряд 1: Локация • Транспорт */}
-                                    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
-                                        {item.Location1 && (
-                                            <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                                                <FieldCompact label="Местоположение" value={item.Location1} />
-                                            </Box>
-                                        )}
-                                        {item.Shipment && (
-                                            <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                                                <FieldCompact label="Тран-ка" value={item.Shipment} mono />
-                                            </Box>
-                                        )}
-                                    </Box>
-
-                                    {/* ряд 2: Нет ЕО — склад (на всю ширину) */}
-                                    {item.WhNotEO && (
-                                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                                            <Box sx={{ flex: "1 1 auto", minWidth: 0 }}>
-                                                <FieldCompact label="Нет ЕО — склад" value={item.WhNotEO} />
-                                            </Box>
-                                        </Box>
-                                    )}
-                                </Box>
-                            )}
-                        </Box>
-                    </Box>
-                </Box>
-            </Box>
-
-            {/* Fallback fullscreen без затемнения */}
-            {fsFallback && (
-                <Box onClick={() => setFsFallback(false)} sx={{ position: "fixed", inset: 0, zIndex: 6, bgcolor: "transparent" }}>
-                    <Swiper modules={[Navigation, Pagination, Zoom]} navigation pagination={{ clickable: true }} zoom={{ maxRatio: 4 }}
-                        spaceBetween={12} slidesPerView={1} style={{ width: "100vw", height: "100vh" }}>
-                        {images.map((f, i) => (
-                            <SwiperSlide key={`fs-${i}`}>
-                                <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
-                                    <img alt={f.name || `Фото ${i + 1}`} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                                </div>
-                            </SwiperSlide>
-                        ))}
-                    </Swiper>
-                    <Box sx={{ position: "fixed", top: 12, right: 12 }}>
-                        <IconButton sx={{ bgcolor: "rgba(0,0,0,0.5)", color: "#fff" }} onClick={() => setFsFallback(false)}>
-                            <FullscreenExitIcon />
-                        </IconButton>
-                    </Box>
-                </Box>
-            )}
-        </>
+      <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center" }}>
+        <CircularProgress />
+      </Box>
     );
+  }
+
+  if (!isDesktop) {
+    return (
+      <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
+        <Paper sx={{ p: 3, maxWidth: 560 }}>
+          <Typography variant="h6" gutterBottom>
+            Предпросмотр доступен только в desktop-версии.
+          </Typography>
+          <Typography color="text.secondary">
+            Откройте ссылку с параметром ?ID= на экране шириной от 1200px.
+          </Typography>
+        </Paper>
+      </Box>
+    );
+  }
+
+  if (accessError) {
+    return (
+      <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
+        <Paper sx={{ p: 3, maxWidth: 620 }}>
+          <Typography color="error">{accessError}</Typography>
+        </Paper>
+      </Box>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
+        <Paper sx={{ p: 3, maxWidth: 760 }}>
+          <Typography variant="h6" gutterBottom>
+            Доступ к расширенному предпросмотру ограничен.
+          </Typography>
+          <Typography color="text.secondary">
+            Требуется должность «Начальник смены» и подразделение, содержащее «Группа отгрузки».
+          </Typography>
+        </Paper>
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ position: "fixed", inset: 0, display: "flex", bgcolor: "#000" }}>
+      <Box ref={swiperRef} sx={{ position: "relative", flex: 1, minWidth: 0, bgcolor: "black" }}>
+        {itemLoading ? (
+          <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+            <CircularProgress />
+          </Box>
+        ) : itemError || !item ? (
+          <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
+            <Paper sx={{ p: 2 }}>
+              <Typography color="error">{itemError || "Элемент не найден."}</Typography>
+            </Paper>
+          </Box>
+        ) : images.length === 0 ? (
+          <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}>
+            <Typography sx={{ color: "white", opacity: 0.7 }}>Вложений-изображений нет</Typography>
+          </Box>
+        ) : (
+          <Swiper
+            modules={[Navigation, Pagination, Zoom]}
+            navigation
+            pagination={{ clickable: true }}
+            zoom={{ maxRatio: 3 }}
+            slidesPerView={1}
+            style={{ width: "100%", height: "100%" }}
+          >
+            {images.map((f, i) => (
+              <SwiperSlide key={`${f.name}-${i}`}>
+                <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
+                  <img
+                    alt={f.name || `Фото ${i + 1}`}
+                    src={f.src}
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                </div>
+              </SwiperSlide>
+            ))}
+          </Swiper>
+        )}
+
+        <Tooltip title={isFs ? "Выйти из полноэкранного" : "Открыть на весь экран"}>
+          <IconButton
+            onClick={toggleFullscreen}
+            sx={{
+              position: "absolute",
+              top: 12,
+              right: 12,
+              zIndex: 5,
+              bgcolor: "rgba(0,0,0,0.4)",
+              color: "#fff",
+              "&:hover": { bgcolor: "rgba(0,0,0,0.55)" },
+            }}
+            size="large"
+          >
+            {isFs ? <FullscreenExitIcon fontSize="large" /> : <FullscreenIcon fontSize="large" />}
+          </IconButton>
+        </Tooltip>
+
+        {item && (
+          <Paper
+            elevation={0}
+            sx={{
+              position: "absolute",
+              left: 12,
+              right: 12,
+              bottom: 12,
+              p: 1.5,
+              color: "#fff",
+              bgcolor: "rgba(0,0,0,0.45)",
+              border: "1px solid rgba(255,255,255,0.2)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap">
+              <Typography><b>ID:</b> {item.Id}</Typography>
+              <Typography><b>ЕО:</b> {item.THU || "—"}</Typography>
+              <Typography><b>РЦ:</b> {item.DC_THU || "—"}</Typography>
+              <Typography><b>Автор:</b> {item.Author || "—"}</Typography>
+              <Typography><b>Создан:</b> {prettyDate(item.Created)}</Typography>
+            </Stack>
+            {item.Problems?.length > 0 && (
+              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
+                {item.Problems.map((p, idx) => (
+                  <Chip key={`${p}-${idx}`} label={p} size="small" sx={{ color: "white", borderColor: "rgba(255,255,255,0.5)" }} variant="outlined" />
+                ))}
+              </Stack>
+            )}
+          </Paper>
+        )}
+      </Box>
+
+      <Box
+        sx={{
+          width: 390,
+          borderLeft: "1px solid #d8d8d8",
+          bgcolor: "#fff",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <Box sx={{ p: 2, borderBottom: "1px solid #e8e8e8" }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Элементы с вложениями
+          </Typography>
+
+          <Stack spacing={1.5}>
+            <TextField
+              size="small"
+              type="month"
+              label="Месяц"
+              InputLabelProps={{ shrink: true }}
+              value={monthValue}
+              onChange={(e) => setMonthValue(e.target.value)}
+            />
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="author-filter-label">Автор</InputLabel>
+              <Select
+                labelId="author-filter-label"
+                value={authorFilter}
+                label="Автор"
+                onChange={(e) => setAuthorFilter(e.target.value)}
+              >
+                <MenuItem value="all">Все авторы</MenuItem>
+                {authorOptions.map((author) => (
+                  <MenuItem key={author} value={escapeOdataString(author).replace(/''/g, "'")}>
+                    {author}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+        </Box>
+
+        <Box sx={{ p: 1.5, flex: 1, overflowY: "auto" }}>
+          {listLoading ? (
+            <Box sx={{ py: 4, display: "grid", placeItems: "center" }}>
+              <CircularProgress size={24} />
+            </Box>
+          ) : filteredItems.length === 0 ? (
+            <Typography color="text.secondary" sx={{ p: 1 }}>
+              За выбранный период нет элементов с вложениями.
+            </Typography>
+          ) : (
+            filteredItems.map((row) => (
+              <Paper
+                key={row.Id}
+                onClick={() => loadItemById(row.Id)}
+                sx={{
+                  p: 1.25,
+                  mb: 1,
+                  cursor: "pointer",
+                  border: activeItemId === row.Id ? "1px solid #171c8f" : "1px solid #ececec",
+                  boxShadow: activeItemId === row.Id ? "0 0 0 2px rgba(23,28,143,0.12)" : "none",
+                }}
+              >
+                <Stack direction="row" justifyContent="space-between" spacing={1}>
+                  <Typography fontWeight={700}>ID {row.Id}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {prettyDate(row.Created)}
+                  </Typography>
+                </Stack>
+                <Typography variant="body2" sx={{ mt: 0.3 }}>
+                  <b>ЕО:</b> {row.THU || "—"}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  <b>Автор:</b> {row.Author || "—"}
+                </Typography>
+                {row.Problems?.length > 0 && (
+                  <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.75 }}>
+                    {row.Problems.slice(0, 3).map((problem, idx) => (
+                      <Chip key={`${row.Id}-${idx}`} label={problem} size="small" />
+                    ))}
+                    {row.Problems.length > 3 && <Chip size="small" label={`+${row.Problems.length - 3}`} />}
+                  </Stack>
+                )}
+              </Paper>
+            ))
+          )}
+        </Box>
+
+        <Divider />
+        <Box sx={{ p: 1.25 }}>
+          <Typography variant="caption" color="text.secondary">
+            Профиль: {profile.title || "—"} / {profile.department || "—"}
+          </Typography>
+        </Box>
+      </Box>
+    </Box>
+  );
 }
