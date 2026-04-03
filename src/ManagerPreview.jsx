@@ -1,5 +1,5 @@
 import React from "react";
-import apiClient from "./api";
+import apiClient, { normalizeNextUrl } from "./api";
 import { API_BASE_URL } from "../config";
 import {
   Box,
@@ -170,16 +170,26 @@ export default function ManagerPreview({ userProfile, onBack }) {
     setListLoading(true);
     try {
       const { startIso, endIso } = getMonthBoundaries(selectedMonth);
-      const { data } = await apiClient.get(
+      let nextUrl =
         `/web/lists/getbytitle('ProblemsPallet')/items` +
-          `?$select=Id,THU,Created,Problems,Attachments,Author/Title` +
-          `&$expand=Author` +
-          `&$filter=(Created ge datetime'${startIso}' and Created lt datetime'${endIso}' and Attachments eq 1)` +
-          `&$orderby=Created desc&$top=500`,
-        { headers: { Accept: "application/json;odata=verbose" } }
-      );
+        `?$select=Id,THU,Created,Problems,Attachments,Author/Title` +
+        `&$expand=Author` +
+        `&$filter=(Created ge datetime'${startIso}' and Created lt datetime'${endIso}' and Attachments eq 1)` +
+        `&$orderby=Created desc&$top=500`;
 
-      const rows = (data?.d?.results ?? []).map((row) => ({
+      const allRows = [];
+
+      while (nextUrl) {
+        const { data } = await apiClient.get(nextUrl, {
+          headers: { Accept: "application/json;odata=verbose" },
+        });
+
+        const pageRows = data?.d?.results ?? [];
+        allRows.push(...pageRows);
+        nextUrl = normalizeNextUrl(data?.d?.__next) || null;
+      }
+
+      const rows = allRows.map((row) => ({
         Id: row?.Id,
         THU: row?.THU ?? "",
         Author: row?.Author?.Title ?? "Не указан",
@@ -445,6 +455,14 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   color: "#fff",
                   backgroundColor: "rgba(255,255,255,0.08)",
                   "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                },
+                "& input": {
+                  colorScheme: "dark",
+                },
+                "& input::-webkit-calendar-picker-indicator": {
+                  filter: "invert(1)",
+                  opacity: 0.9,
+                  cursor: "pointer",
                 },
                 "& .MuiInputLabel-root": { color: "rgba(255,255,255,0.8)" },
               }}
