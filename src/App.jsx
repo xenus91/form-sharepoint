@@ -44,6 +44,7 @@ import RecipientAutocomplete from "./RecipientAutocomplete";
 import BtnGroupLocation from "./btngroupLocation";
 import CollectionsIcon from "@mui/icons-material/Collections";
 import MonthlyCounter from "./MonthlyCounter";
+import ManagerPreview from "./ManagerPreview";
 import { useNotifications } from './NotificationsProvider';
 
 SwiperCore.use([Pagination, Navigation]);
@@ -1171,13 +1172,10 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     String(userProfile.userTitle || "").trim().toLowerCase() === "начальник смены" &&
     String(userProfile.userDepartment || "").toLowerCase().includes("группа отгрузки");
 
+  const [managerPreviewOpen, setManagerPreviewOpen] = useState(false);
+
   const handleOpenManagerPreview = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("managerPreview", "1");
-    url.searchParams.delete("ID");
-    url.searchParams.delete("Id");
-    url.searchParams.delete("id");
-    window.location.href = `${url.pathname}${url.search}`;
+    setManagerPreviewOpen(true);
   };
 
   const handleLocationChange = (value) => {
@@ -1185,6 +1183,15 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     if (/отгружен/i.test(value)) setIsTransportationRequired(true);
     else setIsTransportationRequired(false);
   };
+
+  if (managerPreviewOpen) {
+    return (
+      <ManagerPreview
+        userProfile={userProfile}
+        onBack={() => setManagerPreviewOpen(false)}
+      />
+    );
+  }
 
   return (
     <ThemeProvider theme={figmaTheme}>

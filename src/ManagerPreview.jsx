@@ -27,11 +27,6 @@ import "swiper/css/navigation";
 import "swiper/css/pagination";
 import "swiper/css/zoom";
 
-function getIdFromQuery() {
-  const usp = new URLSearchParams(window.location.search || "");
-  return usp.get("ID") || usp.get("Id") || usp.get("id");
-}
-
 const prettyDate = (iso) => (iso ? new Date(iso).toLocaleString("ru-RU") : "—");
 const toMonthValue = (iso) => {
   if (!iso) return "";
@@ -66,13 +61,8 @@ function isAllowedProfile(profile) {
   return title === "начальник смены" && department.includes("группа отгрузки");
 }
 
-export default function ManagerPreview() {
-  const queryId = React.useMemo(() => getIdFromQuery(), []);
+export default function ManagerPreview({ userProfile, onBack }) {
   const [isDesktop, setIsDesktop] = React.useState(window.matchMedia("(min-width: 1200px)").matches);
-
-  const [profile, setProfile] = React.useState({ title: "", department: "" });
-  const [accessLoading, setAccessLoading] = React.useState(true);
-  const [accessError, setAccessError] = React.useState("");
 
   const [monthValue, setMonthValue] = React.useState(toMonthValue(new Date().toISOString()));
   const [authorFilter, setAuthorFilter] = React.useState("all");
@@ -205,55 +195,21 @@ export default function ManagerPreview() {
     }
   }, []);
 
-  React.useEffect(() => {
-    let ignore = false;
-
-    async function bootstrap() {
-      setAccessLoading(true);
-      setAccessError("");
-      try {
-        const response = await apiClient.get("/SP.UserProfiles.PeopleManager/GetMyProperties", {
-          headers: { Accept: "application/json;odata=verbose" },
-        });
-
-        const profileProps = response?.data?.d?.UserProfileProperties?.results ?? [];
-        const department = profileProps.find((p) => p.Key === "Department")?.Value || "";
-        const title = response?.data?.d?.Title || "";
-
-        if (ignore) return;
-        setProfile({ title, department });
-
-        if (queryId) {
-          const loaded = await loadItemById(queryId);
-          if (loaded?.Created) {
-            setMonthValue(toMonthValue(loaded.Created));
-          }
-        }
-      } catch (error) {
-        console.error(error);
-        if (!ignore) setAccessError("Не удалось получить профиль пользователя.");
-      } finally {
-        if (!ignore) setAccessLoading(false);
-      }
-    }
-
-    bootstrap();
-    return () => {
-      ignore = true;
-    };
-  }, [queryId, loadItemById]);
 
   React.useEffect(() => {
-    if (!isAllowedProfile(profile)) return;
+    if (!isAllowedProfile(userProfile)) return;
     loadMonthItems(monthValue);
-  }, [monthValue, profile, loadMonthItems]);
+  }, [monthValue, userProfile, loadMonthItems]);
 
   const filteredItems = React.useMemo(() => {
     if (authorFilter === "all") return listItems;
     return listItems.filter((row) => row.Author === authorFilter);
   }, [listItems, authorFilter]);
 
-  const allowed = isAllowedProfile(profile);
+  const allowed = isAllowedProfile({
+    title: userProfile?.userTitle,
+    department: userProfile?.userDepartment,
+  });
 
   const toggleFullscreen = () => {
     const el = swiperRef.current;
@@ -264,22 +220,6 @@ export default function ManagerPreview() {
     }
   };
 
-  const goBackToMain = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("managerPreview");
-    url.searchParams.delete("ID");
-    url.searchParams.delete("Id");
-    url.searchParams.delete("id");
-    window.location.href = `${url.pathname}${url.search}`;
-  };
-
-  if (accessLoading) {
-    return (
-      <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center" }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
 
   if (!isDesktop) {
     return (
@@ -291,16 +231,6 @@ export default function ManagerPreview() {
           <Typography color="text.secondary">
             Откройте этот режим на экране шириной от 1200px.
           </Typography>
-        </Paper>
-      </Box>
-    );
-  }
-
-  if (accessError) {
-    return (
-      <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
-        <Paper sx={{ p: 3, maxWidth: 620 }}>
-          <Typography color="error">{accessError}</Typography>
         </Paper>
       </Box>
     );
@@ -325,7 +255,7 @@ export default function ManagerPreview() {
     <Box sx={{ position: "fixed", inset: 0, display: "flex", bgcolor: "#000" }}>
       <Box ref={swiperRef} sx={{ position: "relative", flex: 1, minWidth: 0, bgcolor: "black" }}>
         <Box sx={{ position: "absolute", top: 12, left: 12, zIndex: 6, display: "flex", gap: 1 }}>
-          <Button variant="contained" onClick={goBackToMain}>Назад в форму</Button>
+          <Button variant="contained" onClick={onBack}>Назад в форму</Button>
         </Box>
 
         {!item ? (
@@ -523,7 +453,7 @@ export default function ManagerPreview() {
         <Divider />
         <Box sx={{ p: 1.25 }}>
           <Typography variant="caption" color="text.secondary">
-            Профиль: {profile.title || "—"} / {profile.department || "—"}
+            Профиль: {userProfile?.userTitle || "—"} / {userProfile?.userDepartment || "—"}
           </Typography>
         </Box>
       </Box>
