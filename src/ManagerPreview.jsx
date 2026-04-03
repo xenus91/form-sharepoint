@@ -61,6 +61,13 @@ function isAllowedProfile(profile) {
   return title === "начальник смены" && department.includes("группа отгрузки");
 }
 
+function toAllowedPayload(userProfile) {
+  return {
+    title: userProfile?.userTitle,
+    department: userProfile?.userDepartment,
+  };
+}
+
 export default function ManagerPreview({ userProfile, onBack }) {
   const [isDesktop, setIsDesktop] = React.useState(window.matchMedia("(min-width: 1200px)").matches);
 
@@ -196,20 +203,18 @@ export default function ManagerPreview({ userProfile, onBack }) {
   }, []);
 
 
+  const allowed = isAllowedProfile(toAllowedPayload(userProfile));
+
   React.useEffect(() => {
-    if (!isAllowedProfile(userProfile)) return;
+    if (!allowed) return;
+    setAuthorFilter("all");
     loadMonthItems(monthValue);
-  }, [monthValue, userProfile, loadMonthItems]);
+  }, [allowed, monthValue, loadMonthItems]);
 
   const filteredItems = React.useMemo(() => {
     if (authorFilter === "all") return listItems;
     return listItems.filter((row) => row.Author === authorFilter);
   }, [listItems, authorFilter]);
-
-  const allowed = isAllowedProfile({
-    title: userProfile?.userTitle,
-    department: userProfile?.userDepartment,
-  });
 
   const toggleFullscreen = () => {
     const el = swiperRef.current;
@@ -363,13 +368,16 @@ export default function ManagerPreview({ userProfile, onBack }) {
       <Box
         sx={{
           width: 390,
-          borderLeft: "1px solid #d8d8d8",
-          bgcolor: "#fff",
+          borderLeft: "1px solid rgba(255,255,255,0.35)",
+          bgcolor: "rgba(10, 10, 10, 0.35)",
+          backdropFilter: "blur(20px) saturate(150%) contrast(1.05)",
+          WebkitBackdropFilter: "blur(20px) saturate(150%) contrast(1.05)",
+          color: "#fff",
           display: "flex",
           flexDirection: "column",
         }}
       >
-        <Box sx={{ p: 2, borderBottom: "1px solid #e8e8e8" }}>
+        <Box sx={{ p: 2, borderBottom: "1px solid rgba(255,255,255,0.25)" }}>
           <Typography variant="h6" sx={{ mb: 1 }}>
             Элементы с вложениями
           </Typography>
@@ -382,15 +390,37 @@ export default function ManagerPreview({ userProfile, onBack }) {
               InputLabelProps={{ shrink: true }}
               value={monthValue}
               onChange={(e) => setMonthValue(e.target.value)}
+              sx={{
+                "& .MuiOutlinedInput-root": {
+                  color: "#fff",
+                  backgroundColor: "rgba(255,255,255,0.08)",
+                  "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                },
+                "& .MuiInputLabel-root": { color: "rgba(255,255,255,0.8)" },
+              }}
             />
 
             <FormControl size="small" fullWidth>
-              <InputLabel id="author-filter-label">Автор</InputLabel>
+              <InputLabel id="author-filter-label" sx={{ color: "rgba(255,255,255,0.8)" }}>Автор</InputLabel>
               <Select
                 labelId="author-filter-label"
                 value={authorFilter}
                 label="Автор"
                 onChange={(e) => setAuthorFilter(e.target.value)}
+                sx={{
+                  color: "#fff",
+                  backgroundColor: "rgba(255,255,255,0.08)",
+                  "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                }}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      bgcolor: "rgba(20,20,20,0.95)",
+                      color: "#fff",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    },
+                  },
+                }}
               >
                 <MenuItem value="all">Все авторы</MenuItem>
                 {authorOptions.map((author) => (
@@ -409,7 +439,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
               <CircularProgress size={24} />
             </Box>
           ) : filteredItems.length === 0 ? (
-            <Typography color="text.secondary" sx={{ p: 1 }}>
+            <Typography sx={{ p: 1, color: "rgba(255,255,255,0.75)" }}>
               За выбранный период нет элементов с вложениями.
             </Typography>
           ) : (
@@ -421,20 +451,22 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   p: 1.25,
                   mb: 1,
                   cursor: "pointer",
-                  border: activeItemId === row.Id ? "1px solid #171c8f" : "1px solid #ececec",
-                  boxShadow: activeItemId === row.Id ? "0 0 0 2px rgba(23,28,143,0.12)" : "none",
+                  color: "#fff",
+                  bgcolor: activeItemId === row.Id ? "rgba(90,120,255,0.2)" : "rgba(255,255,255,0.08)",
+                  border: activeItemId === row.Id ? "1px solid rgba(140,170,255,0.85)" : "1px solid rgba(255,255,255,0.2)",
+                  boxShadow: activeItemId === row.Id ? "0 0 0 2px rgba(140,170,255,0.25)" : "none",
                 }}
               >
                 <Stack direction="row" justifyContent="space-between" spacing={1}>
                   <Typography fontWeight={700}>ID {row.Id}</Typography>
-                  <Typography variant="caption" color="text.secondary">
+                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.7)" }}>
                     {prettyDate(row.Created)}
                   </Typography>
                 </Stack>
                 <Typography variant="body2" sx={{ mt: 0.3 }}>
                   <b>ЕО:</b> {row.THU || "—"}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.85)" }}>
                   <b>Автор:</b> {row.Author || "—"}
                 </Typography>
                 {row.Problems?.length > 0 && (
@@ -450,9 +482,9 @@ export default function ManagerPreview({ userProfile, onBack }) {
           )}
         </Box>
 
-        <Divider />
+        <Divider sx={{ borderColor: "rgba(255,255,255,0.25)" }} />
         <Box sx={{ p: 1.25 }}>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.75)" }}>
             Профиль: {userProfile?.userTitle || "—"} / {userProfile?.userDepartment || "—"}
           </Typography>
         </Box>
