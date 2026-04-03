@@ -89,6 +89,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
   const swiperRef = React.useRef(null);
   const [isFs, setIsFs] = React.useState(false);
+  const detailsCacheRef = React.useRef(new Map());
+  const requestSeqRef = React.useRef(0);
 
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 1200px)");
@@ -104,18 +106,38 @@ export default function ManagerPreview({ userProfile, onBack }) {
   }, []);
 
   const loadItemById = React.useCallback(async (id) => {
+    if (!id) return null;
+    setActiveItemId(id);
+
+    const cached = detailsCacheRef.current.get(id);
+    if (cached) {
+      setItem(cached.item);
+      setImages(cached.images);
+      setItemError("");
+      return cached.raw;
+    }
+
+    const requestSeq = ++requestSeqRef.current;
     setItemLoading(true);
     setItemError("");
 
     try {
-      const { data } = await apiClient.get(
-        `/web/lists/getbytitle('ProblemsPallet')/items(${id})` +
-          `?$select=Id,THU,DC_THU,Location1,Shipment,WhNotEO,Problems,Warehouse,Created,` +
-          `Recipient/Id,Recipient/Title,Recipient/SCNumberText,Author/Title&$expand=Recipient,Author`,
-        { headers: { Accept: "application/json;odata=verbose" } }
-      );
+      const [itemResp, attachmentsResp] = await Promise.all([
+        apiClient.get(
+          `/web/lists/getbytitle('ProblemsPallet')/items(${id})` +
+            `?$select=Id,THU,DC_THU,Location1,Shipment,WhNotEO,Problems,Warehouse,Created,` +
+            `Recipient/Id,Recipient/Title,Recipient/SCNumberText,Author/Title&$expand=Recipient,Author`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        ),
+        apiClient.get(
+          `/web/lists/getbytitle('ProblemsPallet')/items(${id})/AttachmentFiles`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        ),
+      ]);
 
-      const d = data?.d;
+      if (requestSeq !== requestSeqRef.current) return null;
+
+      const d = itemResp?.data?.d;
       if (!d) throw new Error("Элемент не найден");
 
       const problemsArr = Array.isArray(d?.Problems?.results)
@@ -124,7 +146,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
           ? [d.Problems]
           : [];
 
-      setItem({
+      const mappedItem = {
         Id: d?.Id,
         THU: d?.THU ?? "",
         DC_THU: d?.DC_THU ?? "",
@@ -137,13 +159,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
         Problems: problemsArr,
         Author: d?.Author?.Title ?? "",
         Created: d?.Created ?? "",
-      });
-
-      const a = await apiClient.get(
-        `/web/lists/getbytitle('ProblemsPallet')/items(${id})/AttachmentFiles`,
-        { headers: { Accept: "application/json;odata=verbose" } }
-      );
-      const results = a?.data?.d?.results ?? [];
+      };
+      const results = attachmentsResp?.data?.d?.results ?? [];
       const imgs = results
         .filter((f) => isImageByName(f?.FileName))
         .map((f) => {
@@ -152,15 +169,19 @@ export default function ManagerPreview({ userProfile, onBack }) {
         })
         .filter((x) => x.src);
 
+      detailsCacheRef.current.set(id, { item: mappedItem, images: imgs, raw: d });
+
+      setItem(mappedItem);
       setImages(imgs);
-      setActiveItemId(d?.Id ?? null);
       return d;
     } catch (error) {
       console.error(error);
       setItemError("Не удалось загрузить элемент или вложения.");
       return null;
     } finally {
-      setItemLoading(false);
+      if (requestSeq === requestSeqRef.current) {
+        setItemLoading(false);
+      }
     }
   }, []);
 
