@@ -17,6 +17,7 @@ import {
   Tooltip,
   Typography,
   Button,
+  Popover,
 } from "@mui/material";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
@@ -82,6 +83,9 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const [activeItemId, setActiveItemId] = React.useState(null);
   const [item, setItem] = React.useState(null);
   const [images, setImages] = React.useState([]);
+  const [problemsAnchorEl, setProblemsAnchorEl] = React.useState(null);
+  const [problemsPopoverList, setProblemsPopoverList] = React.useState([]);
+  const [problemsPopoverTitle, setProblemsPopoverTitle] = React.useState("");
 
   const swiperRef = React.useRef(null);
   const [isFs, setIsFs] = React.useState(false);
@@ -225,6 +229,16 @@ export default function ManagerPreview({ userProfile, onBack }) {
     }
   };
 
+  const handleOpenProblemsPopover = (event, row) => {
+    setProblemsAnchorEl(event.currentTarget);
+    setProblemsPopoverList(row?.Problems || []);
+    setProblemsPopoverTitle(`ID ${row?.Id ?? ""}`);
+  };
+
+  const handleCloseProblemsPopover = () => {
+    setProblemsAnchorEl(null);
+  };
+
 
   if (!isDesktop) {
     return (
@@ -260,7 +274,23 @@ export default function ManagerPreview({ userProfile, onBack }) {
     <Box sx={{ position: "fixed", inset: 0, display: "flex", bgcolor: "#000" }}>
       <Box ref={swiperRef} sx={{ position: "relative", flex: 1, minWidth: 0, bgcolor: "black" }}>
         <Box sx={{ position: "absolute", top: 12, left: 12, zIndex: 6, display: "flex", gap: 1 }}>
-          <Button variant="contained" onClick={onBack}>Назад в форму</Button>
+          <Button
+            variant="outlined"
+            onClick={onBack}
+            sx={{
+              color: "#fff",
+              borderColor: "rgba(255,255,255,0.45)",
+              bgcolor: "rgba(10,10,10,0.32)",
+              backdropFilter: "blur(16px) saturate(140%)",
+              WebkitBackdropFilter: "blur(16px) saturate(140%)",
+              "&:hover": {
+                borderColor: "rgba(255,255,255,0.7)",
+                bgcolor: "rgba(10,10,10,0.45)",
+              },
+            }}
+          >
+            Назад в форму
+          </Button>
         </Box>
 
         {!item ? (
@@ -327,41 +357,61 @@ export default function ManagerPreview({ userProfile, onBack }) {
         )}
 
         {item && (
-          <Paper
-            elevation={0}
+          <Box
             sx={{
               position: "absolute",
-              left: 12,
-              right: 12,
-              bottom: 12,
-              p: 1.5,
-              color: "#fff",
-              bgcolor: "rgba(0,0,0,0.45)",
-              border: "1px solid rgba(255,255,255,0.2)",
-              backdropFilter: "blur(10px)",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 6,
+              display: "flex",
+              justifyContent: "center",
+              px: 1.5,
+              pb: 0.75,
+              pointerEvents: "none",
             }}
           >
-            <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap">
-              <Typography><b>ID:</b> {item.Id}</Typography>
-              <Typography><b>ЕО:</b> {item.THU || "—"}</Typography>
-              <Typography><b>РЦ:</b> {item.DC_THU || "—"}</Typography>
-              <Typography><b>Автор:</b> {item.Author || "—"}</Typography>
-              <Typography><b>Создан:</b> {prettyDate(item.Created)}</Typography>
-            </Stack>
-            {item.Problems?.length > 0 && (
-              <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
-                {item.Problems.map((p, idx) => (
-                  <Chip
-                    key={`${p}-${idx}`}
-                    label={p}
-                    size="small"
-                    sx={{ color: "white", borderColor: "rgba(255,255,255,0.5)" }}
-                    variant="outlined"
-                  />
-                ))}
+            <Paper
+              elevation={0}
+              sx={{
+                width: { xs: "100%", sm: "72%" },
+                p: 1.5,
+                borderRadius: "24px 24px 0 0",
+                color: "#fff",
+                bgcolor: "rgba(10,10,10,0.32)",
+                border: "1px solid rgba(255,255,255,0.35)",
+                backdropFilter: "blur(18px) saturate(150%)",
+                WebkitBackdropFilter: "blur(18px) saturate(150%)",
+                pointerEvents: "auto",
+              }}
+            >
+              <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap">
+                <Typography><b>ID:</b> {item.Id}</Typography>
+                <Typography><b>ЕО:</b> {item.THU || "—"}</Typography>
+                <Typography><b>РЦ:</b> {item.DC_THU || "—"}</Typography>
+                <Typography><b>Автор:</b> {item.Author || "—"}</Typography>
+                <Typography><b>Создан:</b> {prettyDate(item.Created)}</Typography>
               </Stack>
-            )}
-          </Paper>
+              {item.Problems?.length > 0 && (
+                <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 1 }}>
+                  {item.Problems.map((p, idx) => (
+                    <Chip
+                      key={`${p}-${idx}`}
+                      label={p}
+                      size="small"
+                      sx={{
+                        color: "white",
+                        borderColor: "rgba(255,255,255,0.6)",
+                        bgcolor: "rgba(255,255,255,0.08)",
+                        "& .MuiChip-label": { color: "#fff" },
+                      }}
+                      variant="outlined"
+                    />
+                  ))}
+                </Stack>
+              )}
+            </Paper>
+          </Box>
         )}
       </Box>
 
@@ -471,10 +521,38 @@ export default function ManagerPreview({ userProfile, onBack }) {
                 </Typography>
                 {row.Problems?.length > 0 && (
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.75 }}>
-                    {row.Problems.slice(0, 3).map((problem, idx) => (
-                      <Chip key={`${row.Id}-${idx}`} label={problem} size="small" />
-                    ))}
-                    {row.Problems.length > 3 && <Chip size="small" label={`+${row.Problems.length - 3}`} />}
+                    <Chip
+                      clickable
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleOpenProblemsPopover(event, row);
+                      }}
+                      label={row.Problems[0]}
+                      size="small"
+                      sx={{
+                        color: "#fff",
+                        bgcolor: "rgba(255,255,255,0.14)",
+                        border: "1px solid rgba(255,255,255,0.35)",
+                        "& .MuiChip-label": { color: "#fff" },
+                      }}
+                    />
+                    {row.Problems.length > 1 && (
+                      <Chip
+                        clickable
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleOpenProblemsPopover(event, row);
+                        }}
+                        size="small"
+                        label={`+${row.Problems.length - 1}`}
+                        sx={{
+                          color: "#fff",
+                          bgcolor: "rgba(120,150,255,0.25)",
+                          border: "1px solid rgba(180,205,255,0.6)",
+                          "& .MuiChip-label": { color: "#fff", fontWeight: 700 },
+                        }}
+                      />
+                    )}
                   </Stack>
                 )}
               </Paper>
@@ -489,6 +567,36 @@ export default function ManagerPreview({ userProfile, onBack }) {
           </Typography>
         </Box>
       </Box>
+
+      <Popover
+        open={Boolean(problemsAnchorEl)}
+        anchorEl={problemsAnchorEl}
+        onClose={handleCloseProblemsPopover}
+        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
+        transformOrigin={{ vertical: "top", horizontal: "left" }}
+        PaperProps={{
+          sx: {
+            mt: 0.75,
+            p: 1.25,
+            minWidth: 260,
+            maxWidth: 420,
+            bgcolor: "rgba(18,18,18,0.95)",
+            color: "#fff",
+            border: "1px solid rgba(255,255,255,0.2)",
+          },
+        }}
+      >
+        <Typography variant="subtitle2" sx={{ mb: 0.8 }}>
+          Проблемы {problemsPopoverTitle}
+        </Typography>
+        <Stack spacing={0.5}>
+          {problemsPopoverList.map((problem, idx) => (
+            <Typography key={`${problem}-${idx}`} variant="body2">
+              • {problem}
+            </Typography>
+          ))}
+        </Stack>
+      </Popover>
     </Box>
   );
 }
