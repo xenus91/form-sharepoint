@@ -18,7 +18,9 @@ import {
   Typography,
   Button,
   Popover,
+  InputAdornment,
 } from "@mui/material";
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import { Swiper, SwiperSlide } from "swiper/react";
@@ -74,7 +76,10 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
   const [monthValue, setMonthValue] = React.useState(toMonthValue(new Date().toISOString()));
   const [authorFilter, setAuthorFilter] = React.useState("all");
+  const [problemFilter, setProblemFilter] = React.useState("all");
+  const [sortOrder, setSortOrder] = React.useState("desc");
   const [authorOptions, setAuthorOptions] = React.useState([]);
+  const [problemOptions, setProblemOptions] = React.useState([]);
   const [listLoading, setListLoading] = React.useState(false);
   const [listItems, setListItems] = React.useState([]);
 
@@ -91,6 +96,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const [isFs, setIsFs] = React.useState(false);
   const detailsCacheRef = React.useRef(new Map());
   const requestSeqRef = React.useRef(0);
+  const monthInputRef = React.useRef(null);
 
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 1200px)");
@@ -195,7 +201,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
         `/web/lists/getbytitle('ProblemsPallet')/items` +
         `?$select=Id,THU,Created,Problems,Attachments,Author/Title` +
         `&$expand=Author` +
-        `&$filter=(Created ge datetime'${startIso}' and Created lt datetime'${endIso}' and Attachments eq 1)` +
+        `&$filter=(OperationDate ge datetime'${startIso}' and OperationDate lt datetime'${endIso}' and Attachments eq 1)` +
         `&$orderby=Created desc&$top=500`;
 
       const allRows = [];
@@ -225,13 +231,18 @@ export default function ManagerPreview({ userProfile, onBack }) {
       const authors = Array.from(new Set(rows.map((r) => r.Author).filter(Boolean))).sort((a, b) =>
         a.localeCompare(b, "ru-RU")
       );
+      const problems = Array.from(
+        new Set(rows.flatMap((r) => r.Problems || []).filter(Boolean))
+      ).sort((a, b) => a.localeCompare(b, "ru-RU"));
 
       setListItems(rows);
       setAuthorOptions(authors);
+      setProblemOptions(problems);
     } catch (error) {
       console.error(error);
       setListItems([]);
       setAuthorOptions([]);
+      setProblemOptions([]);
     } finally {
       setListLoading(false);
     }
@@ -243,13 +254,25 @@ export default function ManagerPreview({ userProfile, onBack }) {
   React.useEffect(() => {
     if (!allowed) return;
     setAuthorFilter("all");
+    setProblemFilter("all");
     loadMonthItems(monthValue);
   }, [allowed, monthValue, loadMonthItems]);
 
   const filteredItems = React.useMemo(() => {
-    if (authorFilter === "all") return listItems;
-    return listItems.filter((row) => row.Author === authorFilter);
-  }, [listItems, authorFilter]);
+    let result = listItems;
+    if (authorFilter !== "all") {
+      result = result.filter((row) => row.Author === authorFilter);
+    }
+    if (problemFilter !== "all") {
+      result = result.filter((row) => (row.Problems || []).includes(problemFilter));
+    }
+    const sorted = [...result].sort((a, b) => {
+      const aTs = new Date(a.Created || 0).getTime();
+      const bTs = new Date(b.Created || 0).getTime();
+      return sortOrder === "asc" ? aTs - bTs : bTs - aTs;
+    });
+    return sorted;
+  }, [listItems, authorFilter, problemFilter, sortOrder]);
 
   const toggleFullscreen = () => {
     const el = swiperRef.current;
@@ -470,20 +493,31 @@ export default function ManagerPreview({ userProfile, onBack }) {
               label="Месяц"
               InputLabelProps={{ shrink: true }}
               value={monthValue}
+              inputRef={monthInputRef}
               onChange={(e) => setMonthValue(e.target.value)}
+              onClick={() => monthInputRef.current?.showPicker?.()}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <CalendarMonthIcon
+                      sx={{ color: "rgba(255,255,255,0.9)", cursor: "pointer" }}
+                      onClick={() => monthInputRef.current?.showPicker?.()}
+                    />
+                  </InputAdornment>
+                ),
+              }}
               sx={{
                 "& .MuiOutlinedInput-root": {
                   color: "#fff",
                   backgroundColor: "rgba(255,255,255,0.08)",
                   "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
                 },
-                "& input": {
+                "& .MuiInputBase-input": {
                   colorScheme: "dark",
                 },
-                "& input::-webkit-calendar-picker-indicator": {
-                  filter: "invert(1)",
-                  opacity: 0.9,
-                  cursor: "pointer",
+                "& .MuiInputBase-input::-webkit-calendar-picker-indicator": {
+                  opacity: 0,
+                  width: 0,
                 },
                 "& .MuiInputLabel-root": { color: "rgba(255,255,255,0.8)" },
               }}
@@ -517,6 +551,46 @@ export default function ManagerPreview({ userProfile, onBack }) {
                     {author}
                   </MenuItem>
                 ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="problem-filter-label" sx={{ color: "rgba(255,255,255,0.8)" }}>Проблема</InputLabel>
+              <Select
+                labelId="problem-filter-label"
+                value={problemFilter}
+                label="Проблема"
+                onChange={(e) => setProblemFilter(e.target.value)}
+                sx={{
+                  color: "#fff",
+                  backgroundColor: "rgba(255,255,255,0.08)",
+                  "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                }}
+              >
+                <MenuItem value="all">Все проблемы</MenuItem>
+                {problemOptions.map((problem) => (
+                  <MenuItem key={problem} value={problem}>
+                    {problem}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl size="small" fullWidth>
+              <InputLabel id="sort-order-label" sx={{ color: "rgba(255,255,255,0.8)" }}>Сортировка даты</InputLabel>
+              <Select
+                labelId="sort-order-label"
+                value={sortOrder}
+                label="Сортировка даты"
+                onChange={(e) => setSortOrder(e.target.value)}
+                sx={{
+                  color: "#fff",
+                  backgroundColor: "rgba(255,255,255,0.08)",
+                  "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                }}
+              >
+                <MenuItem value="desc">Сначала новые</MenuItem>
+                <MenuItem value="asc">Сначала старые</MenuItem>
               </Select>
             </FormControl>
           </Stack>
@@ -561,11 +635,6 @@ export default function ManagerPreview({ userProfile, onBack }) {
                 {row.Problems?.length > 0 && (
                   <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ mt: 0.75 }}>
                     <Chip
-                      clickable
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleOpenProblemsPopover(event, row);
-                      }}
                       label={row.Problems[0]}
                       size="small"
                       sx={{
