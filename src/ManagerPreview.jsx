@@ -97,6 +97,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const swiperRef = React.useRef(null);
   const [isFs, setIsFs] = React.useState(false);
   const [swiperInstance, setSwiperInstance] = React.useState(null);
+  const [activeSlideIndex, setActiveSlideIndex] = React.useState(0);
   const detailsCacheRef = React.useRef(new Map());
   const requestSeqRef = React.useRef(0);
   const monthInputRef = React.useRef(null);
@@ -114,6 +115,14 @@ export default function ManagerPreview({ userProfile, onBack }) {
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
+  React.useEffect(() => {
+    if (!swiperInstance) return;
+    if (activeSlideIndex >= images.length) {
+      setActiveSlideIndex(0);
+      swiperInstance.slideTo(0, 0);
+    }
+  }, [activeSlideIndex, images.length, swiperInstance]);
+
   const loadItemById = React.useCallback(async (id) => {
     if (!id) return null;
     setActiveItemId(id);
@@ -122,6 +131,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
     if (cached) {
       setItem(cached.item);
       setImages(cached.images);
+      setActiveSlideIndex(0);
       setItemError("");
       return cached.raw;
     }
@@ -182,6 +192,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
       setItem(mappedItem);
       setImages(imgs);
+      setActiveSlideIndex(0);
       return d;
     } catch (error) {
       console.error(error);
@@ -374,6 +385,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
           <Swiper
             modules={[Pagination, Zoom]}
             onSwiper={setSwiperInstance}
+            onSlideChange={(swiper) => setActiveSlideIndex(swiper.activeIndex || 0)}
             pagination={{ clickable: true }}
             zoom={{ maxRatio: 3 }}
             slidesPerView={1}
@@ -396,42 +408,54 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
         {item && images.length > 1 && (
           <>
-            <IconButton
-              onClick={(event) => {
-                event.stopPropagation();
-                swiperInstance?.slidePrev();
-              }}
-              sx={{
-                position: "absolute",
-                left: 12,
-                top: "50%",
-                transform: "translateY(-50%)",
-                zIndex: 7,
-                bgcolor: "rgba(0,0,0,0.42)",
-                color: "#fff",
-                "&:hover": { bgcolor: "rgba(0,0,0,0.58)" },
-              }}
-            >
-              <ChevronLeftIcon />
-            </IconButton>
-            <IconButton
-              onClick={(event) => {
-                event.stopPropagation();
-                swiperInstance?.slideNext();
-              }}
-              sx={{
-                position: "absolute",
-                right: 12,
-                top: "50%",
-                transform: "translateY(-50%)",
-                zIndex: 7,
-                bgcolor: "rgba(0,0,0,0.42)",
-                color: "#fff",
-                "&:hover": { bgcolor: "rgba(0,0,0,0.58)" },
-              }}
-            >
-              <ChevronRightIcon />
-            </IconButton>
+            {activeSlideIndex > 0 && (
+              <IconButton
+                onClick={(event) => {
+                  event.stopPropagation();
+                  swiperInstance?.slidePrev();
+                }}
+                sx={{
+                  position: "absolute",
+                  left: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  zIndex: 7,
+                  bgcolor: "rgba(0,0,0,0.42)",
+                  color: "#fff",
+                  "&:hover": { bgcolor: "rgba(0,0,0,0.58)" },
+                  "&:focus, &:focus-visible": {
+                    outline: "none",
+                    boxShadow: "none",
+                  },
+                }}
+              >
+                <ChevronLeftIcon />
+              </IconButton>
+            )}
+            {activeSlideIndex < images.length - 1 && (
+              <IconButton
+                onClick={(event) => {
+                  event.stopPropagation();
+                  swiperInstance?.slideNext();
+                }}
+                sx={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  zIndex: 7,
+                  bgcolor: "rgba(0,0,0,0.42)",
+                  color: "#fff",
+                  "&:hover": { bgcolor: "rgba(0,0,0,0.58)" },
+                  "&:focus, &:focus-visible": {
+                    outline: "none",
+                    boxShadow: "none",
+                  },
+                }}
+              >
+                <ChevronRightIcon />
+              </IconButton>
+            )}
           </>
         )}
 
