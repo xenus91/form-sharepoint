@@ -617,7 +617,30 @@ export default function ManagerPreview({ userProfile, onBack }) {
           </Stack>
         </Box>
 
-        <Box sx={{ p: 1.5, flex: 1, overflowY: "auto" }}>
+        <Box
+          sx={{
+            p: 1.5,
+            flex: 1,
+            overflowY: "auto",
+            scrollbarWidth: "thin",
+            scrollbarColor: "rgba(190,190,190,0.45) rgba(25,25,25,0.55)",
+            "&::-webkit-scrollbar": {
+              width: 10,
+            },
+            "&::-webkit-scrollbar-track": {
+              background: "rgba(25,25,25,0.55)",
+              borderRadius: 10,
+            },
+            "&::-webkit-scrollbar-thumb": {
+              background: "linear-gradient(180deg, rgba(185,185,185,0.5), rgba(145,145,145,0.55))",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.12)",
+            },
+            "&::-webkit-scrollbar-thumb:hover": {
+              background: "linear-gradient(180deg, rgba(210,210,210,0.65), rgba(165,165,165,0.7))",
+            },
+          }}
+        >
           {listLoading ? (
             <Box sx={{ py: 4, display: "grid", placeItems: "center" }}>
               <CircularProgress size={24} />
