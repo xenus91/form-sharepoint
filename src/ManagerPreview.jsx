@@ -534,6 +534,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   color: "#fff",
                   backgroundColor: "rgba(255,255,255,0.08)",
                   "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                  "& .MuiSelect-icon": { color: "rgba(255,255,255,0.9)" },
                 }}
                 MenuProps={{
                   PaperProps: {
@@ -565,6 +566,16 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   color: "#fff",
                   backgroundColor: "rgba(255,255,255,0.08)",
                   "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                  "& .MuiSelect-icon": { color: "rgba(255,255,255,0.9)" },
+                }}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      bgcolor: "rgba(20,20,20,0.95)",
+                      color: "#fff",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    },
+                  },
                 }}
               >
                 <MenuItem value="all">Все проблемы</MenuItem>
@@ -587,6 +598,16 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   color: "#fff",
                   backgroundColor: "rgba(255,255,255,0.08)",
                   "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
+                  "& .MuiSelect-icon": { color: "rgba(255,255,255,0.9)" },
+                }}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      bgcolor: "rgba(20,20,20,0.95)",
+                      color: "#fff",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    },
+                  },
                 }}
               >
                 <MenuItem value="desc">Сначала новые</MenuItem>
