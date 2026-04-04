@@ -44,6 +44,7 @@ import RecipientAutocomplete from "./RecipientAutocomplete";
 import BtnGroupLocation from "./btngroupLocation";
 import CollectionsIcon from "@mui/icons-material/Collections";
 import MonthlyCounter from "./MonthlyCounter";
+import ManagerPreview from "./ManagerPreview";
 import { useNotifications } from './NotificationsProvider';
 
 SwiperCore.use([Pagination, Navigation]);
@@ -446,6 +447,13 @@ const App = () => {
     return () => stopScannerTransportation();
   }, [scannerTransportationOpen]);
 
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1200px)");
+    const handleChange = (event) => setIsDesktopViewport(event.matches);
+    media.addEventListener("change", handleChange);
+    return () => media.removeEventListener("change", handleChange);
+  }, []);
+
   const [key, setKey] = useState(0);
   const [userProfile, setUserProfile] = React.useState({
     userDepartment: "",
@@ -453,6 +461,7 @@ const App = () => {
     userDisplayName: "",
     userTitle: "",
   });
+  const [isDesktopViewport, setIsDesktopViewport] = useState(window.matchMedia("(min-width: 1200px)").matches);
   const initialDcThuCacheRef = useRef(readDcThuCache());
   const [dcThuOverride, setDcThuOverride] = useState(
     initialDcThuCacheRef.current.value
@@ -1158,11 +1167,31 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     }
   };
 
+  const canOpenManagerPreview =
+    isDesktopViewport &&
+    String(userProfile.userTitle || "").trim().toLowerCase() === "начальник смены" &&
+    String(userProfile.userDepartment || "").toLowerCase().includes("группа отгрузки");
+
+  const [managerPreviewOpen, setManagerPreviewOpen] = useState(false);
+
+  const handleOpenManagerPreview = () => {
+    setManagerPreviewOpen(true);
+  };
+
   const handleLocationChange = (value) => {
     setLocation(value);
     if (/отгружен/i.test(value)) setIsTransportationRequired(true);
     else setIsTransportationRequired(false);
   };
+
+  if (managerPreviewOpen) {
+    return (
+      <ManagerPreview
+        userProfile={userProfile}
+        onBack={() => setManagerPreviewOpen(false)}
+      />
+    );
+  }
 
   return (
     <ThemeProvider theme={figmaTheme}>
@@ -1202,6 +1231,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
+        {canOpenManagerPreview && (
+          <Box sx={{ display: "flex", justifyContent: "center", mb: 1 }}>
+            <Button variant="outlined" onClick={handleOpenManagerPreview} sx={{ borderRadius: 1 }}>
+              Меню просмотра менеджерами
+            </Button>
+          </Box>
+        )}
         <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
           <Button
             variant="outlined"
