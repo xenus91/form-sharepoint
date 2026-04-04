@@ -291,11 +291,28 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
   React.useEffect(() => {
     const handleKeyDown = (event) => {
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      if (
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowLeft" &&
+        event.key !== "ArrowRight"
+      ) return;
       const tag = String(event.target?.tagName || "").toLowerCase();
       const isEditable =
         tag === "input" || tag === "textarea" || event.target?.isContentEditable;
-      if (isEditable || filteredItems.length === 0) return;
+      if (isEditable) return;
+
+      if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && images.length > 1) {
+        event.preventDefault();
+        if (event.key === "ArrowLeft") {
+          swiperInstance?.slidePrev();
+        } else {
+          swiperInstance?.slideNext();
+        }
+        return;
+      }
+
+      if (filteredItems.length === 0) return;
 
       const currentIndex = filteredItems.findIndex((row) => row.Id === activeItemId);
       const safeIndex = currentIndex >= 0 ? currentIndex : 0;
@@ -312,7 +329,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [filteredItems, activeItemId, loadItemById]);
+  }, [filteredItems, activeItemId, loadItemById, images.length, swiperInstance]);
 
   const toggleFullscreen = () => {
     const el = swiperRef.current;
