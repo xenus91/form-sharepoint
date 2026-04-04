@@ -102,6 +102,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const detailsCacheRef = React.useRef(new Map());
   const requestSeqRef = React.useRef(0);
   const monthInputRef = React.useRef(null);
+  const listContainerRef = React.useRef(null);
+  const itemNodeMapRef = React.useRef(new Map());
 
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 1200px)");
@@ -330,6 +332,25 @@ export default function ManagerPreview({ userProfile, onBack }) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [filteredItems, activeItemId, loadItemById, images.length, swiperInstance]);
+
+  React.useEffect(() => {
+    if (!activeItemId) return;
+    const container = listContainerRef.current;
+    const itemNode = itemNodeMapRef.current.get(activeItemId);
+    if (!container || !itemNode) return;
+
+    const cRect = container.getBoundingClientRect();
+    const iRect = itemNode.getBoundingClientRect();
+    const isFullyVisible = iRect.top >= cRect.top && iRect.bottom <= cRect.bottom;
+
+    if (!isFullyVisible) {
+      itemNode.scrollIntoView({
+        block: "end",
+        inline: "nearest",
+        behavior: "smooth",
+      });
+    }
+  }, [activeItemId, filteredItems]);
 
   const toggleFullscreen = () => {
     const el = swiperRef.current;
@@ -787,6 +808,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
         </Box>
 
         <Box
+          ref={listContainerRef}
           sx={{
             p: 1.5,
             flex: 1,
@@ -822,6 +844,10 @@ export default function ManagerPreview({ userProfile, onBack }) {
             filteredItems.map((row) => (
               <Paper
                 key={row.Id}
+                ref={(node) => {
+                  if (node) itemNodeMapRef.current.set(row.Id, node);
+                  else itemNodeMapRef.current.delete(row.Id);
+                }}
                 onClick={() => loadItemById(row.Id)}
                 sx={{
                   p: 1.25,
