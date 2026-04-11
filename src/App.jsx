@@ -25,6 +25,11 @@ import {
   RadioGroup,
   FormControlLabel,
   Radio,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from "@mui/material";
 import ButtonGroup from "@mui/material/ButtonGroup";
 import { useDropzone } from "react-dropzone";
@@ -45,6 +50,9 @@ import BtnGroupLocation from "./btngroupLocation";
 import CollectionsIcon from "@mui/icons-material/Collections";
 import MonthlyCounter from "./MonthlyCounter";
 import ManagerPreview from "./ManagerPreview";
+import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
+import StopIcon from "@mui/icons-material/Stop";
+import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import { useNotifications } from './NotificationsProvider';
 
 SwiperCore.use([Pagination, Navigation]);
@@ -383,9 +391,24 @@ const App = () => {
   const [showPhotoTips, setShowPhotoTips] = useState(false);
   const camBtnRef = useRef(null);
   //const galBtnRef = useRef(null);
-  const isPhotoEmpty = (cameraPhotos.length + galleryPhotos.length) === 0;
+  const [cameraVideos, setCameraVideos] = useState([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [previewVideoUrl, setPreviewVideoUrl] = useState(null);
+  const mediaRecorderRef = useRef(null);
+  const recordedChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+
+  const isPhotoEmpty = (cameraPhotos.length + galleryPhotos.length + cameraVideos.length) === 0;
   const handleRadioChange = (e) => setSelectedRadioValue(e.target.value);
   const { notify } = useNotifications();
+
+  // Состояния для дубликатов ЕО
+  const [duplicateEoDialogOpen, setDuplicateEoDialogOpen] = useState(false);
+  const [duplicateEoItem, setDuplicateEoItem] = useState(null);
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [isFetchingItemData, setIsFetchingItemData] = useState(false);
 
   const ProblemsMenuProps = {
     PaperProps: {
@@ -655,20 +678,79 @@ const App = () => {
   };
 
   const checkEoNumberInRecentRecords = async (eoNumber) => {
+    // Если мы уже в режиме редактирования этого элемента или только что загрузили данные, не проверяем
+    if (editingItemId) return;
+
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const officeSuffix = getEffectiveDcThu();
 
+    let userId = currentUserId;
+    if (!userId) {
+      try {
+        const { data } = await apiClient.get("/web/currentuser");
+        userId = data.d.Id;
+        setCurrentUserId(userId);
+      } catch (err) {
+        console.error("Ошибка получения текущего пользователя:", err);
+      }
+    }
+
     try {
+      const userFilter = userId ? ` and AuthorId eq ${userId}` : "";
       const response = await apiClient.get(
-        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eoNumber}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}')`,
+        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eoNumber}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}'${userFilter})&$select=Id,THU,DC_THU,Created,Author/Title&$expand=Author`,
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       if (response.data.d.results.length > 0) {
-        notify('Такая ЕО уже отправлялась в течение последних 24 часов.', { severity: 'error' });
-        setEoNumber("");
+        const item = response.data.d.results[0];
+        setDuplicateEoItem(item);
+        setDuplicateEoDialogOpen(true);
       }
     } catch (error) {
       console.error("Ошибка при проверке Номер ЕО:", error);
+    }
+  };
+
+  const loadDuplicateEoData = async (itemId) => {
+    setIsFetchingItemData(true);
+    setLoading(true);
+    try {
+      // 1. Получаем данные элемента
+      const itemResp = await apiClient.get(
+        `/web/lists/getbytitle('${LIST_TITLE}')/items(${itemId})?$select=*,Recipient/Id,Recipient/Title&$expand=Recipient,AttachmentFiles`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const item = itemResp.data.d;
+
+      // 2. Мапим поля
+      setEoNumber(item.THU || "");
+      setTransportation(item.Shipment || "");
+      setSelectedRecipient(item.RecipientId || null);
+      setProblems(item.Problems?.results || []);
+      setLocation(item.Location1 || "");
+      setSelectedRadioValue(item.WhNotEO || "");
+      if (item.THU === "ЕО отсутствует") {
+        setIsEOMissing(true);
+      } else {
+        setIsEOMissing(false);
+      }
+
+      // 3. Загружаем фото
+      const attachments = item.AttachmentFiles?.results || [];
+      const photoUrls = attachments.map((att) => att.ServerRelativeUrl);
+      // Превращаем относительные URL в абсолютные для fetch/toBlob
+      const absoluteUrls = photoUrls.map(url => `${window.location.origin}${url}`);
+      setGalleryPhotos(absoluteUrls);
+
+      setEditingItemId(itemId);
+      notify("Данные загружены для редактирования", { severity: "info" });
+    } catch (err) {
+      console.error("Ошибка загрузки данных ЕО:", err);
+      notify("Не удалось загрузить данные для редактирования", { severity: "error" });
+    } finally {
+      setIsFetchingItemData(false);
+      setLoading(false);
+      setDuplicateEoDialogOpen(false);
     }
   };
 
@@ -723,6 +805,12 @@ const App = () => {
         userDisplayName,
         userTitle,
       });
+
+      // Также получим ID пользователя для фильтрации дубликатов
+      const meResp = await apiClient.get("/web/currentuser");
+      if (meResp.data?.d?.Id) {
+        setCurrentUserId(meResp.data.d.Id);
+      }
     } catch (error) {
       console.error("Ошибка при получении профиля пользователя:", error);
     }
@@ -812,6 +900,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   };
 
   const closeCameraModal = () => {
+    if (isRecording) stopRecording();
     stopCamera();
     setCameraOpen(false);
   };
@@ -825,12 +914,78 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           videoRef.current.play();
         }
       })
-      .catch((err) => console.error("Ошибка доступа к камере:", err));
+      .catch((err) => {
+        console.error("Ошибка доступа к камере:", err);
+        if (withAudio) {
+          console.warn("Попытка запуска без аудио...");
+          startCamera(false);
+        }
+      });
   };
 
   const stopCamera = () => {
-    let stream = videoRef.current?.srcObject;
-    if (stream) stream.getTracks().forEach((track) => track.stop());
+    const stream = videoRef.current?.srcObject;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+  };
+
+  const startRecording = () => {
+    const stream = videoRef.current?.srcObject;
+    if (!stream) return;
+    beginMediaRecorder(stream);
+  };
+
+  const beginMediaRecorder = (stream) => {
+    recordedChunksRef.current = [];
+    const options = { mimeType: "video/webm;codecs=vp9" };
+    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+      options.mimeType = "video/webm";
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = "video/mp4";
+      }
+    }
+
+    try {
+      const recorder = new MediaRecorder(stream, options);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType });
+        const url = URL.createObjectURL(blob);
+        const ext = (recorder.mimeType.split("/")[1] || "webm").split(";")[0];
+        setCameraVideos((prev) => [...prev, { blob, url, name: `video_${Date.now()}.${ext}` }]);
+      };
+
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => {
+          if (prev >= 60) { // Лимит 60 секунд
+            stopRecording();
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (err) {
+      console.error("Ошибка при создании MediaRecorder:", err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
   };
 
   const capturePhoto = () => {
@@ -961,7 +1116,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       formIsValid = false;
     }
     if (!problems.includes("Не найдена")) {
-      if (cameraPhotos.length === 0 && galleryPhotos.length === 0) {
+      if (cameraPhotos.length === 0 && galleryPhotos.length === 0 && cameraVideos.length === 0) {
         // вместо alert — стеклянные подсказки
         setShowPhotoTips(true);
         // авто-скрытие через 2.5 сек
@@ -985,78 +1140,145 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       return;
     }
 
-    let createdItemId = null;
+    let createdItemId = editingItemId;
 
     try {
       setSuccess(false);
       setLoading(true);
 
       const officeSuffix = getEffectiveDcThu();
-
       const digest = await getRequestDigest();
 
-      const createResp = await apiClient.post(
-        `/web/lists/getbytitle('${LIST_TITLE}')/items`,
-        {
-          __metadata: { type: "SP.Data.ProblemsPalletListItem" },
-          THU: eoNumber,
-          DC_THU: officeSuffix,
-          RecipientId: selectedRecipient,
-          Location1: location,
-          Shipment: transportation,
-          WhNotEO: selectedRadioValue,
-          OperationDate: operationDateIso,
-          Problems: {
-            __metadata: { type: "Collection(Edm.String)" },
-            results: problems,
+      if (editingItemId) {
+        // РЕЖИМ РЕДАКТИРОВАНИЯ
+        await apiClient.post(
+          `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})`,
+          {
+            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            THU: eoNumber,
+            DC_THU: officeSuffix,
+            RecipientId: selectedRecipient,
+            Location1: location,
+            Shipment: transportation,
+            WhNotEO: selectedRadioValue,
+            OperationDate: operationDateIso,
+            Problems: {
+              __metadata: { type: "Collection(Edm.String)" },
+              results: problems,
+            },
+            Status: "Выполнено", // Сразу ставим статус
           },
-        },
-        {
-          headers: {
-            Accept: "application/json;odata=verbose",
-            "Content-Type": "application/json;odata=verbose",
-            "X-RequestDigest": digest,
-          },
-        }
-      );
+          {
+            headers: {
+              Accept: "application/json;odata=verbose",
+              "Content-Type": "application/json;odata=verbose",
+              "X-RequestDigest": digest,
+              "IF-MATCH": "*",
+              "X-HTTP-Method": "MERGE",
+            },
+          }
+        );
 
-      createdItemId = createResp?.data?.d?.Id;
-      if (!createdItemId) {
-        throw new Error("SharePoint не вернул Id созданного элемента.");
+        // Перед загрузкой новых фото удаляем старые вложения
+        try {
+          const filesResp = await apiClient.get(
+            `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})/AttachmentFiles`,
+            { headers: { Accept: "application/json;odata=verbose" } }
+          );
+          const files = filesResp.data.d.results;
+          for (const file of files) {
+            await apiClient.post(
+              `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})/AttachmentFiles/getByFileName('${encodeURIComponent(file.FileName)}')`,
+              null,
+              {
+                headers: {
+                  "X-RequestDigest": digest,
+                  "X-HTTP-Method": "DELETE",
+                  "IF-MATCH": "*",
+                },
+              }
+            );
+          }
+        } catch (delErr) {
+          console.error("Ошибка при удалении старых вложений:", delErr);
+        }
+      } else {
+        // РЕЖИМ СОЗДАНИЯ
+        const createResp = await apiClient.post(
+          `/web/lists/getbytitle('${LIST_TITLE}')/items`,
+          {
+            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            THU: eoNumber,
+            DC_THU: officeSuffix,
+            RecipientId: selectedRecipient,
+            Location1: location,
+            Shipment: transportation,
+            WhNotEO: selectedRadioValue,
+            OperationDate: operationDateIso,
+            Problems: {
+              __metadata: { type: "Collection(Edm.String)" },
+              results: problems,
+            },
+          },
+          {
+            headers: {
+              Accept: "application/json;odata=verbose",
+              "Content-Type": "application/json;odata=verbose",
+              "X-RequestDigest": digest,
+            },
+          }
+        );
+        createdItemId = createResp?.data?.d?.Id;
       }
 
-      const allSources = [...cameraPhotos, ...galleryPhotos];
+      if (!createdItemId) {
+        throw new Error("SharePoint не вернул Id элемента.");
+      }
+
+      const allSources = [
+        ...cameraPhotos.map(p => ({ src: p, type: 'photo' })),
+        ...galleryPhotos.map(p => ({ src: p, type: 'photo' })),
+        ...cameraVideos.map(v => ({ src: v.blob, type: 'video', name: v.name }))
+      ];
 
       for (let i = 0; i < allSources.length; i++) {
-        const src = allSources[i];
-        const blob = await toBlob(src);
+        const item = allSources[i];
+        const blob = await toBlob(item.src);
 
         let ext = "png";
-        if (blob?.type?.includes("jpeg")) ext = "jpg";
-        if (blob?.type?.includes("png")) ext = "png";
-        if (blob?.type?.includes("heic")) ext = "heic";
-        if (blob?.type?.includes("heif")) ext = "heif";
-        if (!blob?.type) ext = "bin";
+        if (item.type === 'video') {
+          ext = item.name.split('.').pop() || 'webm';
+        } else {
+          if (blob?.type?.includes("jpeg")) ext = "jpg";
+          if (blob?.type?.includes("png")) ext = "png";
+          if (blob?.type?.includes("heic")) ext = "heic";
+          if (blob?.type?.includes("heif")) ext = "heif";
+          if (!blob?.type) ext = "bin";
+        }
 
-        const fileName = `photo_${i + 1}_${Date.now()}.${ext}`;
+        const fileName = item.type === 'video' 
+          ? `video_${i + 1}_${Date.now()}.${ext}` 
+          : `photo_${i + 1}_${Date.now()}.${ext}`;
         await uploadAttachmentRaw(LIST_TITLE, createdItemId, fileName, blob);
       }
 
-      await apiClient.post(
-        `/web/lists/getbytitle('${LIST_TITLE}')/items(${createdItemId})`,
-        {
-          __metadata: { type: "SP.Data.ProblemsPalletListItem" },
-          Status: "Выполнено",
-        },
-        {
-          headers: {
-            Accept: "application/json;odata=verbose",
-            "Content-Type": "application/json;odata=verbose",
-            "IF-MATCH": "*",
-            "X-HTTP-Method": "MERGE",
+      if (!editingItemId) {
+        await apiClient.post(
+          `/web/lists/getbytitle('${LIST_TITLE}')/items(${createdItemId})`,
+          {
+            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            Status: "Выполнено",
           },
-        }
-      );
+          {
+            headers: {
+              Accept: "application/json;odata=verbose",
+              "Content-Type": "application/json;odata=verbose",
+              "IF-MATCH": "*",
+              "X-HTTP-Method": "MERGE",
+            },
+          }
+        );
+      }
 
       setSuccess(true);
       notify('Данные отправлены', { severity: 'success', autoHideDuration: 3000 });
@@ -1069,14 +1291,17 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
       setEoNumber("");
       setIsEOMissing(false);
+      cameraVideos.forEach(v => URL.revokeObjectURL(v.url));
       setCameraPhotos([]);
       setGalleryPhotos([]);
+      setCameraVideos([]);
       setProblems([]);
       setSelectedRecipient(null);
       setLocation("");
       setTransportation("");
       setKey((prevKey) => prevKey + 1);
       setSelectedRadioValue("");
+      setEditingItemId(null);
     } catch (err) {
       console.error("Ошибка отправки данных:", err);
       try {
@@ -1690,7 +1915,35 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           />
           <canvas ref={canvasRef} style={{ display: "none" }} />
 
-          {cameraPhotos.length > 0 && (
+          {isRecording && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 20,
+                left: "50%",
+                transform: "translateX(-50%)",
+                bgcolor: "rgba(0,0,0,0.5)",
+                color: "white",
+                px: 2,
+                py: 0.5,
+                borderRadius: 4,
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                zIndex: 10,
+              }}
+            >
+              <FiberManualRecordIcon sx={{ color: "red", fontSize: 16, animation: "blink 1s infinite" }} />
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                {new Date(recordingSeconds * 1000).toISOString().substr(14, 5)}
+              </Typography>
+              <style>
+                {`@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }`}
+              </style>
+            </Box>
+          )}
+
+          {(cameraPhotos.length > 0 || cameraVideos.length > 0) && (
             <Box
               sx={{
                 width: "100%",
@@ -1706,11 +1959,11 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                 pagination={{ clickable: true, el: ".swiper-pagination" }}
                 style={{ height: "100%" }}
               >
-                {cameraPhotos.map((cameraPhoto, index) => (
-                  <SwiperSlide key={index}>
+                {cameraPhotos.map((photo, index) => (
+                  <SwiperSlide key={`photo-${index}`}>
                     <Box sx={{ position: "relative", width: "100%", height: "100%" }}>
                       <img
-                        src={cameraPhoto}
+                        src={photo}
                         alt={`Фото ${index + 1}`}
                         style={{ width: "100%", height: "100%", objectFit: "cover" }}
                       />
@@ -1718,7 +1971,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                         variant="caption"
                         sx={{
                           position: "absolute",
-                          top: 4,
+                          bottom: 4,
                           left: 4,
                           color: "white",
                           bgcolor: "rgba(0, 0, 0, 0.6)",
@@ -1728,18 +1981,66 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                         Фото {index + 1}
                       </Typography>
                       <IconButton
-                        onClick={() =>
-                          setCameraPhotos(cameraPhotos.filter((_, i) => i !== index))
-                        }
+                        onClick={() => setCameraPhotos(cameraPhotos.filter((_, i) => i !== index))}
                         sx={{
                           position: "absolute",
                           top: 2,
                           right: 2,
-                          bgcolor: "red",
+                          bgcolor: "rgba(255,0,0,0.7)",
                           color: "white",
+                          p: 0.5,
+                          "&:hover": { bgcolor: "red" }
                         }}
                       >
-                        <CloseIcon />
+                        <CloseIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                  </SwiperSlide>
+                ))}
+                {cameraVideos.map((video, index) => (
+                  <SwiperSlide key={`video-${index}`}>
+                    <Box 
+                      onClick={() => setPreviewVideoUrl(video.url)}
+                      sx={{ position: "relative", width: "100%", height: "100%", bgcolor: "#000", cursor: 'pointer' }}
+                    >
+                      <Box sx={{ 
+                        width: '100%', 
+                        height: '100%', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center' 
+                      }}>
+                        <PlayCircleOutlineIcon sx={{ color: "white", fontSize: 48 }} />
+                      </Box>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          position: "absolute",
+                          bottom: 4,
+                          left: 4,
+                          color: "white",
+                          bgcolor: "rgba(0, 0, 0, 0.6)",
+                          px: 0.5,
+                        }}
+                      >
+                        Видео {index + 1}
+                      </Typography>
+                      <IconButton
+                        onClick={() => {
+                          URL.revokeObjectURL(video.url);
+                          setCameraVideos(cameraVideos.filter((_, i) => i !== index));
+                        }}
+                        sx={{
+                          position: "absolute",
+                          top: 2,
+                          right: 2,
+                          bgcolor: "rgba(255,0,0,0.7)",
+                          color: "white",
+                          p: 0.5,
+                          "&:hover": { bgcolor: "red" }
+                        }}
+                      >
+                        <CloseIcon fontSize="small" />
                       </IconButton>
                     </Box>
                   </SwiperSlide>
@@ -1778,12 +2079,14 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             >
               <IconButton
                 onClick={handleCameraSwitch}
+                disabled={isRecording}
                 sx={{
                   height: 52,
                   width: 52,
                   color: "white",
                   bgcolor: "rgba(23,28,143,0.6)",
                   "&:hover": { bgcolor: "rgba(23,28,143,0.75)" },
+                  "&.Mui-disabled": { bgcolor: "rgba(23,28,143,0.2)", color: "rgba(255,255,255,0.3)" }
                 }}
               >
                 <LoopIcon />
@@ -1791,6 +2094,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
               <Button
                 onClick={capturePhoto}
+                disabled={isRecording}
                 sx={{
                   minHeight: 52,
                   height: 52,
@@ -1803,24 +2107,46 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                   bgcolor: "rgba(23,28,143,0.8)",
                   borderRadius: 14,
                   "&:hover": { bgcolor: "rgba(23,28,143,0.95)" },
+                  "&.Mui-disabled": { bgcolor: "rgba(23,28,143,0.3)", color: "rgba(255,255,255,0.5)" }
                 }}
               >
                 <CameraIcon sx={{ fontSize: 28 }} />
               </Button>
 
+              <Button
+                onClick={isRecording ? stopRecording : startRecording}
+                sx={{
+                  minHeight: 52,
+                  height: 52,
+                  flex: 1,
+                  px: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "white",
+                  bgcolor: isRecording ? "rgba(229,57,53,0.85)" : "rgba(23,28,143,0.8)",
+                  borderRadius: 14,
+                  "&:hover": { bgcolor: isRecording ? "rgba(229,57,53,1)" : "rgba(23,28,143,0.95)" },
+                }}
+              >
+                {isRecording ? <StopIcon sx={{ fontSize: 32 }} /> : <FiberManualRecordIcon sx={{ fontSize: 32 }} />}
+              </Button>
+
               <Box>
                 <IconButton
                   onClick={handleApplyPhotos}
+                  disabled={isRecording}
                   sx={{
                     bgcolor: "rgba(23,28,143,0.8)",
                     color: "white",
                     height: 52,
                     width: 52,
                     "&:hover": { bgcolor: "rgba(23,28,143,0.95)" },
+                    "&.Mui-disabled": { bgcolor: "rgba(23,28,143,0.3)", color: "rgba(255,255,255,0.5)" }
                   }}
                 >
                   <SendIcon sx={{ fontSize: 28 }} />
-                  {cameraPhotos.length > 0 && (
+                  {(cameraPhotos.length + cameraVideos.length) > 0 && (
                     <Box
                       sx={{
                         position: "absolute",
@@ -1836,7 +2162,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                       }}
                     >
                       <Typography variant="caption" sx={{ color: "white", fontSize: 12 }}>
-                        {cameraPhotos.length}
+                        {cameraPhotos.length + cameraVideos.length}
                       </Typography>
                     </Box>
                   )}
@@ -1975,6 +2301,93 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </Box>
         </Box>
       </Modal>
+        <Dialog
+          open={duplicateEoDialogOpen}
+          onClose={() => {
+            setDuplicateEoDialogOpen(false);
+            setEoNumber("");
+          }}
+          PaperProps={{
+            sx: { borderRadius: 3, p: 1 }
+          }}
+        >
+          <DialogTitle sx={{ fontWeight: 800 }}>Дубликат ЕО</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              Вы уже отправляли заявку с этим номером ЕО ({duplicateEoItem?.THU}) за последние 24 часа. Хотите изменить её?
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions sx={{ pb: 2, px: 3 }}>
+            <Button 
+              onClick={() => {
+                setDuplicateEoDialogOpen(false);
+                setEoNumber("");
+              }}
+              color="inherit"
+              sx={{ fontWeight: 700 }}
+            >
+              Нет
+            </Button>
+            <Button
+              onClick={() => loadDuplicateEoData(duplicateEoItem?.Id)}
+              variant="contained"
+              autoFocus
+              sx={{ 
+                borderRadius: 2,
+                fontWeight: 700,
+                backgroundImage: "linear-gradient(180deg, #171c8f 0%, #10146a 100%)",
+              }}
+            >
+              Да, изменить
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Просмотр видео */}
+        <Dialog
+          open={!!previewVideoUrl}
+          onClose={() => setPreviewVideoUrl(null)}
+          maxWidth="md"
+          fullWidth
+          PaperProps={{
+            sx: { bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }
+          }}
+        >
+          <Box sx={{ position: 'relative', width: '100%', pt: '56.25%', bgcolor: '#000' }}>
+            {previewVideoUrl && (
+              <video
+                src={previewVideoUrl}
+                controls
+                autoPlay
+                playsInline
+                controlsList="nodownload"
+                className="swiper-no-swiping"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  pointerEvents: 'auto'
+                }}
+              />
+            )}
+            <IconButton
+              onClick={() => setPreviewVideoUrl(null)}
+              sx={{
+                position: 'absolute',
+                top: 8,
+                right: 8,
+                color: 'white',
+                bgcolor: 'rgba(0,0,0,0.5)',
+                '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' }
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </Dialog>
     </ThemeProvider>
   );
 };
