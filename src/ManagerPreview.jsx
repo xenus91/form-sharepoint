@@ -1,6 +1,7 @@
 import React from "react";
 import apiClient, { normalizeNextUrl } from "./api";
 import { API_BASE_URL } from "../config";
+// Cache bust: 2026-04-12 01:56
 import {
   Box,
   Chip,
@@ -168,8 +169,16 @@ function pickServerRelUrl(file) {
 }
 
 function fileValueUrl(serverRelativeUrl = "") {
-  const enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/gi, "/");
-  return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${enc}')/$value`;
+  if (!serverRelativeUrl) return "";
+  
+  // SharePoint API требует, чтобы путь ВСЕГДА начинался со слэша.
+  const relPath = serverRelativeUrl.startsWith("/") ? serverRelativeUrl : "/" + serverRelativeUrl;
+  
+  // Экранируем путь для API, сохраняя слэши как разделители структуры
+  const encPath = encodeURIComponent(relPath).replace(/%2F/gi, "/");
+  
+  // Возвращаемся к использованию официального эндпоинта $value
+  return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${encPath}')/$value`;
 }
 
 const VideoPreviewDialog = ({ url, onClose }) => {
@@ -191,6 +200,7 @@ const VideoPreviewDialog = ({ url, onClose }) => {
           autoPlay
           playsInline
           webkit-playsinline="true"
+          crossOrigin="use-credentials" 
           controlsList="nodownload"
           style={{
             position: "absolute",
@@ -200,7 +210,9 @@ const VideoPreviewDialog = ({ url, onClose }) => {
             height: "100%",
             objectFit: "contain",
           }}
-        />
+        >
+          <source src={url} type="video/webm" />
+        </video>
         <IconButton
           onClick={onClose}
           sx={{

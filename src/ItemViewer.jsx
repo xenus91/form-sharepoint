@@ -2,6 +2,7 @@
 import React from "react";
 import apiClient from "./api";
 import { API_BASE_URL } from "../config";
+// Cache bust: 2026-04-12 01:58
 import {
     Box, Chip, CircularProgress, Grid, Paper, Stack, Typography,
     IconButton, Tooltip, Divider, Button,
@@ -39,8 +40,16 @@ function pickServerRelUrl(file) {
     return file?.ServerRelativeUrl || file?.ServerRelativePath?.DecodedUrl || "";
 }
 function fileValueUrl(serverRelativeUrl = "") {
-    const enc = encodeURIComponent(serverRelativeUrl).replace(/%2F/gi, "/");
-    return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${enc}')/$value`;
+    if (!serverRelativeUrl) return "";
+    
+    // SharePoint требует, чтобы пути начинались со слэша.
+    const relPath = serverRelativeUrl.startsWith("/") ? serverRelativeUrl : "/" + serverRelativeUrl;
+    
+    // Экранируем спецсимволы, оставляя слэши для структуры
+    const encPath = encodeURIComponent(relPath).replace(/%2F/gi, "/");
+    
+    // Возвращаемся к использованию API эндпоинта $value
+    return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${encPath}')/$value`;
 }
 
 const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
@@ -79,12 +88,16 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
                 src={src}
                 controls
                 playsInline
+                webkit-playsinline="true"
+                crossOrigin="use-credentials"
                 controlsList="nodownload"
                 className="swiper-no-swiping"
                 onPlay={() => setPlaying(true)}
                 onPause={() => setPlaying(false)}
                 style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "auto" }}
-            />
+            >
+                <source src={src} type="video/webm" />
+            </video>
             <Box
                 onClick={togglePlay}
                 sx={{
