@@ -21,6 +21,11 @@ import {
   InputAdornment,
   Grid,
   Skeleton,
+  Drawer,
+  AppBar,
+  Toolbar,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
@@ -28,6 +33,11 @@ import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import PauseIcon from "@mui/icons-material/Pause";
+import MenuIcon from "@mui/icons-material/Menu";
+import FilterListIcon from "@mui/icons-material/FilterList";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import SortIcon from "@mui/icons-material/Sort";
+import SwapVertIcon from "@mui/icons-material/SwapVert";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Navigation, Pagination, Zoom, FreeMode, Thumbs } from "swiper/modules";
 import "swiper/css";
@@ -40,6 +50,12 @@ const log = (...a) => DEBUG && console.log("[ManagerPreview]", ...a);
 
 const FONT = { xs: 18, sm: 20, md: 22, lg: 24 };
 const LINE = 1.2;
+const EMPTY_ARRAY = [];
+const PB_COLL = 14;
+const PB_EXP = 120;
+const BODY_GAP_EXP = 12;
+const FONT_SMALL = "0.76rem";
+const LINE_SMALL = "1.05";
 
 const FieldCompact = ({ label, value, mono, maxCh, minCh, forceFull = false }) => {
     const valueSx = forceFull
@@ -156,6 +172,7 @@ function fileValueUrl(serverRelativeUrl = "") {
 const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
   const [playing, setPlaying] = React.useState(false);
   const [showIcon, setShowIcon] = React.useState(false);
+  const [isMuted, setIsMuted] = React.useState(true);
   const videoRef = React.useRef(null);
   const timerRef = React.useRef(null);
 
@@ -163,7 +180,16 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
     e.stopPropagation();
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      videoRef.current.play();
+      // Пытаемся включить звук при осознанном клике
+      videoRef.current.muted = false;
+      setIsMuted(false);
+      videoRef.current.play().catch(err => {
+        console.warn("Play blocked", err);
+        // Если заблокировано, пробуем играть без звука
+        videoRef.current.muted = true;
+        setIsMuted(true);
+        videoRef.current.play();
+      });
       setPlaying(true);
     } else {
       videoRef.current.pause();
@@ -177,7 +203,7 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
   return (
     <Box sx={{ 
       width: "100%", 
-      height: `calc(100% - ${collapsedH}px)`, 
+      height: collapsedH === 0 ? "100%" : `calc(100% - ${collapsedH}px)`, 
       position: "relative",
       display: "flex",
       alignItems: "center",
@@ -189,12 +215,15 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
         src={src}
         controls
         playsInline
+        muted={isMuted}
         controlsList="nodownload"
         className="swiper-no-swiping"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "auto" }}
       />
+      
+      {/* Central Overlay for Interaction */}
       <Box
         onClick={togglePlay}
         sx={{
@@ -205,22 +234,21 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
           justifyContent: "center",
           cursor: "pointer",
           zIndex: 2,
-          // Оставляем место для нижних нативных контролов, чтобы по ним можно было кликать
-          bottom: "60px" 
+          bottom: "60px" // Leave space for native controls
         }}
       >
-        {(showIcon || !playing) && (
-           <Box sx={{
-             bgcolor: "rgba(0,0,0,0.4)",
-             borderRadius: "50%",
-             p: 2,
-             backdropFilter: "blur(4px)",
-             border: "1px solid rgba(255,255,255,0.2)",
-             transition: "opacity 0.3s ease",
-             opacity: showIcon || !playing ? 1 : 0
-           }}>
-             {playing ? <PauseIcon sx={{ color: "#fff", fontSize: 64 }} /> : <PlayArrowIcon sx={{ color: "#fff", fontSize: 64 }} />}
-           </Box>
+        {(!playing || showIcon) && (
+          <Box sx={{
+            bgcolor: "rgba(0,0,0,0.45)",
+            borderRadius: "50%",
+            p: 2.5,
+            backdropFilter: "blur(6px)",
+            border: "1px solid rgba(255,255,255,0.25)",
+            transition: "opacity 0.25s ease-out",
+            opacity: (!playing || showIcon) ? 1 : 0,
+          }}>
+            {playing ? <PauseIcon sx={{ color: "#fff", fontSize: 64 }} /> : <PlayArrowIcon sx={{ color: "#fff", fontSize: 64 }} />}
+          </Box>
         )}
       </Box>
     </Box>
@@ -310,6 +338,10 @@ const ManagerListItem = React.memo(({ row, isActive, loadItemById, handleOpenPro
 });
 
 export default function ManagerPreview({ userProfile, onBack }) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+
   const [isDesktop, setIsDesktop] = React.useState(window.matchMedia("(min-width: 1200px)").matches);
 
   const [periodType, setPeriodType] = React.useState("month");
@@ -322,12 +354,14 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const [listLoading, setListLoading] = React.useState(false);
   const [listItems, setListItems] = React.useState([]);
   const listItemsRef = React.useRef([]);
+  const [isSwiping, setIsSwiping] = React.useState(false);
 
   const [itemLoading, setItemLoading] = React.useState(false);
   const [itemError, setItemError] = React.useState("");
   const [activeItemId, setActiveItemId] = React.useState(null);
-  const [item, setItem] = React.useState(null);
-  const [images, setImages] = React.useState([]);
+  const [item, setItem] = React.useState(null); 
+  const [images, setImages] = React.useState([]); 
+  const [mediaMap, setMediaMap] = React.useState({}); 
   const [problemsAnchorEl, setProblemsAnchorEl] = React.useState(null);
   const [problemsPopoverList, setProblemsPopoverList] = React.useState([]);
   const [problemsPopoverTitle, setProblemsPopoverTitle] = React.useState("");
@@ -434,6 +468,72 @@ export default function ManagerPreview({ userProfile, onBack }) {
       setExpanded((v) => !v);
   }, [applyHeights]);
 
+  const filteredItems = React.useMemo(() => {
+    let result = listItems;
+    if (authorFilter !== "all") {
+      result = result.filter((row) => row.Author === authorFilter);
+    }
+    if (problemFilter !== "all") {
+      result = result.filter((row) => (row.Problems || []).includes(problemFilter));
+    }
+    const sorted = [...result].sort((a, b) => {
+      const aTs = new Date(a.Created || 0).getTime();
+      const bTs = new Date(b.Created || 0).getTime();
+      return sortOrder === "asc" ? aTs - bTs : bTs - aTs;
+    });
+    return sorted;
+  }, [listItems, authorFilter, problemFilter, sortOrder]);
+
+  const prefetchItems = React.useCallback(async (currentId) => {
+    const idx = filteredItems.findIndex(x => x.Id === currentId);
+    if (idx === -1) return;
+
+    const neighbors = [];
+    if (idx > 0) neighbors.push(filteredItems[idx - 1]);
+    if (idx < filteredItems.length - 1) neighbors.push(filteredItems[idx + 1]);
+
+    const neighborsToFetch = neighbors.filter(n => {
+      const nid = n.Id;
+      return !(detailsCacheRef.current.has(nid) && mediaMap[nid]);
+    });
+
+    if (neighborsToFetch.length === 0) return;
+
+    try {
+      await Promise.all(neighborsToFetch.map(async (neighbor) => {
+        const nid = neighbor.Id;
+        try {
+          const resp = await apiClient.get(
+            `/web/lists/getbytitle('ProblemsPallet')/items(${nid})/AttachmentFiles`,
+            { headers: { Accept: "application/json;odata=verbose" } }
+          );
+          if (activeItemId !== currentId) return; // Прерываем, если пользователь уже переключился
+
+          const results = resp?.data?.d?.results ?? [];
+          const imgs = results.map(f => {
+            const name = f?.FileName || f.Name || "unnamed";
+            const rel = pickServerRelUrl(f);
+            const low = name.toLowerCase();
+            const isVid = /\.(mp4|webm|ogg|mov|m4v)(;|$)/i.test(low);
+            return {
+              name,
+              src: rel ? fileValueUrl(rel) : "",
+              type: isVid ? "video" : "image"
+            };
+          }).filter(x => x.src);
+
+          const oldCache = detailsCacheRef.current.get(nid) || {};
+          detailsCacheRef.current.set(nid, { ...oldCache, images: imgs });
+          setMediaMap(prev => (prev[nid] ? prev : { ...prev, [nid]: imgs }));
+        } catch (e) {
+          console.warn("Soft prefetch error for", nid, e);
+        }
+      }));
+    } catch (err) {
+      // Ignored for prefetch
+    }
+  }, [filteredItems, mediaMap, activeItemId]);
+
   const loadItemById = React.useCallback(async (id) => {
     if (!id) return null;
     setActiveItemId(id);
@@ -528,6 +628,11 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
       setItem(mappedItem);
       setImages(imgs);
+      setMediaMap(prev => ({ ...prev, [id]: imgs }));
+
+      // Фоновая подгрузка соседей
+      prefetchItems(id);
+      
       return d;
     } catch (error) {
       console.error(error);
@@ -615,22 +720,6 @@ export default function ManagerPreview({ userProfile, onBack }) {
     loadMonthItems(periodType, periodValue);
   }, [allowed, periodType, periodValue, loadMonthItems]);
 
-  const filteredItems = React.useMemo(() => {
-    let result = listItems;
-    if (authorFilter !== "all") {
-      result = result.filter((row) => row.Author === authorFilter);
-    }
-    if (problemFilter !== "all") {
-      result = result.filter((row) => (row.Problems || []).includes(problemFilter));
-    }
-    const sorted = [...result].sort((a, b) => {
-      const aTs = new Date(a.Created || 0).getTime();
-      const bTs = new Date(b.Created || 0).getTime();
-      return sortOrder === "asc" ? aTs - bTs : bTs - aTs;
-    });
-    return sorted;
-  }, [listItems, authorFilter, problemFilter, sortOrder]);
-
   React.useEffect(() => {
     if (activeItemId) {
       const el = document.getElementById(`manager-item-${activeItemId}`);
@@ -696,20 +785,152 @@ export default function ManagerPreview({ userProfile, onBack }) {
   };
 
 
-  if (!isDesktop) {
-    return (
-      <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
-        <Paper sx={{ p: 3, maxWidth: 560 }}>
-          <Typography variant="h6" gutterBottom>
-            Меню просмотра менеджерами доступно только в desktop-версии.
-          </Typography>
-          <Typography color="text.secondary">
-            Откройте этот режим на экране шириной от 1200px.
-          </Typography>
-        </Paper>
-      </Box>
-    );
-  }
+  // МОБИЛЬНЫЙ ХЕДЕР
+  const MobileHeader = (
+    <AppBar position="static" sx={{ bgcolor: "rgba(10,10,10,0.85)", backdropFilter: "blur(10px)", touchAction: "none", zIndex: 10 }}>
+      <Toolbar sx={{ justifyContent: "space-between" }}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <IconButton onClick={onBack} sx={{ color: "#fff" }}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h6" sx={{ fontSize: 18, fontWeight: 700 }}>Менеджер</Typography>
+        </Stack>
+        <IconButton onClick={() => setDrawerOpen(true)} sx={{ color: "#fff" }}>
+          <MenuIcon />
+        </IconButton>
+      </Toolbar>
+    </AppBar>
+  );
+
+  // МОБИЛЬНОЕ МЕНЮ (DRAWER)
+  const FilterDrawer = (
+    <Drawer
+      anchor="right"
+      open={drawerOpen}
+      onClose={() => setDrawerOpen(false)}
+      PaperProps={{
+        sx: {
+          width: 280,
+          bgcolor: "rgba(15,15,15,0.98)",
+          color: "#fff",
+          backdropFilter: "blur(12px)",
+          borderLeft: "1px solid rgba(255,255,255,0.1)",
+          p: 2
+        }
+      }}
+    >
+      <Typography variant="h6" sx={{ mb: 2, display: "flex", alignItems: "center", gap: 1 }}>
+        <FilterListIcon /> Фильтры
+      </Typography>
+      
+      <Stack spacing={3}>
+        <FormControl fullWidth size="small">
+          <InputLabel sx={{ color: "rgba(255,255,255,0.7)" }}>Период</InputLabel>
+          <Select
+            value={periodType}
+            label="Период"
+            onChange={(e) => {
+              const newType = e.target.value;
+              setPeriodType(newType);
+              setPeriodValue(getDefaultValue(newType));
+            }}
+            sx={{
+              color: "#fff",
+              bgcolor: "rgba(255,255,255,0.05)",
+              "& fieldset": { borderColor: "rgba(255,255,255,0.3)" }
+            }}
+          >
+            <MenuItem value="day">День</MenuItem>
+            <MenuItem value="week">Неделя</MenuItem>
+            <MenuItem value="month">Месяц</MenuItem>
+          </Select>
+        </FormControl>
+
+        <TextField
+          fullWidth
+          size="small"
+          type={periodType === "day" ? "date" : periodType}
+          label={periodType === "day" ? "Дата" : periodType === "week" ? "Неделя" : "Месяц"}
+          InputLabelProps={{ shrink: true }}
+          value={periodValue}
+          onChange={(e) => setPeriodValue(e.target.value)}
+          sx={{
+            "& .MuiOutlinedInput-root": {
+              color: "#fff",
+              bgcolor: "rgba(255,255,255,0.05)",
+              "& fieldset": { borderColor: "rgba(255,255,255,0.3)" }
+            },
+            "& .MuiInputLabel-root": { color: "rgba(255,255,255,0.7)" },
+            "& .MuiInputBase-input": { colorScheme: "dark" }
+          }}
+        />
+
+        <FormControl fullWidth size="small">
+          <InputLabel sx={{ color: "rgba(255,255,255,0.7)" }}>Автор</InputLabel>
+          <Select
+            value={authorFilter}
+            label="Автор"
+            onChange={(e) => setAuthorFilter(e.target.value)}
+            sx={{
+              color: "#fff",
+              bgcolor: "rgba(255,255,255,0.05)",
+              "& fieldset": { borderColor: "rgba(255,255,255,0.3)" }
+            }}
+          >
+            <MenuItem value="all">Все авторы</MenuItem>
+            {authorOptions.map((a) => (
+              <MenuItem key={a} value={a}>{a}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl fullWidth size="small">
+          <InputLabel sx={{ color: "rgba(255,255,255,0.7)" }}>Проблема</InputLabel>
+          <Select
+            value={problemFilter}
+            label="Проблема"
+            onChange={(e) => setProblemFilter(e.target.value)}
+            sx={{
+              color: "#fff",
+              bgcolor: "rgba(255,255,255,0.05)",
+              "& fieldset": { borderColor: "rgba(255,255,255,0.3)" }
+            }}
+          >
+            <MenuItem value="all">Любая</MenuItem>
+            {problemOptions.map((p) => (
+              <MenuItem key={p} value={p}>{p}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl fullWidth size="small">
+          <InputLabel sx={{ color: "rgba(255,255,255,0.7)" }}>Сортировка</InputLabel>
+          <Select
+            value={sortOrder}
+            label="Сортировка"
+            onChange={(e) => setSortOrder(e.target.value)}
+            sx={{
+              color: "#fff",
+              bgcolor: "rgba(255,255,255,0.05)",
+              "& fieldset": { borderColor: "rgba(255,255,255,0.3)" }
+            }}
+          >
+            <MenuItem value="desc">Сначала новые</MenuItem>
+            <MenuItem value="asc">Сначала старые</MenuItem>
+          </Select>
+        </FormControl>
+
+        <Button 
+          fullWidth 
+          variant="contained" 
+          onClick={() => setDrawerOpen(false)}
+          sx={{ mt: 2, bgcolor: "rgba(120,150,255,0.8)", "&:hover": { bgcolor: "rgba(120,150,255,1)" } }}
+        >
+          Применить
+        </Button>
+      </Stack>
+    </Drawer>
+  );
 
   if (!allowed) {
     return (
@@ -726,461 +947,203 @@ export default function ManagerPreview({ userProfile, onBack }) {
     );
   }
 
-  return (
-    <Box sx={{ position: "fixed", inset: 0, display: "flex", bgcolor: "#000" }}>
-      {/* ЛЕВАЯ ЧАСТЬ: ГАЛЕРЕЯ + ИНФО (ВЕРТИКАЛЬНЫЙ СТЕК) */}
-      <Box sx={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, bgcolor: "black", overflow: "hidden" }}>
-        
-        {/* ВЕРХНЯЯ ЧАСТЬ: ГАЛЕРЕЯ */}
-        <Box ref={swiperRef} sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 0 }}>
-          <Box sx={{ position: "absolute", top: 12, left: 12, zIndex: 6, display: "flex", gap: 1 }}>
-            <Button
-              variant="outlined"
-              onClick={onBack}
-              sx={{
-                color: "#fff",
-                borderColor: "rgba(255,255,255,0.45)",
-                bgcolor: "rgba(10,10,10,0.32)",
-                backdropFilter: "blur(16px) saturate(140%)",
-                WebkitBackdropFilter: "blur(16px) saturate(140%)",
-                "&:hover": {
-                  borderColor: "rgba(255,255,255,0.7)",
-                  bgcolor: "rgba(10,10,10,0.45)",
-                },
-              }}
-            >
-              Назад в форму
-            </Button>
+  // --- ВСПОМОГАТЕЛЬНЫЕ РЕНДЕРЫ ---
+
+  const renderMediaArea = (targetId) => {
+    const isSlideActive = targetId === activeItemId;
+    const slideItem = item?.Id === targetId ? (item || EMPTY_ARRAY) : (filteredItems.find(x => x.Id === targetId) || EMPTY_ARRAY);
+    const slideImages = mediaMap[targetId] || (item?.Id === targetId ? images : EMPTY_ARRAY);
+    const isSlideLoading = !!(itemLoading && item?.Id === targetId && slideImages.length === 0);
+
+    return (
+      <MediaContent 
+        targetId={targetId}
+        isSlideActive={isSlideActive}
+        itemData={slideItem}
+        slideImages={slideImages}
+        isSlideLoading={isSlideLoading}
+        itemError={item?.Id === targetId ? itemError : ""}
+        isMobile={isMobile}
+        isFs={isSlideActive ? isFs : false}
+        toggleFullscreen={isSlideActive ? toggleFullscreen : null}
+        mainSwiperRef={mainSwiperRef}
+        thumbsSwiper={isSlideActive ? thumbsSwiper : null}
+        setThumbsSwiper={isSlideActive ? setThumbsSwiper : null}
+        isSwiping={isSlideActive ? isSwiping : false}
+      />
+    );
+  };
+
+  const renderInfoPanel = () => {
+    if (!item) return null;
+    return (
+      <Box sx={{ position: "relative", width: "100%", display: "flex", justifyContent: "center", zIndex: 10, touchAction: "none" }}>
+        <Box
+          role="button"
+          aria-expanded={expanded}
+          onClick={handleToggle}
+          sx={{
+            width: isMobile ? "100%" : { xs: "100%", md: "90%" },
+            height: expanded ? `${expandedH}px` : `${collapsedH}px`,
+            bgcolor: "rgba(10, 10, 10, 0.3)",
+            border: "1px solid rgba(255,255,255,0.4)",
+            borderBottom: "none",
+            borderRadius: isMobile ? "0" : "28px 28px 0 0",
+            backdropFilter: isSwiping ? "none" : "blur(20px) saturate(150%)",
+            transition: "height 280ms ease, backdrop-filter 0.2s ease",
+            overflow: "hidden",
+            cursor: "pointer",
+            boxSizing: "border-box",
+          }}
+        >
+          <Box ref={handleRef} sx={{ display: "flex", justifyContent: "center", pt: 1, pb: 1.25 }}>
+            <Box sx={{ width: 52, height: 6, borderRadius: 8, bgcolor: "rgba(255,255,255,0.85)" }} />
           </Box>
 
-          {!item ? (
-            <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}>
-              <Typography sx={{ color: "white", opacity: 0.8 }}>
-                Выберите элемент справа, чтобы открыть фотографии.
-              </Typography>
-            </Box>
-          ) : itemError ? (
-            <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", p: 2, zIndex: 3 }}>
-              <Paper sx={{ p: 2 }}>
-                <Typography color="error">{itemError}</Typography>
-              </Paper>
+          <InfoPanelContent 
+            item={item} 
+            expanded={expanded} 
+            contentRef={contentRef}
+            headerRef={headerRef}
+            bodyRef={bodyRef}
+            prettyDate={prettyDate}
+          />
+        </Box>
+      </Box>
+    );
+  };
+
+  // --- ОСНОВНОЙ РЕНДЕР ---
+
+  if (isMobile) {
+    return (
+      <Box sx={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column", bgcolor: "#000", overflow: "hidden" }}>
+        {MobileHeader}
+        {FilterDrawer}
+
+        <Box sx={{ flex: 1, position: "relative", minHeight: 0 }}>
+          {filteredItems.length === 0 ? (
+            <Box sx={{ height: "100%", display: "grid", placeItems: "center", color: "#fff" }}>
+              <Typography sx={{ opacity: 0.6 }}>Элементы не найдены</Typography>
             </Box>
           ) : (
             <>
-              {itemLoading ? (
-                <Box sx={{ position: "absolute", inset: 0, zIndex: 10, display: "flex", justifyContent: "center", alignItems: "center", bgcolor: "transparent" }}>
-                  <CircularProgress />
-                </Box>
-              ) : images.length === 0 ? (
-                <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}>
-                  <Typography sx={{ color: "white", opacity: 0.7, fontSize: FONT, lineHeight: LINE }}>
-                    Вложения не найдены
-                  </Typography>
-                </Box>
-              ) : (
-                  <Swiper
-                      onSwiper={(s) => { mainSwiperRef.current = s; }}
-                      modules={[Navigation, Pagination, Zoom, Thumbs]}
-                      navigation
-                      pagination={{ clickable: true }}
-                      zoom={{ maxRatio: 3 }}
-                      spaceBetween={12}
-                      slidesPerView={1}
-                      style={{ width: "100%", height: "100%" }}
-                      thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : null }}
-                  >
-                      {images.map((f, i) => (
-                          <SwiperSlide key={i}>
-                              <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
-                                  {f.type === "video" ? (
-                                      <VideoPlayerCustom src={f.src} name={f.name} collapsedH={0} />
-                                  ) : (
-                                      <img alt={f.name || `Фото ${i + 1}`} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                                  )}
-                              </div>
-                          </SwiperSlide>
-                      ))}
-                  </Swiper>
-              )}
-
-              {/* Пояс миниатюр (thumbs) — СВЕРХУ, по центру */}
-              {images.length > 1 && (
-                  <Box
-                      sx={{
-                        position: "absolute",
-                        left: 0,
-                        right: 0,
-                        top: 12,
-                        zIndex: 5,
-                        display: "flex",
-                        justifyContent: "center",
-                        pointerEvents: "none",
-                      }}
-                  >
-                      <Box
-                          sx={{
-                              pointerEvents: "auto",
-                              bgcolor: "rgba(0,0,0,0.35)",
-                              border: "1px solid rgba(255,255,255,0.35)",
-                              backdropFilter: "blur(8px) saturate(140%)",
-                              WebkitBackdropFilter: "blur(8px) saturate(140%)",
-                              borderRadius: "12px",
-                              px: 1,
-                              py: 0.5,
-                              maxWidth: "min(90vw, 680px)",
-                          }}
-                      >
-                          <Swiper
-                              className="thumbs-swiper"
-                              onSwiper={setThumbsSwiper}
-                              modules={[FreeMode, Thumbs]}
-                              watchSlidesProgress
-                              freeMode
-                              slidesPerView="auto"
-                              spaceBetween={8}
-                              style={{ padding: "6px 4px" }}
-                          >
-                              {images.map((f, i) => (
-                                  <SwiperSlide key={`thumb-${i}`} style={{ width: 72, height: 72 }}>
-                                      {f.type === "video" ? (
-                                          <Box sx={{ 
-                                              width: "100%", 
-                                              height: "100%", 
-                                              bgcolor: "#000", 
-                                              borderRadius: 8, 
-                                              display: "flex", 
-                                              alignItems: "center", 
-                                              justifyContent: "center" 
-                                          }}>
-                                              <PlayCircleOutlineIcon sx={{ color: "#fff", fontSize: 40 }} />
-                                          </Box>
-                                      ) : (
-                                          <img
-                                              src={f.src}
-                                              alt={f.name || `Миниатюра ${i + 1}`}
-                                              style={{
-                                                  width: "100%",
-                                                  height: "100%",
-                                                  objectFit: "cover",
-                                                  borderRadius: 8,
-                                                  display: "block",
-                                              }}
-                                          />
-                                      )}
-                                  </SwiperSlide>
-                              ))}
-                          </Swiper>
-                      </Box>
-                  </Box>
-              )}
-
+              {/* FIXED FULLSCREEN BUTTON (OVERLAY) */}
               <Tooltip title={isFs ? "Выйти из полноэкранного" : "Открыть на весь экран"}>
                 <IconButton
                   onClick={toggleFullscreen}
-                  sx={{
-                    position: "absolute",
-                    top: 12,
-                    right: 12,
-                    zIndex: 6,
-                    bgcolor: "rgba(0,0,0,0.4)",
-                    color: "#fff",
-                    "&:hover": { bgcolor: "rgba(0,0,0,0.55)" },
+                  sx={{ 
+                    position: "absolute", 
+                    top: 12, 
+                    right: 12, 
+                    zIndex: 20, 
+                    bgcolor: "rgba(0,0,0,0.45)", 
+                    color: "#fff", 
+                    backdropFilter: "blur(6px)",
+                    "&:hover": { bgcolor: "rgba(0,0,0,0.6)" } 
                   }}
                   size="large"
                 >
                   {isFs ? <FullscreenExitIcon fontSize="large" /> : <FullscreenIcon fontSize="large" />}
                 </IconButton>
               </Tooltip>
-            </>
-          )}
 
-          {fsFallback && (
-              <Box onClick={() => setFsFallback(false)} sx={{ position: "fixed", inset: 0, zIndex: 6, bgcolor: "transparent" }}>
-                  <Swiper modules={[Navigation, Pagination, Zoom]} navigation pagination={{ clickable: true }} zoom={{ maxRatio: 4 }}
-                      spaceBetween={12} slidesPerView={1} style={{ width: "100vw", height: "100vh" }}>
-                      {images.map((f, i) => (
-                          <SwiperSlide key={`fs-${i}`}>
-                              <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
-                                  <img alt={f.name || `Фото ${i + 1}`} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                              </div>
-                          </SwiperSlide>
-                      ))}
-                  </Swiper>
-                  <Box sx={{ position: "fixed", top: 12, right: 12 }}>
-                      <IconButton sx={{ bgcolor: "rgba(0,0,0,0.5)", color: "#fff" }} onClick={() => setFsFallback(false)}>
-                          <FullscreenExitIcon />
-                      </IconButton>
-                  </Box>
-              </Box>
+              <Swiper
+                direction="vertical"
+                slidesPerView={1}
+                style={{ width: "100%", height: "100%" }}
+                initialSlide={Math.max(0, filteredItems.findIndex(r => r.Id === activeItemId))}
+                onSlideChangeTransitionStart={() => setIsSwiping(true)}
+                onSlideChangeTransitionEnd={() => setIsSwiping(false)}
+                onSlideChange={(s) => {
+                  const target = filteredItems[s.activeIndex];
+                  if (target) loadItemById(target.Id);
+                }}
+              >
+                {(() => {
+                  const cIdx = filteredItems.findIndex(r => r.Id === activeItemId);
+                  return filteredItems.map((row, index) => {
+                    const isNear = Math.abs(index - cIdx) <= 1;
+                    return (
+                      <SwiperSlide key={row.Id} style={{ height: "100%" }}>
+                        <Box sx={{ width: "100%", height: "100%", position: "relative" }}>
+                          {isNear ? renderMediaArea(row.Id) : (
+                            <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center", bgcolor: "#000" }}>
+                              <CircularProgress sx={{ opacity: 0.2 }} />
+                            </Box>
+                          )}
+                        </Box>
+                      </SwiperSlide>
+                    );
+                  });
+                })()}
+              </Swiper>
+            </>
           )}
         </Box>
 
-        {/* НИЖНЯЯ ЧАСТЬ: ИНФО-ПАНЕЛЬ */}
-        {item && (
-          <Box
-            sx={{
-              position: "relative",
-              width: "100%",
-              display: "flex",
-              justifyContent: "center",
-              zIndex: 4,
-            }}
-          >
-            <Box
-              role="button"
-              aria-expanded={expanded}
-              onClick={handleToggle}
-              sx={{
-                width: { xs: "100%", md: "90%" },
-                height: expanded
-                  ? `${Math.round(Math.max(expandedH, MIN_EXPANDED))}px`
-                  : `${Math.round(Math.max(collapsedH, MIN_COLLAPSED))}px`,
-                transition: "height 280ms ease",
-                willChange: "height",
-                bgcolor: "rgba(10, 10, 10, 0.25)",
-                border: "1px solid rgba(255,255,255,0.40)",
-                borderBottom: "none",
-                borderRadius: "28px 28px 0 0",
-                backdropFilter: "blur(20px) saturate(150%)",
-                overflow: "hidden",
-                cursor: "pointer",
-                boxSizing: "border-box",
-              }}
-            >
-              {/* ручка — крупнее */}
-              <Box ref={handleRef} sx={{ display: "flex", justifyContent: "center", pt: 1, pb: 1.25 }}>
-                <Box
-                  sx={{
-                    width: 52,
-                    height: 6,
-                    borderRadius: 8,
-                    bgcolor: "rgba(255,255,255,0.85)",
-                  }}
-                />
-              </Box>
+        {renderInfoPanel()}
 
-              {/* контент */}
-              <Box ref={contentRef} sx={{ px: 1.5, pb: expanded ? `${PB_EXP}px` : `${PB_COLL}px`, color: "#fff" }}>
-                {/* HEADER — 2 строки + ПРОБЛЕМЫ (видны в коллапсе) */}
-                <Box ref={headerRef}>
-                  {/* строка 1 */}
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
-                    <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                      <FieldCompact label="РЦ" value={item.DC_THU} mono minCh={4} maxCh={5} />
-                    </Box>
-                    <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                      <FieldCompact label="Склад" value={item.Warehouse} mono minCh={0} maxCh={8} />
-                    </Box>
-                    <Box sx={{ flex: "0 0 auto", minWidth: "18ch" }}>
-                      <FieldCompact label="ЕО" value={item.THU} mono maxCh={18} forceFull />
-                    </Box>
-                    <Box sx={{ flex: "0 auto", ml: "auto" }}>
-                        <Typography sx={{ opacity: 0.8, fontSize: FONT, fontWeight: 700 }}>ID {item.Id}</Typography>
-                    </Box>
-                  </Box>
-
-                  {/* строка 2 */}
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center", mb: 1 }}>
-                    <Box sx={{ flex: "0 auto", minWidth: 0 }}>
-                      <FieldCompact label="Получатель" value={item.Recipient} />
-                    </Box>
-                    <Box sx={{ flex: "1 auto", minWidth: 0 }}>
-                      <FieldCompact label="Регион" value={item.RecipientRegion} />
-                    </Box>
-                  </Box>
-
-                  <Divider sx={{ my: 0.75, borderColor: "rgba(255,255,255,0.35)" }} />
-
-                  {/* ПРОБЛЕМЫ — label + chips в одной строке, при нехватке ширины чипы переносятся */}
-                  <Box
-                    sx={{
-                      display: "flex",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      columnGap: 0.6,
-                      rowGap: 0.6,
-                    }}
-                  >
-                    <Typography
-                      sx={{
-                        fontSize: FONT,
-                        lineHeight: LINE,
-                        color: "rgba(255,255,255,0.95)",
-                        textShadow: "0 1px 1px rgba(0,0,0,0.25)",
-                        fontWeight: 800,
-                        letterSpacing: 0.2,
-                        mb: 0,
-                        mr: 0.5,
-                      }}
-                    >
-                      Проблемы:
-                    </Typography>
-
-                    {item.Problems?.length ? (
-                      item.Problems.map((v, idx) => (
-                        <Chip
-                          key={`${v}-${idx}`}
-                          label={v}
-                          variant="outlined"
-                          sx={{
-                            color: "#fff",
-                            borderColor: "rgba(255,255,255,0.55)",
-                            background: "transparent",
-                            backdropFilter: "inherit",
-                            WebkitBackdropFilter: "inherit",
-                            height: "auto",
-                            "& .MuiChip-label": {
-                              px: 1.25,
-                              py: 0.3,
-                              fontSize: FONT,
-                              lineHeight: LINE,
-                              fontWeight: 700,
-                            },
-                          }}
-                        />
-                      ))
-                    ) : (
-                      <Typography sx={{ opacity: 0.8, fontSize: FONT, lineHeight: LINE }}>—</Typography>
-                    )}
-                  </Box>
-                </Box>
-
-                {/* BODY — в DOM для измерений, в коллапсе невидим */}
-                <Box
-                  ref={bodyRef}
-                  sx={{
-                    mt: expanded ? `${BODY_GAP_EXP}px` : 0,
-                    visibility: expanded ? "visible" : "hidden",
-                    pointerEvents: expanded ? "auto" : "none",
-                    background: "transparent",
-                  }}
-                >
-                  <Grid container spacing={1}>
-                    <Grid item xs={12} sm={6}><FieldCompact label="Автор" value={item.Author} /></Grid>
-                    <Grid item xs={12} sm={6}><FieldCompact label="Создан" value={prettyDate(item.Created)} /></Grid>
-                  </Grid>
-
-                  <Divider sx={{ my: 0.75, borderColor: "rgba(255,255,255,0.35)" }} />
-
-                  {(item.Location1 || item.Shipment || item.WhNotEO) && (
-                    <Box sx={{ mt: 1 }}>
-                      {/* ряд 1: Локация • Транспорт */}
-                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
-                        {item.Location1 && (
-                          <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                            <FieldCompact label="Местоположение" value={item.Location1} />
-                          </Box>
-                        )}
-                        {item.Shipment && (
-                          <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
-                            <FieldCompact label="Тран-ка" value={item.Shipment} mono />
-                          </Box>
-                        )}
-                      </Box>
-
-                      {/* ряд 2: Нет ЕО — склад (на всю ширину) */}
-                      {item.WhNotEO && (
-                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center" }}>
-                          <Box sx={{ flex: "1 1 auto", minWidth: 0 }}>
-                            <FieldCompact label="Нет ЕО — склад" value={item.WhNotEO} />
-                          </Box>
-                        </Box>
-                      )}
-                    </Box>
-                  )}
-                </Box>
-              </Box>
-            </Box>
+        {/* Fallback FS */}
+        {fsFallback && (
+          <Box onClick={() => setFsFallback(false)} sx={{ position: "fixed", inset: 0, zIndex: 1000, bgcolor: "#000" }}>
+             <Swiper modules={[Navigation, Pagination, Zoom]} navigation pagination={{ clickable: true }} zoom={{ maxRatio: 4 }} style={{ width: "100vw", height: "100vh" }}>
+               {images.map((f, i) => (
+                 <SwiperSlide key={i}><div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
+                   <img src={f.src} alt={f.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                 </div></SwiperSlide>
+               ))}
+             </Swiper>
+             <IconButton sx={{ position: "fixed", top: 12, right: 12, color: "#fff", bgcolor: "rgba(0,0,0,0.5)" }} onClick={() => setFsFallback(false)}>
+               <FullscreenExitIcon />
+             </IconButton>
           </Box>
         )}
       </Box>
+    );
+  }
 
-      <Box
-        sx={{
-          width: 390,
-          borderLeft: "1px solid rgba(255,255,255,0.35)",
-          bgcolor: "rgba(10, 10, 10, 0.35)",
-          backdropFilter: "blur(20px) saturate(150%) contrast(1.05)",
-          WebkitBackdropFilter: "blur(20px) saturate(150%) contrast(1.05)",
-          color: "#fff",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
+  // DESKTOP LAYOUT
+  return (
+    <Box sx={{ position: "fixed", inset: 0, display: "flex", bgcolor: "#000" }}>
+      <Box sx={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, bgcolor: "black", overflow: "hidden" }}>
+        <Box ref={swiperRef} sx={{ flex: 1, position: "relative", minHeight: 0, zIndex: 0 }}>
+          <Box sx={{ position: "absolute", top: 12, left: 12, zIndex: 6 }}>
+            <Button variant="outlined" onClick={onBack} sx={{ color: "#fff", borderColor: "rgba(255,255,255,0.45)", bgcolor: "rgba(10,10,10,0.32)", backdropFilter: "blur(16px)", "&:hover": { bgcolor: "rgba(10,10,10,0.45)" } }}>Назад в форму</Button>
+          </Box>
+          {/* DESKTOP FULLSCREEN BUTTON */}
+          <Tooltip title={isFs ? "Выйти из полноэкранного" : "Открыть на весь экран"}>
+            <IconButton
+              onClick={toggleFullscreen}
+              sx={{ position: "absolute", top: 12, right: 12, zIndex: 6, bgcolor: "rgba(0,0,0,0.4)", color: "#fff", "&:hover": { bgcolor: "rgba(0,0,0,0.55)" } }}
+              size="large"
+            >
+              {isFs ? <FullscreenExitIcon fontSize="large" /> : <FullscreenIcon fontSize="large" />}
+            </IconButton>
+          </Tooltip>
+          {renderMediaArea(activeItemId)}
+        </Box>
+        {renderInfoPanel()}
+      </Box>
+
+      {/* ПРАВАЯ ПАНЕЛЬ (ТОЛЬКО ДЕСКТОП) */}
+      <Box sx={{ width: 390, borderLeft: "1px solid rgba(255,255,255,0.35)", bgcolor: "rgba(10, 10, 10, 0.35)", backdropFilter: "blur(20px)", color: "#fff", display: "flex", flexDirection: "column" }}>
         <Box sx={{ p: 2, borderBottom: "1px solid rgba(255,255,255,0.25)" }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>
-            Элементы с вложениями
-          </Typography>
-
+          <Typography variant="h6" sx={{ mb: 1 }}>Элементы с вложениями</Typography>
           <Stack spacing={1.5}>
             <Stack direction="row" spacing={1}>
               <FormControl size="small" sx={{ width: 110 }}>
-                <InputLabel id="period-type-label" sx={{ color: "rgba(255,255,255,0.8)" }}>Период</InputLabel>
-                <Select
-                  labelId="period-type-label"
-                  value={periodType}
-                  label="Период"
-                  onChange={(e) => {
-                    const newType = e.target.value;
-                    setPeriodType(newType);
-                    setPeriodValue(getDefaultValue(newType));
-                  }}
-                  sx={{
-                    color: "#fff",
-                    backgroundColor: "rgba(255,255,255,0.08)",
-                    "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
-                    "& .MuiSelect-icon": { color: "rgba(255,255,255,0.9)" },
-                  }}
-                  MenuProps={{ PaperProps: { sx: { bgcolor: "rgba(20,20,20,0.95)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" } } }}
-                >
-                  <MenuItem value="day">День</MenuItem>
-                  <MenuItem value="week">Неделя</MenuItem>
-                  <MenuItem value="month">Месяц</MenuItem>
+                <InputLabel sx={{ color: "rgba(255,255,255,0.8)" }}>Период</InputLabel>
+                <Select value={periodType} label="Период" onChange={(e) => { setPeriodType(e.target.value); setPeriodValue(getDefaultValue(e.target.value)); }} sx={{ color: "#fff", "& fieldset": { borderColor: "rgba(255,255,255,0.45)" } }}>
+                  <MenuItem value="day">День</MenuItem><MenuItem value="week">Неделя</MenuItem><MenuItem value="month">Месяц</MenuItem>
                 </Select>
               </FormControl>
-
-              <TextField
-                size="small"
-                type={periodType === "day" ? "date" : periodType}
-                label={periodType === "day" ? "День" : periodType === "week" ? "Неделя" : "Месяц"}
-                InputLabelProps={{ shrink: true }}
-                value={periodValue}
-                inputRef={monthInputRef}
-                onChange={(e) => setPeriodValue(e.target.value)}
-                onClick={() => monthInputRef.current?.showPicker?.()}
-                InputProps={{
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <CalendarMonthIcon
-                        sx={{ color: "rgba(255,255,255,0.9)", cursor: "pointer" }}
-                        onClick={() => monthInputRef.current?.showPicker?.()}
-                      />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{
-                  flex: 1,
-                  "& .MuiOutlinedInput-root": {
-                    color: "#fff",
-                    backgroundColor: "rgba(255,255,255,0.08)",
-                    "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
-                  },
-                  "& .MuiInputBase-input": {
-                    colorScheme: "dark",
-                  },
-                  "& .MuiInputBase-input::-webkit-calendar-picker-indicator": {
-                    opacity: 0,
-                    width: 0,
-                  },
-                  "& .MuiInputLabel-root": { color: "rgba(255,255,255,0.8)" },
-                }}
-              />
+              <TextField size="small" type={periodType === "day" ? "date" : periodType} label="Дата" InputLabelProps={{ shrink: true }} value={periodValue} onChange={(e) => setPeriodValue(e.target.value)} sx={{ flex: 1, "& .MuiOutlinedInput-root": { color: "#fff", "& fieldset": { borderColor: "rgba(255,255,255,0.45)" } }, "& .MuiInputBase-input": { colorScheme: "dark" } }} />
             </Stack>
-
+            
             <FormControl size="small" fullWidth>
-              <InputLabel id="author-filter-label" sx={{ color: "rgba(255,255,255,0.8)" }}>Автор</InputLabel>
+              <InputLabel sx={{ color: "rgba(255,255,255,0.8)" }}>Автор</InputLabel>
               <Select
-                labelId="author-filter-label"
                 value={authorFilter}
                 label="Автор"
                 onChange={(e) => setAuthorFilter(e.target.value)}
@@ -1190,29 +1153,16 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
                   "& .MuiSelect-icon": { color: "rgba(255,255,255,0.9)" },
                 }}
-                MenuProps={{
-                  PaperProps: {
-                    sx: {
-                      bgcolor: "rgba(20,20,20,0.95)",
-                      color: "#fff",
-                      border: "1px solid rgba(255,255,255,0.2)",
-                    },
-                  },
-                }}
+                MenuProps={{ PaperProps: { sx: { bgcolor: "rgba(20,20,20,0.95)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" } } }}
               >
                 <MenuItem value="all">Все авторы</MenuItem>
-                {authorOptions.map((author) => (
-                  <MenuItem key={author} value={author}>
-                    {author}
-                  </MenuItem>
-                ))}
+                {authorOptions.map((a) => <MenuItem key={a} value={a}>{a}</MenuItem>)}
               </Select>
             </FormControl>
 
             <FormControl size="small" fullWidth>
-              <InputLabel id="problem-filter-label" sx={{ color: "rgba(255,255,255,0.8)" }}>Проблема</InputLabel>
+              <InputLabel sx={{ color: "rgba(255,255,255,0.8)" }}>Проблема</InputLabel>
               <Select
-                labelId="problem-filter-label"
                 value={problemFilter}
                 label="Проблема"
                 onChange={(e) => setProblemFilter(e.target.value)}
@@ -1222,22 +1172,10 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   "& fieldset": { borderColor: "rgba(255,255,255,0.45)" },
                   "& .MuiSelect-icon": { color: "rgba(255,255,255,0.9)" },
                 }}
-                MenuProps={{
-                  PaperProps: {
-                    sx: {
-                      bgcolor: "rgba(20,20,20,0.95)",
-                      color: "#fff",
-                      border: "1px solid rgba(255,255,255,0.2)",
-                    },
-                  },
-                }}
+                MenuProps={{ PaperProps: { sx: { bgcolor: "rgba(20,20,20,0.95)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" } } }}
               >
-                <MenuItem value="all">Все проблемы</MenuItem>
-                {problemOptions.map((problem) => (
-                  <MenuItem key={problem} value={problem}>
-                    {problem}
-                  </MenuItem>
-                ))}
+                <MenuItem value="all">Любая</MenuItem>
+                {problemOptions.map((p) => <MenuItem key={p} value={p}>{p}</MenuItem>)}
               </Select>
             </FormControl>
 
@@ -1278,20 +1216,12 @@ export default function ManagerPreview({ userProfile, onBack }) {
             overflowY: "auto",
             scrollbarWidth: "thin",
             scrollbarColor: "rgba(190,190,190,0.45) rgba(25,25,25,0.55)",
-            "&::-webkit-scrollbar": {
-              width: 10,
-            },
-            "&::-webkit-scrollbar-track": {
-              background: "rgba(25,25,25,0.55)",
-              borderRadius: 10,
-            },
+            "&::-webkit-scrollbar": { width: 10 },
+            "&::-webkit-scrollbar-track": { background: "rgba(25,25,25,0.55)", borderRadius: 10 },
             "&::-webkit-scrollbar-thumb": {
               background: "linear-gradient(180deg, rgba(185,185,185,0.5), rgba(145,145,145,0.55))",
               borderRadius: 10,
               border: "1px solid rgba(255,255,255,0.12)",
-            },
-            "&::-webkit-scrollbar-thumb:hover": {
-              background: "linear-gradient(180deg, rgba(210,210,210,0.65), rgba(165,165,165,0.7))",
             },
           }}
         >
@@ -1330,15 +1260,17 @@ export default function ManagerPreview({ userProfile, onBack }) {
         onClose={handleCloseProblemsPopover}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         transformOrigin={{ vertical: "top", horizontal: "left" }}
-        PaperProps={{
-          sx: {
-            mt: 0.75,
-            p: 1.25,
-            minWidth: 260,
-            maxWidth: 420,
-            bgcolor: "rgba(18,18,18,0.95)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.2)",
+        slotProps={{
+          paper: {
+            sx: {
+              mt: 0.75,
+              p: 1.25,
+              minWidth: 260,
+              maxWidth: 420,
+              bgcolor: "rgba(18,18,18,0.95)",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.2)",
+            },
           },
         }}
       >
@@ -1346,7 +1278,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
           Проблемы {problemsPopoverTitle}
         </Typography>
         <Stack spacing={0.5}>
-          {problemsPopoverList.map((problem, idx) => (
+          {(problemsPopoverList || EMPTY_ARRAY).map((problem, idx) => (
             <Typography key={`${problem}-${idx}`} variant="body2">
               • {problem}
             </Typography>
@@ -1356,3 +1288,146 @@ export default function ManagerPreview({ userProfile, onBack }) {
     </Box>
   );
 }
+
+// --- МЕМОИЗИРОВАННЫЙ КОНТЕНТ ИНФО-ПАНЕЛИ ---
+const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bodyRef, prettyDate }) => {
+  return (
+    <Box ref={contentRef} sx={{ px: 1.5, pb: expanded ? `${PB_EXP}px` : `${PB_COLL}px`, color: "#fff" }}>
+      <Box ref={headerRef}>
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
+          <Box sx={{ flex: "0 1 auto", minWidth: 0 }}><FieldCompact label="РЦ" value={item.DC_THU} mono minCh={4} maxCh={5} /></Box>
+          <Box sx={{ flex: "0 1 auto", minWidth: 0 }}><FieldCompact label="Склад" value={item.Warehouse} mono minCh={0} maxCh={8} /></Box>
+          <Box sx={{ flex: "0 0 auto", minWidth: "18ch" }}><FieldCompact label="ЕО" value={item.THU} mono maxCh={18} forceFull /></Box>
+          <Box sx={{ flex: "0 auto", ml: "auto" }}><Typography sx={{ opacity: 0.8, fontSize: FONT_SMALL, fontWeight: 700 }}>ID {item.Id}</Typography></Box>
+        </Box>
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center", mb: 1 }}>
+          <Box sx={{ flex: "0 auto", minWidth: 0 }}><FieldCompact label="Получатель" value={item.Recipient} /></Box>
+          <Box sx={{ flex: "1 auto", minWidth: 0 }}><FieldCompact label="Регион" value={item.RecipientRegion} /></Box>
+        </Box>
+        <Divider sx={{ my: 0.75, borderColor: "rgba(255,255,255,0.35)" }} />
+        <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", columnGap: 0.6, rowGap: 0.6 }}>
+          <Typography sx={{ fontSize: FONT_SMALL, lineHeight: LINE_SMALL, color: "rgba(255,255,255,0.95)", fontWeight: 800, mr: 0.5 }}>Проблемы:</Typography>
+          {item.Problems?.length ? item.Problems.map((v, idx) => (
+            <Chip key={`${v}-${idx}`} label={v} variant="outlined" sx={{ color: "#fff", borderColor: "rgba(255,255,255,0.55)", height: "auto", "& .MuiChip-label": { px: 1.25, py: 0.3, fontSize: FONT_SMALL, fontWeight: 700 } }} />
+          )) : <Typography sx={{ opacity: 0.8, fontSize: FONT_SMALL }}>—</Typography>}
+        </Box>
+      </Box>
+
+      <Box ref={bodyRef} sx={{ mt: expanded ? `${BODY_GAP_EXP}px` : 0, visibility: expanded ? "visible" : "hidden", pointerEvents: expanded ? "auto" : "none" }}>
+        <Grid container spacing={1}>
+          <Grid item xs={12} sm={6}><FieldCompact label="Автор" value={item.Author} /></Grid>
+          <Grid item xs={12} sm={6}><FieldCompact label="Создан" value={prettyDate(item.Created)} /></Grid>
+        </Grid>
+        <Divider sx={{ my: 0.75, borderColor: "rgba(255,255,255,0.35)" }} />
+        {(item.Location1 || item.Shipment || item.WhNotEO) && (
+          <Box sx={{ mt: 1 }}>
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
+              {item.Location1 && <Box sx={{ flex: "0 1 auto" }}><FieldCompact label="Местоположение" value={item.Location1} /></Box>}
+              {item.Shipment && <Box sx={{ flex: "0 1 auto" }}><FieldCompact label="Тран-ка" value={item.Shipment} mono /></Box>}
+            </Box>
+            {item.WhNotEO && <FieldCompact label="Нет ЕО — склад" value={item.WhNotEO} />}
+          </Box>
+        )}
+      </Box>
+    </Box>
+  );
+});
+
+// --- МЕМОИЗИРОВАННЫЙ КОМПОНЕНТ ДЛЯ СЛАЙДА ---
+const MediaContent = React.memo(({ 
+  targetId, isSlideActive, itemData, slideImages, isSlideLoading, itemError, 
+  isMobile, isFs, toggleFullscreen, mainSwiperRef, thumbsSwiper, setThumbsSwiper, isSwiping 
+}) => {
+  if (!itemData) {
+    return (
+      <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}>
+        <Typography sx={{ color: "white", opacity: 0.8 }}>
+          {isMobile ? "Загрузка..." : "Выберите элемент справа, чтобы открыть фотографии."}
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (itemError) {
+    return (
+      <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", p: 2, zIndex: 3 }}>
+        <Paper sx={{ p: 2 }}><Typography color="error">{itemError}</Typography></Paper>
+      </Box>
+    );
+  }
+
+  return (
+    <>
+      {isSlideLoading ? (
+        <Box sx={{ position: "absolute", inset: 0, zIndex: 10, display: "flex", justifyContent: "center", alignItems: "center" }}>
+          <CircularProgress />
+        </Box>
+      ) : slideImages.length === 0 ? (
+        <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}>
+          <Typography sx={{ color: "white", opacity: 0.7, fontSize: 13 }}>Вложения не найдены</Typography>
+        </Box>
+      ) : (
+        <Swiper
+          onSwiper={(s) => { if (isSlideActive) mainSwiperRef.current = s; }}
+          modules={[Navigation, Pagination, Zoom, Thumbs]}
+          navigation={true} pagination={{ clickable: true }} zoom={{ maxRatio: 3 }}
+          spaceBetween={12} slidesPerView={1}
+          style={{ width: "100%", height: "100%" }}
+          thumbs={isSlideActive && thumbsSwiper && !thumbsSwiper.destroyed ? { swiper: thumbsSwiper } : null}
+        >
+          {slideImages.map((f, i) => (
+            <SwiperSlide key={i}>
+              <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
+                {f.type === "video" ? (
+                  <VideoPlayerCustom src={f.src} name={f.name} collapsedH={0} />
+                ) : (
+                  <img alt={f.name} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                )}
+              </div>
+            </SwiperSlide>
+          ))}
+        </Swiper>
+      )}
+
+      {slideImages.length > 1 && isSlideActive && (
+        <Box sx={{ position: "absolute", left: 0, right: 0, top: isMobile ? 2 : 12, zIndex: 5, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+          <Box sx={{ 
+            pointerEvents: "auto", bgcolor: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.15)", 
+            backdropFilter: (isMobile && isSwiping) ? "none" : "blur(8px)", borderRadius: "12px", px: isMobile ? 0.5 : 1, py: 0.5, maxWidth: "min(90vw, 680px)",
+            transition: "backdrop-filter 0.1s ease"
+          }}>
+            <Swiper 
+              key={`thumbs-${targetId}`} className="thumbs-swiper" onSwiper={setThumbsSwiper} 
+              modules={[FreeMode, Thumbs]} watchSlidesProgress freeMode slidesPerView="auto" spaceBetween={8} 
+              style={{ padding: isMobile ? "2px" : "6px 4px" }}
+            >
+              {slideImages.map((f, i) => (
+                <SwiperSlide key={`thumb-${targetId}-${i}`} style={{ width: isMobile ? 50 : 72, height: isMobile ? 50 : 72 }}>
+                  {f.type === "video" ? (
+                    <Box sx={{ width: "100%", height: "100%", bgcolor: "#000", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <PlayCircleOutlineIcon sx={{ color: "#fff", fontSize: isMobile ? 24 : 40 }} />
+                    </Box>
+                  ) : (
+                    <img src={f.src} alt="thumb" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 8, display: "block" }} />
+                  )}
+                </SwiperSlide>
+              ))}
+            </Swiper>
+          </Box>
+        </Box>
+      )}
+    </>
+  );
+}, (prev, next) => {
+  return prev.targetId === next.targetId && 
+         prev.isSlideActive === next.isSlideActive && 
+         prev.isSlideLoading === next.isSlideLoading &&
+         prev.itemData === next.itemData &&
+         prev.slideImages === next.slideImages &&
+         prev.itemError === next.itemError &&
+         prev.isFs === next.isFs &&
+         prev.isSwiping === next.isSwiping &&
+         prev.thumbsSwiper === next.thumbsSwiper;
+});
+
+
