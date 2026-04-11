@@ -1261,7 +1261,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
         let ext = "png";
         if (item.type === 'video') {
-          ext = item.name.split('.').pop() || 'webm';
+          // Тщательно очищаем расширение от кодеков и параметров (Safari fix)
+          const rawExt = item.name.split('.').pop() || 'webm';
+          ext = rawExt.split(';')[0]; 
         } else {
           if (blob?.type?.includes("jpeg")) ext = "jpg";
           if (blob?.type?.includes("png")) ext = "png";
