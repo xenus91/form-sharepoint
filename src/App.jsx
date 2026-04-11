@@ -25,11 +25,6 @@ import {
   RadioGroup,
   FormControlLabel,
   Radio,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogContentText,
-  DialogActions,
 } from "@mui/material";
 import ButtonGroup from "@mui/material/ButtonGroup";
 import { useDropzone } from "react-dropzone";
@@ -392,13 +387,6 @@ const App = () => {
   const handleRadioChange = (e) => setSelectedRadioValue(e.target.value);
   const { notify } = useNotifications();
 
-  // Состояния для дубликатов ЕО
-  const [duplicateEoDialogOpen, setDuplicateEoDialogOpen] = useState(false);
-  const [duplicateEoItem, setDuplicateEoItem] = useState(null);
-  const [editingItemId, setEditingItemId] = useState(null);
-  const [currentUserId, setCurrentUserId] = useState(null);
-  const [isFetchingItemData, setIsFetchingItemData] = useState(false);
-
   const ProblemsMenuProps = {
     PaperProps: {
       sx: {
@@ -667,79 +655,20 @@ const App = () => {
   };
 
   const checkEoNumberInRecentRecords = async (eoNumber) => {
-    // Если мы уже в режиме редактирования этого элемента или только что загрузили данные, не проверяем
-    if (editingItemId) return;
-
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const officeSuffix = getEffectiveDcThu();
 
-    let userId = currentUserId;
-    if (!userId) {
-      try {
-        const { data } = await apiClient.get("/web/currentuser");
-        userId = data.d.Id;
-        setCurrentUserId(userId);
-      } catch (err) {
-        console.error("Ошибка получения текущего пользователя:", err);
-      }
-    }
-
     try {
-      const userFilter = userId ? ` and AuthorId eq ${userId}` : "";
       const response = await apiClient.get(
-        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eoNumber}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}'${userFilter})&$select=Id,THU,DC_THU,Created,Author/Title&$expand=Author`,
+        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eoNumber}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}')`,
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       if (response.data.d.results.length > 0) {
-        const item = response.data.d.results[0];
-        setDuplicateEoItem(item);
-        setDuplicateEoDialogOpen(true);
+        notify('Такая ЕО уже отправлялась в течение последних 24 часов.', { severity: 'error' });
+        setEoNumber("");
       }
     } catch (error) {
       console.error("Ошибка при проверке Номер ЕО:", error);
-    }
-  };
-
-  const loadDuplicateEoData = async (itemId) => {
-    setIsFetchingItemData(true);
-    setLoading(true);
-    try {
-      // 1. Получаем данные элемента
-      const itemResp = await apiClient.get(
-        `/web/lists/getbytitle('${LIST_TITLE}')/items(${itemId})?$select=*,Recipient/Id,Recipient/Title&$expand=Recipient,AttachmentFiles`,
-        { headers: { Accept: "application/json;odata=verbose" } }
-      );
-      const item = itemResp.data.d;
-
-      // 2. Мапим поля
-      setEoNumber(item.THU || "");
-      setTransportation(item.Shipment || "");
-      setSelectedRecipient(item.RecipientId || null);
-      setProblems(item.Problems?.results || []);
-      setLocation(item.Location1 || "");
-      setSelectedRadioValue(item.WhNotEO || "");
-      if (item.THU === "ЕО отсутствует") {
-        setIsEOMissing(true);
-      } else {
-        setIsEOMissing(false);
-      }
-
-      // 3. Загружаем фото
-      const attachments = item.AttachmentFiles?.results || [];
-      const photoUrls = attachments.map((att) => att.ServerRelativeUrl);
-      // Превращаем относительные URL в абсолютные для fetch/toBlob
-      const absoluteUrls = photoUrls.map(url => `${window.location.origin}${url}`);
-      setGalleryPhotos(absoluteUrls);
-
-      setEditingItemId(itemId);
-      notify("Данные загружены для редактирования", { severity: "info" });
-    } catch (err) {
-      console.error("Ошибка загрузки данных ЕО:", err);
-      notify("Не удалось загрузить данные для редактирования", { severity: "error" });
-    } finally {
-      setIsFetchingItemData(false);
-      setLoading(false);
-      setDuplicateEoDialogOpen(false);
     }
   };
 
@@ -794,12 +723,6 @@ const App = () => {
         userDisplayName,
         userTitle,
       });
-
-      // Также получим ID пользователя для фильтрации дубликатов
-      const meResp = await apiClient.get("/web/currentuser");
-      if (meResp.data?.d?.Id) {
-        setCurrentUserId(meResp.data.d.Id);
-      }
     } catch (error) {
       console.error("Ошибка при получении профиля пользователя:", error);
     }
@@ -1062,99 +985,44 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       return;
     }
 
-    let createdItemId = editingItemId;
+    let createdItemId = null;
 
     try {
       setSuccess(false);
       setLoading(true);
 
       const officeSuffix = getEffectiveDcThu();
+
       const digest = await getRequestDigest();
 
-      if (editingItemId) {
-        // РЕЖИМ РЕДАКТИРОВАНИЯ
-        await apiClient.post(
-          `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})`,
-          {
-            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
-            THU: eoNumber,
-            DC_THU: officeSuffix,
-            RecipientId: selectedRecipient,
-            Location1: location,
-            Shipment: transportation,
-            WhNotEO: selectedRadioValue,
-            OperationDate: operationDateIso,
-            Problems: {
-              __metadata: { type: "Collection(Edm.String)" },
-              results: problems,
-            },
-            Status: "Выполнено", // Сразу ставим статус
+      const createResp = await apiClient.post(
+        `/web/lists/getbytitle('${LIST_TITLE}')/items`,
+        {
+          __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+          THU: eoNumber,
+          DC_THU: officeSuffix,
+          RecipientId: selectedRecipient,
+          Location1: location,
+          Shipment: transportation,
+          WhNotEO: selectedRadioValue,
+          OperationDate: operationDateIso,
+          Problems: {
+            __metadata: { type: "Collection(Edm.String)" },
+            results: problems,
           },
-          {
-            headers: {
-              Accept: "application/json;odata=verbose",
-              "Content-Type": "application/json;odata=verbose",
-              "X-RequestDigest": digest,
-              "IF-MATCH": "*",
-              "X-HTTP-Method": "MERGE",
-            },
-          }
-        );
-
-        // Перед загрузкой новых фото удаляем старые вложения
-        try {
-          const filesResp = await apiClient.get(
-            `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})/AttachmentFiles`,
-            { headers: { Accept: "application/json;odata=verbose" } }
-          );
-          const files = filesResp.data.d.results;
-          for (const file of files) {
-            await apiClient.post(
-              `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})/AttachmentFiles/getByFileName('${encodeURIComponent(file.FileName)}')`,
-              null,
-              {
-                headers: {
-                  "X-RequestDigest": digest,
-                  "X-HTTP-Method": "DELETE",
-                  "IF-MATCH": "*",
-                },
-              }
-            );
-          }
-        } catch (delErr) {
-          console.error("Ошибка при удалении старых вложений:", delErr);
+        },
+        {
+          headers: {
+            Accept: "application/json;odata=verbose",
+            "Content-Type": "application/json;odata=verbose",
+            "X-RequestDigest": digest,
+          },
         }
-      } else {
-        // РЕЖИМ СОЗДАНИЯ
-        const createResp = await apiClient.post(
-          `/web/lists/getbytitle('${LIST_TITLE}')/items`,
-          {
-            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
-            THU: eoNumber,
-            DC_THU: officeSuffix,
-            RecipientId: selectedRecipient,
-            Location1: location,
-            Shipment: transportation,
-            WhNotEO: selectedRadioValue,
-            OperationDate: operationDateIso,
-            Problems: {
-              __metadata: { type: "Collection(Edm.String)" },
-              results: problems,
-            },
-          },
-          {
-            headers: {
-              Accept: "application/json;odata=verbose",
-              "Content-Type": "application/json;odata=verbose",
-              "X-RequestDigest": digest,
-            },
-          }
-        );
-        createdItemId = createResp?.data?.d?.Id;
-      }
+      );
 
+      createdItemId = createResp?.data?.d?.Id;
       if (!createdItemId) {
-        throw new Error("SharePoint не вернул Id элемента.");
+        throw new Error("SharePoint не вернул Id созданного элемента.");
       }
 
       const allSources = [...cameraPhotos, ...galleryPhotos];
@@ -1174,23 +1042,21 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         await uploadAttachmentRaw(LIST_TITLE, createdItemId, fileName, blob);
       }
 
-      if (!editingItemId) {
-        await apiClient.post(
-          `/web/lists/getbytitle('${LIST_TITLE}')/items(${createdItemId})`,
-          {
-            __metadata: { type: "SP.Data.ProblemsPalletListItem" },
-            Status: "Выполнено",
+      await apiClient.post(
+        `/web/lists/getbytitle('${LIST_TITLE}')/items(${createdItemId})`,
+        {
+          __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+          Status: "Выполнено",
+        },
+        {
+          headers: {
+            Accept: "application/json;odata=verbose",
+            "Content-Type": "application/json;odata=verbose",
+            "IF-MATCH": "*",
+            "X-HTTP-Method": "MERGE",
           },
-          {
-            headers: {
-              Accept: "application/json;odata=verbose",
-              "Content-Type": "application/json;odata=verbose",
-              "IF-MATCH": "*",
-              "X-HTTP-Method": "MERGE",
-            },
-          }
-        );
-      }
+        }
+      );
 
       setSuccess(true);
       notify('Данные отправлены', { severity: 'success', autoHideDuration: 3000 });
@@ -1211,7 +1077,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setTransportation("");
       setKey((prevKey) => prevKey + 1);
       setSelectedRadioValue("");
-      setEditingItemId(null);
     } catch (err) {
       console.error("Ошибка отправки данных:", err);
       try {
@@ -2110,47 +1975,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </Box>
         </Box>
       </Modal>
-        <Dialog
-          open={duplicateEoDialogOpen}
-          onClose={() => {
-            setDuplicateEoDialogOpen(false);
-            setEoNumber("");
-          }}
-          PaperProps={{
-            sx: { borderRadius: 3, p: 1 }
-          }}
-        >
-          <DialogTitle sx={{ fontWeight: 800 }}>Дубликат ЕО</DialogTitle>
-          <DialogContent>
-            <DialogContentText>
-              Вы уже отправляли заявку с этим номером ЕО ({duplicateEoItem?.THU}) за последние 24 часа. Хотите изменить её?
-            </DialogContentText>
-          </DialogContent>
-          <DialogActions sx={{ pb: 2, px: 3 }}>
-            <Button 
-              onClick={() => {
-                setDuplicateEoDialogOpen(false);
-                setEoNumber("");
-              }}
-              color="inherit"
-              sx={{ fontWeight: 700 }}
-            >
-              Нет
-            </Button>
-            <Button
-              onClick={() => loadDuplicateEoData(duplicateEoItem?.Id)}
-              variant="contained"
-              autoFocus
-              sx={{ 
-                borderRadius: 2,
-                fontWeight: 700,
-                backgroundImage: "linear-gradient(180deg, #171c8f 0%, #10146a 100%)",
-              }}
-            >
-              Да, изменить
-            </Button>
-          </DialogActions>
-        </Dialog>
     </ThemeProvider>
   );
 };
