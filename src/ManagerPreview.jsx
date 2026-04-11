@@ -14,6 +14,7 @@ import {
   Select,
   Stack,
   TextField,
+  Dialog,
   Tooltip,
   Typography,
   Button,
@@ -36,6 +37,7 @@ import PauseIcon from "@mui/icons-material/Pause";
 import MenuIcon from "@mui/icons-material/Menu";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import CloseIcon from "@mui/icons-material/Close";
 import SortIcon from "@mui/icons-material/Sort";
 import SwapVertIcon from "@mui/icons-material/SwapVert";
 import { Swiper, SwiperSlide } from "swiper/react";
@@ -170,90 +172,52 @@ function fileValueUrl(serverRelativeUrl = "") {
   return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${enc}')/$value`;
 }
 
-const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
-  const [playing, setPlaying] = React.useState(false);
-  const [showIcon, setShowIcon] = React.useState(false);
-  const [isMuted, setIsMuted] = React.useState(true);
-  const videoRef = React.useRef(null);
-  const timerRef = React.useRef(null);
-
-  const togglePlay = (e) => {
-    e.stopPropagation();
-    if (!videoRef.current) return;
-    if (videoRef.current.paused) {
-      // Пытаемся включить звук при осознанном клике
-      videoRef.current.muted = false;
-      setIsMuted(false);
-      videoRef.current.play().catch(err => {
-        console.warn("Play blocked", err);
-        // Если заблокировано, пробуем играть без звука
-        videoRef.current.muted = true;
-        setIsMuted(true);
-        videoRef.current.play();
-      });
-      setPlaying(true);
-    } else {
-      videoRef.current.pause();
-      setPlaying(false);
-    }
-    setShowIcon(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setShowIcon(false), 800);
-  };
-
+const VideoPreviewDialog = ({ url, onClose }) => {
+  if (!url) return null;
   return (
-    <Box sx={{ 
-      width: "100%", 
-      height: collapsedH === 0 ? "100%" : `calc(100% - ${collapsedH}px)`, 
-      position: "relative",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      bgcolor: "#000" 
-    }}>
-      <video
-        ref={videoRef}
-        src={src}
-        playsInline
-        webkit-playsinline="true"
-        preload="auto"
-        muted={isMuted}
-        controlsList="nodownload"
-        className="swiper-no-swiping"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
-      />
-      
-      {/* Central Overlay for Interaction */}
-      <Box
-        onClick={togglePlay}
-        sx={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          zIndex: 2,
-          bottom: 0 
-        }}
-      >
-        {(!playing || showIcon) && (
-          <Box sx={{
-            bgcolor: "rgba(0,0,0,0.45)",
-            borderRadius: "50%",
-            p: 2.5,
-            backdropFilter: "blur(6px)",
-            border: "1px solid rgba(255,255,255,0.25)",
-            transition: "opacity 0.25s ease-out",
-            opacity: (!playing || showIcon) ? 1 : 0,
-          }}>
-            {playing ? <PauseIcon sx={{ color: "#fff", fontSize: 64 }} /> : <PlayArrowIcon sx={{ color: "#fff", fontSize: 64 }} />}
-          </Box>
-        )}
+    <Dialog
+      open={!!url}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: { bgcolor: "#000", borderRadius: 2, overflow: "hidden", position: "relative" }
+      }}
+    >
+      <Box sx={{ position: "relative", width: "100%", pt: "56.25%", bgcolor: "#000" }}>
+        <video
+          src={url}
+          controls
+          autoPlay
+          playsInline
+          webkit-playsinline="true"
+          controlsList="nodownload"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
+        />
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: "absolute",
+            top: 12,
+            right: 12,
+            color: "white",
+            bgcolor: "rgba(0,0,0,0.5)",
+            backdropFilter: "blur(4px)",
+            "&:hover": { bgcolor: "rgba(0,0,0,0.7)" },
+            zIndex: 10
+          }}
+        >
+          <CloseIcon />
+        </IconButton>
       </Box>
-    </Box>
+    </Dialog>
   );
 };
 
@@ -363,6 +327,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const [activeItemId, setActiveItemId] = React.useState(null);
   const [itemsMap, setItemsMap] = React.useState({});
   const [mediaMap, setMediaMap] = React.useState({});
+  const [videoPreviewUrl, setVideoPreviewUrl] = React.useState(null);
   const [problemsAnchorEl, setProblemsAnchorEl] = React.useState(null);
   const [problemsPopoverList, setProblemsPopoverList] = React.useState([]);
   const [problemsPopoverTitle, setProblemsPopoverTitle] = React.useState("");
@@ -401,21 +366,22 @@ export default function ManagerPreview({ userProfile, onBack }) {
       const bodyH = bodyRef.current?.scrollHeight || 0;
 
       if (headerH < 12 || handleH < 4) {
-          const collapsedFinal = Math.max(MIN_COLLAPSED, 112);
+          const collapsedFinal = isMobile ? 32 : Math.max(MIN_COLLAPSED, 112);
           const expandedFinal = Math.max(MIN_EXPANDED, Math.min(wH - 8, collapsedFinal + 280));
           return { collapsedFinal, expandedFinal };
       }
 
-      const collapsedFinal = Math.round(handleH + headerH + PB_COLL + SAFETY);
+      // На мобилках показываем только "кончик" (handleH + небольшой паддинг), на десктопе — заголовок
+      const collapsedFinal = isMobile ? 32 : Math.round(handleH + headerH + PB_COLL + SAFETY);
       const full = Math.round(handleH + headerH + BODY_GAP_EXP + bodyH + PB_EXP + SAFETY);
       const viewportMax = Math.max(wH - 8, collapsedFinal + 1);
       const expandedFinal = Math.min(full, viewportMax);
 
       return {
-          collapsedFinal: Math.max(collapsedFinal, MIN_COLLAPSED),
+          collapsedFinal: isMobile ? 32 : Math.max(collapsedFinal, MIN_COLLAPSED),
           expandedFinal: Math.max(expandedFinal, MIN_EXPANDED),
       };
-  }, []);
+  }, [isMobile]);
 
   const applyHeights = React.useCallback(() => {
     if (isAnimatingRef.current || isSwipingRef.current) return;
@@ -959,6 +925,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
         parentVerticalSwiperRef={parentVerticalSwiperRef}
         isSwipingRef={isSwipingRef} // Передаем реф для блокировки высоты
         isSwiping={isSlideActive ? isSwiping : false}
+        setIsSwiping={setIsSwiping} // ПЕРЕДАЕМ ФУНКЦИЮ ДЛЯ ЖЕСТОВ
+        setVideoPreviewUrl={setVideoPreviewUrl} // ПЕРЕДАЕМ ДЛЯ ЗАПУСКА ПЛЕЕРА
         collapsedH={collapsedH}
       />
     );
@@ -974,23 +942,21 @@ export default function ManagerPreview({ userProfile, onBack }) {
           onClick={handleToggle}
           sx={{
             width: isMobile ? "100%" : { xs: "100%", md: "90%" },
-            // Контейнер теперь всегда имеет полную высоту раскрытого состояния,
-            // но мы будем «прятать» его часть за пределы видимости или использовать translateY
-            height: `${expandedH}px`,
+            height: isMobile && !expanded ? "32px" : `${expandedH}px`,
             position: "absolute",
             bottom: 0,
             left: "50%",
-            transform: `translateX(-50%) translateY(${expanded ? 0 : (expandedH - collapsedH)}px)`,
-            transition: "transform 280ms cubic-bezier(0.4, 0, 0.2, 1), backdrop-filter 0.2s ease",
-            bgcolor: "rgba(10, 10, 10, 0.3)",
-            border: "1px solid rgba(255,255,255,0.4)",
+            transform: `translateX(-50%) translateY(${expanded ? 0 : (isMobile ? 0 : expandedH - collapsedH)}px)`,
+            transition: "transform 350ms cubic-bezier(0.33, 1, 0.68, 1), height 350ms cubic-bezier(0.33, 1, 0.68, 1), backdrop-filter 0.2s ease",
+            bgcolor: "rgba(10, 10, 10, 0.45)",
+            border: "1px solid rgba(255,255,255,0.45)",
             borderBottom: "none",
-            borderRadius: isMobile ? "0" : "28px 28px 0 0",
-            backdropFilter: (isSwiping || isAnimating) ? "none" : "blur(20px) saturate(150%)",
+            borderRadius: "28px 28px 0 0",
+            backdropFilter: (isSwiping || isAnimating) ? "none" : "blur(25px) saturate(160%)",
             overflow: "hidden",
             cursor: "pointer",
             boxSizing: "border-box",
-            willChange: "transform",
+            willChange: "transform, height",
             zIndex: 10
           }}
         >
@@ -1005,6 +971,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
             headerRef={headerRef}
             bodyRef={bodyRef}
             prettyDate={prettyDate}
+            isMobile={isMobile}
           />
         </Box>
       </Box>
@@ -1115,6 +1082,12 @@ export default function ManagerPreview({ userProfile, onBack }) {
         </Box>
 
         {renderInfoPanel()}
+
+        {/* Диалог просмотра видео */}
+        <VideoPreviewDialog 
+          url={videoPreviewUrl} 
+          onClose={() => setVideoPreviewUrl(null)} 
+        />
 
         {/* Fallback FS */}
         {fsFallback && (
@@ -1317,15 +1290,21 @@ export default function ManagerPreview({ userProfile, onBack }) {
           ))}
         </Stack>
       </Popover>
+
+      {/* Диалог просмотра видео */}
+      <VideoPreviewDialog 
+        url={videoPreviewUrl} 
+        onClose={() => setVideoPreviewUrl(null)} 
+      />
     </Box>
   );
 }
 
 // --- МЕМОИЗИРОВАННЫЙ КОНТЕНТ ИНФО-ПАНЕЛИ ---
-const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bodyRef, prettyDate }) => {
+const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bodyRef, prettyDate, isMobile }) => {
   return (
     <Box ref={contentRef} sx={{ px: 1.5, pb: expanded ? `${PB_EXP}px` : `${PB_COLL}px`, color: "#fff" }}>
-      <Box ref={headerRef}>
+      <Box ref={headerRef} sx={{ opacity: isMobile ? (expanded ? 1 : 0) : 1, transition: "opacity 0.2s ease" }}>
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
           <Box sx={{ flex: "0 1 auto", minWidth: 0 }}><FieldCompact label="РЦ" value={item.DC_THU} mono minCh={4} maxCh={5} /></Box>
           <Box sx={{ flex: "0 1 auto", minWidth: 0 }}><FieldCompact label="Склад" value={item.Warehouse} mono minCh={0} maxCh={8} /></Box>
@@ -1376,7 +1355,7 @@ const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bo
 // --- МЕМОИЗИРОВАННЫЙ КОМПОНЕНТ ДЛЯ СЛАЙДА ---
 const MediaContent = React.memo(({ 
   targetId, isSlideActive, itemData, slideImages, isSlideLoading, itemError, 
-  isMobile, isFs, toggleFullscreen, mainSwiperRef, parentVerticalSwiperRef, isSwipingRef, isSwiping, collapsedH 
+  isMobile, isFs, toggleFullscreen, mainSwiperRef, parentVerticalSwiperRef, isSwipingRef, isSwiping, setIsSwiping, setVideoPreviewUrl, collapsedH 
 }) => {
   const [thumbsSwiper, setThumbsSwiper] = React.useState(null);
   const [activeIdx, setActiveIdx] = React.useState(0);
@@ -1452,7 +1431,7 @@ const MediaContent = React.memo(({
           touchReleaseOnEdges={true}
           observer={true}
           observeParents={true}
-          cssMode={true} // Переход на нативный режим (CSS Scroll Snap)
+          cssMode={isMobile} // Нативный скролл только для мобильных
           navigation={false}
           zoom={{ maxRatio: 3 }}
           spaceBetween={12} slidesPerView={1}
@@ -1460,24 +1439,15 @@ const MediaContent = React.memo(({
             setIsSwiping(true);
             if (isSwipingRef) isSwipingRef.current = true;
             if (glassPanelRef.current) glassPanelRef.current.style.backdropFilter = "none";
-            if (parentVerticalSwiperRef?.current) {
-              parentVerticalSwiperRef.current.allowTouchMove = false;
-            }
           }}
           onTouchEnd={() => {
             setIsSwiping(false);
             if (isSwipingRef) isSwipingRef.current = false;
             if (glassPanelRef.current) glassPanelRef.current.style.backdropFilter = "blur(8px)";
-            if (parentVerticalSwiperRef?.current) {
-              parentVerticalSwiperRef.current.allowTouchMove = true;
-            }
           }}
           onTransitionEnd={() => {
             if (isSwipingRef) isSwipingRef.current = false;
             if (glassPanelRef.current) glassPanelRef.current.style.backdropFilter = "blur(8px)";
-            if (parentVerticalSwiperRef?.current) {
-              parentVerticalSwiperRef.current.allowTouchMove = true;
-            }
           }}
            onActiveIndexChange={(s) => {
             if (activeIdx !== s.activeIndex) {
@@ -1487,7 +1457,7 @@ const MediaContent = React.memo(({
           style={{ 
             width: "100%", 
             height: isMobile ? `calc(100% - ${collapsedH}px)` : "100%",
-            touchAction: "pan-y !important",
+            touchAction: "none", // Позволяем Swiper самому управлять жестами
             "--swiper-pagination-color": "#fff",
             "--swiper-pagination-bottom": "20px",
           }}
@@ -1504,7 +1474,28 @@ const MediaContent = React.memo(({
             >
               <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
                 {f.type === "video" ? (
-                  <VideoPlayerCustom src={f.src} name={f.name} collapsedH={collapsedH} />
+                  <Box 
+                    onClick={() => setVideoPreviewUrl(f.src)}
+                    sx={{ 
+                      width: "100%", height: "100%", 
+                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                      bgcolor: "#111", cursor: "pointer", position: "relative"
+                    }}
+                  >
+                    <Box sx={{
+                      p: 3, borderRadius: "50%", 
+                      bgcolor: "rgba(255,255,255,0.1)", 
+                      backdropFilter: "blur(12px)", 
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      transition: "transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+                      "&:hover": { transform: "scale(1.1)" }
+                    }}>
+                      <PlayArrowIcon sx={{ color: "#fff", fontSize: 64 }} />
+                    </Box>
+                    <Typography sx={{ color: "rgba(255,255,255,0.7)", mt: 2, fontWeight: 700, fontSize: 13, letterSpacing: 0.5 }}>
+                      СМОТРЕТЬ ВИДЕО
+                    </Typography>
+                  </Box>
                 ) : (
                   <img alt={f.name} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                 )}
