@@ -359,9 +359,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const [itemLoading, setItemLoading] = React.useState(false);
   const [itemError, setItemError] = React.useState("");
   const [activeItemId, setActiveItemId] = React.useState(null);
-  const [item, setItem] = React.useState(null); 
-  const [images, setImages] = React.useState([]); 
-  const [mediaMap, setMediaMap] = React.useState({}); 
+  const [itemsMap, setItemsMap] = React.useState({});
+  const [mediaMap, setMediaMap] = React.useState({});
   const [problemsAnchorEl, setProblemsAnchorEl] = React.useState(null);
   const [problemsPopoverList, setProblemsPopoverList] = React.useState([]);
   const [problemsPopoverTitle, setProblemsPopoverTitle] = React.useState("");
@@ -370,7 +369,6 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const mainSwiperRef = React.useRef(null);
   const [isFs, setIsFs] = React.useState(false);
   const [fsFallback, setFsFallback] = React.useState(false);
-  const [thumbsSwiper, setThumbsSwiper] = React.useState(null);
   const detailsCacheRef = React.useRef(new Map());
   const requestSeqRef = React.useRef(0);
   const monthInputRef = React.useRef(null);
@@ -382,6 +380,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const contentRef = React.useRef(null);
   const [collapsedH, setCollapsedH] = React.useState(112);
   const [expandedH, setExpandedH] = React.useState(360);
+  const [isAnimating, setIsAnimating] = React.useState(false);
+  const isAnimatingRef = React.useRef(false);
 
   const BODY_GAP_EXP = 10;
   const PB_COLL = 10;
@@ -414,13 +414,15 @@ export default function ManagerPreview({ userProfile, onBack }) {
   }, []);
 
   const applyHeights = React.useCallback(() => {
+      if (isAnimatingRef.current) return;
       const { collapsedFinal, expandedFinal } = computeHeightsNow();
-      setCollapsedH(collapsedFinal);
-      setExpandedH(expandedFinal);
+      
+      setCollapsedH((prev) => (Math.abs(prev - collapsedFinal) > 2 ? collapsedFinal : prev));
+      setExpandedH((prev) => (Math.abs(prev - expandedFinal) > 2 ? expandedFinal : prev));
   }, [computeHeightsNow]);
 
   React.useLayoutEffect(() => {
-      if (!item) return;
+      if (!itemsMap[activeItemId]) return;
       let raf = 0;
       let tries = 0;
       const tick = () => {
@@ -433,7 +435,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
       };
       tick();
       return () => cancelAnimationFrame(raf);
-  }, [item, applyHeights]);
+  }, [itemsMap, activeItemId, applyHeights]);
 
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 1200px)");
@@ -449,14 +451,20 @@ export default function ManagerPreview({ userProfile, onBack }) {
   }, []);
 
   React.useEffect(() => {
-      const onResize = () => applyHeights();
+      const onResize = () => {
+        if (!isAnimatingRef.current) applyHeights();
+      };
       window.addEventListener("resize", onResize);
-      document.fonts?.ready?.then(applyHeights).catch(() => { });
+      document.fonts?.ready?.then(() => {
+        if (!isAnimatingRef.current) applyHeights();
+      }).catch(() => { });
       return () => window.removeEventListener("resize", onResize);
   }, [applyHeights]);
 
   React.useEffect(() => {
-      const ro = new ResizeObserver(() => applyHeights());
+      const ro = new ResizeObserver(() => {
+        if (!isAnimatingRef.current) applyHeights();
+      });
       handleRef.current && ro.observe(handleRef.current);
       headerRef.current && ro.observe(headerRef.current);
       bodyRef.current && ro.observe(bodyRef.current);
@@ -464,8 +472,15 @@ export default function ManagerPreview({ userProfile, onBack }) {
   }, [applyHeights]);
 
   const handleToggle = React.useCallback(() => {
-      applyHeights();
+      isAnimatingRef.current = true;
+      setIsAnimating(true);
       setExpanded((v) => !v);
+      
+      setTimeout(() => {
+        applyHeights();
+        setIsAnimating(false);
+        isAnimatingRef.current = false;
+      }, 350); // Чуть больше чем CSS transition для гарантии
   }, [applyHeights]);
 
   const filteredItems = React.useMemo(() => {
@@ -484,8 +499,45 @@ export default function ManagerPreview({ userProfile, onBack }) {
     return sorted;
   }, [listItems, authorFilter, problemFilter, sortOrder]);
 
+  const mapItemData = (d) => {
+    const problemsArr = Array.isArray(d?.Problems?.results)
+      ? d.Problems.results
+      : d?.Problems ? [d.Problems] : [];
+    return {
+      Id: d?.Id,
+      THU: d?.THU ?? "",
+      DC_THU: d?.DC_THU ?? "",
+      RecipientRegion: d?.Recipient?.Title ?? "",
+      Recipient: d?.Recipient?.SCNumberText ?? "",
+      Warehouse: d?.Warehouse ?? "",
+      Location1: d?.Location1 ?? "",
+      Shipment: d?.Shipment ?? "",
+      WhNotEO: d?.WhNotEO ?? "",
+      Problems: problemsArr,
+      Author: d?.Author?.Title ?? "",
+      Created: d?.Created ?? "",
+    };
+  };
+
+  const mapAttachments = (results) => {
+    return results.map((f) => {
+      const name = f?.FileName || f?.Name || "unnamed";
+      const lowerName = name.toLowerCase();
+      const isImg = /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif)$/i.test(lowerName);
+      const isVid = /\.(mp4|webm|ogg|mov|m4v)(;|$)/i.test(lowerName);
+      if (!isImg && !isVid) return null;
+      const rel = pickServerRelUrl(f);
+      return {
+        name: name,
+        src: rel ? fileValueUrl(rel) : "",
+        type: isVid ? "video" : "image"
+      };
+    }).filter((x) => x && x.src);
+  };
+
   const prefetchItems = React.useCallback(async (currentId) => {
-    const idx = filteredItems.findIndex(x => x.Id === currentId);
+    if (!currentId) return;
+    const idx = filteredItems.findIndex(r => r.Id === currentId);
     if (idx === -1) return;
 
     const neighbors = [];
@@ -494,7 +546,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
     const neighborsToFetch = neighbors.filter(n => {
       const nid = n.Id;
-      return !(detailsCacheRef.current.has(nid) && mediaMap[nid]);
+      return !itemsMap[nid]; // Fetch only if we don't have full details
     });
 
     if (neighborsToFetch.length === 0) return;
@@ -503,61 +555,43 @@ export default function ManagerPreview({ userProfile, onBack }) {
       await Promise.all(neighborsToFetch.map(async (neighbor) => {
         const nid = neighbor.Id;
         try {
-          const resp = await apiClient.get(
-            `/web/lists/getbytitle('ProblemsPallet')/items(${nid})/AttachmentFiles`,
-            { headers: { Accept: "application/json;odata=verbose" } }
-          );
-          if (activeItemId !== currentId) return; // Прерываем, если пользователь уже переключился
+          const [itemResp, attResp] = await Promise.all([
+            apiClient.get(
+              `/web/lists/getbytitle('ProblemsPallet')/items(${nid})` +
+              `?$select=Id,THU,DC_THU,Location1,Shipment,WhNotEO,Problems,Warehouse,Created,` +
+              `Recipient/Id,Recipient/Title,Recipient/SCNumberText,Author/Title&$expand=Recipient,Author`,
+              { headers: { Accept: "application/json;odata=verbose" } }
+            ),
+            apiClient.get(
+              `/web/lists/getbytitle('ProblemsPallet')/items(${nid})/AttachmentFiles`,
+              { headers: { Accept: "application/json;odata=verbose" } }
+            )
+          ]);
 
-          const results = resp?.data?.d?.results ?? [];
-          const imgs = results.map(f => {
-            const name = f?.FileName || f.Name || "unnamed";
-            const rel = pickServerRelUrl(f);
-            const low = name.toLowerCase();
-            const isVid = /\.(mp4|webm|ogg|mov|m4v)(;|$)/i.test(low);
-            return {
-              name,
-              src: rel ? fileValueUrl(rel) : "",
-              type: isVid ? "video" : "image"
-            };
-          }).filter(x => x.src);
+          if (activeItemId !== currentId) return;
 
-          const oldCache = detailsCacheRef.current.get(nid) || {};
-          detailsCacheRef.current.set(nid, { ...oldCache, images: imgs });
-          setMediaMap(prev => (prev[nid] ? prev : { ...prev, [nid]: imgs }));
+          const d = itemResp?.data?.d;
+          if (!d) return;
+
+          const mapped = mapItemData(d);
+          const imgs = mapAttachments(attResp?.data?.d?.results ?? []);
+
+          setItemsMap(prev => prev[nid] ? prev : { ...prev, [nid]: mapped });
+          setMediaMap(prev => prev[nid] ? prev : { ...prev, [nid]: imgs });
+          detailsCacheRef.current.set(nid, { item: mapped, images: imgs, raw: d });
         } catch (e) {
-          console.warn("Soft prefetch error for", nid, e);
+          console.warn("Prefetch error for", nid, e);
         }
       }));
-    } catch (err) {
-      // Ignored for prefetch
-    }
-  }, [filteredItems, mediaMap, activeItemId]);
+    } catch (err) { }
+  }, [filteredItems, itemsMap, activeItemId]);
 
   const loadItemById = React.useCallback(async (id) => {
     if (!id) return null;
     setActiveItemId(id);
 
-    const cached = detailsCacheRef.current.get(id);
-    if (cached) {
-      setItem(cached.item);
-      setImages(cached.images);
-      setItemError("");
-      return cached.raw;
-    }
-
-    // --- Оптимистичный UI ---
-    const row = listItemsRef.current.find(r => r.Id === id);
-    if (row) {
-        setItem({
-            Id: row.Id,
-            THU: row.THU || "",
-            Author: row.Author || "",
-            Created: row.Created || "",
-            Problems: row.Problems || [],
-            DC_THU: "", Warehouse: "", Recipient: "", RecipientRegion: "", Location1: "", Shipment: "", WhNotEO: ""
-        });
-        setImages([]);
+    if (itemsMap[id] && mediaMap[id]) {
+      return itemsMap[id];
     }
 
     setItemLoading(true);
@@ -565,13 +599,12 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
     const requestSeq = ++requestSeqRef.current;
 
-    setTimeout(async () => {
-      try {
-        const [itemResp, attachmentsResp] = await Promise.all([
+    try {
+      const [itemResp, attachmentsResp] = await Promise.all([
         apiClient.get(
           `/web/lists/getbytitle('ProblemsPallet')/items(${id})` +
-            `?$select=Id,THU,DC_THU,Location1,Shipment,WhNotEO,Problems,Warehouse,Created,` +
-            `Recipient/Id,Recipient/Title,Recipient/SCNumberText,Author/Title&$expand=Recipient,Author`,
+          `?$select=Id,THU,DC_THU,Location1,Shipment,WhNotEO,Problems,Warehouse,Created,` +
+          `Recipient/Id,Recipient/Title,Recipient/SCNumberText,Author/Title&$expand=Recipient,Author`,
           { headers: { Accept: "application/json;odata=verbose" } }
         ),
         apiClient.get(
@@ -584,67 +617,24 @@ export default function ManagerPreview({ userProfile, onBack }) {
       const d = itemResp?.data?.d;
       if (!d) throw new Error("Элемент не найден");
 
-      const problemsArr = Array.isArray(d?.Problems?.results)
-        ? d.Problems.results
-        : d?.Problems
-          ? [d.Problems]
-          : [];
+      const mappedItem = mapItemData(d);
+      const imgs = mapAttachments(attachmentsResp?.data?.d?.results ?? []);
 
-      const mappedItem = {
-        Id: d?.Id,
-        THU: d?.THU ?? "",
-        DC_THU: d?.DC_THU ?? "",
-        RecipientRegion: d?.Recipient?.Title ?? "",
-        Recipient: d?.Recipient?.SCNumberText ?? "",
-        Warehouse: d?.Warehouse ?? "",
-        Location1: d?.Location1 ?? "",
-        Shipment: d?.Shipment ?? "",
-        WhNotEO: d?.WhNotEO ?? "",
-        Problems: problemsArr,
-        Author: d?.Author?.Title ?? "",
-        Created: d?.Created ?? "",
-      };
-      const results = attachmentsResp?.data?.d?.results ?? [];
-      const imgs = results
-        .map((f) => {
-          const name = f?.FileName || f?.Name || f?.FileLeafRef || "unnamed";
-          const lowerName = name.toLowerCase();
-          const isImg = /\.(jpe?g|png|webp|gif|bmp|tiff?|heic|heif)$/i.test(lowerName);
-          const isVid = /\.(mp4|webm|ogg|mov|m4v)(;|$)/i.test(lowerName);
-          
-          if (!isImg && !isVid) return null;
-
-          const rel = pickServerRelUrl(f);
-          return {
-            name: name,
-            src: rel ? fileValueUrl(rel) : "",
-            serverRelativeUrl: rel,
-            type: isVid ? "video" : "image"
-          };
-        })
-        .filter((x) => x && x.src);
-
-      detailsCacheRef.current.set(id, { item: mappedItem, images: imgs, raw: d });
-
-      setItem(mappedItem);
-      setImages(imgs);
+      setItemsMap(prev => ({ ...prev, [id]: mappedItem }));
       setMediaMap(prev => ({ ...prev, [id]: imgs }));
 
-      // Фоновая подгрузка соседей
       prefetchItems(id);
-      
       return d;
     } catch (error) {
       console.error(error);
       setItemError("Не удалось загрузить элемент или вложения.");
       return null;
-      } finally {
-        if (requestSeq === requestSeqRef.current) {
-          setItemLoading(false);
-        }
+    } finally {
+      if (requestSeq === requestSeqRef.current) {
+        setItemLoading(false);
       }
-    }, 0);
-  }, []);
+    }
+  }, [itemsMap, mediaMap, prefetchItems]);
 
   const loadMonthItems = React.useCallback(async (pType, pValue) => {
     if (!pValue) return;
@@ -698,6 +688,9 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
       setListItems(rows);
       listItemsRef.current = rows;
+      if (rows.length > 0) {
+        loadItemById(rows[0].Id);
+      }
       setAuthorOptions(authors);
       setProblemOptions(problems);
     } catch (error) {
@@ -950,10 +943,10 @@ export default function ManagerPreview({ userProfile, onBack }) {
   // --- ВСПОМОГАТЕЛЬНЫЕ РЕНДЕРЫ ---
 
   const renderMediaArea = (targetId) => {
+    const slideItem = itemsMap[targetId];
+    const slideImages = mediaMap[targetId] || [];
     const isSlideActive = targetId === activeItemId;
-    const slideItem = item?.Id === targetId ? (item || EMPTY_ARRAY) : (filteredItems.find(x => x.Id === targetId) || EMPTY_ARRAY);
-    const slideImages = mediaMap[targetId] || (item?.Id === targetId ? images : EMPTY_ARRAY);
-    const isSlideLoading = !!(itemLoading && item?.Id === targetId && slideImages.length === 0);
+    const isSlideLoading = itemLoading && isSlideActive;
 
     return (
       <MediaContent 
@@ -962,20 +955,19 @@ export default function ManagerPreview({ userProfile, onBack }) {
         itemData={slideItem}
         slideImages={slideImages}
         isSlideLoading={isSlideLoading}
-        itemError={item?.Id === targetId ? itemError : ""}
+        itemError={activeItemId === targetId ? itemError : ""}
         isMobile={isMobile}
         isFs={isSlideActive ? isFs : false}
         toggleFullscreen={isSlideActive ? toggleFullscreen : null}
         mainSwiperRef={mainSwiperRef}
-        thumbsSwiper={isSlideActive ? thumbsSwiper : null}
-        setThumbsSwiper={isSlideActive ? setThumbsSwiper : null}
         isSwiping={isSlideActive ? isSwiping : false}
+        collapsedH={collapsedH}
       />
     );
   };
 
   const renderInfoPanel = () => {
-    if (!item) return null;
+    if (!itemsMap[activeItemId]) return null;
     return (
       <Box sx={{ position: "relative", width: "100%", display: "flex", justifyContent: "center", zIndex: 10, touchAction: "none" }}>
         <Box
@@ -984,16 +976,24 @@ export default function ManagerPreview({ userProfile, onBack }) {
           onClick={handleToggle}
           sx={{
             width: isMobile ? "100%" : { xs: "100%", md: "90%" },
-            height: expanded ? `${expandedH}px` : `${collapsedH}px`,
+            // Контейнер теперь всегда имеет полную высоту раскрытого состояния,
+            // но мы будем «прятать» его часть за пределы видимости или использовать translateY
+            height: `${expandedH}px`,
+            position: "absolute",
+            bottom: 0,
+            left: "50%",
+            transform: `translateX(-50%) translateY(${expanded ? 0 : (expandedH - collapsedH)}px)`,
+            transition: "transform 280ms cubic-bezier(0.4, 0, 0.2, 1), backdrop-filter 0.2s ease",
             bgcolor: "rgba(10, 10, 10, 0.3)",
             border: "1px solid rgba(255,255,255,0.4)",
             borderBottom: "none",
             borderRadius: isMobile ? "0" : "28px 28px 0 0",
-            backdropFilter: isSwiping ? "none" : "blur(20px) saturate(150%)",
-            transition: "height 280ms ease, backdrop-filter 0.2s ease",
+            backdropFilter: (isSwiping || isAnimating) ? "none" : "blur(20px) saturate(150%)",
             overflow: "hidden",
             cursor: "pointer",
             boxSizing: "border-box",
+            willChange: "transform",
+            zIndex: 10
           }}
         >
           <Box ref={handleRef} sx={{ display: "flex", justifyContent: "center", pt: 1, pb: 1.25 }}>
@@ -1001,7 +1001,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
           </Box>
 
           <InfoPanelContent 
-            item={item} 
+            item={itemsMap[activeItemId]} 
             expanded={expanded} 
             contentRef={contentRef}
             headerRef={headerRef}
@@ -1052,7 +1052,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
                 direction="vertical"
                 slidesPerView={1}
                 style={{ width: "100%", height: "100%" }}
-                initialSlide={Math.max(0, filteredItems.findIndex(r => r.Id === activeItemId))}
+                initialSlide={0}
                 onSlideChangeTransitionStart={() => setIsSwiping(true)}
                 onSlideChangeTransitionEnd={() => setIsSwiping(false)}
                 onSlideChange={(s) => {
@@ -1313,7 +1313,15 @@ const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bo
         </Box>
       </Box>
 
-      <Box ref={bodyRef} sx={{ mt: expanded ? `${BODY_GAP_EXP}px` : 0, visibility: expanded ? "visible" : "hidden", pointerEvents: expanded ? "auto" : "none" }}>
+      <Box 
+        ref={bodyRef} 
+        sx={{ 
+          mt: `${BODY_GAP_EXP}px`, // Теперь отступ постоянен, чтобы макет не «прыгал» при клике
+          opacity: expanded ? 1 : 0, 
+          transition: "opacity 0.2s ease",
+          pointerEvents: expanded ? "auto" : "none" 
+        }}
+      >
         <Grid container spacing={1}>
           <Grid item xs={12} sm={6}><FieldCompact label="Автор" value={item.Author} /></Grid>
           <Grid item xs={12} sm={6}><FieldCompact label="Создан" value={prettyDate(item.Created)} /></Grid>
@@ -1336,8 +1344,10 @@ const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bo
 // --- МЕМОИЗИРОВАННЫЙ КОМПОНЕНТ ДЛЯ СЛАЙДА ---
 const MediaContent = React.memo(({ 
   targetId, isSlideActive, itemData, slideImages, isSlideLoading, itemError, 
-  isMobile, isFs, toggleFullscreen, mainSwiperRef, thumbsSwiper, setThumbsSwiper, isSwiping 
+  isMobile, isFs, toggleFullscreen, mainSwiperRef, isSwiping, collapsedH 
 }) => {
+  const [thumbsSwiper, setThumbsSwiper] = React.useState(null);
+
   if (!itemData) {
     return (
       <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}>
@@ -1356,6 +1366,27 @@ const MediaContent = React.memo(({
     );
   }
 
+  // --- РЕЖИМ ЛЕГКОГО ПРЕВЬЮ ДЛЯ СОСЕДНИХ СЛАЙДОВ (ОПТИМИЗАЦИЯ СВАЙПА) ---
+  if (!isSlideActive) {
+    const firstMedia = slideImages[0];
+    return (
+      <Box sx={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "#000" }}>
+        {!firstMedia ? (
+          <CircularProgress size={30} sx={{ opacity: 0.3 }} />
+        ) : firstMedia.type === "video" ? (
+          <PlayCircleOutlineIcon sx={{ color: "rgba(255,255,255,0.4)", fontSize: 60 }} />
+        ) : (
+          <img 
+            src={firstMedia.src} 
+            alt="preview" 
+            style={{ width: "100%", height: "100%", objectFit: "contain", opacity: 0.6 }} 
+          />
+        )}
+      </Box>
+    );
+  }
+
+  // --- ПОЛНОЦЕННЫЙ ИНТЕРАКТИВНЫЙ РЕЖИМ ТОЛЬКО ДЛЯ АКТИВНОГО СЛАЙДА ---
   return (
     <>
       {isSlideLoading ? (
@@ -1372,14 +1403,24 @@ const MediaContent = React.memo(({
           modules={[Navigation, Pagination, Zoom, Thumbs]}
           navigation={true} pagination={{ clickable: true }} zoom={{ maxRatio: 3 }}
           spaceBetween={12} slidesPerView={1}
-          style={{ width: "100%", height: "100%" }}
+          style={{ 
+            width: "100%", 
+            height: isMobile ? `calc(100% - ${collapsedH}px)` : "100%", // «Зажимаем» область фото для мобильных
+            "--swiper-navigation-color": "#fff",
+            "--swiper-pagination-color": "#fff",
+            "--swiper-pagination-bottom": "20px", // Теперь точки навигации считаются от края «зажатой» области
+          }}
+          pagination={{ 
+            clickable: true,
+            dynamicBullets: true 
+          }}
           thumbs={isSlideActive && thumbsSwiper && !thumbsSwiper.destroyed ? { swiper: thumbsSwiper } : null}
         >
           {slideImages.map((f, i) => (
             <SwiperSlide key={i}>
               <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
                 {f.type === "video" ? (
-                  <VideoPlayerCustom src={f.src} name={f.name} collapsedH={0} />
+                  <VideoPlayerCustom src={f.src} name={f.name} collapsedH={collapsedH} />
                 ) : (
                   <img alt={f.name} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                 )}
@@ -1399,6 +1440,7 @@ const MediaContent = React.memo(({
             <Swiper 
               key={`thumbs-${targetId}`} className="thumbs-swiper" onSwiper={setThumbsSwiper} 
               modules={[FreeMode, Thumbs]} watchSlidesProgress freeMode slidesPerView="auto" spaceBetween={8} 
+              slideToClickedSlide={true} // Переход по клику на миниатюру
               style={{ padding: isMobile ? "2px" : "6px 4px" }}
             >
               {slideImages.map((f, i) => (
@@ -1426,8 +1468,7 @@ const MediaContent = React.memo(({
          prev.slideImages === next.slideImages &&
          prev.itemError === next.itemError &&
          prev.isFs === next.isFs &&
-         prev.isSwiping === next.isSwiping &&
-         prev.thumbsSwiper === next.thumbsSwiper;
+         prev.isSwiping === next.isSwiping;
 });
 
 

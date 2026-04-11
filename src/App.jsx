@@ -1393,7 +1393,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   };
 
   const canOpenManagerPreview =
-    isDesktopViewport &&
     String(userProfile.userTitle || "").trim().toLowerCase() === "начальник смены" &&
     String(userProfile.userDepartment || "").toLowerCase().includes("группа отгрузки");
 
