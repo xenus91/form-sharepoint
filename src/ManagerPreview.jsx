@@ -23,8 +23,10 @@ import {
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { Swiper, SwiperSlide } from "swiper/react";
-import { Navigation, Pagination, Zoom } from "swiper/modules";
+import { Pagination, Zoom, Thumbs, FreeMode } from "swiper/modules";
 import "swiper/css";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
@@ -94,9 +96,14 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
   const swiperRef = React.useRef(null);
   const [isFs, setIsFs] = React.useState(false);
+  const [swiperInstance, setSwiperInstance] = React.useState(null);
+  const [thumbsSwiper, setThumbsSwiper] = React.useState(null);
+  const [activeSlideIndex, setActiveSlideIndex] = React.useState(0);
   const detailsCacheRef = React.useRef(new Map());
   const requestSeqRef = React.useRef(0);
   const monthInputRef = React.useRef(null);
+  const listContainerRef = React.useRef(null);
+  const itemNodeMapRef = React.useRef(new Map());
 
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 1200px)");
@@ -111,6 +118,14 @@ export default function ManagerPreview({ userProfile, onBack }) {
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
+  React.useEffect(() => {
+    if (!swiperInstance) return;
+    if (activeSlideIndex >= images.length) {
+      setActiveSlideIndex(0);
+      swiperInstance.slideTo(0, 0);
+    }
+  }, [activeSlideIndex, images.length, swiperInstance]);
+
   const loadItemById = React.useCallback(async (id) => {
     if (!id) return null;
     setActiveItemId(id);
@@ -119,6 +134,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
     if (cached) {
       setItem(cached.item);
       setImages(cached.images);
+      setActiveSlideIndex(0);
       setItemError("");
       return cached.raw;
     }
@@ -179,6 +195,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
 
       setItem(mappedItem);
       setImages(imgs);
+      setActiveSlideIndex(0);
       return d;
     } catch (error) {
       console.error(error);
@@ -273,6 +290,67 @@ export default function ManagerPreview({ userProfile, onBack }) {
     });
     return sorted;
   }, [listItems, authorFilter, problemFilter, sortOrder]);
+
+  React.useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowLeft" &&
+        event.key !== "ArrowRight"
+      ) return;
+      const tag = String(event.target?.tagName || "").toLowerCase();
+      const isEditable =
+        tag === "input" || tag === "textarea" || event.target?.isContentEditable;
+      if (isEditable) return;
+
+      if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && images.length > 1) {
+        event.preventDefault();
+        if (event.key === "ArrowLeft") {
+          swiperInstance?.slidePrev();
+        } else {
+          swiperInstance?.slideNext();
+        }
+        return;
+      }
+
+      if (filteredItems.length === 0) return;
+
+      const currentIndex = filteredItems.findIndex((row) => row.Id === activeItemId);
+      const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex =
+        event.key === "ArrowDown"
+          ? Math.min(filteredItems.length - 1, safeIndex + 1)
+          : Math.max(0, safeIndex - 1);
+      const nextItem = filteredItems[nextIndex];
+      if (nextItem && nextItem.Id !== activeItemId) {
+        event.preventDefault();
+        loadItemById(nextItem.Id);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [filteredItems, activeItemId, loadItemById, images.length, swiperInstance]);
+
+  React.useEffect(() => {
+    if (!activeItemId) return;
+    const container = listContainerRef.current;
+    const itemNode = itemNodeMapRef.current.get(activeItemId);
+    if (!container || !itemNode) return;
+
+    const cRect = container.getBoundingClientRect();
+    const iRect = itemNode.getBoundingClientRect();
+    const isFullyVisible = iRect.top >= cRect.top && iRect.bottom <= cRect.bottom;
+
+    if (!isFullyVisible) {
+      itemNode.scrollIntoView({
+        block: "end",
+        inline: "nearest",
+        behavior: "smooth",
+      });
+    }
+  }, [activeItemId, filteredItems]);
 
   const toggleFullscreen = () => {
     const el = swiperRef.current;
@@ -369,11 +447,14 @@ export default function ManagerPreview({ userProfile, onBack }) {
           </Box>
         ) : (
           <Swiper
-            modules={[Navigation, Pagination, Zoom]}
-            navigation
+            modules={[Pagination, Zoom, Thumbs]}
+            onSwiper={setSwiperInstance}
+            onSlideChange={(swiper) => setActiveSlideIndex(swiper.activeIndex || 0)}
             pagination={{ clickable: true }}
             zoom={{ maxRatio: 3 }}
             slidesPerView={1}
+            speed={280}
+            thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : null }}
             style={{ width: "100%", height: "100%" }}
           >
             {images.map((f, i) => (
@@ -388,6 +469,115 @@ export default function ManagerPreview({ userProfile, onBack }) {
               </SwiperSlide>
             ))}
           </Swiper>
+        )}
+
+        {item && images.length > 1 && (
+          <Box
+            sx={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: 12,
+              zIndex: 6,
+              display: "flex",
+              justifyContent: "center",
+              pointerEvents: "none",
+            }}
+          >
+            <Box
+              sx={{
+                pointerEvents: "auto",
+                bgcolor: "rgba(0,0,0,0.35)",
+                border: "1px solid rgba(255,255,255,0.35)",
+                backdropFilter: "blur(8px) saturate(140%)",
+                WebkitBackdropFilter: "blur(8px) saturate(140%)",
+                borderRadius: "12px",
+                px: 1,
+                py: 0.5,
+                maxWidth: "min(90vw, 680px)",
+              }}
+            >
+              <Swiper
+                className="manager-thumbs-swiper"
+                onSwiper={setThumbsSwiper}
+                modules={[FreeMode, Thumbs]}
+                watchSlidesProgress
+                freeMode
+                slidesPerView="auto"
+                spaceBetween={8}
+                style={{ padding: "6px 4px" }}
+              >
+                {images.map((f, i) => (
+                  <SwiperSlide key={`manager-thumb-${i}`} style={{ width: 72, height: 72 }}>
+                    <img
+                      src={f.src}
+                      alt={f.name || `Миниатюра ${i + 1}`}
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        borderRadius: 8,
+                        display: "block",
+                      }}
+                    />
+                  </SwiperSlide>
+                ))}
+              </Swiper>
+            </Box>
+          </Box>
+        )}
+
+        {item && images.length > 1 && (
+          <>
+            {activeSlideIndex > 0 && (
+              <IconButton
+                onClick={(event) => {
+                  event.stopPropagation();
+                  swiperInstance?.slidePrev();
+                }}
+                sx={{
+                  position: "absolute",
+                  left: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  zIndex: 7,
+                  bgcolor: "rgba(0,0,0,0.42)",
+                  color: "#fff",
+                  "&:hover": { bgcolor: "rgba(0,0,0,0.58)" },
+                  "&:focus, &:focus-visible": {
+                    outline: "none",
+                    boxShadow: "none",
+                  },
+                }}
+              >
+                <ChevronLeftIcon />
+              </IconButton>
+            )}
+            {activeSlideIndex < images.length - 1 && (
+              <IconButton
+                onClick={(event) => {
+                  event.stopPropagation();
+                  swiperInstance?.slideNext();
+                }}
+                sx={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  zIndex: 7,
+                  bgcolor: "rgba(0,0,0,0.42)",
+                  color: "#fff",
+                  "&:hover": { bgcolor: "rgba(0,0,0,0.58)" },
+                  "&:focus, &:focus-visible": {
+                    outline: "none",
+                    boxShadow: "none",
+                  },
+                }}
+              >
+                <ChevronRightIcon />
+              </IconButton>
+            )}
+          </>
         )}
 
         {item && (
@@ -421,7 +611,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
               display: "flex",
               justifyContent: "center",
               px: 1.5,
-              pb: 0.75,
+              pb: 0,
               pointerEvents: "none",
             }}
           >
@@ -618,6 +808,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
         </Box>
 
         <Box
+          ref={listContainerRef}
           sx={{
             p: 1.5,
             flex: 1,
@@ -653,6 +844,10 @@ export default function ManagerPreview({ userProfile, onBack }) {
             filteredItems.map((row) => (
               <Paper
                 key={row.Id}
+                ref={(node) => {
+                  if (node) itemNodeMapRef.current.set(row.Id, node);
+                  else itemNodeMapRef.current.delete(row.Id);
+                }}
                 onClick={() => loadItemById(row.Id)}
                 sx={{
                   p: 1.25,
@@ -749,6 +944,19 @@ export default function ManagerPreview({ userProfile, onBack }) {
           ))}
         </Stack>
       </Popover>
+
+      <style>{`
+        .manager-thumbs-swiper .swiper-slide {
+          opacity: 0.65;
+          outline: 1px solid rgba(255,255,255,0.35);
+          border-radius: 8px;
+          overflow: hidden;
+        }
+        .manager-thumbs-swiper .swiper-slide-thumb-active {
+          opacity: 1;
+          outline: 2px solid #fff;
+        }
+      `}</style>
     </Box>
   );
 }
