@@ -214,16 +214,15 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
       <video
         ref={videoRef}
         src={src}
-        controls
         playsInline
         webkit-playsinline="true"
-        preload="metadata"
+        preload="auto"
         muted={isMuted}
         controlsList="nodownload"
         className="swiper-no-swiping"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "auto" }}
+        style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "none" }}
       />
       
       {/* Central Overlay for Interaction */}
@@ -237,7 +236,7 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
           justifyContent: "center",
           cursor: "pointer",
           zIndex: 2,
-          bottom: "60px" // Leave space for native controls
+          bottom: 0 
         }}
       >
         {(!playing || showIcon) && (
@@ -718,14 +717,6 @@ export default function ManagerPreview({ userProfile, onBack }) {
     loadMonthItems(periodType, periodValue);
   }, [allowed, periodType, periodValue, loadMonthItems]);
 
-  React.useEffect(() => {
-    if (activeItemId) {
-      const el = document.getElementById(`manager-item-${activeItemId}`);
-      if (el && el.scrollIntoView) {
-        el.scrollIntoView({ behavior: "auto", block: "nearest" });
-      }
-    }
-  }, [activeItemId]);
 
   React.useEffect(() => {
     const handleKeyDown = (e) => {
@@ -1065,7 +1056,11 @@ export default function ManagerPreview({ userProfile, onBack }) {
                 touchReleaseOnEdges={true}
                 preventInteractionOnTransition={true}
                 modules={[Virtual]}
-                virtual={true}
+                virtual={{ 
+                  enabled: true, 
+                  addSlidesBefore: 2, 
+                  addSlidesAfter: 2
+                }}
                 style={{ width: "100%", height: "100%" }}
                 initialSlide={0}
                 onSwiper={(s) => { parentVerticalSwiperRef.current = s; }}
@@ -1077,10 +1072,16 @@ export default function ManagerPreview({ userProfile, onBack }) {
                    setIsSwiping(false);
                    isSwipingRef.current = false;
                    applyHeights(); // Пересчитываем высоту ТОЛЬКО в конце свайпа
+                   
+                   // Загружаем данные только когда слайд ПОЛНОСТЬЮ ОСТАНОВИЛСЯ
+                   if (parentVerticalSwiperRef.current) {
+                     const idx = parentVerticalSwiperRef.current.activeIndex;
+                     const target = filteredItems[idx];
+                     if (target && target.Id !== activeItemId) loadItemById(target.Id);
+                   }
                 }}
                 onSlideChange={(s) => {
-                  const target = filteredItems[s.activeIndex];
-                  if (target) loadItemById(target.Id);
+                  // Пусто. Мы перенесли загрузку в TransitionEnd для стабильности Safari
                 }}
               >
                 {(() => {
@@ -1382,6 +1383,14 @@ const MediaContent = React.memo(({
   const localSwiperRef = React.useRef(null);
   const glassPanelRef = React.useRef(null);
 
+  // ПРИНУДИТЕЛЬНЫЙ СБРОС: при смене сотрудника всегда возвращаемся к 1-й фотографии
+  React.useEffect(() => {
+    setActiveIdx(0);
+    if (localSwiperRef.current) {
+      localSwiperRef.current.slideTo(0, 0);
+    }
+  }, [targetId]);
+
   if (!itemData) {
     return (
       <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center" }}>
@@ -1438,8 +1447,7 @@ const MediaContent = React.memo(({
               localSwiperRef.current = s;
               if (isSlideActive) mainSwiperRef.current = s; 
             }}
-          modules={[Zoom, Virtual]}
-          virtual={true}
+          modules={[Zoom]}
           nested={true}
           touchReleaseOnEdges={true}
           observer={true}
@@ -1471,7 +1479,7 @@ const MediaContent = React.memo(({
               parentVerticalSwiperRef.current.allowTouchMove = true;
             }
           }}
-          onSlideChange={(s) => {
+           onActiveIndexChange={(s) => {
             if (activeIdx !== s.activeIndex) {
               setActiveIdx(s.activeIndex);
             }
@@ -1488,7 +1496,6 @@ const MediaContent = React.memo(({
           {slideImages.map((f, i) => (
             <SwiperSlide 
               key={i}
-              virtualIndex={i}
               style={{
                 width: "100%", height: "100%",
                 WebkitBackfaceVisibility: "hidden",
