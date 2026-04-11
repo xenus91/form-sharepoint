@@ -39,7 +39,8 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import SortIcon from "@mui/icons-material/Sort";
 import SwapVertIcon from "@mui/icons-material/SwapVert";
 import { Swiper, SwiperSlide } from "swiper/react";
-import { Navigation, Pagination, Zoom, FreeMode, Thumbs } from "swiper/modules";
+import { Navigation, Pagination, Zoom, FreeMode, Thumbs, Virtual } from "swiper/modules";
+import "swiper/css/virtual";
 import "swiper/css";
 import "swiper/css/navigation";
 import "swiper/css/pagination";
@@ -215,6 +216,8 @@ const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
         src={src}
         controls
         playsInline
+        webkit-playsinline="true"
+        preload="metadata"
         muted={isMuted}
         controlsList="nodownload"
         className="swiper-no-swiping"
@@ -382,6 +385,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const [expandedH, setExpandedH] = React.useState(360);
   const [isAnimating, setIsAnimating] = React.useState(false);
   const isAnimatingRef = React.useRef(false);
+  const isSwipingRef = React.useRef(false);
+  const parentVerticalSwiperRef = React.useRef(null);
 
   const BODY_GAP_EXP = 10;
   const PB_COLL = 10;
@@ -414,11 +419,11 @@ export default function ManagerPreview({ userProfile, onBack }) {
   }, []);
 
   const applyHeights = React.useCallback(() => {
-      if (isAnimatingRef.current) return;
-      const { collapsedFinal, expandedFinal } = computeHeightsNow();
-      
-      setCollapsedH((prev) => (Math.abs(prev - collapsedFinal) > 2 ? collapsedFinal : prev));
-      setExpandedH((prev) => (Math.abs(prev - expandedFinal) > 2 ? expandedFinal : prev));
+    if (isAnimatingRef.current || isSwipingRef.current) return;
+    const { collapsedFinal, expandedFinal } = computeHeightsNow();
+    
+    setCollapsedH((prev) => (Math.abs(prev - collapsedFinal) > 2 ? collapsedFinal : prev));
+    setExpandedH((prev) => (Math.abs(prev - expandedFinal) > 2 ? expandedFinal : prev));
   }, [computeHeightsNow]);
 
   React.useLayoutEffect(() => {
@@ -960,6 +965,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
         isFs={isSlideActive ? isFs : false}
         toggleFullscreen={isSlideActive ? toggleFullscreen : null}
         mainSwiperRef={mainSwiperRef}
+        parentVerticalSwiperRef={parentVerticalSwiperRef}
+        isSwipingRef={isSwipingRef} // Передаем реф для блокировки высоты
         isSwiping={isSlideActive ? isSwiping : false}
         collapsedH={collapsedH}
       />
@@ -1051,10 +1058,26 @@ export default function ManagerPreview({ userProfile, onBack }) {
               <Swiper
                 direction="vertical"
                 slidesPerView={1}
+                speed={350} 
+                threshold={10} 
+                longSwipesRatio={0.4} 
+                followFinger={true}
+                touchReleaseOnEdges={true}
+                preventInteractionOnTransition={true}
+                modules={[Virtual]}
+                virtual={true}
                 style={{ width: "100%", height: "100%" }}
                 initialSlide={0}
-                onSlideChangeTransitionStart={() => setIsSwiping(true)}
-                onSlideChangeTransitionEnd={() => setIsSwiping(false)}
+                onSwiper={(s) => { parentVerticalSwiperRef.current = s; }}
+                onSlideChangeTransitionStart={() => {
+                   setIsSwiping(true);
+                   isSwipingRef.current = true;
+                }}
+                onSlideChangeTransitionEnd={() => {
+                   setIsSwiping(false);
+                   isSwipingRef.current = false;
+                   applyHeights(); // Пересчитываем высоту ТОЛЬКО в конце свайпа
+                }}
                 onSlideChange={(s) => {
                   const target = filteredItems[s.activeIndex];
                   if (target) loadItemById(target.Id);
@@ -1065,7 +1088,15 @@ export default function ManagerPreview({ userProfile, onBack }) {
                   return filteredItems.map((row, index) => {
                     const isNear = Math.abs(index - cIdx) <= 1;
                     return (
-                      <SwiperSlide key={row.Id} style={{ height: "100%" }}>
+                      <SwiperSlide 
+                        key={row.Id} 
+                        virtualIndex={index}
+                        style={{ 
+                          height: "100%",
+                          WebkitBackfaceVisibility: "hidden",
+                          transform: "translate3d(0,0,0)"
+                        }}
+                      >
                         <Box sx={{ width: "100%", height: "100%", position: "relative" }}>
                           {isNear ? renderMediaArea(row.Id) : (
                             <Box sx={{ width: "100%", height: "100%", display: "grid", placeItems: "center", bgcolor: "#000" }}>
@@ -1344,9 +1375,12 @@ const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bo
 // --- МЕМОИЗИРОВАННЫЙ КОМПОНЕНТ ДЛЯ СЛАЙДА ---
 const MediaContent = React.memo(({ 
   targetId, isSlideActive, itemData, slideImages, isSlideLoading, itemError, 
-  isMobile, isFs, toggleFullscreen, mainSwiperRef, isSwiping, collapsedH 
+  isMobile, isFs, toggleFullscreen, mainSwiperRef, parentVerticalSwiperRef, isSwipingRef, isSwiping, collapsedH 
 }) => {
   const [thumbsSwiper, setThumbsSwiper] = React.useState(null);
+  const [activeIdx, setActiveIdx] = React.useState(0);
+  const localSwiperRef = React.useRef(null);
+  const glassPanelRef = React.useRef(null);
 
   if (!itemData) {
     return (
@@ -1398,26 +1432,69 @@ const MediaContent = React.memo(({
           <Typography sx={{ color: "white", opacity: 0.7, fontSize: 13 }}>Вложения не найдены</Typography>
         </Box>
       ) : (
-        <Swiper
-          onSwiper={(s) => { if (isSlideActive) mainSwiperRef.current = s; }}
-          modules={[Navigation, Pagination, Zoom, Thumbs]}
-          navigation={true} zoom={{ maxRatio: 3 }}
+        <Box sx={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
+          <Swiper
+            onSwiper={(s) => { 
+              localSwiperRef.current = s;
+              if (isSlideActive) mainSwiperRef.current = s; 
+            }}
+          modules={[Zoom, Virtual]}
+          virtual={true}
+          nested={true}
+          touchReleaseOnEdges={true}
+          observer={true}
+          observeParents={true}
+          cssMode={true} // Переход на нативный режим (CSS Scroll Snap)
+          navigation={false}
+          zoom={{ maxRatio: 3 }}
           spaceBetween={12} slidesPerView={1}
+          onTouchStart={() => {
+            setIsSwiping(true);
+            if (isSwipingRef) isSwipingRef.current = true;
+            if (glassPanelRef.current) glassPanelRef.current.style.backdropFilter = "none";
+            if (parentVerticalSwiperRef?.current) {
+              parentVerticalSwiperRef.current.allowTouchMove = false;
+            }
+          }}
+          onTouchEnd={() => {
+            setIsSwiping(false);
+            if (isSwipingRef) isSwipingRef.current = false;
+            if (glassPanelRef.current) glassPanelRef.current.style.backdropFilter = "blur(8px)";
+            if (parentVerticalSwiperRef?.current) {
+              parentVerticalSwiperRef.current.allowTouchMove = true;
+            }
+          }}
+          onTransitionEnd={() => {
+            if (isSwipingRef) isSwipingRef.current = false;
+            if (glassPanelRef.current) glassPanelRef.current.style.backdropFilter = "blur(8px)";
+            if (parentVerticalSwiperRef?.current) {
+              parentVerticalSwiperRef.current.allowTouchMove = true;
+            }
+          }}
+          onSlideChange={(s) => {
+            if (activeIdx !== s.activeIndex) {
+              setActiveIdx(s.activeIndex);
+            }
+          }}
           style={{ 
             width: "100%", 
-            height: isMobile ? `calc(100% - ${collapsedH}px)` : "100%", // «Зажимаем» область фото для мобильных
-            "--swiper-navigation-color": "#fff",
+            height: isMobile ? `calc(100% - ${collapsedH}px)` : "100%",
+            touchAction: "pan-y !important",
             "--swiper-pagination-color": "#fff",
-            "--swiper-pagination-bottom": "20px", // Теперь точки навигации считаются от края «зажатой» области
+            "--swiper-pagination-bottom": "20px",
           }}
-          pagination={{ 
-            clickable: true,
-            dynamicBullets: true 
-          }}
-          thumbs={isSlideActive && thumbsSwiper && !thumbsSwiper.destroyed ? { swiper: thumbsSwiper } : null}
+          pagination={false}
         >
           {slideImages.map((f, i) => (
-            <SwiperSlide key={i}>
+            <SwiperSlide 
+              key={i}
+              virtualIndex={i}
+              style={{
+                width: "100%", height: "100%",
+                WebkitBackfaceVisibility: "hidden",
+                transform: "translate3d(0,0,0)"
+              }}
+            >
               <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
                 {f.type === "video" ? (
                   <VideoPlayerCustom src={f.src} name={f.name} collapsedH={collapsedH} />
@@ -1428,34 +1505,84 @@ const MediaContent = React.memo(({
             </SwiperSlide>
           ))}
         </Swiper>
-      )}
 
-      {slideImages.length > 1 && isSlideActive && (
-        <Box sx={{ position: "absolute", left: 0, right: 0, top: isMobile ? 2 : 12, zIndex: 5, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
-          <Box sx={{ 
-            pointerEvents: "auto", bgcolor: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.15)", 
-            backdropFilter: (isMobile && isSwiping) ? "none" : "blur(8px)", borderRadius: "12px", px: isMobile ? 0.5 : 1, py: 0.5, maxWidth: "min(90vw, 680px)",
-            transition: "backdrop-filter 0.1s ease"
-          }}>
-            <Swiper 
-              key={`thumbs-${targetId}`} className="thumbs-swiper" onSwiper={setThumbsSwiper} 
-              modules={[FreeMode, Thumbs]} watchSlidesProgress freeMode slidesPerView="auto" spaceBetween={8} 
-              slideToClickedSlide={true} // Переход по клику на миниатюру
-              style={{ padding: isMobile ? "2px" : "6px 4px" }}
-            >
-              {slideImages.map((f, i) => (
-                <SwiperSlide key={`thumb-${targetId}-${i}`} style={{ width: isMobile ? 50 : 72, height: isMobile ? 50 : 72 }}>
-                  {f.type === "video" ? (
-                    <Box sx={{ width: "100%", height: "100%", bgcolor: "#000", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <PlayCircleOutlineIcon sx={{ color: "#fff", fontSize: isMobile ? 24 : 40 }} />
-                    </Box>
-                  ) : (
-                    <img src={f.src} alt="thumb" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 8, display: "block" }} />
-                  )}
-                </SwiperSlide>
-              ))}
-            </Swiper>
-          </Box>
+          {/* КАСТОМНЫЕ КНОПКИ НАВИГАЦИИ (ДЛЯ ИСКЛЮЧЕНИЯ ПЕРЕСКОКА) */}
+          {!isSlideLoading && slideImages.length > 1 && (
+            <>
+              <IconButton
+                onClick={(e) => { e.stopPropagation(); localSwiperRef.current?.slidePrev(); }}
+                sx={{
+                  position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", zIndex: 20,
+                  bgcolor: "rgba(0,0,0,0.45)", color: "#fff", backdropFilter: "blur(4px)",
+                  "&:hover": { bgcolor: "rgba(0,0,0,0.6)" },
+                  display: "flex",
+                  opacity: activeIdx === 0 ? 0 : 1, transition: "all 0.2s"
+                }}
+              >
+                <ArrowBackIcon />
+              </IconButton>
+              <IconButton
+                onClick={(e) => { e.stopPropagation(); localSwiperRef.current?.slideNext(); }}
+                sx={{
+                  position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", zIndex: 20,
+                  bgcolor: "rgba(0,0,0,0.45)", color: "#fff", backdropFilter: "blur(4px)",
+                  "&:hover": { bgcolor: "rgba(0,0,0,0.6)" },
+                  display: "flex",
+                  opacity: activeIdx === slideImages.length - 1 ? 0 : 1, transition: "all 0.2s"
+                }}
+              >
+                <ArrowBackIcon sx={{ transform: "rotate(180deg)" }} />
+              </IconButton>
+            </>
+          )}
+
+          {slideImages.length > 1 && isSlideActive && (
+            <Box sx={{ position: "absolute", left: 0, right: 0, top: isMobile ? 2 : 12, zIndex: 5, display: "flex", justifyContent: "center", pointerEvents: "none" }}>
+              <Box ref={glassPanelRef} sx={{ 
+                pointerEvents: "auto", bgcolor: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.15)", 
+                backdropFilter: "blur(8px)", borderRadius: "12px", px: isMobile ? 0.5 : 1, py: 0.5, maxWidth: "min(90vw, 680px)",
+                transition: "backdrop-filter 0.1s ease"
+              }}>
+                <Swiper 
+                  key={`thumbs-${targetId}`} className="thumbs-swiper" onSwiper={setThumbsSwiper} 
+                  modules={[FreeMode, Thumbs]} watchSlidesProgress freeMode slidesPerView="auto" spaceBetween={8} 
+                  slideToClickedSlide={true} // Переход по клику на миниатюру
+                  style={{ padding: isMobile ? "2px" : "6px 4px" }}
+                >
+                  {slideImages.map((f, i) => {
+                    const isActive = activeIdx === i;
+                    return (
+                      <SwiperSlide 
+                        key={`thumb-${targetId}-${i}`} 
+                        onClick={() => {
+                          if (mainSwiperRef.current) mainSwiperRef.current.slideTo(i);
+                        }}
+                        style={{ 
+                          width: isMobile ? 50 : 72, 
+                          height: isMobile ? 50 : 72,
+                          cursor: "pointer",
+                          opacity: isActive ? 1 : 0.4,
+                          border: isActive ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)",
+                          borderRadius: 10,
+                          overflow: "hidden",
+                          transition: "all 0.2s ease",
+                          boxSizing: "border-box"
+                        }}
+                      >
+                        {f.type === "video" ? (
+                          <Box sx={{ width: "100%", height: "100%", bgcolor: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <PlayCircleOutlineIcon sx={{ color: "#fff", fontSize: isMobile ? 24 : 40 }} />
+                          </Box>
+                        ) : (
+                          <img src={f.src} alt="thumb" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                        )}
+                      </SwiperSlide>
+                    );
+                  })}
+                </Swiper>
+              </Box>
+            </Box>
+          )}
         </Box>
       )}
     </>
@@ -1468,7 +1595,7 @@ const MediaContent = React.memo(({
          prev.slideImages === next.slideImages &&
          prev.itemError === next.itemError &&
          prev.isFs === next.isFs &&
-         prev.isSwiping === next.isSwiping;
+         prev.collapsedH === next.collapsedH;
 });
 
 
