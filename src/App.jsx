@@ -398,9 +398,23 @@ const App = () => {
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
   const recordingTimerRef = useRef(null);
+  const [cameraMode, setCameraMode] = useState("photo"); // "photo" | "video"
 
   const isPhotoEmpty = (cameraPhotos.length + galleryPhotos.length + cameraVideos.length) === 0;
   const handleRadioChange = (e) => setSelectedRadioValue(e.target.value);
+
+  // Глобальное отключение эффектов фокуса
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.innerHTML = `
+      button:focus, button:active, .MuiButtonBase-root:focus {
+        outline: none !important;
+        -webkit-tap-highlight-color: transparent !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
   const { notify } = useNotifications();
 
   // Состояния для дубликатов ЕО
@@ -961,15 +975,15 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       recorder.start();
       mediaRecorderRef.current = recorder;
       setIsRecording(true);
-      setRecordingSeconds(0);
+      setRecordingSeconds(30);
 
       recordingTimerRef.current = setInterval(() => {
         setRecordingSeconds((prev) => {
-          if (prev >= 60) { // Лимит 60 секунд
+          if (prev <= 1) {
             stopRecording();
-            return prev;
+            return 0;
           }
-          return prev + 1;
+          return prev - 1;
         });
       }, 1000);
     } catch (err) {
@@ -1831,7 +1845,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                       color={isPhotoEmpty ? "inherit" : "primary"}
                       sx={photoBtnSx(loading, isPhotoEmpty)}
                     >
-                      <Badge badgeContent={cameraPhotos.length} color="secondary" overlap="circular">
+                      <Badge badgeContent={cameraPhotos.length + cameraVideos.length} color="secondary" overlap="circular">
                         <CameraIcon sx={{ fontSize: 28 }} />
                       </Badge>
                     </Button>
@@ -1946,9 +1960,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             <Box
               sx={{
                 width: "100%",
-                height: "22vh",
+                height: "16vh", // Еще меньше высота превью
                 bgcolor: "rgba(0, 0, 0, 0.35)",
-                mb: "1vh",
+                mb: "0.5vh",
               }}
             >
               <Swiper
@@ -2025,7 +2039,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                         Видео {index + 1}
                       </Typography>
                       <IconButton
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           URL.revokeObjectURL(video.url);
                           setCameraVideos(cameraVideos.filter((_, i) => i !== index));
                         }}
@@ -2049,125 +2064,176 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             </Box>
           )}
 
+          {/* Режимы и Кнопка затвора */}
           <Box
             sx={{
               width: "100%",
               display: "flex",
-              justifyContent: "space-between",
+              flexDirection: "column",
               alignItems: "center",
-              px: 2,
-              py: 1.5,
-              backdropFilter: "blur(8px)",
-              background: "rgba(255,255,255,0.1)",
+              gap: 0.25, // Минимальный зазор
+              pb: 0.75,  // Экстремально компактный низ
+              pt: 1,     // Меньше верхний отступ
+              backdropFilter: "blur(12px)",
+              background: "rgba(0,0,0,0.35)",
+              borderTop: "1px solid rgba(255,255,255,0.1)",
             }}
           >
-            <ButtonGroup
-              variant="contained"
-              color="inherit"
-              fullWidth
-              sx={{
-                "& .MuiButtonBase-root": {
-                  fontSize: "1.05rem",
-                  padding: "0px 0px",
-                  height: 56,
-                  borderRadius: 2,
-                },
-                gap: 2,
-                background: "transparent",
-              }}
-            >
+            {/* Liquid Glass Switcher */}
+            {!isRecording && (
+              <Box
+                sx={{
+                  position: "relative",
+                  display: "flex",
+                  width: 170,
+                  height: 38,
+                  bgcolor: "rgba(255,255,255,0.1)",
+                  borderRadius: 20,
+                  p: 0.5,
+                  cursor: "pointer",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                onClick={() => setCameraMode(cameraMode === "photo" ? "video" : "photo")}
+              >
+                {/* Анимированная стеклянная подложка */}
+                <Box
+                  sx={{
+                    position: "absolute",
+                    top: 2,
+                    left: cameraMode === "photo" ? 2 : "calc(50% + 1px)",
+                    width: "calc(50% - 3px)",
+                    height: "calc(100% - 4px)",
+                    bgcolor: "rgba(255,255,255,0.25)",
+                    backdropFilter: "blur(10px)",
+                    boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
+                    borderRadius: 18,
+                    transition: "all 0.4s cubic-bezier(0.4, 0, 0.2, 1)",
+                  }}
+                />
+                <Box sx={{ flex: 1, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Typography variant="caption" sx={{ color: "white", fontSize: 13, fontWeight: 800, letterSpacing: 0.5, opacity: cameraMode === "photo" ? 1 : 0.4, transition: "opacity 0.3s" }}>
+                    ФОТО
+                  </Typography>
+                </Box>
+                <Box sx={{ flex: 1, zIndex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Typography variant="caption" sx={{ color: "white", fontSize: 13, fontWeight: 800, letterSpacing: 0.5, opacity: cameraMode === "video" ? 1 : 0.4, transition: "opacity 0.3s" }}>
+                    ВИДЕО
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+
+            <Box sx={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", px: 3.5 }}>
               <IconButton
                 onClick={handleCameraSwitch}
                 disabled={isRecording}
                 sx={{
-                  height: 52,
-                  width: 52,
                   color: "white",
-                  bgcolor: "rgba(23,28,143,0.6)",
-                  "&:hover": { bgcolor: "rgba(23,28,143,0.75)" },
-                  "&.Mui-disabled": { bgcolor: "rgba(23,28,143,0.2)", color: "rgba(255,255,255,0.3)" }
+                  bgcolor: "rgba(23,28,143, 0.25)", // Заливка основным цветом
+                  p: 1.5,
+                  width: 52, // Стандартный размер
+                  height: 52,
+                  mx: 1, // Отступ от края
+                  backdropFilter: "blur(4px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  "&:hover": { bgcolor: "rgba(23,28,143, 0.45)" },
+                  "&.Mui-disabled": { opacity: 0 },
+                  transition: "all 0.3s ease"
                 }}
               >
-                <LoopIcon />
+                <LoopIcon sx={{ fontSize: 26 }} />
               </IconButton>
 
-              <Button
-                onClick={capturePhoto}
-                disabled={isRecording}
-                sx={{
-                  minHeight: 52,
-                  height: 52,
-                  flex: 1,                         // кнопка растягивается, иконка при этом по центру
-                  px: 0,                           // убираем горизонтальные отступы
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",        // <- идеальный центр
-                  color: "white",
-                  bgcolor: "rgba(23,28,143,0.8)",
-                  borderRadius: 14,
-                  "&:hover": { bgcolor: "rgba(23,28,143,0.95)" },
-                  "&.Mui-disabled": { bgcolor: "rgba(23,28,143,0.3)", color: "rgba(255,255,255,0.5)" }
-                }}
-              >
-                <CameraIcon sx={{ fontSize: 28 }} />
-              </Button>
-
-              <Button
-                onClick={isRecording ? stopRecording : startRecording}
-                sx={{
-                  minHeight: 52,
-                  height: 52,
-                  flex: 1,
-                  px: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "white",
-                  bgcolor: isRecording ? "rgba(229,57,53,0.85)" : "rgba(23,28,143,0.8)",
-                  borderRadius: 14,
-                  "&:hover": { bgcolor: isRecording ? "rgba(229,57,53,1)" : "rgba(23,28,143,0.95)" },
-                }}
-              >
-                {isRecording ? <StopIcon sx={{ fontSize: 32 }} /> : <FiberManualRecordIcon sx={{ fontSize: 32 }} />}
-              </Button>
-
-              <Box>
+              {/* Единая умная кнопка затвора */}
+              <Box sx={{ position: "relative", width: 88, height: 88, display: "flex", justifyContent: "center", alignItems: "center" }}>
+                {isRecording && (
+                  <svg style={{ position: "absolute", inset: 0, width: "100%", height: "100%", transform: "rotate(-90deg)" }}>
+                    <circle cx="44" cy="44" r="38" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="4" />
+                    <circle 
+                      cx="44" cy="44" r="38" fill="none" stroke="#fff" strokeWidth="4" 
+                      strokeDasharray={238.76} 
+                      strokeDashoffset={238.76 * (1 - recordingSeconds / 30)}
+                      strokeLinecap="round"
+                      style={{ transition: "stroke-dashoffset 1s linear" }}
+                    />
+                  </svg>
+                )}
                 <IconButton
-                  onClick={handleApplyPhotos}
-                  disabled={isRecording}
+                  onClick={cameraMode === "photo" ? capturePhoto : (isRecording ? stopRecording : startRecording)}
                   sx={{
-                    bgcolor: "rgba(23,28,143,0.8)",
-                    color: "white",
-                    height: 52,
-                    width: 52,
-                    "&:hover": { bgcolor: "rgba(23,28,143,0.95)" },
-                    "&.Mui-disabled": { bgcolor: "rgba(23,28,143,0.3)", color: "rgba(255,255,255,0.5)" }
+                    width: isRecording ? 52 : 72, // Сделали красную кнопку при записи еще меньше
+                    height: isRecording ? 52 : 72,
+                    bgcolor: isRecording ? "#e53935" : "white",
+                    color: isRecording ? "white" : "#171c8f",
+                    transition: "all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+                    "&:hover": { bgcolor: isRecording ? "#c62828" : "rgba(255,255,255,0.9)" },
+                    boxShadow: isRecording ? "0 0 10px rgba(229,57,53,0.4)" : "0 4px 20px rgba(0,0,0,0.3)",
                   }}
                 >
-                  <SendIcon sx={{ fontSize: 28 }} />
-                  {(cameraPhotos.length + cameraVideos.length) > 0 && (
-                    <Box
-                      sx={{
-                        position: "absolute",
-                        top: -2,
-                        right: -2,
-                        bgcolor: "#595de3",
-                        borderRadius: "50%",
-                        height: 20,
-                        width: 20,
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                      }}
-                    >
-                      <Typography variant="caption" sx={{ color: "white", fontSize: 12 }}>
-                        {cameraPhotos.length + cameraVideos.length}
-                      </Typography>
-                    </Box>
+                  {isRecording ? (
+                    <Box 
+                      sx={{ 
+                        width: 18, 
+                        height: 18, 
+                        bgcolor: "white", 
+                        borderRadius: "2px",
+                        animation: "stopScale 0.2s ease-out" 
+                      }} 
+                    />
+                  ) : (
+                    cameraMode === "photo" ? 
+                      <CameraIcon sx={{ fontSize: 36, animation: "stopScale 0.2s ease-out" }} /> : 
+                      <FiberManualRecordIcon sx={{ fontSize: 36, color: "#e53935", animation: "stopScale 0.2s ease-out" }} />
                   )}
+                  <style>
+                    {`@keyframes stopScale { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}
+                  </style>
                 </IconButton>
               </Box>
-            </ButtonGroup>
+
+              <IconButton
+                onClick={handleApplyPhotos}
+                disabled={isRecording}
+                sx={{
+                  color: "white",
+                  bgcolor: "rgba(23,28,143, 0.25)", // Заливка основным цветом
+                  p: 1.5,
+                  width: 52, // Стандартный размер
+                  height: 52,
+                  mx: 1, // Отступ от края
+                  backdropFilter: "blur(4px)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  position: "relative",
+                  "&:hover": { bgcolor: "rgba(23,28,143, 0.45)" },
+                  "&.Mui-disabled": { opacity: 0.5 },
+                  transition: "all 0.3s ease"
+                }}
+              >
+                <SendIcon sx={{ fontSize: 26 }} />
+                {(cameraPhotos.length + cameraVideos.length) > 0 && (
+                  <Box
+                    sx={{
+                      position: "absolute",
+                      top: -4,
+                      right: -4,
+                      bgcolor: "#595de3",
+                      borderRadius: "50%",
+                      minWidth: 20,
+                      height: 20,
+                      px: 0.5,
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      border: "2px solid rgba(0,0,0,0.3)",
+                    }}
+                  >
+                    <Typography variant="caption" sx={{ color: "white", fontSize: 11, fontWeight: 800 }}>
+                      {cameraPhotos.length + cameraVideos.length}
+                    </Typography>
+                  </Box>
+                )}
+              </IconButton>
+            </Box>
           </Box>
         </Box>
       </Modal>
@@ -2349,7 +2415,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           maxWidth="md"
           fullWidth
           PaperProps={{
-            sx: { bgcolor: '#000', borderRadius: 2, overflow: 'hidden' }
+            sx: { bgcolor: '#000', borderRadius: 0.5, overflow: 'hidden' }
           }}
         >
           <Box sx={{ position: 'relative', width: '100%', pt: '56.25%', bgcolor: '#000' }}>

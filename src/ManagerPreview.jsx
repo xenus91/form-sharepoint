@@ -1401,7 +1401,7 @@ const MediaContent = React.memo(({
         <Swiper
           onSwiper={(s) => { if (isSlideActive) mainSwiperRef.current = s; }}
           modules={[Navigation, Pagination, Zoom, Thumbs]}
-          navigation={true} pagination={{ clickable: true }} zoom={{ maxRatio: 3 }}
+          navigation={true} zoom={{ maxRatio: 3 }}
           spaceBetween={12} slidesPerView={1}
           style={{ 
             width: "100%", 
