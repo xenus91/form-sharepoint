@@ -952,13 +952,27 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
   const beginMediaRecorder = (stream) => {
     recordedChunksRef.current = [];
-    const options = { mimeType: "video/webm;codecs=vp9" };
-    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-      options.mimeType = "video/webm";
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options.mimeType = "video/mp4";
+    
+    // Список предпочтительных форматов в порядке убывания совместимости.
+    // video/mp4 (H.264) — наиболее универсальный формат для всех устройств.
+    const preferredTypes = [
+      "video/mp4;codecs=avc1,mp4a.40.2",
+      "video/mp4;codecs=avc1",
+      "video/mp4",
+      "video/webm;codecs=h264",
+      "video/webm;codecs=vp8",
+      "video/webm"
+    ];
+
+    let selectedType = "";
+    for (const type of preferredTypes) {
+      if (MediaRecorder.isTypeSupported(type)) {
+        selectedType = type;
+        break;
       }
     }
+
+    const options = { mimeType: selectedType };
 
     try {
       const recorder = new MediaRecorder(stream, options);
@@ -968,8 +982,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       recorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType });
         const url = URL.createObjectURL(blob);
-        const ext = (recorder.mimeType.split("/")[1] || "webm").split(";")[0];
-        setCameraVideos((prev) => [...prev, { blob, url, name: `video_${Date.now()}.${ext}` }]);
+        // Всегда сохраняем с расширением .mp4 для максимальной совместимости в SharePoint и на iOS
+        setCameraVideos((prev) => [...prev, { blob, url, name: `video_${Date.now()}.mp4` }]);
       };
 
       recorder.start();
