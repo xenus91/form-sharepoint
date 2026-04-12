@@ -164,6 +164,24 @@ const isImageByName = (name = "") =>
 const isVideoByName = (name = "") =>
   /\.(mp4|webm|ogg|mov)$/i.test(name);
 
+function getVideoMimeType(name = "") {
+  const ext = String(name).toLowerCase().split(".").pop();
+  switch (ext) {
+    case "mp4":
+    case "m4v":
+      return "video/mp4";
+    case "mov":
+      return "video/quicktime";
+    case "webm":
+      return "video/webm";
+    case "ogg":
+    case "ogv":
+      return "video/ogg";
+    default:
+      return "";
+  }
+}
+
 function pickServerRelUrl(file) {
   return file?.ServerRelativeUrl || file?.ServerRelativePath?.DecodedUrl || "";
 }
@@ -181,8 +199,33 @@ function fileValueUrl(serverRelativeUrl = "") {
   return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${encPath}')/$value`;
 }
 
-const VideoPreviewDialog = ({ url, onClose }) => {
+function fileDirectUrl(serverRelativeUrl = "") {
+  if (!serverRelativeUrl) return "";
+  const relPath = serverRelativeUrl.startsWith("/") ? serverRelativeUrl : `/${serverRelativeUrl}`;
+  const baseWithoutApi = API_BASE_URL.replace(/\/_api$/i, "");
+  return `${baseWithoutApi}${encodeURI(relPath)}`;
+}
+
+function fileMediaUrl(serverRelativeUrl = "", isVideo = false) {
+  if (!serverRelativeUrl) return "";
+  // В проде для видео отдаем прямой URL файла (без /_api/.../$value),
+  // чтобы браузер получал нативные заголовки контента/Range.
+  // В dev оставляем $value через прокси /api.
+  if (isVideo && API_BASE_URL !== "/api") {
+    return fileDirectUrl(serverRelativeUrl);
+  }
+  return fileValueUrl(serverRelativeUrl);
+}
+
+const VideoPreviewDialog = ({ url, mimeType, onClose }) => {
   if (!url) return null;
+  const canPlayVideo = (() => {
+    if (!mimeType || typeof document === "undefined") return true;
+    const probe = document.createElement("video");
+    const support = probe.canPlayType(mimeType);
+    return support === "probably" || support === "maybe";
+  })();
+
   return (
     <Dialog
       open={!!url}
@@ -194,25 +237,58 @@ const VideoPreviewDialog = ({ url, onClose }) => {
       }}
     >
       <Box sx={{ position: "relative", width: "100%", pt: "56.25%", bgcolor: "#000" }}>
-        <video
-          src={url}
-          controls
-          autoPlay
-          playsInline
-          webkit-playsinline="true"
-          crossOrigin="use-credentials" 
-          controlsList="nodownload"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "contain",
-          }}
-        >
-          <source src={url} type="video/webm" />
-        </video>
+        {canPlayVideo ? (
+          <video
+            src={url}
+            controls
+            autoPlay
+            muted
+            playsInline
+            preload="metadata"
+            controlsList="nodownload"
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+            }}
+          >
+            <source src={url} type={mimeType || undefined} />
+          </video>
+        ) : (
+          <Box
+            sx={{
+              position: "absolute",
+              inset: 0,
+              display: "grid",
+              placeItems: "center",
+              p: 3,
+              textAlign: "center",
+              color: "white",
+            }}
+          >
+            <Box>
+              <Typography sx={{ fontWeight: 700, mb: 1 }}>
+                Этот формат не поддерживается вашим браузером.
+              </Typography>
+              <Typography sx={{ opacity: 0.8, fontSize: 14, mb: 2 }}>
+                Safari на iOS обычно не воспроизводит WebM. Нужен MP4 (H.264/AAC).
+              </Typography>
+              <Button
+                variant="outlined"
+                color="inherit"
+                component="a"
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Открыть файл
+              </Button>
+            </Box>
+          </Box>
+        )}
         <IconButton
           onClick={onClose}
           sx={{
@@ -340,6 +416,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
   const [itemsMap, setItemsMap] = React.useState({});
   const [mediaMap, setMediaMap] = React.useState({});
   const [videoPreviewUrl, setVideoPreviewUrl] = React.useState(null);
+  const [videoPreviewMimeType, setVideoPreviewMimeType] = React.useState("");
   const [problemsAnchorEl, setProblemsAnchorEl] = React.useState(null);
   const [problemsPopoverList, setProblemsPopoverList] = React.useState([]);
   const [problemsPopoverTitle, setProblemsPopoverTitle] = React.useState("");
@@ -511,8 +588,9 @@ export default function ManagerPreview({ userProfile, onBack }) {
       const rel = pickServerRelUrl(f);
       return {
         name: name,
-        src: rel ? fileValueUrl(rel) : "",
-        type: isVid ? "video" : "image"
+        src: rel ? fileMediaUrl(rel, isVid) : "",
+        type: isVid ? "video" : "image",
+        mimeType: isVid ? getVideoMimeType(name) : undefined,
       };
     }).filter((x) => x && x.src);
   };
@@ -939,6 +1017,7 @@ export default function ManagerPreview({ userProfile, onBack }) {
         isSwiping={isSlideActive ? isSwiping : false}
         setIsSwiping={setIsSwiping} // ПЕРЕДАЕМ ФУНКЦИЮ ДЛЯ ЖЕСТОВ
         setVideoPreviewUrl={setVideoPreviewUrl} // ПЕРЕДАЕМ ДЛЯ ЗАПУСКА ПЛЕЕРА
+        setVideoPreviewMimeType={setVideoPreviewMimeType}
         collapsedH={collapsedH}
       />
     );
@@ -1098,7 +1177,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
         {/* Диалог просмотра видео */}
         <VideoPreviewDialog 
           url={videoPreviewUrl} 
-          onClose={() => setVideoPreviewUrl(null)} 
+          mimeType={videoPreviewMimeType}
+          onClose={() => { setVideoPreviewUrl(null); setVideoPreviewMimeType(""); }} 
         />
 
         {/* Fallback FS */}
@@ -1306,7 +1386,8 @@ export default function ManagerPreview({ userProfile, onBack }) {
       {/* Диалог просмотра видео */}
       <VideoPreviewDialog 
         url={videoPreviewUrl} 
-        onClose={() => setVideoPreviewUrl(null)} 
+        mimeType={videoPreviewMimeType}
+        onClose={() => { setVideoPreviewUrl(null); setVideoPreviewMimeType(""); }} 
       />
     </Box>
   );
@@ -1367,7 +1448,7 @@ const InfoPanelContent = React.memo(({ item, expanded, contentRef, headerRef, bo
 // --- МЕМОИЗИРОВАННЫЙ КОМПОНЕНТ ДЛЯ СЛАЙДА ---
 const MediaContent = React.memo(({ 
   targetId, isSlideActive, itemData, slideImages, isSlideLoading, itemError, 
-  isMobile, isFs, toggleFullscreen, mainSwiperRef, parentVerticalSwiperRef, isSwipingRef, isSwiping, setIsSwiping, setVideoPreviewUrl, collapsedH 
+  isMobile, isFs, toggleFullscreen, mainSwiperRef, parentVerticalSwiperRef, isSwipingRef, isSwiping, setIsSwiping, setVideoPreviewUrl, setVideoPreviewMimeType, collapsedH 
 }) => {
   const [thumbsSwiper, setThumbsSwiper] = React.useState(null);
   const [activeIdx, setActiveIdx] = React.useState(0);
@@ -1487,7 +1568,10 @@ const MediaContent = React.memo(({
               <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
                 {f.type === "video" ? (
                   <Box 
-                    onClick={() => setVideoPreviewUrl(f.src)}
+                    onClick={() => {
+                      setVideoPreviewUrl(f.src);
+                      setVideoPreviewMimeType?.(f.mimeType || "");
+                    }}
                     sx={{ 
                       width: "100%", height: "100%", 
                       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -1607,5 +1691,3 @@ const MediaContent = React.memo(({
          prev.isFs === next.isFs &&
          prev.collapsedH === next.collapsedH;
 });
-
-
