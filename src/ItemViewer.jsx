@@ -5,13 +5,15 @@ import { API_BASE_URL } from "../config";
 // Cache bust: 2026-04-12 01:58
 import {
     Box, Chip, CircularProgress, Grid, Paper, Stack, Typography,
-    IconButton, Tooltip, Divider, Button,
+    IconButton, Tooltip, Divider, Button, Dialog
 } from "@mui/material";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import PauseIcon from "@mui/icons-material/Pause";
+import CloseIcon from "@mui/icons-material/Close";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { Swiper, SwiperSlide } from "swiper/react";
 import { Navigation, Pagination, Zoom, Thumbs, FreeMode } from "swiper/modules";
 import "swiper/css";
@@ -25,6 +27,8 @@ const log = (...a) => DEBUG && console.log("[ItemViewer]", ...a);
 // ЕДИНЫЙ МАСШТАБ ШРИФТОВ
 const FONT = { xs: 18, sm: 20, md: 22, lg: 24 };
 const LINE = 1.2;
+
+const isMobile = window.innerWidth <= 600;
 
 // ───────── helpers ─────────
 function getIdFromQuery() {
@@ -52,81 +56,56 @@ function fileValueUrl(serverRelativeUrl = "") {
     return `${API_BASE_URL}/web/GetFileByServerRelativeUrl('${encPath}')/$value`;
 }
 
-const VideoPlayerCustom = ({ src, name, collapsedH = 112 }) => {
-    const [playing, setPlaying] = React.useState(false);
-    const [showIcon, setShowIcon] = React.useState(false);
-    const videoRef = React.useRef(null);
-    const timerRef = React.useRef(null);
-
-    const togglePlay = (e) => {
-        e.stopPropagation();
-        if (!videoRef.current) return;
-        if (videoRef.current.paused) {
-            videoRef.current.play();
-            setPlaying(true);
-        } else {
-            videoRef.current.pause();
-            setPlaying(false);
-        }
-        setShowIcon(true);
-        if (timerRef.current) clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => setShowIcon(false), 800);
-    };
-
-    return (
-        <Box sx={{ 
-            width: "100%", 
-            height: "100%", 
-            position: "relative",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            bgcolor: "#000" 
-        }}>
-            <video
-                ref={videoRef}
-                src={src}
-                controls
-                playsInline
-                webkit-playsinline="true"
-                crossOrigin="use-credentials"
-                controlsList="nodownload"
-                className="swiper-no-swiping"
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-                style={{ width: "100%", height: "100%", objectFit: "contain", pointerEvents: "auto" }}
-            >
-                <source src={src} type="video/webm" />
-            </video>
-            <Box
-                onClick={togglePlay}
-                sx={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    cursor: "pointer",
-                    zIndex: 2,
-                    bottom: "60px" 
-                }}
-            >
-                {(showIcon || !playing) && (
-                    <Box sx={{
-                        bgcolor: "rgba(0,0,0,0.4)",
-                        borderRadius: "50%",
-                        p: 2,
-                        backdropFilter: "blur(4px)",
-                        border: "1px solid rgba(255,255,255,0.2)",
-                        transition: "opacity 0.3s ease",
-                        opacity: showIcon || !playing ? 1 : 0
-                    }}>
-                        {playing ? <PauseIcon sx={{ color: "#fff", fontSize: 64 }} /> : <PlayArrowIcon sx={{ color: "#fff", fontSize: 64 }} />}
-                    </Box>
-                )}
-            </Box>
-        </Box>
-    );
+const VideoPreviewDialog = ({ url, onClose }) => {
+  if (!url) return null;
+  return (
+    <Dialog
+      open={!!url}
+      onClose={onClose}
+      maxWidth="md"
+      fullWidth
+      PaperProps={{
+        sx: { bgcolor: "#000", borderRadius: 2, overflow: "hidden", position: "relative" }
+      }}
+    >
+      <Box sx={{ position: "relative", width: "100%", pt: "56.25%", bgcolor: "#000" }}>
+        <video
+          src={url}
+          controls
+          autoPlay
+          playsInline
+          webkit-playsinline="true"
+          crossOrigin="use-credentials" 
+          controlsList="nodownload"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+          }}
+        >
+          <source src={url} type="video/webm" />
+        </video>
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: "absolute",
+            top: 12,
+            right: 12,
+            color: "white",
+            bgcolor: "rgba(0,0,0,0.5)",
+            backdropFilter: "blur(4px)",
+            "&:hover": { bgcolor: "rgba(0,0,0,0.7)" },
+            zIndex: 10
+          }}
+        >
+          <CloseIcon />
+        </IconButton>
+      </Box>
+    </Dialog>
+  );
 };
 
 // компактное поле: ЛЕЙБЛ и ЗНАЧЕНИЕ — ОДИНАКОВЫЕ размеры
@@ -186,9 +165,12 @@ export default function ItemViewer() {
     const [loading, setLoading] = React.useState(true);
     const [item, setItem] = React.useState(null);
     const [images, setImages] = React.useState([]);
+    const [videoPreviewUrl, setVideoPreviewUrl] = React.useState(null);
     const [error, setError] = React.useState("");
 
     // Swiper fullscreen + thumbs
+    const localSwiperRef = React.useRef(null);
+    const [activeIdx, setActiveIdx] = React.useState(0);
     const swiperRef = React.useRef(null);
     const [isFs, setIsFs] = React.useState(false);
     const [fsFallback, setFsFallback] = React.useState(false);
@@ -307,23 +289,21 @@ export default function ItemViewer() {
         const bodyH = bodyRef.current?.scrollHeight || 0;
 
         if (headerH < 12 || handleH < 4) {
-            const collapsedFinal = Math.max(MIN_COLLAPSED, 112);
+            const collapsedFinal = isMobile ? 32 : Math.max(MIN_COLLAPSED, 112);
             const expandedFinal = Math.max(MIN_EXPANDED, Math.min(wH - 8, collapsedFinal + 280));
-            log("computeHeightsNow (fallback)", { wH, handleH, headerH, bodyH, collapsedFinal, expandedFinal });
             return { collapsedFinal, expandedFinal };
         }
 
-        const collapsedFinal = Math.round(handleH + headerH + PB_COLL + SAFETY);
+        const collapsedFinal = isMobile ? 32 : Math.round(handleH + headerH + PB_COLL + SAFETY);
         const full = Math.round(handleH + headerH + BODY_GAP_EXP + bodyH + PB_EXP + SAFETY);
         const viewportMax = Math.max(wH - 8, collapsedFinal + 1);
         const expandedFinal = Math.min(full, viewportMax);
 
-        log("computeHeightsNow", { wH, handleH, headerH, bodyH, collapsedFinal, expandedFinal });
         return {
-            collapsedFinal: Math.max(collapsedFinal, MIN_COLLAPSED),
+            collapsedFinal: isMobile ? 32 : Math.max(collapsedFinal, MIN_COLLAPSED),
             expandedFinal: Math.max(expandedFinal, MIN_EXPANDED),
         };
-    }, []);
+    }, [isMobile]);
 
     const applyHeights = React.useCallback(() => {
         const { collapsedFinal, expandedFinal } = computeHeightsNow();
@@ -407,20 +387,49 @@ export default function ItemViewer() {
                         </Box>
                     ) : (
                         <Swiper
-                            modules={[Navigation, Pagination, Zoom, Thumbs]}
-                            navigation
-                            pagination={{ clickable: true }}
+                            modules={[Pagination, Zoom, Thumbs]}
+                            onSwiper={(s) => { localSwiperRef.current = s; }}
+                            onActiveIndexChange={(s) => setActiveIdx(s.activeIndex)}
+                            navigation={false}
+                            pagination={isMobile ? { clickable: true } : false}
                             zoom={{ maxRatio: 3 }}
                             spaceBetween={12}
                             slidesPerView={1}
-                            style={{ width: "100%", height: "100%" }}
+                            cssMode={isMobile}
+                            style={{ 
+                                width: "100%", 
+                                height: isMobile ? `calc(100% - ${collapsedH}px)` : "100%",
+                                "--swiper-pagination-color": "#fff",
+                                "--swiper-pagination-bottom": "20px",
+                            }}
                             thumbs={{ swiper: thumbsSwiper && !thumbsSwiper.destroyed ? thumbsSwiper : null }}
                         >
                             {images.map((f, i) => (
-                                <SwiperSlide key={i}>
+                                <SwiperSlide key={i} style={{ height: "100%" }}>
                                     <div className="swiper-zoom-container" style={{ width: "100%", height: "100%" }}>
                                         {f.type === "video" ? (
-                                            <VideoPlayerCustom src={f.src} name={f.name} collapsedH={0} />
+                                            <Box 
+                                                onClick={() => setVideoPreviewUrl(f.src)}
+                                                sx={{ 
+                                                    width: "100%", height: "100%", 
+                                                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                                                    bgcolor: "#111", cursor: "pointer", position: "relative"
+                                                }}
+                                            >
+                                                <Box sx={{
+                                                    p: 3, borderRadius: "50%", 
+                                                    bgcolor: "rgba(255,255,255,0.1)", 
+                                                    backdropFilter: "blur(12px)", 
+                                                    border: "1px solid rgba(255,255,255,0.2)",
+                                                    transition: "transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+                                                    "&:hover": { transform: "scale(1.1)" }
+                                                }}>
+                                                    <PlayArrowIcon sx={{ color: "#fff", fontSize: 64 }} />
+                                                </Box>
+                                                <Typography sx={{ color: "rgba(255,255,255,0.7)", mt: 2, fontWeight: 700, fontSize: 13, letterSpacing: 0.5 }}>
+                                                    СМОТРЕТЬ ВИДЕО
+                                                </Typography>
+                                            </Box>
                                         ) : (
                                             <img alt={f.name || `Фото ${i + 1}`} src={f.src} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
                                         )}
@@ -428,6 +437,36 @@ export default function ItemViewer() {
                                 </SwiperSlide>
                             ))}
                         </Swiper>
+                    )}
+
+                    {/* КАСТОМНЫЕ КНОПКИ НАВИГАЦИИ (ДЛЯ ИСКЛЮЧЕНИЯ ПЕРЕСКОКА) */}
+                    {!loading && images.length > 1 && !isMobile && (
+                        <>
+                            <IconButton
+                                onClick={(e) => { e.stopPropagation(); localSwiperRef.current?.slidePrev(); }}
+                                sx={{
+                                    position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", zIndex: 20,
+                                    bgcolor: "rgba(0,0,0,0.45)", color: "#fff", backdropFilter: "blur(4px)",
+                                    "&:hover": { bgcolor: "rgba(0,0,0,0.6)" },
+                                    display: "flex",
+                                    opacity: activeIdx === 0 ? 0.3 : 1, transition: "all 0.2s"
+                                }}
+                            >
+                                <ArrowBackIcon />
+                            </IconButton>
+                            <IconButton
+                                onClick={(e) => { e.stopPropagation(); localSwiperRef.current?.slideNext(); }}
+                                sx={{
+                                    position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", zIndex: 20,
+                                    bgcolor: "rgba(0,0,0,0.45)", color: "#fff", backdropFilter: "blur(4px)",
+                                    "&:hover": { bgcolor: "rgba(0,0,0,0.6)" },
+                                    display: "flex",
+                                    opacity: activeIdx === images.length - 1 ? 0.3 : 1, transition: "all 0.2s"
+                                }}
+                            >
+                                <ArrowBackIcon sx={{ transform: "rotate(180deg)" }} />
+                            </IconButton>
+                        </>
                     )}
 
                     <Tooltip title={isFs ? "Выйти из полноэкранного" : "Открыть на весь экран"}>
@@ -466,7 +505,7 @@ export default function ItemViewer() {
                                     backdropFilter: "blur(8px) saturate(140%)",
                                     WebkitBackdropFilter: "blur(8px) saturate(140%)",
                                     borderRadius: "12px",
-                                    px: 1,
+                                    px: isMobile ? 0.5 : 1,
                                     py: 0.5,
                                     maxWidth: "min(90vw, 680px)",
                                 }}
@@ -479,37 +518,52 @@ export default function ItemViewer() {
                                     freeMode
                                     slidesPerView="auto"
                                     spaceBetween={8}
-                                    style={{ padding: "6px 4px" }}
+                                    slideToClickedSlide={true}
+                                    style={{ padding: isMobile ? "2px" : "6px 4px" }}
                                 >
-                                    {images.map((f, i) => (
-                                        <SwiperSlide key={`thumb-${i}`} style={{ width: 72, height: 72 }}>
-                                            {f.type === "video" ? (
-                                                <Box sx={{ 
-                                                    width: "100%", 
-                                                    height: "100%", 
-                                                    bgcolor: "#000", 
-                                                    borderRadius: 8, 
-                                                    display: "flex", 
-                                                    alignItems: "center", 
-                                                    justifyContent: "center" 
-                                                }}>
-                                                    <PlayCircleOutlineIcon sx={{ color: "#fff", fontSize: 40 }} />
-                                                </Box>
-                                            ) : (
-                                                <img
-                                                    src={f.src}
-                                                    alt={f.name || `Миниатюра ${i + 1}`}
-                                                    style={{
-                                                        width: "100%",
-                                                        height: "100%",
-                                                        objectFit: "cover",
-                                                        borderRadius: 8,
-                                                        display: "block",
-                                                    }}
-                                                />
-                                            )}
-                                        </SwiperSlide>
-                                    ))}
+                                    {images.map((f, i) => {
+                                        const isActive = activeIdx === i;
+                                        return (
+                                            <SwiperSlide 
+                                                key={`thumb-${i}`} 
+                                                style={{ 
+                                                    width: isMobile ? 50 : 72, 
+                                                    height: isMobile ? 50 : 72, 
+                                                    cursor: "pointer", 
+                                                    borderRadius: 10, 
+                                                    overflow: "hidden",
+                                                    border: isActive ? "2px solid #fff" : "2px solid transparent",
+                                                    opacity: isActive ? 1 : 0.5,
+                                                    transition: "all 0.2s ease",
+                                                    boxSizing: "border-box"
+                                                }}
+                                            >
+                                                {f.type === "video" ? (
+                                                    <Box sx={{ 
+                                                        width: "100%", 
+                                                        height: "100%", 
+                                                        bgcolor: "#000", 
+                                                        display: "flex", 
+                                                        alignItems: "center", 
+                                                        justifyContent: "center" 
+                                                    }}>
+                                                        <PlayCircleOutlineIcon sx={{ color: "#fff", fontSize: isMobile ? 24 : 40 }} />
+                                                    </Box>
+                                                ) : (
+                                                    <img
+                                                        src={f.src}
+                                                        alt={f.name || `Миниатюра ${i + 1}`}
+                                                        style={{
+                                                            width: "100%",
+                                                            height: "100%",
+                                                            objectFit: "cover",
+                                                            display: "block",
+                                                        }}
+                                                    />
+                                                )}
+                                            </SwiperSlide>
+                                        );
+                                    })}
                                 </Swiper>
                             </Box>
                         </Box>
@@ -534,7 +588,7 @@ export default function ItemViewer() {
                             width: { xs: "100%", sm: "60vw" },
                             height: expanded
                                 ? `${Math.round(Math.max(expandedH, MIN_EXPANDED))}px`
-                                : `${Math.round(Math.max(collapsedH, MIN_COLLAPSED))}px`,
+                                : (isMobile ? "32px" : `${Math.round(Math.max(collapsedH, MIN_COLLAPSED))}px`),
                             transition: "height 280ms ease",
                             willChange: "height",
                             bgcolor: "rgba(10, 10, 10, 0.25)",
@@ -562,7 +616,7 @@ export default function ItemViewer() {
                         {/* контент */}
                         <Box ref={contentRef} sx={{ px: { xs: 1.5, md: 2 }, pb: expanded ? `${PB_EXP}px` : `${PB_COLL}px`, color: "#fff" }}>
                             {/* HEADER — 2 строки + ПРОБЛЕМЫ (видны в коллапсе) */}
-                            <Box ref={headerRef}>
+                            <Box ref={headerRef} sx={{ opacity: isMobile ? (expanded ? 1 : 0) : 1, transition: "opacity 0.2s ease" }}>
                                 {/* строка 1 */}
                                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mb: 0.75, alignItems: "center" }}>
                                     <Box sx={{ flex: "0 1 auto", minWidth: 0 }}>
@@ -715,6 +769,12 @@ export default function ItemViewer() {
                     </Box>
                 </Box>
             )}
+
+            {/* Диалог просмотра видео */}
+            <VideoPreviewDialog 
+                url={videoPreviewUrl} 
+                onClose={() => setVideoPreviewUrl(null)} 
+            />
         </>
     );
 }
