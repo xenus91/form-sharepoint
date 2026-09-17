@@ -1,6 +1,7 @@
 // api.js
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
+import { installCacheInterceptor, invalidate, getCacheStats, makeKey } from './sp/cache';
 
 // Кэш формы-дайджеста (SharePoint)
 let digestValue = null;
@@ -52,6 +53,21 @@ apiClient.interceptors.response.use(
     return Promise.reject(err);
   }
 );
+
+// Авто-кэш + in-flight dedup для всех GET.
+// Уважает config.__noCache (true = пропустить кэш, для polling/refresh).
+// TTL по умолчанию 60s; можно переопределить через config.__cacheTtlMs.
+// Инвалидация: invalidate("substring") или invalidate(/regex/).
+installCacheInterceptor(apiClient, { defaultTtlMs: 60_000 });
+
+// Удобный helper для редких случаев, когда хочется явный TTL/options.
+export async function cachedGet(url, config = {}, opts = {}) {
+  const key = makeKey('get', url, config.params);
+  const mod = await import('./sp/cache');
+  return mod.getCached(key, () => apiClient.get(url, config).then((r) => r.data), opts);
+}
+
+export { invalidate, getCacheStats };
 
 export default apiClient;
 

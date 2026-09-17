@@ -30,6 +30,13 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Drawer,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Divider,
 } from "@mui/material";
 import ButtonGroup from "@mui/material/ButtonGroup";
 import { useDropzone } from "react-dropzone";
@@ -53,6 +60,11 @@ import ManagerPreview from "./ManagerPreview";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
+import MenuIcon from "@mui/icons-material/Menu";
+import HomeIcon from "@mui/icons-material/Home";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import AssignmentIcon from "@mui/icons-material/Assignment";
+import TasksView from "./TasksView";
 import { useNotifications } from './NotificationsProvider';
 
 SwiperCore.use([Pagination, Navigation]);
@@ -846,6 +858,18 @@ const App = () => {
       ? normalizeDcThu(dcThuOverride)
       : getOfficeSuffix(userProfile.userOffice);
 
+  // Эффективный Office для задач — при локальной смене РЦ задачи должны перепоискаться по новому РЦ.
+  // Если dcThuOverride активен, конструируем "РЦ-XXXX" из суффикса, иначе берём офис из профиля.
+  const effectiveOfficeForTasks = isDcThuActive && normalizeDcThu(dcThuOverride)
+    ? `РЦ-${normalizeDcThu(dcThuOverride)}`
+    : userProfile.userOffice;
+  const effectiveUserProfileForTasks = React.useMemo(() => {
+    if (isDcThuActive && effectiveOfficeForTasks) {
+      return { ...userProfile, userOffice: effectiveOfficeForTasks };
+    }
+    return userProfile;
+  }, [userProfile, isDcThuActive, effectiveOfficeForTasks]);
+
   const operationDate = operationDateIso ? new Date(operationDateIso) : null;
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
     getShiftDateOptions();
@@ -1427,9 +1451,102 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     String(userProfile.userDepartment || "").toLowerCase().includes("группа отгрузки");
 
   const [managerPreviewOpen, setManagerPreviewOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // hash-роут: #tasks / #/tasks / #manager / #form (+ #tasks/id=10, #tasks/10, #tasks?id=10)
+  const parseHash = () => {
+    const raw = window.location.hash || "";
+    const low = raw.toLowerCase();
+    let view = "form";
+    if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
+    else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
+    // elementId: поддерживает id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10
+    let elementId = null;
+    let elementAction = null;
+    // 1) id=число (любой вариант: id=10, elementid=10, ?id=10 &id=10 /id=10)
+    const mId = low.match(/(?:elementid|\bid)\s*=\s*(\d{1,19})/);
+    if (mId) elementId = mId[1];
+    else {
+      // 2) путь /tasks/10
+      const mPath = raw.match(/#\/?tasks\/(\d{1,19})/i);
+      if (mPath) elementId = mPath[1];
+      else {
+        // 3) чистый ?10 после #tasks (редко) - пробуем последний числовой сегмент
+        const after = low.replace(/^#\/?tasks\/?/, "");
+        if (/^\d{1,19}([\/?&#].*)?$/.test(after.trim())) {
+          const mNum = after.trim().match(/^(\d{1,19})/);
+          if (mNum) elementId = mNum[1];
+        }
+      }
+    }
+    // SearchResult для имитации первого нажатия Найдена/Не найдена
+    const mSearch = low.match(/searchresult\s*=\s*([a-z_]+)/);
+    if (mSearch) {
+      const v = mSearch[1].trim().toLowerCase();
+      if (v === "searchcomplete" || v === "complete" || v === "found") elementAction = "found";
+      else if (v === "searchfail" || v === "fail" || v === "notfound" || v === "not_found") elementAction = "notfound";
+      else elementAction = v;
+    }
+    // action для следующего этапа (found/notfound)
+    const mAct = low.match(/action\s*=\s*([a-zа-я_]+)/);
+    if (!elementAction && mAct) {
+      const v = mAct[1].trim();
+      if (v === "found" || v === "найдена" || v === "найден") elementAction = "found";
+      else if (v === "notfound" || v === "not_found" || v === "не_найдена" || v === "не-найдена" || v === "не найдена" || v === "не найден") elementAction = "notfound";
+      else elementAction = v;
+    } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
+    else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
+    return { view, elementId, elementAction };
+  };
+  const getViewFromHash = () => parseHash().view;
+  const [currentView, setCurrentView] = useState(() => getViewFromHash());
+  const [hashElementId, setHashElementId] = useState(() => parseHash().elementId);
+  const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
+  const [tasksActiveCount, setTasksActiveCount] = useState(0);
+  const [taskDistribution, setTaskDistribution] = useState(null);
+  const [taskFieldsApp, setTaskFieldsApp] = useState([]);
+
+  // синхронизация с hash — прямой переход по #tasks (+ elementId)
+  useEffect(() => {
+    const onHash = () => {
+      const p = parseHash();
+      setCurrentView(p.view);
+      setHashElementId(p.elementId);
+      setHashElementAction(p.elementAction);
+    };
+    window.addEventListener("hashchange", onHash);
+    onHash();
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  useEffect(() => {
+    const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
+    const parsed = parseHash();
+    if (currentView === "form") {
+      if (window.location.hash && window.location.hash.toLowerCase() !== "#form") window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return;
+    }
+    // если уже на нужном view и hash содержит ожидаемый префикс — не трогаем (сохраняем id=... в url)
+    if (window.location.hash.toLowerCase().startsWith(desired.toLowerCase())) {
+      return;
+    }
+    // иначе ставим желаемый hash (с сохранением elementId если был и view tasks)
+    if (currentView === "tasks" && parsed.elementId) {
+      window.location.hash = `${desired}/id=${parsed.elementId}` + (parsed.elementAction ? `&action=${parsed.elementAction}` : "");
+    } else {
+      window.location.hash = desired;
+    }
+  }, [currentView]);
 
   const handleOpenManagerPreview = () => {
-    setManagerPreviewOpen(true);
+    setCurrentView("manager");
+    setDrawerOpen(false);
+  };
+  const handleOpenForm = () => {
+    setCurrentView("form");
+    setDrawerOpen(false);
+  };
+  const handleOpenTasks = () => {
+    setCurrentView("tasks");
+    setDrawerOpen(false);
   };
 
   const handleLocationChange = (value) => {
@@ -1438,23 +1555,422 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     else setIsTransportationRequired(false);
   };
 
-  if (managerPreviewOpen) {
+  // Keep legacy managerPreviewOpen sync with currentView
+  useEffect(() => {
+    if (managerPreviewOpen) setCurrentView("manager");
+  }, [managerPreviewOpen]);
+
+  // Poll active tasks count for burger badge - uses GUID directly, no discovery, every 60s + on focus/visibility
+  const TASKS_LIST_GUID = "463B634E-A71A-4FEF-9A1F-B803431D8639";
+  const TASKS_LIST_API = `/web/lists(guid'${TASKS_LIST_GUID}')`;
+  const DCEMAIL_LIST_TITLE = "DcEmail";
+
+  function getGroupIdsFromDistributionApp(dist) {
+    if (!dist) return [];
+    const extractIds = (val) => {
+      if (val == null) return [];
+      if (Array.isArray(val)) return val.map((v) => (v != null && typeof v === "object" ? v.Id ?? v : v)).filter((v) => v != null && v !== "").map(Number).filter((n) => !Number.isNaN(n));
+      if (typeof val === "object") {
+        if (Array.isArray(val.results)) return val.results.map((v) => (v != null && typeof v === "object" ? v.Id ?? v : v)).filter((v) => v != null && v !== "").map(Number).filter((n) => !Number.isNaN(n));
+        if (val.Id != null) { const n = Number(val.Id); return Number.isNaN(n) ? [] : [n]; }
+        if (val.__deferred) return [];
+      }
+      if (typeof val === "number" || typeof val === "string") { const n = Number(val); return Number.isNaN(n) ? [] : [n]; }
+      return [];
+    };
+    if (dist.Email != null) {
+      const ids = extractIds(dist.Email);
+      if (ids.length) return [...new Set(ids)];
+    }
+    for (const key of ["EmailId", "Email_x002e_Id", "Email_x0020_Id", "EMailId", "Email_X002e_Id"]) {
+      if (dist[key] != null) {
+        const ids = extractIds(dist[key]);
+        if (ids.length) return [...new Set(ids)];
+      }
+    }
+    for (const k of Object.keys(dist)) {
+      if (/email/i.test(k) && /id/i.test(k) && dist[k] != null) {
+        const ids = extractIds(dist[k]);
+        if (ids.length) return [...new Set(ids)];
+      }
+    }
+    return [];
+  }
+
+  async function resolveDistributionViaDcEmailApp(office, department) {
+    if (!office && !department) return null;
+    const officeStr = String(office).trim();
+    const deptStr = String(department).trim();
+    const full = `${officeStr}${deptStr}`;
+    const candidates = [full];
+    const suffix = officeStr.includes("-") ? officeStr.split("-").pop().trim() : "";
+    if (suffix && suffix !== officeStr) {
+      const v1 = `${suffix}${deptStr}`;
+      if (!candidates.includes(v1)) candidates.push(v1);
+      const v2 = `РЦ-${suffix}${deptStr}`;
+      if (!candidates.includes(v2)) candidates.push(v2);
+      const v3 = officeStr.replace("-", "") + deptStr;
+      if (!candidates.includes(v3)) candidates.push(v3);
+    }
+    for (const offDepKey of candidates) {
+      const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+      try {
+        const { data } = await apiClient.get(
+          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        );
+        const items = data?.d?.results || [];
+        if (items.length) return items[0];
+      } catch {}
+    }
+    try {
+      const { data: data2 } = await apiClient.get(
+        `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$top=100`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const items2 = data2?.d?.results || [];
+      for (const cand of candidates) {
+        const norm = cand.trim().toLowerCase();
+        const found = items2.find((it) => String(it.OffDepKey || "").trim().toLowerCase() === norm);
+        if (found) return found;
+      }
+    } catch {}
+    for (const offDepKey of candidates) {
+      const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+      try {
+        const { data } = await apiClient.get(
+          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,EmailId&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        );
+        const items = data?.d?.results || [];
+        if (items.length) return items[0];
+      } catch (e2) {
+        console.warn("DcEmail resolve (App) failed", e2?.message);
+      }
+    }
+    return null;
+  }
+  // Resolve distribution for group-assigned tasks via DcEmail — учитывает локальный РЦ (dcThuOverride)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const officeForTasks = effectiveOfficeForTasks || userProfile.userOffice;
+      const deptForTasks = userProfile.userDepartment;
+      if (!officeForTasks && !deptForTasks) return;
+      const dist = await resolveDistributionViaDcEmailApp(officeForTasks, deptForTasks);
+      if (!cancelled) {
+        setTaskDistribution(dist);
+        // Лог для отладки локальной смены РЦ
+        console.log("[tasks] distribution resolved", { officeForTasks, deptForTasks, distOffDepKey: dist?.OffDepKey, groupIds: dist ? getGroupIdsFromDistributionApp(dist) : [] });
+      }
+      try {
+        const { data } = await apiClient.get(`${TASKS_LIST_API}/fields?$select=InternalName`, { headers: { Accept: "application/json;odata=verbose" } });
+        if (!cancelled) setTaskFieldsApp((data?.d?.results || []).map((f) => f.InternalName));
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [userProfile.userOffice, userProfile.userDepartment, effectiveOfficeForTasks, isDcThuActive]);
+
+  // Уведомление при локальной смене РЦ — задачи перепоискаются автоматически
+  const prevOfficeRef = useRef(effectiveOfficeForTasks);
+  useEffect(() => {
+    if (prevOfficeRef.current !== effectiveOfficeForTasks && prevOfficeRef.current) {
+      const msg = isDcThuActive
+        ? `РЦ сменён на ${effectiveOfficeForTasks} — задачи перезагружены`
+        : `Локальный РЦ сброшен, задачи для ${effectiveOfficeForTasks || "профиля"} перезагружены`;
+      console.log("[tasks] local RC changed", { from: prevOfficeRef.current, to: effectiveOfficeForTasks });
+      try { notify(msg, { severity: "info", autoHideDuration: 3000 }); } catch {}
+    }
+    prevOfficeRef.current = effectiveOfficeForTasks;
+  }, [effectiveOfficeForTasks, isDcThuActive]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    let cancelled = false;
+    async function fetchBadgeCountSimple() {
+      try {
+        // Build filter based on distribution (group assignment) if available
+        // Email — поле Пользователь/Группа, берем Id групп для AssignedToId
+        let filter;
+        if (taskDistribution) {
+          const groupIds = getGroupIdsFromDistributionApp(taskDistribution);
+          if (groupIds.length > 0) {
+            const allIds = [...new Set([...groupIds.map(Number), currentUserId].filter((v) => v != null && !Number.isNaN(v)).map(Number))];
+            if (allIds.length === 1) filter = `AssignedToId eq ${allIds[0]}`;
+            else if (allIds.length > 1) filter = `(${allIds.map((id) => `AssignedToId eq ${id}`).join(" or ")})`;
+            else filter = `AssignedToId eq ${currentUserId}`;
+          } else {
+            filter = `AssignedToId eq ${currentUserId}`;
+          }
+        } else {
+          filter = `AssignedToId eq ${currentUserId}`;
+        }
+        const url = `${TASKS_LIST_API}/items?$select=Id,Status,PercentComplete&$filter=${filter}&$top=100`;
+        try {
+          const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
+          const results = data?.d?.results || [];
+          let cnt = 0;
+          for (const r of results) {
+            const s = String(r.Status || "").toLowerCase();
+            const pc = r.PercentComplete;
+            const isCompleted = pc === 1 || pc === 100 || s.includes("заверш") || s.includes("completed") || (s.includes("выполн") && !s.includes("в процессе")) || s === "5";
+            if (!isCompleted) cnt += 1;
+          }
+          if (!cancelled) setTasksActiveCount(cnt);
+        } catch (e) {
+          // Fallback to AssignedTo/Id if primary filter failed (e.g., field not exists)
+          const altUrl = `${TASKS_LIST_API}/items?$select=Id,Status,PercentComplete&$filter=AssignedTo/Id eq ${currentUserId}&$top=100`;
+          try {
+            const { data } = await apiClient.get(altUrl, { headers: { Accept: "application/json;odata=verbose" } });
+            const results = data?.d?.results || [];
+            let cnt = 0;
+            for (const r of results) {
+              const s = String(r.Status || "").toLowerCase();
+              const pc = r.PercentComplete;
+              const isCompleted = pc === 1 || pc === 100 || s.includes("заверш") || s.includes("completed") || (s.includes("выполн") && !s.includes("в процессе")) || s === "5";
+              if (!isCompleted) cnt += 1;
+            }
+            if (!cancelled) setTasksActiveCount(cnt);
+          } catch {}
+        }
+      } catch {}
+    }
+    fetchBadgeCountSimple();
+    const id = setInterval(fetchBadgeCountSimple, 60000);
+    const onFocus = () => fetchBadgeCountSimple();
+    const onVisible = () => { if (document.visibilityState === "visible") fetchBadgeCountSimple(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVisible); };
+  }, [currentUserId, taskDistribution, taskFieldsApp]);
+
+  if (currentView === "manager") {
     return (
-      <ManagerPreview
-        userProfile={userProfile}
-        onBack={() => setManagerPreviewOpen(false)}
-      />
+      <ThemeProvider theme={figmaTheme}>
+        <ManagerPreview
+          userProfile={userProfile}
+          onBack={() => setCurrentView("form")}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  if (currentView === "tasks") {
+    return (
+      <ThemeProvider theme={figmaTheme}>
+        {/* Burger button for tasks */}
+        <Box
+          sx={{
+            position: "fixed",
+            top: 12,
+            left: 12,
+            zIndex: 1302,
+            display: drawerOpen ? "none" : "block",
+          }}
+        >
+          <Badge
+            badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null}
+            color="error"
+            max={99}
+            overlap="circular"
+            anchorOrigin={{ vertical: "top", horizontal: "right" }}
+            sx={{
+              "& .MuiBadge-badge": {
+                fontWeight: 800,
+                minWidth: 20,
+                height: 20,
+                fontSize: "0.75rem",
+                border: "2px solid white",
+              },
+            }}
+          >
+            <IconButton
+              onClick={() => setDrawerOpen(true)}
+              sx={{
+                bgcolor: "rgba(255,255,255,0.85)",
+                backdropFilter: "blur(8px)",
+                border: "1px solid rgba(23,28,143,0.15)",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+                width: 44,
+                height: 44,
+                "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
+              }}
+            >
+              <MenuIcon sx={{ color: "#171c8f" }} />
+            </IconButton>
+          </Badge>
+        </Box>
+        <Drawer
+          anchor="left"
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          PaperProps={{
+            sx: {
+              width: 280,
+              bgcolor: "rgba(255,255,255,0.92)",
+              backdropFilter: "blur(16px)",
+              borderRight: "1px solid rgba(23,28,143,0.1)",
+            },
+          }}
+        >
+          <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
+            <Box sx={{ flex: 1 }} />
+            <IconButton onClick={() => setDrawerOpen(false)} size="small"><CloseIcon /></IconButton>
+          </Box>
+          <Divider />
+          <List>
+            <ListItem disablePadding>
+              <ListItemButton onClick={handleOpenForm}>
+                <ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
+                <ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} />
+              </ListItemButton>
+            </ListItem>
+            {canOpenManagerPreview && (
+              <ListItem disablePadding>
+                <ListItemButton onClick={handleOpenManagerPreview}>
+                  <ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
+                  <ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} />
+                </ListItemButton>
+              </ListItem>
+            )}
+            <ListItem disablePadding>
+              <ListItemButton onClick={handleOpenTasks} selected>
+                <ListItemIcon>
+                  <Badge badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null} color="error" max={99}>
+                    <AssignmentIcon sx={{ color: "#171c8f" }} />
+                  </Badge>
+                </ListItemIcon>
+                <ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} />
+              </ListItemButton>
+            </ListItem>
+          </List>
+          <Box sx={{ flex: 1 }} />
+          <Divider />
+          <Box sx={{ p: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              {userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}
+            </Typography>
+          </Box>
+        </Drawer>
+        {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
+        <Box sx={{ pt: 0, width: "100%", minWidth: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+          <TasksView userProfile={effectiveUserProfileForTasks} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onCountChange={setTasksActiveCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
+        </Box>
+        {/* Keep modals for operation date etc accessible in tasks view as well */}
+      </ThemeProvider>
     );
   }
 
   return (
     <ThemeProvider theme={figmaTheme}>
-      {/* Верхняя панель счётчика */}
+      {/* Бургер кнопка слева вверху */}
+      <Box
+        sx={{
+          position: "fixed",
+          top: 12,
+          left: 12,
+          zIndex: 1302,
+          display: drawerOpen ? "none" : "block",
+        }}
+      >
+        <Badge
+          badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null}
+          color="error"
+          max={99}
+          overlap="circular"
+          anchorOrigin={{ vertical: "top", horizontal: "right" }}
+          sx={{
+            "& .MuiBadge-badge": {
+              fontWeight: 800,
+              minWidth: 20,
+              height: 20,
+              fontSize: "0.75rem",
+              border: "2px solid white",
+            },
+          }}
+        >
+          <IconButton
+            onClick={() => setDrawerOpen(true)}
+            sx={{
+              bgcolor: "rgba(255,255,255,0.85)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(23,28,143,0.15)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              width: 44,
+              height: 44,
+              "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
+            }}
+          >
+            <MenuIcon sx={{ color: "#171c8f" }} />
+          </IconButton>
+        </Badge>
+      </Box>
+      <Drawer
+        anchor="left"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        PaperProps={{
+          sx: {
+            width: 280,
+            bgcolor: "rgba(255,255,255,0.92)",
+            backdropFilter: "blur(16px)",
+            borderRight: "1px solid rgba(23,28,143,0.1)",
+          },
+        }}
+      >
+        <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
+          <Box sx={{ flex: 1 }} />
+          <IconButton onClick={() => setDrawerOpen(false)} size="small"><CloseIcon /></IconButton>
+        </Box>
+        <Divider />
+        <List>
+          <ListItem disablePadding>
+            <ListItemButton onClick={handleOpenForm} selected={currentView === "form"}>
+              <ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
+              <ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} />
+            </ListItemButton>
+          </ListItem>
+          {canOpenManagerPreview && (
+            <ListItem disablePadding>
+              <ListItemButton onClick={handleOpenManagerPreview}>
+                <ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
+                <ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} />
+              </ListItemButton>
+            </ListItem>
+          )}
+          <ListItem disablePadding>
+            <ListItemButton onClick={handleOpenTasks}>
+              <ListItemIcon>
+                <Badge badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null} color="error" max={99}>
+                  <AssignmentIcon sx={{ color: "#171c8f" }} />
+                </Badge>
+              </ListItemIcon>
+              <ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} />
+            </ListItemButton>
+          </ListItem>
+        </List>
+        <Box sx={{ flex: 1 }} />
+        <Divider />
+        <Box sx={{ p: 2 }}>
+          <Typography variant="caption" color="text.secondary">
+            {userProfile.userDisplayName || ""} • {userProfile.userTitle || ""} — {userProfile.userOffice || ""}
+          </Typography>
+          <Box sx={{ mt: 1 }}>
+            <Button size="small" variant="outlined" onClick={handleOpenDcThuModal} sx={{ borderRadius: 2, fontSize: 12 }}>
+              РЦ: {getEffectiveDcThu() || "—"}
+            </Button>
+          </Box>
+        </Box>
+      </Drawer>
+      {/* Верхняя панель счётчика со смещением под бургер */}
       <MonthlyCounter
         ref={monthlyCounterRef}
         listTitle="ProblemsPallet"
         authorId={userProfile.userId}
         position="fixed"
+        leftOffset={64}
         extraContent={
           <Box
             sx={{
@@ -1485,13 +2001,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
-        {canOpenManagerPreview && (
-          <Box sx={{ display: "flex", justifyContent: "center", mb: 1 }}>
-            <Button variant="outlined" onClick={handleOpenManagerPreview} sx={{ borderRadius: 1 }}>
-              Меню просмотра менеджерами
-            </Button>
-          </Box>
-        )}
+        {/* Меню просмотра менеджерами теперь в бургер-меню слева вверху */}
+        {/* canOpenManagerPreview hidden button moved to drawer */}
         <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
           <Button
             variant="outlined"

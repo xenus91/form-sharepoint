@@ -1,0 +1,102 @@
+// src/tasks/mapping.js
+// Маппинг сырого SP task в наш task-объект.
+// Раньше жил внутри TasksView.jsx как mapRawTask — вынесен сюда для переиспользования
+// в loadTasks, fetchFullTask, searchTaskByRelatedItem, hashSearch и т.д.
+//
+// extractEONumberFromTask и другие extractors живут в ./formatters.js,
+// чтобы TaskCard мог их импортировать без циклических импортов.
+
+/**
+ * Удаляет HTML-теги и декодирует базовые сущности.
+ * Используется только в mapRawTask для поля Body (карточка показывает plain text).
+ */
+function stripHtml(html) {
+  if (!html) return "";
+  const tmp = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
+  return tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+}
+
+/**
+ * @param {object} r сырой объект с SharePoint (data.d из verbose-ответа)
+ * @param {{ recipientField?: string|null, scNumberField?: string|null }} [opts]
+ * @returns {object} наш Task
+ */
+export function mapRawTask(r, opts = {}) {
+  const { recipientField = null, scNumberField = null } = opts;
+  let recipientVal = "";
+  if (recipientField && r[recipientField]) {
+    const rec = r[recipientField];
+    if (rec && typeof rec === "object") {
+      if (rec.Title) recipientVal = rec.Title;
+      else if (rec.results && rec.results[0]?.Title) recipientVal = rec.results[0].Title;
+    } else if (typeof rec === "string") recipientVal = rec;
+  }
+  // Fallback: try common names
+  if (!recipientVal) {
+    recipientVal = r.Recipient?.Title || r.RecipientTitle || r["Recipient"] || "";
+    if (typeof recipientVal === "object" && recipientVal?.Title) recipientVal = recipientVal.Title;
+  }
+  // SCNumber direct from task fields
+  let scNumberVal = "";
+  if (scNumberField && r[scNumberField] != null) scNumberVal = String(r[scNumberField]).trim();
+  if (!scNumberVal) scNumberVal = r.SCNumber || r.ScNumber || r.SC_x0020_Number || "";
+  if (typeof scNumberVal === 'object' && scNumberVal?.Title) scNumberVal = scNumberVal.Title;
+
+  // AdditionalActionsRequired — может быть Choice (Нет/Да) или Boolean (Yes/No). У пользователя поле булевое.
+  let additionalRequiredRaw = r.AdditionalActionsRequired;
+  // SharePoint может отдавать также AdditionalActionsRequired_x0020_ или другое имя — проверяем варианты
+  if (additionalRequiredRaw == null) {
+    additionalRequiredRaw = r.AdditionalActionsRequired_x0020_ ?? r.OData__AdditionalActionsRequired ?? "";
+  }
+  let additionalRequired = "";
+  if (additionalRequiredRaw === true || additionalRequiredRaw === 1 || additionalRequiredRaw === "1") {
+    additionalRequired = "Да";
+  } else if (additionalRequiredRaw === false || additionalRequiredRaw === 0 || additionalRequiredRaw === "0") {
+    additionalRequired = "Нет";
+  } else if (typeof additionalRequiredRaw === "string") {
+    const s = additionalRequiredRaw.trim().toLowerCase();
+    if (s === "да" || s === "true" || s === "1") additionalRequired = "Да";
+    else if (s === "нет" || s === "false" || s === "0") additionalRequired = "Нет";
+    else if (s) additionalRequired = additionalRequiredRaw.trim();
+    else additionalRequired = "";
+  } else if (additionalRequiredRaw != null && additionalRequiredRaw !== "") {
+    additionalRequired = String(additionalRequiredRaw).trim();
+  } else {
+    additionalRequired = "";
+  }
+  // AdditionalActions (Multi-Choice Fill-in) — SharePoint verbose возвращает {results: []}
+  let additionalActions = [];
+  const rawAA = r.AdditionalActions ?? null;
+  if (rawAA) {
+    if (Array.isArray(rawAA)) additionalActions = rawAA;
+    else if (Array.isArray(rawAA.results)) additionalActions = rawAA.results;
+    else if (typeof rawAA === "string" && rawAA) additionalActions = [rawAA];
+  }
+  additionalActions = additionalActions.map((v) => String(v).trim()).filter(Boolean);
+
+  return {
+    Id: r.Id,
+    Title: r.Title || "",
+    Body: stripHtml(r.Body) || r.Body || "",
+    BodyRaw: r.Body || "",
+    AssignedTo: r.AssignedTo?.Title || "",
+    AssignedToId: r.AssignedTo?.Id || r.AssignedToId || null,
+    EditorTitle: r.Editor?.Title || "",
+    Editor: r.Editor?.Title || "",
+    EditorId: r.Editor?.Id || r.EditorId || null,
+    Status: r.Status || "",
+    ResultSearchTHU: r.ResultSearchTHU || "",
+    Location1: r.Location1 || "",
+    AdditionalActionsRequired: additionalRequired,
+    AdditionalActions: additionalActions,
+    Created: r.Created || "",
+    Modified: r.Modified || "",
+    PercentComplete: r.PercentComplete,
+    DueDate: r.DueDate || null,
+    Recipient: recipientVal || "",
+    SCNumber: scNumberVal || "",
+    RelatedItems: r.RelatedItems || null,
+    WorkflowItemId: r.WorkflowItemId || null,
+    raw: r,
+  };
+}
