@@ -1,9 +1,12 @@
-import React, { useEffect, useState, useCallback, useMemo, useTransition } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useTransition, useRef } from "react";
 import apiClient, { normalizeNextUrl, invalidate } from "./api";
 import { buildTaskIndex, findInIndex } from "./utils/taskIndex";
 import { createAdaptivePolling } from "./utils/polling";
 import { runWithConcurrency } from "./utils/concurrency";
 import { mapRawTask } from "./tasks/mapping";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { fetchTasks } from "./tasks/fetchTasks";
 import { HASH_LOG, HASH_WARN } from "./tasks/log";
 import { searchTaskByRelatedItem, fetchFullTask } from "./tasks/hashSearch";
 import { enrichTasksWithRelated } from "./tasks/enrich";
@@ -194,6 +197,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         opacity: isUpdating ? 0.65 : 1,
         pointerEvents: isUpdating ? "none" : "auto",
         transition: "opacity 150ms",
+        contentVisibility: "auto",
+        containIntrinsicSize: "auto 340px",
+        contain: "layout paint style",
       }}
     >
       {isUpdating && (() => {
@@ -1118,6 +1124,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   const lastFocusLoadRef = React.useRef(Date.now());
   const lastHashFocusRef = React.useRef(Date.now());
   const [expandedGroups, setExpandedGroups] = useState(() => new Set()); // SCNumber -> expanded
+  const virtualParentRef = React.useRef(null); // для виртуализации списка
   const [currentUserId, setCurrentUserId] = useState(null);
   const [userOfficeDept, setUserOfficeDept] = useState({ office: "", department: "" });
   const [distribution, setDistribution] = useState(null); // DcEmail item
@@ -1761,6 +1768,16 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     });
   }, [filteredTasks, groupingEnabled]);
 
+  // Виртуализация для плоского списка (grouping off) — рендерим только видимые карточки
+  const useVirtual = !groupingEnabled && filteredTasks.length > 25;
+  const flatVirtualizer = useVirtualizer({
+    count: useVirtual ? filteredTasks.length : 0,
+    getScrollElement: () => virtualParentRef.current,
+    estimateSize: () => 360,
+    overscan: 6,
+    measureElement: (el) => el?.getBoundingClientRect()?.height ?? 360,
+  });
+
   const toggleGroup = useCallback((sc) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -1778,32 +1795,9 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     setExpandedGroups(new Set());
   }, []);
 
-  const handleResultClick = (task, resultValue) => {
-    const normalized = String(resultValue).trim().toLowerCase();
-    const isFoundExact = normalized === "найден" || normalized === "найдена";
-    const isNotFoundExact = normalized === "не найдена" || normalized === "не найден" || normalized === "не найдено";
-    if (isFoundExact) {
-      setPendingTask(task);
-      setPendingResult(resultValue);
-      setLocationComment("");
-      {
-        const defPending = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : ["Отправить ЕО в OTM"]);
-        setPendingAdditionalActions(Array.isArray(task.AdditionalActions) && task.AdditionalActions.length ? [...task.AdditionalActions] : defPending);
-      }
-      setPendingCustomAction("");
-      setPendingAdditionalError("");
-      setLocationDialogOpen(true);
-    } else if (isNotFoundExact) {
-      setPendingTask(task);
-      setPendingResult(resultValue);
-      setConfirmNotFoundOpen(true);
-    } else {
-      // Прочие результаты — без доп. действий
-      completeTask(task, resultValue, undefined, "", []);
-    }
-  };
 
-  const handleTakeInWork = async (task) => {
+
+  const handleTakeInWork = useCallback(async (task) => {
     setUpdatingId(task.Id);
     setUpdatingAction("take");
     try {
@@ -1907,9 +1901,9 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       setUpdatingId(null);
       setUpdatingAction(null);
     }
-  };
+  }, [entityType, inProgressStatusValue, currentUserId, currentUserTitle, notify, loadTasks]);
 
-  const completeTask = async (task, resultValue, locationValue, additionalRequired, additionalActions) => {
+  const completeTask = useCallback(async (task, resultValue, locationValue, additionalRequired, additionalActions) => {
     const prevTaskSnapshot = { ...task };
     setUpdatingId(task.Id);
     const _norm = String(resultValue || "").trim().toLowerCase();
@@ -2340,7 +2334,32 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       setConfirmNotFoundOpen(false);
       setPendingTask(null);
     }
-  };
+  }, [entityType, completedStatusValue, additionalRequiredIsBoolean, currentUserId, currentUserTitle, notify, loadTasks, pendingResult]);
+
+  const handleResultClick = useCallback((task, resultValue) => {
+    const normalized = String(resultValue).trim().toLowerCase();
+    const isFoundExact = normalized === "найден" || normalized === "найдена";
+    const isNotFoundExact = normalized === "не найдена" || normalized === "не найден" || normalized === "не найдено";
+    if (isFoundExact) {
+      setPendingTask(task);
+      setPendingResult(resultValue);
+      setLocationComment("");
+      {
+        const defPending = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : ["Отправить ЕО в OTM"]);
+        setPendingAdditionalActions(Array.isArray(task.AdditionalActions) && task.AdditionalActions.length ? [...task.AdditionalActions] : defPending);
+      }
+      setPendingCustomAction("");
+      setPendingAdditionalError("");
+      setLocationDialogOpen(true);
+    } else if (isNotFoundExact) {
+      setPendingTask(task);
+      setPendingResult(resultValue);
+      setConfirmNotFoundOpen(true);
+    } else {
+      // Прочие результаты — без доп. действий
+      completeTask(task, resultValue, undefined, "", []);
+    }
+  }, [fieldDefaultActions, completeTask]);
 
   const handleLocationSubmit = (skip) => {
     if (!pendingTask) return;
@@ -2475,7 +2494,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
           <Button size="small" variant="text" onClick={onClearLocalRc} sx={{ fontWeight:700, textTransform:"none", color:"#8d6e00", flexShrink:0, whiteSpace:"nowrap" }}>Сбросить</Button>
         </Box>
       )}
-      <Box sx={{ position: "relative", zIndex: 10, bgcolor: "rgba(250,250,255,0.92)", backdropFilter: "blur(8px)", mx: 0, px: { xs: 1, sm: 2 }, pt: 1, pb: 1, mb: 1, borderRadius: '28px', border: "1px solid rgba(23,28,143,0.12)", boxShadow: "0 2px 8px rgba(23,28,143,0.06)", overflow: 'visible', boxSizing: 'border-box', flexShrink: 0 }}>
+      <Box sx={{ position: "relative", zIndex: 10, bgcolor: "#ffffff", backdropFilter: "none", transform: "translateZ(0)", willChange: "transform", mx: 0, px: { xs: 1, sm: 2 }, pt: 1, pb: 1, mb: 1, borderRadius: '28px', border: "1px solid rgba(23,28,143,0.12)", boxShadow: "0 2px 8px rgba(23,28,143,0.06)", overflow: 'visible', boxSizing: 'border-box', flexShrink: 0, contain: "layout paint" }}>
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5, mt: 0, pl: { xs: 6, sm: 6 } }}>
           <Typography variant="h6" sx={{ display: "flex", alignItems: "center", gap: 1, fontWeight: 800, color: "#171c8f" }}>
             <AssignmentIcon /> {isHashMode ? `Элемент #${elementIdParam}` : "Задачи"}
@@ -2619,7 +2638,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       <>
 
 
-      <Box sx={{ 
+      <Box ref={virtualParentRef} sx={{ 
         flex: 1,
         minHeight: 0,
         overflowY: "auto", 
@@ -2671,6 +2690,51 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
               const overdueInGroup = groupTasks.filter((t) => { const d = new Date(t.DueDate); return t.DueDate && !isNaN(d) && d.getTime() < Date.now() && !isCompletedStatus(t.Status, t.PercentComplete); }).length;
               const hideHeader = groupingEnabled === false && sc === "Все";
               if (hideHeader) {
+                if (useVirtual) {
+                  const vItems = flatVirtualizer.getVirtualItems();
+                  return (
+                    <Box key={sc} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box", position: "relative" }}>
+                      <Box sx={{ height: `${flatVirtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
+                        {vItems.map((virtualItem) => {
+                          const task = filteredTasks[virtualItem.index];
+                          if (!task) return null;
+                          const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
+                          const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
+                          return (
+                            <Box
+                              key={task.Id}
+                              data-index={virtualItem.index}
+                              ref={flatVirtualizer.measureElement}
+                              sx={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                transform: `translateY(${virtualItem.start}px)`,
+                                pb: 1.5,
+                                boxSizing: "border-box",
+                              }}
+                            >
+                              <TaskCard fieldDefaultActions={fieldDefaultActions}
+                                task={task}
+                                isCompleted={isCompleted}
+                                isOverdue={isOverdue}
+                                choices={choices}
+                                updatingId={updatingId}
+                                updatingAction={updatingAction}
+                                onResultClick={handleResultClick}
+                                onTakeInWork={handleTakeInWork}
+                                onComplete={completeTask}
+                                currentUserId={currentUserId}
+                                currentUserTitle={currentUserTitle}
+                              />
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    </Box>
+                  );
+                }
                 return (
                   <Stack key={sc} spacing={1.5} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
                     {groupTasks.map((task) => {
