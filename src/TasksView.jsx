@@ -1115,6 +1115,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   const [fieldsLoading, setFieldsLoading] = useState(true);
   const [isTabPending, startTabTransition] = useTransition();
   const [isDataPending, startDataTransition] = useTransition();
+  const lastFocusLoadRef = React.useRef(Date.now());
+  const lastHashFocusRef = React.useRef(Date.now());
   const [expandedGroups, setExpandedGroups] = useState(() => new Set()); // SCNumber -> expanded
   const [currentUserId, setCurrentUserId] = useState(null);
   const [userOfficeDept, setUserOfficeDept] = useState({ office: "", department: "" });
@@ -1465,16 +1467,29 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       // Делаем неблокирующе: параллельно подтягиваем без фриза UI.
       // Логика вынесена в ./tasks/enrich.js (см. enrichTasksWithRelated).
       // Enrich — без useTransition, чтобы фоновый пулинг не вызывал isDataPending мигание.
+      // Дифф по значению — не создаём новые объекты если Recipient/SCNumber уже такие же (убирает мигание на focus).
       if (mapped.length > 0) {
         (async () => {
           const { recipientMap: recMap, scNumberMap: scMap } = await enrichTasksWithRelated(mapped, { concurrency: 5 });
           if (recMap.size === 0 && scMap.size === 0) return;
-          setTasks((prev) => prev.map((p) => {
-            let upd = p;
-            if (recMap.has(p.Id)) upd = { ...upd, Recipient: recMap.get(p.Id) };
-            if (scMap.has(p.Id)) upd = { ...upd, SCNumber: scMap.get(p.Id), TKNumber: scMap.get(p.Id) };
-            return upd;
-          }));
+          setTasks((prev) => {
+            let changed = false;
+            const next = prev.map((p) => {
+              const newRec = recMap.get(p.Id);
+              const newSc = scMap.get(p.Id);
+              let upd = p;
+              let needNew = false;
+              if (newRec !== undefined && p.Recipient !== newRec) needNew = true;
+              if (newSc !== undefined && p.SCNumber !== newSc) needNew = true;
+              if (!needNew) return p;
+              changed = true;
+              upd = { ...p };
+              if (newRec !== undefined) upd.Recipient = newRec;
+              if (newSc !== undefined) { upd.SCNumber = newSc; upd.TKNumber = newSc; }
+              return upd;
+            });
+            return changed ? next : prev;
+          });
           // раскрыть новые ТК группы сразу
           const newTKs = new Set([...scMap.values()].map((v) => extractTKNumber(v) !== "Без ТК" ? extractTKNumber(v) : extractTKNumberFromTask({ SCNumber: v })));
           if (newTKs.size > 0) {
@@ -1518,14 +1533,14 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
         const activeCount = mapped.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete)).length;
         onCountChange(activeCount);
       }
-      // авто-развернуть все новые группы при первой загрузке
+      // авто-развернуть все новые группы при первой загрузке — без лишних сетов (убирает мигание)
       const newGroups = new Set(mapped.map((m) => extractTKNumberFromTask(m)));
       setExpandedGroups((prev) => {
         if (prev.size === 0) return newGroups;
-        // сохранить состояние, добавить новые ключи развернутыми
+        let changed = false;
         const next = new Set(prev);
-        newGroups.forEach((g) => { if (!prev.has(g)) next.add(g); });
-        return next;
+        newGroups.forEach((g) => { if (!prev.has(g)) { next.add(g); changed = true; } });
+        return changed ? next : prev;
       });
     } catch (e) {
       console.error("load tasks error", e);
@@ -2344,7 +2359,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   const isHashMode = !!elementIdParam;
 
   // в hash-режиме — фоновое обновление только найденной задачи (без скрытия карточки, маленький лоадер в углу)
-  // хуки до раннего return, иначе нарушение Rules of Hooks
+  // хуки до раннего return, иначе нарушение Rules of Hooks — с троттлингом focus 30с и диффом против мигания
   useEffect(() => {
     if (!isHashMode || !elementTaskMatch) return;
     let cancelled = false;
@@ -2357,8 +2372,15 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
         const raw = data?.d;
         if (!raw || cancelled) return;
         const mapped = mapRawTask(raw, { recipientField, scNumberField });
-        setElementTaskMatch(mapped);
-        setTasks((prev) => prev.map((t) => t.Id === mapped.Id ? mapped : t));
+        setElementTaskMatch((prev) => {
+          if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete) && prev.Location1 === mapped.Location1) return prev;
+          return mapped;
+        });
+        setTasks((prev) => {
+          const ex = prev.find((t) => t.Id === mapped.Id);
+          if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete) && ex.Location1 === mapped.Location1) return prev;
+          return prev.map((t) => t.Id === mapped.Id ? mapped : t);
+        });
       } catch (e) {
         const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
         if (msg.includes("additionalactions")) {
@@ -2367,8 +2389,15 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
             const raw = data?.d;
             if (!raw || cancelled) return;
             const mapped = mapRawTask(raw, { recipientField, scNumberField });
-            setElementTaskMatch(mapped);
-            setTasks((prev) => prev.map((t) => t.Id === mapped.Id ? mapped : t));
+            setElementTaskMatch((prev) => {
+              if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete)) return prev;
+              return mapped;
+            });
+            setTasks((prev) => {
+              const ex = prev.find((t) => t.Id === mapped.Id);
+              if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete)) return prev;
+              return prev.map((t) => t.Id === mapped.Id ? mapped : t);
+            });
           } catch {}
         }
       } finally {
@@ -2383,7 +2412,12 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       pauseWhenHidden: true,
       onError: (e) => console.warn("[polling] refreshHashTask error, backing off:", e?.response?.status || e?.message),
     });
-    const onFocus = () => refreshHashTask();
+    const onFocus = () => {
+      const now = Date.now();
+      if (now - lastHashFocusRef.current < 30000) return;
+      lastHashFocusRef.current = now;
+      refreshHashTask();
+    };
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
@@ -2394,17 +2428,26 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
 
   // poll для нормального списка — в hash-режиме не дергаем loadTasks, чтобы не скрывать карточку
   // Адаптивный polling: пауза на скрытой вкладке + backoff при ошибках (cap 5 мин).
+  // Focus — с троттлингом 30с, чтобы каждый возврат в окно не вызывал мигание.
   useEffect(() => {
     if (!currentUserId) return;
     if (isHashMode) return;
     const stop = createAdaptivePolling({
-      fn: () => loadTasks({ silent: true }),
+      fn: () => {
+        lastFocusLoadRef.current = Date.now();
+        return loadTasks({ silent: true });
+      },
       intervalMs: 60_000,
       maxBackoffMs: 5 * 60_000,
       pauseWhenHidden: true,
       onError: (e) => console.warn("[polling] loadTasks error, backing off:", e?.response?.status || e?.message),
     });
-    const onFocus2 = () => loadTasks({ silent: true });
+    const onFocus2 = () => {
+      const now = Date.now();
+      if (now - lastFocusLoadRef.current < 30000) return;
+      lastFocusLoadRef.current = now;
+      loadTasks({ silent: true });
+    };
     window.addEventListener("focus", onFocus2);
     return () => {
       stop();
