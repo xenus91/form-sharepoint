@@ -1644,25 +1644,17 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
 
   // Виртуализация для плоского списка (grouping off) — рендерим только видимые карточки
   // Порог 50 — при меньшем списке виртуализация не нужна и только мешает (пустое место после удаления)
-  const useVirtual = !groupingEnabled && filteredTasks.length > 50;
+  // Виртуализация временно отключена — давала пропуск на размер карточки между элементами
+  // (оценка 360/380 + absolute translateY + measureElement оставляли гэп на высоту карточки)
+  // Список теперь рендерится обычным Stack без виртуализации; при необходимости включим с корректной высотой
+  const useVirtual = false;
   const flatVirtualizer = useVirtualizer({
-    count: useVirtual ? filteredTasks.length : 0,
+    count: 0,
     getScrollElement: () => virtualParentRef.current,
-    estimateSize: () => 380,
-    overscan: 8,
-    // measureElement через ResizeObserver — корректно пересчитывает при открытии/закрытии инлайн-форм
-    measureElement: (el) => el?.getBoundingClientRect()?.height ?? 380,
+    estimateSize: () => 360,
+    overscan: 6,
+    measureElement: (el) => el?.getBoundingClientRect()?.height ?? 360,
   });
-  // При изменении списка или закрытии карточки — форсируем пересчет виртуализатора
-  useEffect(() => {
-    if (useVirtual) {
-      // небольшой debounce, чтобы DOM успел обновиться после удаления/закрытия
-      const id = setTimeout(() => {
-        try { flatVirtualizer.measure(); } catch {}
-      }, 50);
-      return () => clearTimeout(id);
-    }
-  }, [filteredTasks.length, useVirtual, flatVirtualizer]);
 
   const toggleGroup = useCallback((sc) => {
     setExpandedGroups((prev) => {
