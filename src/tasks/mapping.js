@@ -74,6 +74,28 @@ export function mapRawTask(r, opts = {}) {
   }
   additionalActions = additionalActions.map((v) => String(v).trim()).filter(Boolean);
 
+  // ContentTypeId для динамического определения поля результата (по ContentType)
+  let contentTypeIdVal = r.ContentTypeId || r.ContentType?.StringValue || r.ContentTypeId?.StringValue || null;
+  if (typeof contentTypeIdVal === "object" && contentTypeIdVal?.StringValue) contentTypeIdVal = contentTypeIdVal.StringValue;
+  // Динамическое поле результата: если есть поле с TypeDisplayName "Результирующий выбор", берём его,
+  // иначе fallback на ResultSearchTHU. Для совместимости проверяем все возможные InternalName из raw
+  let dynamicResultVal = r.ResultSearchTHU || "";
+  // Если в raw есть другое поле с тем же смыслом (например, Result, ResultNew), но мы его не знаем на этапе маппинга,
+  // оно будет доступно как r[fieldInternalName] — TaskCard позже уточнит через getTaskResultValue.
+  // Здесь сохраняем первое найденное, но оставляем raw для дальнейшего разрешения.
+  if (!dynamicResultVal) {
+    // Попытка найти любое поле, где ключ содержит "Result" и значение похоже на choice
+    for (const k of Object.keys(r)) {
+      if (k.toLowerCase().includes("result") && typeof r[k] === "string" && r[k].trim()) {
+        // Не берём ResultSearchTHU уже проверенный, но берём первый другой
+        if (k !== "ResultSearchTHU") {
+          dynamicResultVal = r[k];
+          break;
+        }
+      }
+    }
+  }
+
   return {
     Id: r.Id,
     Title: r.Title || "",
@@ -85,7 +107,9 @@ export function mapRawTask(r, opts = {}) {
     Editor: r.Editor?.Title || "",
     EditorId: r.Editor?.Id || r.EditorId || null,
     Status: r.Status || "",
-    ResultSearchTHU: r.ResultSearchTHU || "",
+    ResultSearchTHU: dynamicResultVal || "",
+    // Сохраняем также динамическое значение под универсальным ключом для новой логики
+    ResultValue: dynamicResultVal || "",
     Location1: r.Location1 || "",
     AdditionalActionsRequired: additionalRequired,
     AdditionalActions: additionalActions,
@@ -97,6 +121,7 @@ export function mapRawTask(r, opts = {}) {
     SCNumber: scNumberVal || "",
     RelatedItems: r.RelatedItems || null,
     WorkflowItemId: r.WorkflowItemId || null,
+    ContentTypeId: contentTypeIdVal || null,
     raw: r,
   };
 }

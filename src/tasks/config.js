@@ -68,5 +68,5 @@ export function getCachedAdditionalActionsDefaultSync() {
 }
 
 // Select/expand для fetchFullTask (используется в TasksView и hashSearch).
-export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,WorkflowItemId";
+export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,WorkflowItemId,ContentTypeId";
 export const FULL_TASK_EXPAND = "AssignedTo,Editor";

@@ -6,8 +6,8 @@
 import { TASKS_LIST_API } from "./config";
 import { getGroupIdsFromDistribution } from "./distribution";
 
-const SELECT_BASE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title";
-const SELECT_BASE_NO_DUE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,Editor/Id,Editor/Title";
+const SELECT_BASE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,ContentTypeId";
+const SELECT_BASE_NO_DUE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,Editor/Id,Editor/Title,ContentTypeId";
 const SELECT_ADDITIONAL = "AdditionalActionsRequired,AdditionalActions";
 
 /**
@@ -16,6 +16,7 @@ const SELECT_ADDITIONAL = "AdditionalActionsRequired,AdditionalActions";
  * @property {boolean} [useDueDate=true] — выбирать ли поле DueDate
  * @property {boolean} [useAdditionalActions=true] — включать ли AdditionalActions поля
  * @property {string|null} [recipientField=null] — InternalName поля Recipient (Lookup)
+ * @property {string[]} [resultFieldInternalNames=[]] — InternalName полей результата (динамически по ContentType)
  * @property {object|null} [distribution=null] — DcEmail-запись (для фильтра по группе)
  * @property {number|null} [currentUserId=null] — Id текущего пользователя (fallback для фильтра)
  * @property {number} [top=100] — page size
@@ -46,8 +47,16 @@ export function buildTaskListQuery(opts = {}) {
     orderBy = "Created asc",
   } = opts;
 
-  // Extra select fields (OffDepKey, Recipient expand, RelatedItems, WorkflowItemId, AdditionalActions)
+  // Extra select fields (OffDepKey, Recipient expand, RelatedItems, WorkflowItemId, AdditionalActions, Result fields)
   const extraFields = [];
+  // Динамические поля результата (по TypeDisplayName "Результирующий выбор") — добавляем все InternalName, чтобы выборка работала для любого ContentType
+  if (opts.resultFieldInternalNames && Array.isArray(opts.resultFieldInternalNames)) {
+    for (const fn of opts.resultFieldInternalNames) {
+      if (fn && typeof fn === "string" && fn.trim() && !extraFields.includes(fn.trim())) {
+        extraFields.push(fn.trim());
+      }
+    }
+  }
   if (taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
   if (recipientField) {
     extraFields.push(`${recipientField}/Id`);

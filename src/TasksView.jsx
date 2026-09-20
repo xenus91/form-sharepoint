@@ -7,6 +7,8 @@ import { mapRawTask } from "./tasks/mapping";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchTasks } from "./tasks/fetchTasks";
+import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getTaskResultValue, getResultChoicesForTask } from "./tasks/resultField";
+import { getResultUiConfig } from "./tasks/resultConfig";
 import { HASH_LOG, HASH_WARN } from "./tasks/log";
 import { searchTaskByRelatedItem, fetchFullTask } from "./tasks/hashSearch";
 import { enrichTasksWithRelated } from "./tasks/enrich";
@@ -95,7 +97,7 @@ function stripHtml(html) {
 // extractEONumberFromTask — все импортированы из "./tasks/formatters".
 
 // Memoized task card to avoid freeze on rerender
-const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction }) {
+const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap }) {
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
   const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
@@ -114,6 +116,50 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     return ["Отправить ЕО в OTM"];
   });
   const additionalRequired = additionalActions.length > 0 ? "Да" : "Нет";
+  // Динамическое поле результата для этой задачи (по ContentType) — для открытой задачи всегда свежие choices
+  const dynamicFieldMeta = React.useMemo(() => {
+    const fromProp = propResultFieldsMeta && propCtResultMap ? getResultFieldForTask(task, propCtResultMap, propResultFieldsMeta) : null;
+    if (fromProp) return fromProp;
+    // fallback: ищем по raw полям
+    if (task.raw) {
+      for (const k of Object.keys(task.raw)) {
+        if (k.toLowerCase().includes("result") && typeof task.raw[k] === "string") {
+          // не хардкодим, просто возвращаем первое
+        }
+      }
+    }
+    return null;
+  }, [task, propResultFieldsMeta, propCtResultMap]);
+  const dynamicInternalName = dynamicFieldMeta?.internalName || "ResultSearchTHU";
+  // Эффективные choices для этой задачи: из динамического поля или глобальные choices
+  const effectiveChoices = React.useMemo(() => {
+    if (dynamicFieldMeta?.choices && dynamicFieldMeta.choices.length > 0) return dynamicFieldMeta.choices;
+    return choices;
+  }, [dynamicFieldMeta, choices]);
+  // Для открытой задачи — подгружаем свежие choices по ContentType с кэшем (forceRefresh уже в родителе, но дублируем для карточки)
+  const [freshChoices, setFreshChoices] = React.useState(null);
+  const [freshField, setFreshField] = React.useState(null);
+  React.useEffect(() => {
+    if (!isInProgressStatus(task.Status) || isCompleted) {
+      setFreshChoices(null);
+      setFreshField(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { choices: ch, field } = await getResultChoicesForTask(apiClient, task, { forceRefresh: true });
+        if (!cancelled && ch && ch.length > 0) {
+          setFreshChoices(ch);
+          setFreshField(field);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [task.Id, task.ContentTypeId, task.Status, isCompleted]);
+  const displayedChoices = freshChoices || effectiveChoices;
+  const displayedFieldMeta = freshField || dynamicFieldMeta;
+  const displayedInternalName = displayedFieldMeta?.internalName || dynamicInternalName;
   React.useEffect(() => {
     const def = fieldDefaultActions !== null ? fieldDefaultActions : getCachedAdditionalActionsDefaultSync();
     if (def === null) return;
@@ -613,7 +659,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 );
               }
               // Mine or unknown — inline UX без диалогов
-              if (choices.length === 0) {
+              if ((displayedChoices || choices).length === 0) {
                 return (
                   <>
                     <Typography variant="body2" color="error" sx={{ mt: 1.5 }}>
@@ -630,15 +676,46 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   </>
                 );
               }
-              // Determine found / notFound choices
-              const foundChoice = choices.find((c) => {
-                const n = String(c).trim().toLowerCase();
-                return n === "найден" || n === "найдена";
-              }) || choices[0];
-              const notFoundChoice = choices.find((c) => {
-                const n = String(c).trim().toLowerCase();
-                return n === "не найдена" || n === "не найден" || n === "не найдено";
-              }) || choices[1] || null;
+              // Determine found / notFound choices — через конфиг + fallback на legacy строки, без хардкода конкретных значений
+              // Для открытой задачи используем displayedChoices (свежие по ContentType)
+              const choicesForButtons = displayedChoices || choices;
+              const foundChoice = (() => {
+                // 1) по конфигу: requiresLocation / AdditionalActions
+                let c = choicesForButtons.find((ch) => {
+                  const cfg = getResultUiConfig(ch);
+                  return cfg.requiresLocation || cfg.requiresAdditionalActions;
+                });
+                if (c) return c;
+                // 2) legacy: ищем "найден/найдена"
+                c = choicesForButtons.find((ch) => {
+                  const n = String(ch).trim().toLowerCase();
+                  return n === "найден" || n === "найдена";
+                });
+                if (c) return c;
+                // 3) fallback: только если среди choices есть legacy-паттерн, иначе не считаем none как found
+                // Для новых типов задач без legacy — foundChoice = null, чтобы не навязывать спец-экран
+                const hasLegacy = choicesForButtons.some((ch) => {
+                  const n = String(ch).trim().toLowerCase();
+                  return n.includes("найден") || n.includes("не найден");
+                });
+                if (hasLegacy && choicesForButtons.length > 0) return choicesForButtons[0];
+                return null;
+              })();
+              const notFoundChoice = (() => {
+                let c = choicesForButtons.find((ch) => getResultUiConfig(ch).confirm);
+                if (c) return c;
+                c = choicesForButtons.find((ch) => {
+                  const n = String(ch).trim().toLowerCase();
+                  return n === "не найдена" || n === "не найден" || n === "не найдено";
+                });
+                if (c) return c;
+                const hasLegacy = choicesForButtons.some((ch) => {
+                  const n = String(ch).trim().toLowerCase();
+                  return n.includes("найден") || n.includes("не найден");
+                });
+                if (hasLegacy && choicesForButtons.length > 1) return choicesForButtons[1] || null;
+                return null;
+              })();
 
               // Confirm mode for Не найдена — как Взять в работу, но в красной гамме
               if (confirmNotFoundMode) {
@@ -1015,8 +1092,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : foundChoice}
                       </Button>
                     )}
-                    {/* Render any extra choices as outlined */}
-                    {choices.filter((c) => c !== foundChoice && c !== notFoundChoice).map((choice) => (
+                    {/* Render any extra choices as outlined — динамически из displayedChoices */}
+                    {(displayedChoices || choices).filter((c) => c !== foundChoice && c !== notFoundChoice).map((choice) => (
                       <Button
                         key={choice}
                         variant="outlined"
@@ -1139,9 +1216,14 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   const [inProgressStatusValue, setInProgressStatusValue] = useState(null);
   const [entityType, setEntityType] = useState(null);
   const [currentUserTitle, setCurrentUserTitle] = useState("");
+  // Динамическое поле результата: по TypeDisplayName "Результирующий выбор" + ContentType, с кэшем
+  const [resultFieldsMeta, setResultFieldsMeta] = useState([]);
+  const [ctResultMap, setCtResultMap] = useState(() => new Map());
   const [additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean] = useState(null); // null=unknown, true=Boolean, false=Choice
   const queryClient = useQueryClient();
   const tasksQueryEnabled = !!currentUserId && !fieldsLoading;
+  // Динамические поля результата — собираем InternalName для выборки
+  const resultFieldInternalNames = (resultFieldsMeta || []).map((f) => f.internalName).filter(Boolean);
   const {
     data: tasksData,
     isLoading: isTasksLoading,
@@ -1150,8 +1232,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     refetch: refetchTasks,
     dataUpdatedAt: tasksDataUpdatedAt,
   } = useQuery({
-    queryKey: ['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null],
-    queryFn: () => fetchTasks({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField }),
+    queryKey: ['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')],
+    queryFn: () => fetchTasks({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames }),
     enabled: tasksQueryEnabled,
     staleTime: 30_000,
     gcTime: 5*60_000,
@@ -1173,7 +1255,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
         const { recipientMap, scNumberMap } = await enrichTasksWithRelated(data, { concurrency: 5 });
         if (cancelled) return;
         if (recipientMap.size===0 && scNumberMap.size===0) return;
-        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => {
+        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => {
           if (!Array.isArray(prev) || prev.length===0) return prev;
           let changed=false;
           const next = prev.map((p)=>{
@@ -1410,6 +1492,54 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     return () => { cancelled = true; };
   }, []);
 
+  // Динамическое поле результата по TypeDisplayName / ContentType (кэш 5 мин, для открытой задачи — forceRefresh)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const metas = await fetchResultFieldsMeta(apiClient);
+        if (cancelled) return;
+        setResultFieldsMeta(metas);
+        try {
+          const map = await fetchContentTypeResultMap(apiClient);
+          if (!cancelled) setCtResultMap(map);
+        } catch {}
+        if (metas.length > 0 && metas[0].choices && metas[0].choices.length > 0) {
+          setChoices((prev) => (prev && prev.length > 0 ? prev : metas[0].choices));
+        }
+      } catch (e) {
+        console.warn("[resultField] fetch failed", e?.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Для открытой задачи — всегда свежие choices по ContentType
+  useEffect(() => {
+    if (!tasks || tasks.length === 0) return;
+    const hasOpen = tasks.some((tk) => isInProgressStatus(tk.Status) && !isCompletedStatus(tk.Status, tk.PercentComplete));
+    if (!hasOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const metas = await fetchResultFieldsMeta(apiClient, { forceRefresh: true });
+        if (cancelled) return;
+        setResultFieldsMeta(metas);
+        const map = await fetchContentTypeResultMap(apiClient, { forceRefresh: true });
+        if (cancelled) return;
+        setCtResultMap(map);
+        if (metas.length > 0 && metas[0].choices?.length) {
+          const fresh = metas[0].choices;
+          setChoices((prev) => {
+            if (fresh.length !== prev.length || fresh.some((v,i)=> v!==prev[i])) return fresh;
+            return prev;
+          });
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [tasks]);
+
   const loadTasks = useCallback(async (opts={})=>{
     // совместимость: все старые вызовы loadTasks({silent:true}) теперь — invalidate + refetch через TanStack
     await queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -1622,6 +1752,16 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     return tasks.filter((t) => isCompletedStatus(t.Status, t.PercentComplete));
   }, [tasks, tab]);
 
+  // Хелпер для получения свежих choices по ContentType для конкретной задачи
+  const getTaskChoices = useCallback((taskObj) => {
+    const meta = getResultFieldForTask(taskObj, ctResultMap, resultFieldsMeta);
+    if (meta?.choices && meta.choices.length > 0) return meta.choices;
+    return choices;
+  }, [ctResultMap, resultFieldsMeta, choices]);
+  const getTaskFieldMeta = useCallback((taskObj) => {
+    return getResultFieldForTask(taskObj, ctResultMap, resultFieldsMeta) || { internalName: "ResultSearchTHU", choices };
+  }, [ctResultMap, resultFieldsMeta, choices]);
+
   const groupedTasks = useMemo(() => {
     if (!groupingEnabled) {
       // группировка выключена — один виртуальный группа "Все"
@@ -1706,7 +1846,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
             notify(`Задача #${task.Id} уже обрабатывается: ${freshStatus} у ${freshEditor || "—"}. Возьмите другую задачу.`, { severity: "warning" });
           }
           const _freshOpt = { Status: freshStatus, Modified: freshModified, EditorTitle: freshEditor, Editor: freshEditor, EditorId: freshEditorId };
-          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._freshOpt } : t) : prev);
+          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._freshOpt } : t) : prev);
           setElementTaskMatch((prev) => prev && prev.Id === task.Id ? { ...prev, ..._freshOpt } : prev);
           await loadTasks();
           return;
@@ -1748,7 +1888,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
             const ed = check?.data?.d?.Editor?.Title || "другим пользователем";
             notify(`Задача #${task.Id} уже взята пользователем ${ed} (${s}). Возьмите другую задачу.`, { severity: "warning" });
             const edId = check?.data?.d?.Editor?.Id || null;
-            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, Status: s, EditorTitle: ed, Editor: ed, EditorId: edId } : t) : prev);
+            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, Status: s, EditorTitle: ed, Editor: ed, EditorId: edId } : t) : prev);
           } catch {}
           await loadTasks();
           return;
@@ -1767,7 +1907,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       notify(`Задача #${task.Id} взята в работу`, { severity: "success" });
       // optimistic local update + hash card — через TanStack setQueryData
       const _takeOpt = { Status: targetInProgress, Modified: new Date().toISOString(), EditorTitle: currentUserTitle || "Вы", Editor: currentUserTitle || "Вы", EditorId: currentUserId };
-      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._takeOpt } : t) : prev);
+      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._takeOpt } : t) : prev);
       setElementTaskMatch((prev) => prev && prev.Id === task.Id ? { ...prev, ..._takeOpt } : prev);
       // Инвалидируем кэш списка и самой задачи — TanStack + sp/cache
       queryClient.invalidateQueries({ queryKey: ['tasks'] });
@@ -1814,8 +1954,13 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     // optimistic: сразу показываем карточку как завершённую, без ожидания сервера
     let _targetStatusOpt = completedStatusValue || "Завершена";
     if (_targetStatusOpt && String(_targetStatusOpt).toLowerCase().includes("в процессе")) _targetStatusOpt = "Завершена";
+    // Динамическое поле результата по ContentType
+    const _fieldMetaForTask = getResultFieldForTask(task, ctResultMap, resultFieldsMeta) || { internalName: "ResultSearchTHU" };
+    const _resultFieldName = _fieldMetaForTask.internalName || "ResultSearchTHU";
     const _optimistic = {
+      [_resultFieldName]: resultValue,
       ResultSearchTHU: resultValue,
+      ResultValue: resultValue,
       Location1: locationValue !== undefined && locationValue !== null ? locationValue : task.Location1,
       AdditionalActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalActionsRequired || "")),
       AdditionalActions: _isNotFound ? [] : (_isFound ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
@@ -1823,14 +1968,14 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       PercentComplete: 1,
       Modified: new Date().toISOString(),
     };
-    queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._optimistic } : t)) : prev);
+    queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._optimistic } : t)) : prev);
     setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._optimistic } : prev));
     try {
       // === Concurrency guard: re-fetch current state from server ===
       let serverEtag = "*";
       try {
         const resp = await apiClient.get(
-          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Modified`,
+          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Modified,ContentTypeId`,
           { headers: { Accept: "application/json;odata=verbose" } }
         );
         const server = resp?.data?.d;
@@ -1839,10 +1984,13 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
         if (server && isCompletedStatus(server.Status, server.PercentComplete)) {
           notify(`Задача #${task.Id} уже выполнена другим пользователем: ${server.ResultSearchTHU || server.Status}`, { severity: "warning" });
           // Sync local state to server truth — через TanStack
-          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) =>
+          // Синхронизация с сервером — учитываем динамическое поле
+          const _srvFieldName = _resultFieldName;
+          const _srvVal = server[_srvFieldName] ?? server.ResultSearchTHU ?? "";
+          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) =>
             Array.isArray(prev) ? prev.map((t) =>
               t.Id === task.Id
-                ? { ...t, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: server.ResultSearchTHU, Modified: server.Modified }
+                ? { ...t, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: _srvVal, ResultValue: _srvVal, [_srvFieldName]: _srvVal, Modified: server.Modified }
                 : t
             ) : prev
           );
@@ -1869,7 +2017,9 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
 
       const payload = {
         __metadata: { type: et },
+        [_resultFieldName]: resultValue,
         ResultSearchTHU: resultValue,
+        ResultValue: resultValue,
       };
       if (locationValue !== undefined && locationValue !== null) {
         payload.Location1 = locationValue;
@@ -2209,7 +2359,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       const msg = e?.response?.data?.error?.message?.value || e?.message || "Ошибка обновления задачи";
       notify(msg, { severity: "error" });
       // rollback optimistic (включая доп. действия) — через TanStack
-      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
+      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
       setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : prev));
     } finally {
       setUpdatingId(null);
@@ -2279,7 +2429,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
           if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete) && prev.Location1 === mapped.Location1) return prev;
           return mapped;
         });
-        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => {
+        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => {
           if (!Array.isArray(prev)) return prev;
           const ex = prev.find((t) => t.Id === mapped.Id);
           if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete) && ex.Location1 === mapped.Location1) return prev;
@@ -2297,7 +2447,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
               if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete)) return prev;
               return mapped;
             });
-            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => {
+            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => {
               if (!Array.isArray(prev)) return prev;
               const ex = prev.find((t) => t.Id === mapped.Id);
               if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete)) return prev;
@@ -2470,6 +2620,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 isCompleted={isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete)}
                 isOverdue={elementTaskMatch.DueDate ? new Date(elementTaskMatch.DueDate).getTime() < Date.now() : false}
                 choices={choices}
+                              resultFieldsMeta={resultFieldsMeta}
+                              ctResultMap={ctResultMap}
                 updatingId={updatingId}
                 updatingAction={updatingAction}
                 onResultClick={handleResultClick}
@@ -2592,6 +2744,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                                 isCompleted={isCompleted}
                                 isOverdue={isOverdue}
                                 choices={choices}
+                              resultFieldsMeta={resultFieldsMeta}
+                              ctResultMap={ctResultMap}
                                 updatingId={updatingId}
                                 updatingAction={updatingAction}
                                 onResultClick={handleResultClick}
@@ -2619,6 +2773,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                           isCompleted={isCompleted}
                           isOverdue={isOverdue}
                           choices={choices}
+                              resultFieldsMeta={resultFieldsMeta}
+                              ctResultMap={ctResultMap}
                           updatingId={updatingId}
                           updatingAction={updatingAction}
                           onResultClick={handleResultClick}
@@ -2699,6 +2855,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                           isCompleted={isCompleted}
                           isOverdue={isOverdue}
                           choices={choices}
+                              resultFieldsMeta={resultFieldsMeta}
+                              ctResultMap={ctResultMap}
                           updatingId={updatingId}
                           updatingAction={updatingAction}
                           onResultClick={handleResultClick}
@@ -3001,6 +3159,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                     isCompleted={isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete)}
                     isOverdue={elementTaskMatch.DueDate ? new Date(elementTaskMatch.DueDate).getTime() < Date.now() : false}
                     choices={choices}
+                              resultFieldsMeta={resultFieldsMeta}
+                              ctResultMap={ctResultMap}
                     updatingId={updatingId}
                     updatingAction={updatingAction}
                     onResultClick={handleResultClick}

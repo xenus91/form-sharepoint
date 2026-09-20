@@ -7,7 +7,7 @@ import { mapRawTask } from "./mapping";
  * Повторяет логику loadTasks из TasksView, но возвращает Promise<Array<Task>>.
  * Используется TanStack Query queryFn.
  */
-export async function fetchTasks({ currentUserId, distribution, taskFieldNames = [], recipientField = null, scNumberField = null }) {
+export async function fetchTasks({ currentUserId, distribution, taskFieldNames = [], recipientField = null, scNumberField = null, resultFieldInternalNames = [] }) {
   if (!currentUserId) return [];
   let useDueDate = true;
   let useAdditionalActions = true;
@@ -17,6 +17,7 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
       useDueDate,
       useAdditionalActions,
       recipientField,
+      resultFieldInternalNames,
       distribution,
       currentUserId,
     });
