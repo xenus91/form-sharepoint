@@ -197,9 +197,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         opacity: isUpdating ? 0.65 : 1,
         pointerEvents: isUpdating ? "none" : "auto",
         transition: "opacity 150ms",
-        contentVisibility: "auto",
-        containIntrinsicSize: "auto 340px",
-        contain: "layout paint style",
+        // content-visibility убран для виртуализованного списка — виртуализатор уже виртуализует,
+        // двойная виртуализация оставляла пустое место при закрытии/удалении карточки
+        willChange: "transform",
+        contain: "layout paint",
       }}
     >
       {isUpdating && (() => {
@@ -1139,10 +1140,73 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   const [entityType, setEntityType] = useState(null);
   const [currentUserTitle, setCurrentUserTitle] = useState("");
   const [additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean] = useState(null); // null=unknown, true=Boolean, false=Choice
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
+  const tasksQueryEnabled = !!currentUserId && !fieldsLoading;
+  const {
+    data: tasksData,
+    isLoading: isTasksLoading,
+    isFetching: isTasksFetching,
+    error: tasksQueryError,
+    refetch: refetchTasks,
+    dataUpdatedAt: tasksDataUpdatedAt,
+  } = useQuery({
+    queryKey: ['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null],
+    queryFn: () => fetchTasks({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField }),
+    enabled: tasksQueryEnabled,
+    staleTime: 30_000,
+    gcTime: 5*60_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: false, // ручной throttle ниже
+    refetchOnReconnect: true,
+    placeholderData: (prev) => prev,
+    structuralSharing: true,
+  });
+
+  // enrich уже внутри useTasksQuery не используется здесь — делаем локально для совместимости,
+  // но основной fetch через useQuery; enrich патчит кэш диффом
+  useEffect(() => {
+    const data = tasksData;
+    if (!data || data.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { recipientMap, scNumberMap } = await enrichTasksWithRelated(data, { concurrency: 5 });
+        if (cancelled) return;
+        if (recipientMap.size===0 && scNumberMap.size===0) return;
+        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => {
+          if (!Array.isArray(prev) || prev.length===0) return prev;
+          let changed=false;
+          const next = prev.map((p)=>{
+            const newRec = recipientMap.get(p.Id);
+            const newSc = scNumberMap.get(p.Id);
+            if (newRec===undefined && newSc===undefined) return p;
+            if (newRec!==undefined && p.Recipient!==newRec) {} else if (newSc!==undefined && p.SCNumber!==newSc) {} else return p;
+            changed=true;
+            const upd={...p};
+            if (newRec!==undefined) upd.Recipient=newRec;
+            if (newSc!==undefined) { upd.SCNumber=newSc; upd.TKNumber=newSc; }
+            return upd;
+          });
+          return changed? next : prev;
+        });
+        const newTKs = new Set([...scNumberMap.values()].map((v)=> extractTKNumber(v)!=="Без ТК"? extractTKNumber(v): extractTKNumberFromTask({SCNumber:v})));
+        if (newTKs.size>0) {
+          setExpandedGroups((prev)=>{
+            const next=new Set(prev); let ch=false;
+            newTKs.forEach((tk)=>{ if(!next.has(tk) && tk!=="Без ТК"){ next.add(tk); ch=true; }});
+            return ch? next: prev;
+          });
+        }
+      } catch {}
+    })();
+    return ()=>{ cancelled=true; };
+  }, [tasksDataUpdatedAt, queryClient, currentUserId, distribution, taskFieldNames, recipientField, scNumberField]);
+
+  const tasks = tasksData ?? [];
+  const loading = isTasksLoading && tasks.length===0;
+  const isBackgroundFetching = isTasksFetching && !isTasksLoading;
+  const error = tasksQueryError ? "Не удалось загрузить задачи." : "";
   const [tab, setTab] = useState(0); // 0 = active, 1 = completed
-  const [error, setError] = useState("");
 
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
   const [confirmNotFoundOpen, setConfirmNotFoundOpen] = useState(false);
@@ -1346,222 +1410,32 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     return () => { cancelled = true; };
   }, []);
 
-  const loadTasks = useCallback(async (opts = {}) => {
-    const silent = opts.silent === true;
-    if (!currentUserId) return;
-    if (!silent) setLoading(true);
-    setError("");
-    let useDueDate = true;
-    let useAdditionalActions = true;
-    // Build filter: if distribution via DcEmail found, use it (group assignment), else fallback to AssignedTo
-    // Логика вынесена в ./tasks/listQuery.js (см. buildTaskListQuery).
-    const buildUrl = () => buildTaskListQuery({
-      taskFieldNames,
-      useDueDate,
-      useAdditionalActions,
-      recipientField,
-      distribution,
-      currentUserId,
-    });
-    try {
-      let nextUrl = buildUrl();
+  const loadTasks = useCallback(async (opts={})=>{
+    // совместимость: все старые вызовы loadTasks({silent:true}) теперь — invalidate + refetch через TanStack
+    await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    invalidate("/items");
+    const res = await refetchTasks();
+    return res.data;
+  }, [queryClient, refetchTasks]);
 
-      let all = [];
-      let safety = 0;
-      while (nextUrl && safety < 20) {
-        try {
-          // silent-режим = polling/refresh — пропускаем кэш, чтобы получить свежие данные.
-          const { data } = await apiClient.get(nextUrl, {
-            headers: { Accept: "application/json;odata=verbose" },
-            __noCache: silent,
-          });
-          const results = data?.d?.results || [];
-          all = all.concat(results);
-          nextUrl = data?.d?.__next ? normalizeNextUrl(data.d.__next) : null;
-        } catch (e) {
-          const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
-          if (useDueDate && msg.includes("duedate")) {
-            useDueDate = false;
-            nextUrl = buildUrl();
-            continue;
-          }
-          if (useAdditionalActions && (msg.includes("additionalactionsrequired") || msg.includes("additionalactions"))) {
-            useAdditionalActions = false;
-            nextUrl = buildUrl();
-            continue;
-          }
-          if (nextUrl.includes("AssignedToId")) {
-            nextUrl = nextUrl.replace(/AssignedToId/g, "AssignedTo/Id");
-            continue;
-          }
-          throw e;
-        }
-        safety += 1;
-      }
-
-      // fallback if no PercentComplete field
-      let mapped = all.map((r) => {
-        // Try to extract Recipient from direct field (lookup/user)
-        let recipientVal = "";
-        if (recipientField && r[recipientField]) {
-          const rec = r[recipientField];
-          if (rec && typeof rec === 'object') {
-            if (rec.Title) recipientVal = rec.Title;
-            else if (rec.results && rec.results[0]?.Title) recipientVal = rec.results[0].Title;
-            else if (rec.results && rec.results[0]?.Title) recipientVal = rec.results[0].Title;
-          } else if (typeof rec === 'string') recipientVal = rec;
-        }
-        // Fallback: try common names
-        if (!recipientVal) {
-          recipientVal = r.Recipient?.Title || r.RecipientTitle || r["Recipient"] || "";
-          if (typeof recipientVal === 'object' && recipientVal?.Title) recipientVal = recipientVal.Title;
-        }
-        // SCNumber direct from task fields
-        let scNumberVal = "";
-        if (scNumberField && r[scNumberField] != null) scNumberVal = String(r[scNumberField]).trim();
-        if (!scNumberVal) scNumberVal = r.SCNumber || r.ScNumber || r.SC_x0020_Number || "";
-        if (typeof scNumberVal === 'object' && scNumberVal?.Title) scNumberVal = scNumberVal.Title;
-        // AdditionalActionsRequired — может быть Choice или Boolean (у пользователя булевое)
-        let additionalRequiredVal = r.AdditionalActionsRequired;
-        if (additionalRequiredVal == null) additionalRequiredVal = r.AdditionalActionsRequired_x0020_ ?? "";
-        if (additionalRequiredVal === true || additionalRequiredVal === 1 || additionalRequiredVal === "1") additionalRequiredVal = "Да";
-        else if (additionalRequiredVal === false || additionalRequiredVal === 0 || additionalRequiredVal === "0") additionalRequiredVal = "Нет";
-        else if (typeof additionalRequiredVal === "string") {
-          const s = additionalRequiredVal.trim().toLowerCase();
-          if (s === "да" || s === "true" || s === "1") additionalRequiredVal = "Да";
-          else if (s === "нет" || s === "false" || s === "0") additionalRequiredVal = "Нет";
-          else additionalRequiredVal = additionalRequiredVal ? String(additionalRequiredVal).trim() : "";
-        } else if (additionalRequiredVal != null && additionalRequiredVal !== "") {
-          additionalRequiredVal = String(additionalRequiredVal).trim();
-        } else {
-          additionalRequiredVal = "";
-        }
-        let additionalActionsVal = [];
-        const rawAA = r.AdditionalActions ?? null;
-        if (rawAA) {
-          if (Array.isArray(rawAA)) additionalActionsVal = rawAA;
-          else if (Array.isArray(rawAA.results)) additionalActionsVal = rawAA.results;
-          else if (typeof rawAA === "string" && rawAA) additionalActionsVal = [rawAA];
-        }
-        additionalActionsVal = additionalActionsVal.map((v) => String(v).trim()).filter(Boolean);
-        return {
-          Id: r.Id,
-          Title: r.Title || "",
-          Body: stripHtml(r.Body) || r.Body || "",
-          BodyRaw: r.Body || "",
-          AssignedTo: r.AssignedTo?.Title || "",
-          AssignedToId: r.AssignedTo?.Id || r.AssignedToId || null,
-          EditorTitle: r.Editor?.Title || "",
-          Editor: r.Editor?.Title || "",
-          EditorId: r.Editor?.Id || r.EditorId || null,
-          Status: r.Status || "",
-          ResultSearchTHU: r.ResultSearchTHU || "",
-          Location1: r.Location1 || "",
-          AdditionalActionsRequired: additionalRequiredVal,
-          AdditionalActions: additionalActionsVal,
-          Created: r.Created || "",
-          Modified: r.Modified || "",
-          PercentComplete: r.PercentComplete,
-          DueDate: r.DueDate || null,
-          Recipient: recipientVal || "",
-          SCNumber: scNumberVal || "",
-          RelatedItems: r.RelatedItems || null,
-          raw: r,
-        };
-      });
-
-      // 3) Попытка получить Recipient из связанного элемента задачи (RelatedItems -> ProblemsPallet).
-      // Делаем неблокирующе: параллельно подтягиваем без фриза UI.
-      // Логика вынесена в ./tasks/enrich.js (см. enrichTasksWithRelated).
-      // Enrich — без useTransition, чтобы фоновый пулинг не вызывал isDataPending мигание.
-      // Дифф по значению — не создаём новые объекты если Recipient/SCNumber уже такие же (убирает мигание на focus).
-      if (mapped.length > 0) {
-        (async () => {
-          const { recipientMap: recMap, scNumberMap: scMap } = await enrichTasksWithRelated(mapped, { concurrency: 5 });
-          if (recMap.size === 0 && scMap.size === 0) return;
-          setTasks((prev) => {
-            let changed = false;
-            const next = prev.map((p) => {
-              const newRec = recMap.get(p.Id);
-              const newSc = scMap.get(p.Id);
-              let upd = p;
-              let needNew = false;
-              if (newRec !== undefined && p.Recipient !== newRec) needNew = true;
-              if (newSc !== undefined && p.SCNumber !== newSc) needNew = true;
-              if (!needNew) return p;
-              changed = true;
-              upd = { ...p };
-              if (newRec !== undefined) upd.Recipient = newRec;
-              if (newSc !== undefined) { upd.SCNumber = newSc; upd.TKNumber = newSc; }
-              return upd;
-            });
-            return changed ? next : prev;
-          });
-          // раскрыть новые ТК группы сразу
-          const newTKs = new Set([...scMap.values()].map((v) => extractTKNumber(v) !== "Без ТК" ? extractTKNumber(v) : extractTKNumberFromTask({ SCNumber: v })));
-          if (newTKs.size > 0) {
-            setExpandedGroups((prev) => {
-              const next = new Set(prev);
-              let changed = false;
-              newTKs.forEach((tk) => { if (!next.has(tk) && tk !== "Без ТК") { next.add(tk); changed = true; } });
-              return changed ? next : prev;
-            });
-          }
-        })();
-      }
-
-      // Обновление списка: silent-пулинг не должен мигать.
-      // - silent: прямое сравнение по Id+Modified и прямой setTasks без useTransition (не триггерит isDataPending)
-      // - не-silent (первая загрузка / ручной refresh): через useTransition чтобы не фризить большой список
-      if (silent) {
-        setTasks((prev) => {
-          if (prev.length === mapped.length && prev.length > 0) {
-            const prevMap = new Map(prev.map((t) => [t.Id, t]));
-            let same = true;
-            for (const m of mapped) {
-              const p = prevMap.get(m.Id);
-              if (!p || p.Modified !== m.Modified || p.Status !== m.Status || p.ResultSearchTHU !== m.ResultSearchTHU || p.Location1 !== m.Location1 || String(p.PercentComplete) !== String(m.PercentComplete)) {
-                same = false;
-                break;
-              }
-            }
-            if (same) return prev;
-          } else if (prev.length === 0 && mapped.length === 0) {
-            return prev;
-          }
-          return mapped;
-        });
-      } else {
-        startDataTransition(() => {
-          setTasks(mapped);
-        });
-      }
-      if (onCountChange) {
-        const activeCount = mapped.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete)).length;
-        onCountChange(activeCount);
-      }
-      // авто-развернуть все новые группы при первой загрузке — без лишних сетов (убирает мигание)
-      const newGroups = new Set(mapped.map((m) => extractTKNumberFromTask(m)));
-      setExpandedGroups((prev) => {
-        if (prev.size === 0) return newGroups;
-        let changed = false;
-        const next = new Set(prev);
-        newGroups.forEach((g) => { if (!prev.has(g)) { next.add(g); changed = true; } });
-        return changed ? next : prev;
-      });
-    } catch (e) {
-      console.error("load tasks error", e);
-      setError("Не удалось загрузить задачи.");
-      setTasks([]);
-    } finally {
-      if (!silent) setLoading(false);
-      else setLoading(false);
-    }
-  }, [currentUserId, onCountChange, distribution, taskFieldNames, recipientField, scNumberField]);
-
+  // onCountChange + expandedGroups — теперь через эффект от tasks (раньше было внутри loadTasks)
   useEffect(() => {
-    if (currentUserId) loadTasks();
-  }, [loadTasks]);
+    if (!tasksData) return;
+    if (onCountChange) {
+      const activeCount = tasks.filter((t)=> !isCompletedStatus(t.Status, t.PercentComplete)).length;
+      onCountChange(activeCount);
+    }
+    const newGroups = new Set(tasks.map((m)=> extractTKNumberFromTask(m)));
+    setExpandedGroups((prev)=>{
+      if (prev.size===0) return newGroups;
+      let changed=false;
+      const next=new Set(prev);
+      newGroups.forEach((g)=>{ if(!prev.has(g)){ next.add(g); changed=true; }});
+      return changed? next: prev;
+    });
+  }, [tasksData, tasks]);
+
+  // initial load — handled by TanStack Query (tasksQueryEnabled); loadTasks is now invalidate+refetch
 
   // (poll перенесён ниже, после isHashMode — чтобы в hash-режиме не скрывать карточку)
 
@@ -1769,14 +1643,26 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   }, [filteredTasks, groupingEnabled]);
 
   // Виртуализация для плоского списка (grouping off) — рендерим только видимые карточки
-  const useVirtual = !groupingEnabled && filteredTasks.length > 25;
+  // Порог 50 — при меньшем списке виртуализация не нужна и только мешает (пустое место после удаления)
+  const useVirtual = !groupingEnabled && filteredTasks.length > 50;
   const flatVirtualizer = useVirtualizer({
     count: useVirtual ? filteredTasks.length : 0,
     getScrollElement: () => virtualParentRef.current,
-    estimateSize: () => 360,
-    overscan: 6,
-    measureElement: (el) => el?.getBoundingClientRect()?.height ?? 360,
+    estimateSize: () => 380,
+    overscan: 8,
+    // measureElement через ResizeObserver — корректно пересчитывает при открытии/закрытии инлайн-форм
+    measureElement: (el) => el?.getBoundingClientRect()?.height ?? 380,
   });
+  // При изменении списка или закрытии карточки — форсируем пересчет виртуализатора
+  useEffect(() => {
+    if (useVirtual) {
+      // небольшой debounce, чтобы DOM успел обновиться после удаления/закрытия
+      const id = setTimeout(() => {
+        try { flatVirtualizer.measure(); } catch {}
+      }, 50);
+      return () => clearTimeout(id);
+    }
+  }, [filteredTasks.length, useVirtual, flatVirtualizer]);
 
   const toggleGroup = useCallback((sc) => {
     setExpandedGroups((prev) => {
@@ -1828,7 +1714,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
             notify(`Задача #${task.Id} уже обрабатывается: ${freshStatus} у ${freshEditor || "—"}. Возьмите другую задачу.`, { severity: "warning" });
           }
           const _freshOpt = { Status: freshStatus, Modified: freshModified, EditorTitle: freshEditor, Editor: freshEditor, EditorId: freshEditorId };
-          setTasks((prev) => prev.map((t) => t.Id === task.Id ? { ...t, ..._freshOpt } : t));
+          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._freshOpt } : t) : prev);
           setElementTaskMatch((prev) => prev && prev.Id === task.Id ? { ...prev, ..._freshOpt } : prev);
           await loadTasks();
           return;
@@ -1870,7 +1756,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
             const ed = check?.data?.d?.Editor?.Title || "другим пользователем";
             notify(`Задача #${task.Id} уже взята пользователем ${ed} (${s}). Возьмите другую задачу.`, { severity: "warning" });
             const edId = check?.data?.d?.Editor?.Id || null;
-            setTasks((prev) => prev.map((t) => t.Id === task.Id ? { ...t, Status: s, EditorTitle: ed, Editor: ed, EditorId: edId } : t));
+            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, Status: s, EditorTitle: ed, Editor: ed, EditorId: edId } : t) : prev);
           } catch {}
           await loadTasks();
           return;
@@ -1887,11 +1773,12 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
         }
       }
       notify(`Задача #${task.Id} взята в работу`, { severity: "success" });
-      // optimistic local update + hash card
+      // optimistic local update + hash card — через TanStack setQueryData
       const _takeOpt = { Status: targetInProgress, Modified: new Date().toISOString(), EditorTitle: currentUserTitle || "Вы", Editor: currentUserTitle || "Вы", EditorId: currentUserId };
-      setTasks((prev) => prev.map((t) => t.Id === task.Id ? { ...t, ..._takeOpt } : t));
+      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._takeOpt } : t) : prev);
       setElementTaskMatch((prev) => prev && prev.Id === task.Id ? { ...prev, ..._takeOpt } : prev);
-      // Инвалидируем кэш списка и самой задачи — следующий fetchFullTask/loadTasks пойдёт в сеть.
+      // Инвалидируем кэш списка и самой задачи — TanStack + sp/cache
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
       invalidate("/items");
       await loadTasks({ silent: true });
     } catch (err) {
@@ -1944,7 +1831,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       PercentComplete: 1,
       Modified: new Date().toISOString(),
     };
-    setTasks((prev) => prev.map((t) => (t.Id === task.Id ? { ...t, ..._optimistic } : t)));
+    queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._optimistic } : t)) : prev);
     setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._optimistic } : prev));
     try {
       // === Concurrency guard: re-fetch current state from server ===
@@ -1959,13 +1846,13 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
         serverEtag = server?.__metadata?.etag || resp?.headers?.etag || resp?.headers?.ETag || resp?.headers?.["etag"] || "*";
         if (server && isCompletedStatus(server.Status, server.PercentComplete)) {
           notify(`Задача #${task.Id} уже выполнена другим пользователем: ${server.ResultSearchTHU || server.Status}`, { severity: "warning" });
-          // Sync local state to server truth
-          setTasks((prev) =>
-            prev.map((t) =>
+          // Sync local state to server truth — через TanStack
+          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) =>
+            Array.isArray(prev) ? prev.map((t) =>
               t.Id === task.Id
                 ? { ...t, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: server.ResultSearchTHU, Modified: server.Modified }
                 : t
-            )
+            ) : prev
           );
           await loadTasks();
           return;
@@ -2105,6 +1992,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 // Пробуем с Boolean
                 await postUpdate(_isNotFound ? flip : flipWithStatus, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
                 invalidate("/items");
                 setTimeout(() => loadTasks({ silent: true }), 600);
                 return;
@@ -2125,6 +2013,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 await postUpdate(_isFound ? flipWithStatus : flip, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
                 invalidate("/items");
                 setTimeout(() => loadTasks({ silent: true }), 600);
                 return;
@@ -2147,6 +2036,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 // Пробуем с Boolean
                 await postUpdate(_isNotFound ? flip : flipWithStatus, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
                 invalidate("/items");
                 setTimeout(() => loadTasks({ silent: true }), 600);
                 return;
@@ -2167,6 +2057,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 await postUpdate(_isFound ? flipWithStatus : flip, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
                 invalidate("/items");
                 setTimeout(() => loadTasks({ silent: true }), 600);
                 return;
@@ -2183,6 +2074,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
                 await postUpdate(cleanWithStatus, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
                 invalidate("/items");
                 setTimeout(() => loadTasks({ silent: true }), 600);
                 return;
@@ -2268,6 +2160,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 delete clean2.AdditionalActions;
                 await postUpdate(clean2, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
                 invalidate("/items");
                 setTimeout(() => loadTasks({ silent: true }), 600);
                 return;
@@ -2315,17 +2208,16 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       }
 
       notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-      // already optimistically updated; ensure counts refreshed
-      // Инвалидируем кэш задач сразу, чтобы следующий запрос шёл в сеть,
-      // и делаем один silent-refresh через 600 мс (без двойного setTimeout 300+600).
+      // already optimistically updated — invalidate TanStack + sp/cache
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
       invalidate("/items");
       setTimeout(() => loadTasks({ silent: true }), 600);
     } catch (e) {
       console.error("complete task error", e);
       const msg = e?.response?.data?.error?.message?.value || e?.message || "Ошибка обновления задачи";
       notify(msg, { severity: "error" });
-      // rollback optimistic (включая доп. действия)
-      setTasks((prev) => prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)));
+      // rollback optimistic (включая доп. действия) — через TanStack
+      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
       setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : prev));
     } finally {
       setUpdatingId(null);
@@ -2395,7 +2287,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
           if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete) && prev.Location1 === mapped.Location1) return prev;
           return mapped;
         });
-        setTasks((prev) => {
+        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => {
+          if (!Array.isArray(prev)) return prev;
           const ex = prev.find((t) => t.Id === mapped.Id);
           if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete) && ex.Location1 === mapped.Location1) return prev;
           return prev.map((t) => t.Id === mapped.Id ? mapped : t);
@@ -2412,7 +2305,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
               if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete)) return prev;
               return mapped;
             });
-            setTasks((prev) => {
+            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null], (prev) => {
+              if (!Array.isArray(prev)) return prev;
               const ex = prev.find((t) => t.Id === mapped.Id);
               if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete)) return prev;
               return prev.map((t) => t.Id === mapped.Id ? mapped : t);
@@ -2445,34 +2339,20 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     };
   }, [isHashMode, elementTaskMatch?.Id]);
 
-  // poll для нормального списка — в hash-режиме не дергаем loadTasks, чтобы не скрывать карточку
-  // Адаптивный polling: пауза на скрытой вкладке + backoff при ошибках (cap 5 мин).
-  // Focus — с троттлингом 30с, чтобы каждый возврат в окно не вызывал мигание.
+  // Poll удален — TanStack Query refetchInterval 60s уже в useQuery.
+  // Оставлен только focus-throttle 30s: инвалидация TanStack кэша при возврате в окно
   useEffect(() => {
     if (!currentUserId) return;
     if (isHashMode) return;
-    const stop = createAdaptivePolling({
-      fn: () => {
-        lastFocusLoadRef.current = Date.now();
-        return loadTasks({ silent: true });
-      },
-      intervalMs: 60_000,
-      maxBackoffMs: 5 * 60_000,
-      pauseWhenHidden: true,
-      onError: (e) => console.warn("[polling] loadTasks error, backing off:", e?.response?.status || e?.message),
-    });
     const onFocus2 = () => {
       const now = Date.now();
       if (now - lastFocusLoadRef.current < 30000) return;
       lastFocusLoadRef.current = now;
-      loadTasks({ silent: true });
+      queryClient.invalidateQueries({ queryKey: ['tasks'] });
     };
     window.addEventListener("focus", onFocus2);
-    return () => {
-      stop();
-      window.removeEventListener("focus", onFocus2);
-    };
-  }, [currentUserId, loadTasks, isHashMode]);
+    return () => window.removeEventListener("focus", onFocus2);
+  }, [currentUserId, isHashMode, queryClient]);
 
   if (fieldsLoading) {
     return (
@@ -2702,7 +2582,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                           const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
                           return (
                             <Box
-                              key={task.Id}
+                              key={virtualItem.key}
                               data-index={virtualItem.index}
                               ref={flatVirtualizer.measureElement}
                               sx={{
@@ -2843,7 +2723,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
               );
             })}
           </Stack>
-          {loading && tasks.length > 0 && (
+          {(loading || isBackgroundFetching) && tasks.length > 0 && (
             <Box sx={{ display: "flex", justifyContent: "center", py: 2, gap: 1, alignItems: "center" }}><CircularProgress size={20} /><Typography variant="caption" color="text.secondary">Обновление...</Typography></Box>
           )}
         </Box>
