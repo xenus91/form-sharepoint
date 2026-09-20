@@ -1960,7 +1960,6 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     const _optimistic = {
       [_resultFieldName]: resultValue,
       ResultSearchTHU: resultValue,
-      ResultValue: resultValue,
       Location1: locationValue !== undefined && locationValue !== null ? locationValue : task.Location1,
       AdditionalActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalActionsRequired || "")),
       AdditionalActions: _isNotFound ? [] : (_isFound ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
@@ -1975,7 +1974,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       let serverEtag = "*";
       try {
         const resp = await apiClient.get(
-          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Modified,ContentTypeId`,
+          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,${_resultFieldName},ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Modified,ContentTypeId`,
           { headers: { Accept: "application/json;odata=verbose" } }
         );
         const server = resp?.data?.d;
@@ -1990,7 +1989,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
           queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) =>
             Array.isArray(prev) ? prev.map((t) =>
               t.Id === task.Id
-                ? { ...t, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: _srvVal, ResultValue: _srvVal, [_srvFieldName]: _srvVal, Modified: server.Modified }
+                ? { ...t, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: _srvVal, [_srvFieldName]: _srvVal, Modified: server.Modified }
                 : t
             ) : prev
           );
@@ -2018,8 +2017,6 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       const payload = {
         __metadata: { type: et },
         [_resultFieldName]: resultValue,
-        ResultSearchTHU: resultValue,
-        ResultValue: resultValue,
       };
       if (locationValue !== undefined && locationValue !== null) {
         payload.Location1 = locationValue;
