@@ -7,20 +7,32 @@ import { TASKS_LIST_API } from "./config";
 export const RESULT_FIELD_TYPE_DISPLAY_NAME = "Результирующий выбор";
 export const RESULT_FIELD_SHORT_DESC = "Результат задачи";
 
-// In-memory кэш
+// In-memory кэш — результаты меняются редко, кэшируем надолго
 let _resultFieldsCache = null; // Array<{ internalName, title, choices, id, stringId }>
 let _resultFieldsCacheAt = 0;
 let _ctMapCache = null; // Map<string CtStringId -> fieldMeta>
 let _ctMapCacheAt = 0;
-const CACHE_TTL_MS = 5 * 60_000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 часа — поле результата меняется редко
 const STORAGE_KEY_FIELDS = "sp:resultFields:meta";
 const STORAGE_KEY_CTMAP = "sp:resultFields:ctMap";
 
+// Универсальный сторадж: localStorage для долгого кэша, fallback на sessionStorage
+function getStorage() {
+  try {
+    if (typeof localStorage !== "undefined") return localStorage;
+  } catch {}
+  try {
+    if (typeof sessionStorage !== "undefined") return sessionStorage;
+  } catch {}
+  return null;
+}
+
 function loadFromStorage() {
   try {
-    if (typeof sessionStorage === "undefined") return;
-    const rawF = sessionStorage.getItem(STORAGE_KEY_FIELDS);
-    const rawC = sessionStorage.getItem(STORAGE_KEY_CTMAP);
+    const storage = getStorage();
+    if (!storage) return;
+    const rawF = storage.getItem(STORAGE_KEY_FIELDS);
+    const rawC = storage.getItem(STORAGE_KEY_CTMAP);
     if (rawF) {
       const parsed = JSON.parse(rawF);
       if (Array.isArray(parsed.fields) && parsed.at) {
@@ -46,12 +58,13 @@ function loadFromStorage() {
 
 function saveToStorage() {
   try {
-    if (typeof sessionStorage === "undefined") return;
+    const storage = getStorage();
+    if (!storage) return;
     if (_resultFieldsCache) {
-      sessionStorage.setItem(STORAGE_KEY_FIELDS, JSON.stringify({ fields: _resultFieldsCache, at: _resultFieldsCacheAt }));
+      storage.setItem(STORAGE_KEY_FIELDS, JSON.stringify({ fields: _resultFieldsCache, at: _resultFieldsCacheAt }));
     }
     if (_ctMapCache) {
-      sessionStorage.setItem(STORAGE_KEY_CTMAP, JSON.stringify({ map: Array.from(_ctMapCache.entries()), at: _ctMapCacheAt }));
+      storage.setItem(STORAGE_KEY_CTMAP, JSON.stringify({ map: Array.from(_ctMapCache.entries()), at: _ctMapCacheAt }));
     }
   } catch {}
 }
@@ -64,7 +77,7 @@ function norm(s) {
 /**
  * Получить все поля списка, у которых TypeDisplayName === "Результирующий выбор" и
  * TypeShortDescription === "Результат задачи".
- * Кэшируется в памяти + sessionStorage на 5 минут.
+ * Кэшируется в памяти + localStorage на 24 часа (редкие изменения).
  * @param {import('axios').AxiosInstance} apiClient
  * @param {{ forceRefresh?: boolean }} [opts]
  * @returns {Promise<Array<{ internalName:string, title:string, choices:string[], id:string, stringId:string, typeDisplayName:string, shortDesc:string }>>}
@@ -350,9 +363,19 @@ export function clearResultFieldCache() {
   _resultFieldsCacheAt = 0;
   _ctMapCacheAt = 0;
   try {
+    const storage = getStorage();
+    if (storage) {
+      storage.removeItem(STORAGE_KEY_FIELDS);
+      storage.removeItem(STORAGE_KEY_CTMAP);
+    }
+    // Чистим и fallback
     if (typeof sessionStorage !== "undefined") {
       sessionStorage.removeItem(STORAGE_KEY_FIELDS);
       sessionStorage.removeItem(STORAGE_KEY_CTMAP);
+    }
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY_FIELDS);
+      localStorage.removeItem(STORAGE_KEY_CTMAP);
     }
   } catch {}
 }
