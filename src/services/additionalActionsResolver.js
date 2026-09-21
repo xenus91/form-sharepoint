@@ -1,9 +1,11 @@
 // src/services/additionalActionsResolver.js
 // Resolver для AdditionalActions поля — §18 плана.
 // Отвечает: Task → ContentTypeId → TaskTypeConfiguration → fieldInternalName → field metadata → normalized config
-// Пока без TaskTypeConfiguration списка (audit Phase 3 не завершён) — работает в режиме общего поля (случай A).
+// TaskTypeConfiguration теперь VERIFIED-ready (Phase 2.1): читает список TaskTypeConfiguration если существует,
+// иначе fallback к общему полю AdditionalActions (случай A). До tenant аудита таблица UNKNOWN → single field.
 
 import { ADDITIONAL_ACTIONS_FIELD } from "../tasks/config";
+import { fetchTaskTypeConfigurationMap, resolveTaskTypeConfig } from "./taskTypeConfiguration";
 
 /**
  * @typedef {object} AdditionalActionsConfig
@@ -20,13 +22,30 @@ import { ADDITIONAL_ACTIONS_FIELD } from "../tasks/config";
 
 // Кэш нормализованных конфигов: Map<ContentTypeId, config>
 const _normalizedCache = new Map();
+let _taskTypeMapCache = null;
+let _taskTypeMapAt = 0;
+const TASK_TYPE_CACHE_TTL = 30 * 60_000;
 
-// Заглушка TaskTypeConfiguration — в будущем будет GET из списка TaskTypeConfiguration
-// Сейчас возвращает null → используется общее поле
-async function fetchTaskTypeConfig(contentTypeId, apiClient) {
-  // TODO Phase 6.2: GET /_api/web/lists/getbytitle('TaskTypeConfiguration')/items?$filter=ContentTypeId eq '...'
-  // Пока audit не показал необходимость разделения — возвращаем null
-  return null;
+async function getTaskTypeConfig(contentTypeId, apiClient) {
+  if (!apiClient || !contentTypeId) return null;
+  const now = Date.now();
+  if (_taskTypeMapCache && now - _taskTypeMapAt < TASK_TYPE_CACHE_TTL) {
+    return resolveTaskTypeConfig(contentTypeId, _taskTypeMapCache);
+  }
+  try {
+    const map = await fetchTaskTypeConfigurationMap(apiClient);
+    // fetch returns null if list not exists → keep null cache
+    if (map === null) {
+      _taskTypeMapCache = new Map();
+      _taskTypeMapAt = now;
+      return null;
+    }
+    _taskTypeMapCache = map;
+    _taskTypeMapAt = now;
+    return resolveTaskTypeConfig(contentTypeId, map);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -83,13 +102,15 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
   const cacheKey = ctId || "__default";
   if (_normalizedCache.has(cacheKey)) return _normalizedCache.get(cacheKey);
 
-  // 1) Пробуем TaskTypeConfiguration (если будет)
+  // 1) Пробуем TaskTypeConfiguration (если список существует)
   let fieldInternalName = ADDITIONAL_ACTIONS_FIELD;
   let source = "sharepoint-field";
   if (apiClient && ctId) {
-    const typeCfg = await fetchTaskTypeConfig(ctId, apiClient);
-    if (typeCfg && typeCfg.AdditionalActionsFieldInternalName) {
-      fieldInternalName = typeCfg.AdditionalActionsFieldInternalName;
+    const typeCfg = await getTaskTypeConfig(ctId, apiClient);
+    if (typeCfg && typeCfg.additionalActionsFieldInternalName) {
+      fieldInternalName = typeCfg.additionalActionsFieldInternalName;
+      source = "task-type-config";
+    } else if (typeCfg) {
       source = "task-type-config";
     }
   }
@@ -165,4 +186,6 @@ export function resolveAdditionalActionsConfigSync(task, fieldMetaMap) {
 
 export function clearAdditionalActionsResolverCache() {
   _normalizedCache.clear();
+  _taskTypeMapCache = null;
+  _taskTypeMapAt = 0;
 }
