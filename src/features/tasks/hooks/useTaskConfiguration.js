@@ -1,14 +1,14 @@
 // src/features/tasks/hooks/useTaskConfiguration.js
 // Phase 7+17 — единый React Query кэш конфигурации (изолирован от polling Tasks)
 // queryKey: ['task-configuration'], stale 30м, gc несколько часов, no refetchOnWindowFocus
-// Включает: ResultField discovery, ContentType map, TaskTypeConfiguration, TaskResultDefinitions, TaskActionDefinitions
-// Все 3 SP списка — без ребилда, graceful 404 → fallback к hardcoded/field metadata.
+// Включает: ResultField discovery, ContentType map, TaskResultDefinitions (§14), TaskActionDefinitions (§21) — TaskTypeConfiguration (§17) ОТКЛЮЧЁН до аудита
+// TaskResult/ActionDefinitions — graceful 404 → fallback. TaskTypeConfiguration не дергается до аудита (нет 404).
 
 import { useQuery } from "@tanstack/react-query";
 import apiClient from "../../../api";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap } from "../../../tasks/resultField";
 import { TASKS_LIST_API } from "../../../tasks/config";
-import { fetchTaskTypeConfigurationMap } from "../../../services/taskTypeConfiguration";
+// import { fetchTaskTypeConfigurationMap } from "../../../services/taskTypeConfiguration"; // §17 ОТКЛЮЧЁН до аудита — чтобы не было 404 TaskTypeConfiguration
 import { fetchTaskResultDefinitions } from "../../../services/taskResultDefinitions";
 import { fetchTaskActionDefinitions, resolveActionChoices } from "../../../services/taskActionDefinitions";
 
@@ -40,13 +40,15 @@ export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
     queryKey: ["task-configuration"],
     queryFn: async () => {
-      const [resultFields, ctMap, taskTypeMap, resultDefs, actionDefs] = await Promise.all([
+      // §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита content-types.md — нет 404 в Network
+      // Оставлен только TaskResultDefinitions (§14) + TaskActionDefinitions (§21)
+      const [resultFields, ctMap, resultDefs, actionDefs] = await Promise.all([
         fetchResultFieldsMeta(apiClient),
         fetchContentTypeResultMap(apiClient),
-        fetchTaskTypeConfigurationMap(apiClient).catch(() => null),
         fetchTaskResultDefinitions(apiClient).catch(() => null),
         fetchTaskActionDefinitions(apiClient).catch(() => null),
       ]);
+      const taskTypeMap = null; // отключён до аудита
       const additionalMeta = await fetchAdditionalActionsMeta();
       // Если TaskTypeConfiguration задаёт разные AdditionalActions поля — догружаем их метаданные
       const distinctAdditionalNames = new Set();

@@ -1,9 +1,9 @@
-# Decision: Без ребилда — AdditionalActions и 2 SP списка (строго по плану §14, §17, §21)
+# Decision: Без ребилда — AdditionalActions и 2 SP списка (строго по плану §14, §17, §21) — ContentTypeId полный StringValue
 
-> Дата: 2026-09-22 — исправление (было левые поля Label/Color/Variant/Gradient/RequiresLocation)
-> Статус: **IMPLEMENTED — строго по плану, без левых полей**
-> Связано: `src/services/taskResultDefinitions.js` (§14), `src/services/taskActionDefinitions.js` (§21), `src/services/taskTypeConfiguration.js` (§17), `src/features/tasks/hooks/useTaskConfiguration.js`, `src/features/tasks/components/TaskCard.jsx`, `src/services/additionalActionsResolver.js` (§18)
-> Принцип: *Preserve business architecture* — SPD Workflow не трогаем, UI конфигурируется списками, graceful 404 → fallback.
+> Дата: 2026-09-22 — исправление левых полей + 2026-09-23 отключён TaskTypeConfiguration до аудита (нет 404)
+> Статус: **IMPLEMENTED — §14 TaskResultDefinitions + §21 TaskActionDefinitions активны (graceful 404), §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита `docs/audit/content-types.md`**
+> Связано: `src/services/taskResultDefinitions.js` (§14), `src/services/taskActionDefinitions.js` (§21), `src/services/taskTypeConfiguration.js` (§17 — закомментирован), `src/features/tasks/hooks/useTaskConfiguration.js`, `src/features/tasks/components/TaskCard.jsx`, `src/services/additionalActionsResolver.js` (§18)
+> Принцип: *Preserve business architecture* — SPD Workflow не трогаем, UI конфигурируется списками, graceful 404 → fallback. ContentTypeId — полный `StringValue` (`0x01080100...`), не Name.
 
 ## План выдержка (точные поля)
 
@@ -66,7 +66,35 @@ Enabled
 
 ---
 
-## Реализация (без ребилда)
+## Полноценное определение: как заполнять ContentTypeId (ключ — полный StringValue)
+
+**Где взять полный StringValue:**
+1. На `https://portal.lenta.com/sites/obrazceo` открой любую Task → F12 Console → вставь скрипт из `docs/audit/content-types.md` шаг 1 (CT) → `window._cts.map(c=>({Name:c.Name, StringValue:c.Id.StringValue||c.StringId}))`.
+2. Скопируй `StringValue` вида `0x01080100A94D5A38B1E04A...00112233` — это ключ, не `Name` (`Поиск ЕО`) и не `0x0108`.
+
+**Правила ContentTypeId во всех 3 списках:**
+- `пусто` = **глобально для всех CT** (случай A §15, один набор). Используй пока аудит §16 не показал разные наборы.
+- `полный StringValue` = **только для этого CT** (exact match). Пример: `0x01080100A94D...` → только `Task_SearchPallet`.
+- **Дочерний CT наследует:** `0x01080100AA` (родитель) и `0x01080100AA001122` (child). Резолвер берёт **longest prefix**: `ctId.startsWith(key)` → самый длинный ключ побеждает. Поэтому строка с `0x01080100AA` покроет child, а с `0x01080100AA001122` — только child.
+- `Enabled=Нет` или пустой `Title`/`ResultValue`/`ActionId` — строка игнорируется.
+- `SortOrder` — 10,20,30 (порядок в UI), `Enabled=Да` иначе игнор.
+
+**Когда что заполнять (сейчас — случай A, один AdditionalActions):**
+- **Аудит §16 не пройден / наборы одинаковы** → `TaskResultDefinitions` и `TaskActionDefinitions` — глобальные строки (`ContentTypeId` пусто), `TaskTypeConfiguration` **не создавать** (отключён до аудита, fallback к `sharepoint-metadata` — один `AdditionalActions`). `404` в Network — норма, теперь скрыт.
+- **После аудита случай B** (разные наборы) → заведи отдельные поля `SearchAdditionalActions` (`Choice Multi+FillIn`) и строки с `ContentTypeId=полный StringValue` для каждого CT + строку в `TaskTypeConfiguration`:
+
+```
+TaskTypeConfiguration:
+Title=Поиск ЕО | ContentTypeId=0x01080100A94D... | AdditionalActionsFieldInternalName=SearchAdditionalActions | AdditionalActionsRequired=Да | Enabled=Да
+TaskTypeConfiguration:
+Title=Сборка      | ContentTypeId=0x01080100BB... | AdditionalActionsFieldInternalName=PickingAdditionalActions | AdditionalActionsRequired=Да | Enabled=Да
+```
+
+После заполнения — `sessionStorage` 30м или `sessionStorage.clear()` + `location.reload()`.
+
+---
+
+## Реализация (без ребилда, TaskTypeConfiguration отключён до аудита)
 
 ### TaskResultDefinitions (§14)
 `src/services/taskResultDefinitions.js`

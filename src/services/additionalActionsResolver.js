@@ -1,7 +1,7 @@
 // src/services/additionalActionsResolver.js
 // Resolver для AdditionalActions поля — §18 плана.
 // Отвечает: Task → ContentTypeId → TaskTypeConfiguration → fieldInternalName → field metadata → normalized config
-// TaskTypeConfiguration теперь VERIFIED-ready (Phase 2.1): читает список TaskTypeConfiguration если существует,
+// TaskTypeConfiguration §17 ОТКЛЮЧЁН до аудита (нет 404) — оставлен закомментированным, VERIFIED-ready после аудита:
 // иначе fallback к общему полю AdditionalActions (случай A). До tenant аудита таблица UNKNOWN → single field.
 
 import { ADDITIONAL_ACTIONS_FIELD } from "../tasks/config";
@@ -27,25 +27,26 @@ let _taskTypeMapAt = 0;
 const TASK_TYPE_CACHE_TTL = 30 * 60_000;
 
 async function getTaskTypeConfig(contentTypeId, apiClient) {
-  if (!apiClient || !contentTypeId) return null;
-  const now = Date.now();
-  if (_taskTypeMapCache && now - _taskTypeMapAt < TASK_TYPE_CACHE_TTL) {
-    return resolveTaskTypeConfig(contentTypeId, _taskTypeMapCache);
-  }
-  try {
-    const map = await fetchTaskTypeConfigurationMap(apiClient);
-    // fetch returns null if list not exists → keep null cache
-    if (map === null) {
-      _taskTypeMapCache = new Map();
-      _taskTypeMapAt = now;
-      return null;
-    }
-    _taskTypeMapCache = map;
-    _taskTypeMapAt = now;
-    return resolveTaskTypeConfig(contentTypeId, map);
-  } catch {
-    return null;
-  }
+  // §17 ОТКЛЮЧЁН до аудита — всегда null, нет 404 TaskTypeConfiguration
+  return null;
+  //if (!apiClient || !contentTypeId) return null;
+  //const now = Date.now();
+  //if (_taskTypeMapCache && now - _taskTypeMapAt < TASK_TYPE_CACHE_TTL) {
+  //  return resolveTaskTypeConfig(contentTypeId, _taskTypeMapCache);
+  //}
+  //try {
+  //  const map = await fetchTaskTypeConfigurationMap(apiClient);
+  //  if (map === null) {
+  //    _taskTypeMapCache = new Map();
+  //    _taskTypeMapAt = now;
+  //    return null;
+  //  }
+  //  _taskTypeMapCache = map;
+  //  _taskTypeMapAt = now;
+  //  return resolveTaskTypeConfig(contentTypeId, map);
+  //} catch {
+  //  return null;
+  //}
 }
 
 /**
