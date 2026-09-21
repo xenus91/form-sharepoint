@@ -22,6 +22,8 @@ import {
   getTasksListFieldsOverview,
 } from "./tasks/distribution";
 import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
+import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
+import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import {
   formatDueLeft,
   formatDueDateFull,
@@ -85,7 +87,7 @@ function stripHtml(html) {
 // extractEONumberFromTask — все импортированы из "./tasks/formatters".
 
 // Memoized task card to avoid freeze on rerender
-const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap }) {
+const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
   const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
@@ -823,128 +825,15 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                               '&:has(.Mui-expanded)': { borderRadius: '28px 28px 0 0' },
                             }}
                           >
-                            <Autocomplete
-                              multiple
-                              freeSolo
-                              disableCloseOnSelect
-                              options={ADDITIONAL_ACTIONS_STANDARD}
+                            <AdditionalActionsField
+                              fieldInternalName={taskConfig?.ctConfigMap?.get(String(task.contentTypeId || task.ContentTypeId || "").trim())?.additionalActionsField?.internalName || "AdditionalActions"}
+                              required={additionalActions.length > 0}
+                              choices={(taskConfig?.ctConfigMap?.get(String(task.contentTypeId || task.ContentTypeId || "").trim())?.additionalActionsField?.choices || ADDITIONAL_ACTIONS_STANDARD).map(v=>typeof v==='string'?{value:v,label:v}:v)}
+                              allowFillIn={taskConfig?.ctConfigMap?.get(String(task.contentTypeId || task.ContentTypeId || "").trim())?.additionalActionsField?.allowFillIn ?? true}
                               value={additionalActions}
-                              onChange={(event, newValue) => {
-                                const cleaned = newValue.map((v) => String(v).trim()).filter(Boolean);
-                                const uniq = [...new Set(cleaned)];
-                                setAdditionalActions(uniq);
-                                if (additionalError) setAdditionalError("");
-                                if (customActionInput) setCustomActionInput("");
-                              }}
-                              renderTags={(value, getTagProps) =>
-                                value.map((option, index) => {
-                                  const { key, ...tagProps } = getTagProps({ index }); // eslint-disable-line no-unused-vars
-                                  const isStandard = ADDITIONAL_ACTIONS_STANDARD.includes(option);
-                                  return (
-                                    <Chip
-                                      key={option}
-                                      label={option}
-                                      size="small"
-                                      {...tagProps}
-                                      sx={{
-                                        bgcolor: isStandard ? "#E3F2FD" : "#E8F5E9",
-                                        color: isStandard ? "#0D47A1" : "#1b5e20",
-                                        border: isStandard ? "1px solid #90CAF9" : "1px solid #A5D6A7",
-                                        fontWeight: 600,
-                                      }}
-                                    />
-                                  );
-                                })
-                              }
-                              renderOption={(props, option) => {
-                                const { key, ...rest } = props;
-                                return (
-                                  <li key={key} {...rest} style={{ display: 'flex', alignItems: 'center', padding: '10px 16px' }}>
-                                    <Typography sx={{ fontSize: '0.88rem', fontWeight: 500, color: '#202124', lineHeight: 1.3, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{option}</Typography>
-                                  </li>
-                                );
-                              }}
-                              sx={{
-                                width: '100%',
-                                '& .MuiOutlinedInput-root': {
-                                  minHeight: 56,
-                                  borderRadius: '24px',
-                                  backgroundColor: '#fff',
-                                  paddingRight: '12px !important',
-                                  '& fieldset': {
-                                    borderColor: 'rgba(0,0,0,0.10)',
-                                    borderWidth: '1px',
-                                  },
-                                  '&:hover fieldset': {
-                                    borderColor: 'rgba(0,0,0,0.14)',
-                                  },
-                                  '&.Mui-focused fieldset': {
-                                    borderColor: 'rgba(0,0,0,0.14)',
-                                    borderWidth: '1px',
-                                  },
-                                  '&.Mui-focused fieldset legend': {
-                                    color: '#5f6368',
-                                  },
-                                },
-                                '& .MuiInputLabel-root': {
-                                  color: '#5f6368',
-                                  fontSize: '0.95rem',
-                                  fontWeight: 500,
-                                  '&.Mui-focused': { color: '#5f6368' },
-                                  backgroundColor: '#fff',
-                                  padding: '0 6px',
-                                  borderRadius: '4px',
-                                },
-                                '&.Mui-expanded .MuiOutlinedInput-root': {
-                                  borderRadius: '24px',
-                                },
-                              }}
-                              slotProps={{
-                                popper: {
-                                  sx: {
-                                    marginTop: '-1px !important',
-                                  },
-                                },
-                              }}
-                              slots={{
-                                paper: (paperProps) => (
-                                  <Paper
-                                    {...paperProps}
-                                    elevation={0}
-                                    sx={{
-                                      borderRadius: '0 0 28px 28px',
-                                      backgroundColor: '#F1F3F4',
-                                      overflow: 'hidden',
-                                      padding: '3px',
-                                      border: '1px solid rgba(0,0,0,0.10)',
-                                      borderTop: 'none',
-                                      '& .MuiAutocomplete-listbox': {
-                                        backgroundColor: '#fff',
-                                        borderRadius: '24px',
-                                        padding: 0,
-                                        overflow: 'hidden',
-                                      },
-                                      '& .MuiAutocomplete-option': {
-                                        borderRadius: 0,
-                                        margin: 0,
-                                        padding: '10px 16px !important',
-                                        backgroundColor: '#fff',
-                                        '&[aria-selected="true"]': { backgroundColor: '#F1F3F4' },
-                                        '&.Mui-focused': { backgroundColor: '#fafafa' },
-                                      },
-                                    }}
-                                  />
-                                ),
-                              }}
-                              renderInput={(params) => (
-                                <TextField
-                                  {...params}
-                                  label="Дополнительные действия"
-                                  placeholder={additionalActions.length === 0 ? "Выберите из списка или введите своё" : "Добавить ещё..."}
-                                  size="small"
-                                  InputLabelProps={{ shrink: true, ...params.InputLabelProps }}
-                                />
-                              )}
+                              onChange={(next)=>{ setAdditionalActions(next); if (additionalError) setAdditionalError(""); if (customActionInput) setCustomActionInput(""); }}
+                              error={additionalError}
+                              disabled={isUpdating}
                             />
                           </Box>
                           {additionalError && (
@@ -1179,6 +1068,8 @@ const celebrateRing = keyframes`
 export default function TasksView({ userProfile: propUserProfile, currentUserId: propCurrentUserId, onBack: _onBack, onCountChange, initialElementId, initialElementAction, onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
   const { notify } = useNotifications();
   const [fieldsLoading, setFieldsLoading] = useState(true);
+  // Phase 7: isolated configuration cache (30m stale, 4h gc) — не триггерит Tasks polling
+  const taskConfiguration = useTaskConfiguration({ enabled: !fieldsLoading });
   const [isTabPending, startTabTransition] = useTransition();
   const [_isDataPending, _startDataTransition] = useTransition(); // eslint-disable-line no-unused-vars
   const lastFocusLoadRef = React.useRef(Date.now());
@@ -2610,7 +2501,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             </Box>
           ) : elementTaskMatch ? (
             <Box sx={{ position: "relative" }}>
-              <TaskCard fieldDefaultActions={fieldDefaultActions}
+              <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
                 task={elementTaskMatch}
                 isCompleted={isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete)}
                 isOverdue={elementTaskMatch.DueDate ? new Date(elementTaskMatch.DueDate).getTime() < Date.now() : false}
@@ -2734,7 +2625,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                                 boxSizing: "border-box",
                               }}
                             >
-                              <TaskCard fieldDefaultActions={fieldDefaultActions}
+                              <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
                                 task={task}
                                 isCompleted={isCompleted}
                                 isOverdue={isOverdue}
@@ -2762,7 +2653,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                       const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
                       const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
                       return (
-                        <TaskCard fieldDefaultActions={fieldDefaultActions}
+                        <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
                           key={task.Id}
                           task={task}
                           isCompleted={isCompleted}
@@ -2844,7 +2735,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                         const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
                         const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
                         return (
-                          <TaskCard fieldDefaultActions={fieldDefaultActions}
+                          <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
                           key={task.Id}
                           task={task}
                           isCompleted={isCompleted}
@@ -2916,129 +2807,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                   '&:has(.Mui-expanded)': { borderRadius: '28px 28px 0 0' },
                 }}
               >
-                <Autocomplete
-                  multiple
-                  freeSolo
-                  disableCloseOnSelect
-                  options={ADDITIONAL_ACTIONS_STANDARD}
+                <AdditionalActionsField
+                  fieldInternalName={taskConfig?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.internalName || "AdditionalActions"}
+                  required={pendingAdditionalActions.length > 0}
+                  choices={(taskConfig?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.choices || ADDITIONAL_ACTIONS_STANDARD).map(v=>typeof v==='string'?{value:v,label:v}:v)}
+                  allowFillIn={taskConfig?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.allowFillIn ?? true}
                   value={pendingAdditionalActions}
-                  onChange={(event, newValue) => {
-                    const cleaned = newValue.map((v) => String(v).trim()).filter(Boolean);
-                    const uniq = [...new Set(cleaned)];
-                    setPendingAdditionalActions(uniq);
-                    if (pendingAdditionalError) setPendingAdditionalError("");
-                    if (pendingCustomAction) setPendingCustomAction("");
-                  }}
-                  renderTags={(value, getTagProps) =>
-                    value.map((option, index) => {
-                      // eslint-disable-next-line no-unused-vars
-                      const { key, ...tagProps } = getTagProps({ index });
-                      const isStandard = ADDITIONAL_ACTIONS_STANDARD.includes(option);
-                      return (
-                        <Chip
-                          key={option}
-                          label={option}
-                          size="small"
-                          {...tagProps}
-                          sx={{
-                            bgcolor: isStandard ? "#E3F2FD" : "#E8F5E9",
-                            color: isStandard ? "#0D47A1" : "#1b5e20",
-                            border: isStandard ? "1px solid #90CAF9" : "1px solid #A5D6A7",
-                            fontWeight: 600,
-                          }}
-                        />
-                      );
-                    })
-                  }
-                  renderOption={(props, option) => {
-                    const { key, ...rest } = props;
-                    return (
-                      <li key={key} {...rest} style={{ display: 'flex', alignItems: 'center', padding: '10px 16px' }}>
-                        <Typography sx={{ fontSize: '0.88rem', fontWeight: 500, color: '#202124', lineHeight: 1.3, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{option}</Typography>
-                      </li>
-                    );
-                  }}
-                  sx={{
-                    width: '100%',
-                    '& .MuiOutlinedInput-root': {
-                      minHeight: 56,
-                      borderRadius: '24px',
-                      backgroundColor: '#fff',
-                      paddingRight: '12px !important',
-                      '& fieldset': {
-                        borderColor: 'rgba(0,0,0,0.10)',
-                        borderWidth: '1px',
-                      },
-                      '&:hover fieldset': {
-                        borderColor: 'rgba(0,0,0,0.14)',
-                      },
-                      '&.Mui-focused fieldset': {
-                        borderColor: 'rgba(0,0,0,0.14)',
-                        borderWidth: '1px',
-                      },
-                      '&.Mui-focused fieldset legend': {
-                        color: '#5f6368',
-                      },
-                    },
-                    '& .MuiInputLabel-root': {
-                      color: '#5f6368',
-                      fontSize: '0.95rem',
-                      fontWeight: 500,
-                      '&.Mui-focused': { color: '#5f6368' },
-                      backgroundColor: '#fff',
-                      padding: '0 6px',
-                      borderRadius: '4px',
-                    },
-                    '&.Mui-expanded .MuiOutlinedInput-root': {
-                      borderRadius: '24px',
-                    },
-                  }}
-                  slotProps={{
-                    popper: {
-                      sx: {
-                        marginTop: '-1px !important',
-                      },
-                    },
-                  }}
-                  slots={{
-                    paper: (paperProps) => (
-                      <Paper
-                        {...paperProps}
-                        elevation={0}
-                        sx={{
-                          borderRadius: '0 0 28px 28px',
-                          backgroundColor: '#F1F3F4',
-                          overflow: 'hidden',
-                          padding: '3px',
-                          border: '1px solid rgba(0,0,0,0.10)',
-                          borderTop: 'none',
-                          '& .MuiAutocomplete-listbox': {
-                            backgroundColor: '#fff',
-                            borderRadius: '24px',
-                            padding: 0,
-                            overflow: 'hidden',
-                          },
-                          '& .MuiAutocomplete-option': {
-                            borderRadius: 0,
-                            margin: 0,
-                            padding: '10px 16px !important',
-                            backgroundColor: '#fff',
-                            '&[aria-selected="true"]': { backgroundColor: '#F1F3F4' },
-                            '&.Mui-focused': { backgroundColor: '#fafafa' },
-                          },
-                        }}
-                      />
-                    ),
-                  }}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Дополнительные действия"
-                      placeholder={pendingAdditionalActions.length === 0 ? "Выберите из списка или введите своё" : "Добавить ещё..."}
-                      size="small"
-                      InputLabelProps={{ shrink: true, ...params.InputLabelProps }}
-                    />
-                  )}
+                  onChange={(next)=>{ setPendingAdditionalActions(next); if (pendingAdditionalError) setPendingAdditionalError(""); if (pendingCustomAction) setPendingCustomAction(""); }}
+                  error={pendingAdditionalError}
+                  disabled={updatingId === pendingTask?.Id}
                 />
               </Box>
               {pendingAdditionalError && (
@@ -3150,7 +2927,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                       <CheckCircleIcon sx={{ color: "#2e7d32", fontSize: 18 }} /> Связанная задача найдена
                     </Typography>
                   )}
-                  <TaskCard fieldDefaultActions={fieldDefaultActions}
+                  <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
                     task={elementTaskMatch}
                     isCompleted={isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete)}
                     isOverdue={elementTaskMatch.DueDate ? new Date(elementTaskMatch.DueDate).getTime() < Date.now() : false}
