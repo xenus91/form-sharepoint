@@ -114,14 +114,14 @@ export function extractTKNumberFromTask(task) {
   const direct = task.TKNumber || task.SCNumber || task.TK_x0020_Number || task.raw?.SCNumber || task.raw?.Recipient_x003a_SCNumberText || task.raw?.Recipient_x003A_SCNumberText;
   if (direct) {
     const s = String(direct).trim();
-    if (/^\d{4,}$/.test(s)) return `TK${s}`;
+    if (/^\d+$/.test(s)) return `TK${s}`;
     const sc = extractTKNumber(s);
     if (sc !== "Без ТК") return sc;
     if (s) return s.slice(0, 30);
   }
   if (task.SCNumber) {
     const s = String(task.SCNumber).trim();
-    if (/^\d{4,}$/.test(s)) return `TK${s}`;
+    if (/^\d+$/.test(s)) return `TK${s}`;
     const sc = extractTKNumber(s);
     if (sc !== "Без ТК") return sc;
   }
@@ -144,7 +144,7 @@ export function extractSCNumberFromTask(task) {
   const direct = task.SCNumber || task.raw?.SCNumber || task.raw?.ScNumber || task.raw?.Recipient_x003a_SCNumberText;
   if (direct) {
     const s = String(direct).trim();
-    if (/^\d{4,}$/.test(s)) return `SC${s}`;
+    if (/^\d+$/.test(s)) return `SC${s}`;
     const sc = extractSCNumber(s);
     if (sc !== "Без ТК") return sc;
     if (s) return s.slice(0, 30);
