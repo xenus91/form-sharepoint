@@ -215,7 +215,16 @@ apiClient.interceptors.response.use(
     } else if (msg.includes("recipient")) {
       console.warn("[api] Recipient error on non-Tasks list (ignored for flag)", err?.config?.url);
     }
-    console.error('API Error:', err?.response?.status, err?.response?.data || err?.message);
+    const isConfigList404 = err?.response?.status === 404 && err?.config?.url && (
+      err.config.url.includes("TaskTypeConfiguration") ||
+      err.config.url.includes("TaskResultDefinitions") ||
+      err.config.url.includes("TaskActionDefinitions")
+    );
+    if (isConfigList404) {
+      console.info(`[api] config list not found (404 fallback) ${err?.config?.url.split('/').pop()?.split('?')[0]}`);
+    } else {
+      console.error('API Error:', err?.response?.status, err?.response?.data || err?.message);
+    }
     return Promise.reject(err);
   }
 );
