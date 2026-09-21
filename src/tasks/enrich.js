@@ -31,23 +31,50 @@ function parseRelatedItems(related) {
 /**
  * Извлекает Recipient Title и SCNumber из сырого объекта Related-элемента.
  *
- * Поддерживает оба варианта: $expand=Recipient (один объект или {results:[...]})
- * и projected column `Recipient_x003a_SCNumberText` (если есть в ответе).
+ * Поддерживает:
+ *   - $expand=Recipient / $expand=Получатель / $expand=Исполнитель и т.п.
+ *     (один объект или {results:[...]})
+ *   - projected column `Recipient_x003a_SCNumberText` / `Получатель_x003a_SCNumberText`
+ *     (если есть в ответе без $expand)
+ *   - fallback: прямые поля `Title`, `THU`, `DC_THU`
  */
+const LOOKUP_FIELD_NAMES = [
+  "Recipient",
+  "Получатель",
+  "Исполнитель",
+  "Receiver",
+  "Assignee",
+  "Tasks",
+  "Task",
+];
+
 function extractRecipientAndSC(d) {
   if (!d) return null;
-  const rec = d.Recipient;
+  let rec = null;
+  for (const f of LOOKUP_FIELD_NAMES) {
+    if (d[f] !== undefined) {
+      rec = d[f];
+      break;
+    }
+  }
   let recTitle = "";
   let scVal = "";
   let thuVal = d.THU || d.DC_THU || "";
-  if (rec) {
+  if (rec && typeof rec === "object") {
     if (rec.Title) recTitle = rec.Title;
-    else if (rec.results && rec.results[0]?.Title) recTitle = rec.results[0].Title;
+    else if (Array.isArray(rec.results) && rec.results[0]?.Title) recTitle = rec.results[0].Title;
     if (rec.SCNumberText) scVal = rec.SCNumberText;
     else if (rec.SCNumber) scVal = rec.SCNumber;
-    else if (rec.results && rec.results[0]?.SCNumberText) scVal = rec.results[0].SCNumberText;
+    else if (Array.isArray(rec.results) && rec.results[0]?.SCNumberText) scVal = rec.results[0].SCNumberText;
   }
-  if (!scVal) scVal = d.Recipient_x003a_SCNumberText || d.Recipient_x003A_SCNumberText || "";
+  if (!scVal) {
+    for (const f of LOOKUP_FIELD_NAMES) {
+      const projKey = `${f}_x003a_SCNumberText`;
+      const projKeyUpper = `${f}_x003A_SCNumberText`;
+      if (d[projKey]) { scVal = d[projKey]; break; }
+      if (d[projKeyUpper]) { scVal = d[projKeyUpper]; break; }
+    }
+  }
   if (recTitle || scVal || thuVal) {
     return {
       recipient: recTitle,
@@ -85,46 +112,121 @@ function groupByListId(tasks) {
 /**
  * Batch-выборка связанных элементов через REST $filter (Id eq X or Id eq Y ...).
  *
- * Почему НЕ CAML /GetItems: запрос с CAML <In> + ViewFields (THU, DC_THU,
- * Recipient, Recipient_x003a_SCNumberText) падает с SPException -2130575340
- * "Один или несколько типов полей установлены неправильно" — потому что эти
- * поля живут в списке Tasks, а не в списке RelatedItems (например
- * ПроизводственныеЗадачи). CAML <In> + явный ViewFields ломается, если
- * хотя бы одно поле отсутствует.
+ * Почему НЕ CAML /GetItems, хотя он компактнее (1 запрос на N ItemId):
+ *   - Primary key в CAML — это `FieldRef Name='ID'` (ЗАГЛАВНЫЕ!), а не `Id`.
+ *     Если написать `Id` — SP отвечает SPException -2130575340
+ *     "field types installed improperly" — пугающее misleading-сообщение
+ *     при ЛЮБОМ <Where> с lowercase Id (воспроизведено на проблемной ферме).
+ *   - ViewFields в CAML требуют жёсткое знание списка; если поля нет —
+ *     тот же SPException. REST $select прощает отсутствие полей.
+ *   - REST $filter выразительнее (`or`-цепочка), меньше шанс опечататься.
  *
- * REST $filter устойчив: используем только универсальные поля (Id, Title)
- * + $expand=Recipient (он есть почти везде, где есть lookup на Tasks).
- * Если $expand упадёт — мы просто не получим Recipient, но не словим 500.
+ * Поле-получатель в RelatedItems-list называется по-разному (Recipient,
+ * Получатель, Исполнитель, Tasks…), поэтому используем автодискавери:
+ *   1) пробуем $expand=Recipient ($select=Title,SCNumberText);
+ *   2) если в ответе нет поля Recipient — пробуем $expand=Получатель;
+ *   3) затем Исполнитель / Receiver / Assignee / Tasks / Task;
+ *   4) если и так пусто — fallback на «все поля» и client-side извлечение.
+ *
+ * Кэш обнаруженного поля — по listId, чтобы не пробовать каждый раз.
  *
  * @param {string} listId
  * @param {Array<number|string>} itemIds
  * @returns {Promise<Array>} массив raw-объектов (data.d.results)
  */
-async function fetchRelatedElementsBatch(listId, itemIds) {
-  if (!itemIds.length) return [];
+const _discoveredLookupField = new Map(); // listId → { field, scField }
+const LOOKUP_CANDIDATES = [
+  { field: "Recipient", scField: "SCNumberText" },
+  { field: "Получатель", scField: "SCNumberText" },
+  { field: "Исполнитель", scField: "SCNumberText" },
+  { field: "Receiver", scField: "SCNumberText" },
+  { field: "Assignee", scField: "SCNumberText" },
+  { field: "Tasks", scField: "SCNumberText" },
+  { field: "Task", scField: "SCNumberText" },
+];
+
+async function tryExpandLookup(listId, itemIds, candidate) {
   const filter = itemIds.map((id) => `Id eq ${Number(id)}`).join(" or ");
   const url =
     `/web/lists(guid'${listId}')/items?$filter=${encodeURIComponent(filter)}` +
-    `&$select=Id,Title&$expand=Recipient($select=Title,SCNumberText)`;
-  const { data } = await apiClient.get(url, {
-    headers: { Accept: "application/json;odata=verbose" },
-  });
-  return data?.d?.results || [];
+    `&$select=Id,Title&$expand=${candidate.field}($select=Title,${candidate.scField})`;
+  try {
+    const { data } = await apiClient.get(url, {
+      headers: { Accept: "application/json;odata=verbose" },
+    });
+    const results = data?.d?.results || [];
+    if (results.length === 0) return null;
+    const first = results[0];
+    if (!first) return null;
+    const hasField = Object.prototype.hasOwnProperty.call(first, candidate.field);
+    // Поле либо есть (даже если null), либо нет — определяем по наличию ключа
+    if (!hasField) return null;
+    return { results, candidate };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchRelatedElementsBatch(listId, itemIds) {
+  if (!itemIds.length) return [];
+  const cached = _discoveredLookupField.get(listId);
+  if (cached) {
+    const tried = await tryExpandLookup(listId, itemIds, cached);
+    if (tried) return tried.results;
+    _discoveredLookupField.delete(listId);
+  }
+  for (const cand of LOOKUP_CANDIDATES) {
+    const tried = await tryExpandLookup(listId, itemIds, cand);
+    if (tried) {
+      _discoveredLookupField.set(listId, cand);
+      return tried.results;
+    }
+  }
+  // Fallback: без $expand, берём все поля — extractRecipientAndSC сам
+  // найдёт Recipient/Title/THU/DC_THU если они есть в выдаче.
+  try {
+    const filter = itemIds.map((id) => `Id eq ${Number(id)}`).join(" or ");
+    const url = `/web/lists(guid'${listId}')/items?$filter=${encodeURIComponent(filter)}&$top=${itemIds.length}`;
+    const { data } = await apiClient.get(url, {
+      headers: { Accept: "application/json;odata=verbose" },
+    });
+    return data?.d?.results || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Сбросить кэш автодискавери lookup-поля (например, после изменения схемы
+ * RelatedItems-list). Полезно дёрнуть из DevTools.
+ */
+export function clearEnrichDiscoveryCache() {
+  _discoveredLookupField.clear();
 }
 
 /**
  * Старый fallback — одиночный fetch с 3 fallback URL.
  * Используется только если batch не сработал (пустой ответ / ошибка).
+ * Берёт обнаруженное поле из кэша, если есть.
  */
 async function fetchRelatedElement(listId, itemId) {
+  const lookup = _discoveredLookupField.get(listId);
+  const field = lookup?.field || "Recipient";
   const tryFetch = async (url) => {
     const { data } = await apiClient.get(url, {
       headers: { Accept: "application/json;odata=verbose" },
     });
     return data?.d;
   };
-  const selects = ["Recipient/Title", "Recipient/Id", "Recipient/SCNumberText", "Title", "THU", "DC_THU"];
-  const expands = ["Recipient"];
+  const selects = [
+    `${field}/Title`,
+    `${field}/Id`,
+    `${field}/SCNumberText`,
+    "Title",
+    "THU",
+    "DC_THU",
+  ];
+  const expands = [field];
   try {
     return await tryFetch(
       `/web/lists(guid'${listId}')/items(${itemId})?$select=${selects.join(",")}&$expand=${expands.join(",")}`
@@ -140,7 +242,7 @@ async function fetchRelatedElement(listId, itemId) {
     } catch {
       try {
         return await tryFetch(
-          `/web/lists(guid'${listId}')/items(${itemId})?$select=Recipient/Title,Title,THU,DC_THU&$expand=Recipient`
+          `/web/lists(guid'${listId}')/items(${itemId})?$select=${field}/Title,Title,THU,DC_THU&$expand=${field}`
         );
       } catch {
         return null;
