@@ -1,9 +1,16 @@
+/* eslint-disable */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchTasks } from "./fetchTasks";
 import { enrichTasksWithRelated } from "./enrich";
 // eslint-disable-next-line no-unused-vars
 import { extractTKNumberFromTask, extractTKNumber } from "./formatters";
 import { useEffect } from "react";
+// DBG helper — включи ?dbg=1 или localStorage.setItem('dbg','1') чтобы видеть детальные логи
+const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return true; }catch{ return true; } })();
+const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
+const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollapsed(...a);}catch{} };
+const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch{} };
+
 
 export function useTasksQuery({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames = [], enabled = true }) {
   const queryClient = useQueryClient();
@@ -18,14 +25,17 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
     (resultFieldInternalNames || []).join(","),
   ];
 
+  __dlog("[DBG:useTasksQuery] init", { queryKey, enabled });
   // Глобальный кэш для всех типов задач (ResultSearchTHU, ResultSearchComplete) — чтобы не мигало на любом типе
   const query = useQuery({
     queryKey,
     queryFn: async () => {
+      __dlog("[DBG:useTasksQuery] queryFn start", { resultFieldInternalNames });
       const raw = await fetchTasks({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames });
       // Сразу накладываем глобальный кэш enrich (по taskId и по RelatedItems) чтобы не мигало "ЕО 808..." → "ТК 107 • ЕО ..."
       // Кэш работает для всех типов: и Поиск ЕО (ResultSearchTHU), и ЕО найдена (ResultSearchComplete)
       const { getGlobalEnrichCacheByTaskId, getGlobalEnrichCache } = await import("./enrich");
+      __dlog("[DBG:useTasksQuery] queryFn raw", raw.length, raw.slice(0,2).map(t=>({Id:t.Id, Recipient:t.Recipient||'∅', ContentTypeId:String(t.ContentTypeId||'').slice(-12)})));
       if (raw.length > 0) {
         let changed = false;
         const merged = raw.map((t) => {
@@ -53,6 +63,7 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
           changed = true;
           return { ...t, Recipient: cached.Recipient || t.Recipient, SCNumber: cached.SCNumber || t.SCNumber, THU: cached.THU || t.THU, TKNumber: cached.SCNumber || t.SCNumber, raw: { ...t.raw, THU: cached.THU || t.raw?.THU } };
         });
+        __dlog("[DBG:useTasksQuery] queryFn merged", { changed, hits: merged.filter((m,i)=> m!==raw[i]).length });
         return changed ? merged : raw;
       }
       return raw;
@@ -70,17 +81,21 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
   // Фоновое обогащение Recipient/SCNumber/THU — батч вместо fan-out, с кэшем чтобы не мигало
   useEffect(() => {
     const data = query.data;
+    __dlog("[DBG:useTasksQuery] effect dataUpdatedAt", query.dataUpdatedAt, "dataLen", data?.length, "isFetching", query.isFetching);
     if (!data || data.length === 0) return;
     // Дебаунс чтобы не DDoS-ить GetItems каждый dataUpdatedAt
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
         // Не обогащаем если данные уже обогащены (все задачи с ТК или без RelatedItems)
+        __dlog("[DBG:useTasksQuery] effect check", { sample: data.slice(0,3).map(t=>({Id:t.Id, R:t.Recipient||'∅', SC:t.SCNumber||'∅', THU:t.THU||'∅', hasRel:!!t.RelatedItems, ct:String(t.ContentTypeId||'').slice(-12)})) });
         const needEnrich = data.some((t) => (!t.Recipient || !t.SCNumber) && t.RelatedItems);
         if (!needEnrich) return;
+        __dlog("[DBG:useTasksQuery] calling enrichTasksWithRelated", data.length);
         const { recipientMap, scNumberMap, thuMap } = await enrichTasksWithRelated(data, { concurrency: 5, useBatch: true });
         if (cancelled) return;
-        if (recipientMap.size === 0 && scNumberMap.size === 0 && thuMap.size === 0) return;
+        __dlog("[DBG:useTasksQuery] enrich result", { r: recipientMap.size, sc: scNumberMap.size, thu: thuMap.size });
+        if (recipientMap.size === 0 && scNumberMap.size === 0 && thuMap.size === 0) { __dlog("[DBG:useTasksQuery] enrich empty -> skip setQueryData"); return; }
         // Кэшируем глобально для всех типов задач
         const { setGlobalEnrichCacheByTaskId, setGlobalEnrichCache, getGlobalEnrichCacheByTaskId } = await import("./enrich");
         for (const [id, rec] of recipientMap.entries()) {

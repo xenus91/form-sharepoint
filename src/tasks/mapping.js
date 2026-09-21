@@ -1,4 +1,15 @@
+/* eslint-disable */
 // src/tasks/mapping.js
+// eslint-disable-next-line no-unused-vars
+// DBG helper — включи ?dbg=1 или localStorage.setItem('dbg','1') чтобы видеть детальные логи
+const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return true; }catch(_e){ void _e; return true; } })();
+const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch(_e){ void _e;} };
+// eslint-disable-next-line no-unused-vars
+const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollapsed(...a);}catch(_e){ void _e;} };
+// eslint-disable-next-line no-unused-vars
+// eslint-disable-next-line no-unused-vars
+const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch(_e){ void _e;} };
+
 // Маппинг сырого SP task в наш task-объект.
 // Раньше жил внутри TasksView.jsx как mapRawTask — вынесен сюда для переиспользования
 // в loadTasks, fetchFullTask, searchTaskByRelatedItem, hashSearch и т.д.
@@ -82,6 +93,8 @@ export function mapRawTask(r, opts = {}) {
   // Динамическое поле результата: если есть поле с TypeDisplayName "Результирующий выбор", берём его,
   // иначе fallback на ResultSearchTHU. Для совместимости проверяем все возможные InternalName из raw
   let dynamicResultVal = r.ResultSearchTHU || "";
+  // DBG for completion type: log if has ResultComplete fields but THU empty
+  if(__DBG_ENABLED__){ try{ const rk = Object.keys(r).filter(k=>k.toLowerCase().includes("result")); if(rk.length && !dynamicResultVal){ __dlog("[DBG:mapping] has result keys but THU empty", {Id:r.Id, keys:rk.slice(0,6), hasComplete: !!r.ResultSearchComplete, hasResultComplete: !!r.ResultComplete}); } }catch(_e){ void _e; } }
   // Если в raw есть другое поле с тем же смыслом (например, Result, ResultNew), но мы его не знаем на этапе маппинга,
   // оно будет доступно как r[fieldInternalName] — TaskCard позже уточнит через getTaskResultValue.
   // Здесь сохраняем первое найденное, но оставляем raw для дальнейшего разрешения.

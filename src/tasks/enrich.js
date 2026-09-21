@@ -9,6 +9,12 @@ import apiClient from "../api";
 // eslint-disable-next-line no-unused-vars
 import { extractTKNumberFromTask } from "./formatters";
 import { runWithConcurrency } from "../utils/concurrency";
+// DBG helper — включи ?dbg=1 или localStorage.setItem('dbg','1') чтобы видеть детальные логи
+const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return true; }catch{ return true; } })();
+const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
+const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollapsed(...a);}catch{} };
+const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch{} };
+
 
 // Глобальный кэш для всех типов задач (ResultSearchTHU, ResultSearchComplete) — чтобы не мигало на любом типе
 const GLOBAL_ENRICH_TTL = 10 * 60 * 1000;
@@ -35,10 +41,12 @@ function persistGlobalEnrichCache() {
 export function getGlobalEnrichCache(listId, itemId) {
   const key = `${listId}:${itemId}`;
   const hit = _globalEnrichCache.get(key);
-  if (hit && Date.now() - hit.at < GLOBAL_ENRICH_TTL) return hit.data;
+  if (hit && Date.now() - hit.at < GLOBAL_ENRICH_TTL) { __dlog("[DBG:enrich] getGlobalEnrichCache HIT", key, hit.data?.Title||hit.data?.Id); return hit.data; }
+  __dlog("[DBG:enrich] getGlobalEnrichCache MISS", key);
   return null;
 }
 export function setGlobalEnrichCache(listId, itemId, data) {
+  __dlog("[DBG:enrich] setGlobalEnrichCache", `${listId}:${itemId}`, data?.Title||data?.Id);
   const key = `${listId}:${itemId}`;
   _globalEnrichCache.set(key, { data, at: Date.now() });
   if (_globalEnrichCache.size > 200) {
@@ -49,10 +57,12 @@ export function setGlobalEnrichCache(listId, itemId, data) {
 }
 export function getGlobalEnrichCacheByTaskId(taskId) {
   const hit = _globalEnrichCache.get(`task:${taskId}`);
-  if (hit && Date.now() - hit.at < GLOBAL_ENRICH_TTL) return hit.data;
+  if (hit && Date.now() - hit.at < GLOBAL_ENRICH_TTL) { __dlog("[DBG:enrich] getByTaskId HIT", taskId, hit.data); return hit.data; }
+  __dlog("[DBG:enrich] getByTaskId MISS", taskId);
   return null;
 }
 export function setGlobalEnrichCacheByTaskId(taskId, data) {
+  __dlog("[DBG:enrich] setByTaskId", taskId, data);
   _globalEnrichCache.set(`task:${taskId}`, { data, at: Date.now() });
   persistGlobalEnrichCache();
 }
@@ -146,6 +156,8 @@ async function fetchRecipientForTask(task) {
  * есть RelatedItems, и пока не определили TK-номер.
  */
 export function needsEnrichment(mapped) {
+  // DBG: логируем почему задача попала в enrich
+  try{ const need = mapped.filter((m) => (!m.Recipient || !m.SCNumber || !m.THU) && m.RelatedItems); __dlog("[DBG:enrich] needsEnrichment", { total: mapped.length, need: need.length, needIds: need.map(m=>({Id:m.Id, Title:(m.Title||'').slice(0,30), ContentTypeId:String(m.ContentTypeId||'').slice(-12), Recipient: m.Recipient||'∅', SCNumber:m.SCNumber||'∅', THU:m.THU||'∅', hasRelated: !!m.RelatedItems })) }); }catch(_e){ void _e; } // eslint-disable-line no-empty
   // Убрали проверку на "Без ТК" — обогащаем любую задачу без Recipient/SCNumber/THU с RelatedItems
   // Фикс для #527: ЕО без ТК в Title, но с Recipient в связанном элементе — раньше не попадала в enrich
   return mapped.filter(
@@ -188,6 +200,7 @@ function chunk(arr, size) {
 }
 
 async function fetchRelatedBatch(listId, itemIds) {
+  __dlog("[DBG:enrich] fetchRelatedBatch start", { listId, itemIds });
   const selects = ["Recipient/Title", "Recipient/Id", "Recipient/SCNumberText", "Title", "THU", "DC_THU"];
   const expands = ["Recipient"];
   const selectStr = selects.join(",");
@@ -195,6 +208,7 @@ async function fetchRelatedBatch(listId, itemIds) {
   const chunks = chunk(itemIds, 30);
   const results = [];
   for (const c of chunks) {
+    __dlog("[DBG:enrich] fetchRelatedBatch chunk", { listId, c, uncachedBefore: c.filter((id) => !getGlobalEnrichCache(listId, id)).length });
     // Проверяем глобальный кэш для всех типов задач — если всё в кэше, не делаем сеть
     const uncached = c.filter((id) => !getGlobalEnrichCache(listId, id));
     if (uncached.length === 0) {
@@ -250,6 +264,7 @@ async function fetchRelatedBatch(listId, itemIds) {
  */
 export async function enrichTasksWithRelated(mapped, opts = {}) {
   const { concurrency = 5, useBatch = true } = opts;
+  __dlog("[DBG:enrich] enrichTasksWithRelated start", { mappedCount: mapped.length, opts, sampleContentTypes: mapped.slice(0,2).map(m=>({Id:m.Id, ContentTypeId:String(m.ContentTypeId||'').slice(0,40), Title:(m.Title||'').slice(0,30)})) });
   const tasks = needsEnrichment(mapped);
   const recipientMap = new Map();
   const scNumberMap = new Map();
@@ -260,7 +275,8 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
   if (useBatch) {
     try {
       const groups = groupByListId(tasks);
-      if (groups.size === 0) return { recipientMap, scNumberMap, thuMap };
+      __dlog("[DBG:enrich] groupByListId", { groups: Array.from(groups.entries()).map(([k,v])=>({listId:k.slice(0,12), itemIds:v.itemIds, taskIds:v.taskIds})), groupsSize: groups.size });
+      if (groups.size === 0) { __dlog("[DBG:enrich] no groups -> empty"); return { recipientMap, scNumberMap, thuMap }; }
       // Map ItemId -> raw data
       const itemById = new Map(); // `${listId}:${id}` -> data
       for (const [listId, g] of groups.entries()) {
@@ -274,6 +290,7 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
           }
         }
       }
+      __dlog("[DBG:enrich] itemById size", itemById.size, Array.from(itemById.keys()).slice(0,5));
       for (const tsk of tasks) {
         try {
           const related = parseRelatedItems(tsk.RelatedItems);
@@ -297,6 +314,7 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
           }
         } catch {}
       }
+      __dlog("[DBG:enrich] batch result", { recipientMap: Array.from(recipientMap.entries()), scNumberMap: Array.from(scNumberMap.entries()), thuMap: Array.from(thuMap.entries()) });
       return { recipientMap, scNumberMap, thuMap };
     } catch (e) {
       console.warn("[enrich] batch failed, fallback to fan-out", e?.message);

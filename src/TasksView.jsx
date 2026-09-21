@@ -1,5 +1,9 @@
 /* eslint-disable react/prop-types, no-empty, no-useless-catch */
 import React, { useEffect, useState, useCallback, useMemo, useTransition } from "react";
+// DBG helper
+const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return true; }catch(_e){ void _e; return true; } })();
+const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
+
 import apiClient, { invalidate } from "./api";
 import { buildTaskIndex, findInIndex } from "./utils/taskIndex";
 import { createAdaptivePolling } from "./utils/polling";
@@ -121,6 +125,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     return choices;
   }, [dynamicFieldMeta, choices]);
   // Для открытой задачи — подгружаем свежие choices по ContentType с кэшем (forceRefresh уже в родителе, но дублируем для карточки)
+  React.useEffect(()=>{ if(!__DBG_ENABLED__) return; try{ const isComp = (()=>{ const k=Object.keys(task.raw||{}); return k.some(kk=>kk.toLowerCase().includes('complete')) || String(task.Title||'').toLowerCase().includes('заверш'); })(); if(isComp) __dlog("[DBG:TaskCard] render completion task", {Id:task.Id, Title:task.Title, Status:task.Status, CT:String(task.ContentTypeId||'').slice(-18), Recipient:task.Recipient||'∅', SCNumber:task.SCNumber||'∅', THU:task.THU||'∅', isCompleted, hasRelated: !!task.RelatedItems, rawKeys: Object.keys(task.raw||{}).filter(k=>k.toLowerCase().includes('result')) }); }catch(_e){void _e;}}, [task.Id, task.Recipient, task.SCNumber, task.Status]);
   const [freshChoices, setFreshChoices] = React.useState(null);
   const [freshField, setFreshField] = React.useState(null);
   React.useEffect(() => {
@@ -233,6 +238,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         contain: "layout paint",
       }}
     >
+      {__DBG_ENABLED__ && (()=>{ try{ const isCompDbg = (()=>{ const k=Object.keys(task.raw||{}); return k.some(kk=>kk.toLowerCase().includes('complete')) || String(task.Title||'').toLowerCase().includes('заверш'); })(); if(!isCompDbg) return null; }catch{ return null; } return (
+        <Box sx={{ position:'absolute', top:4, right:4, zIndex:9, bgcolor:'rgba(255,0,0,0.08)', border:'1px dashed rgba(255,0,0,0.3)', borderRadius:'6px', px:0.6, py:0.2, fontSize:'10px', color:'#b71c1c', pointerEvents:'none', fontFamily:'monospace' }}>
+          DBG #{task.Id} C:{String(task.ContentTypeId||'').slice(-8)} R:{task.Recipient?'✓':'∅'} SC:{task.SCNumber?'✓':'∅'}
+        </Box>
+      );})()}
       {isUpdating && (() => {
         const action = updatingAction || (isTaking ? "take" : null);
         const isNotFoundAction = action === "notFound";
@@ -1222,6 +1232,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [tasksDataUpdatedAt]);
 
   const tasks = tasksData ?? [];
+  // DBG: polling / loading / completion-type diagnostics
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  React.useEffect(()=>{ if(!__DBG_ENABLED__) return; try{
+    const sample = (tasks||[]).slice(0,4).map(x=>({Id:x.Id, Title:(x.Title||'').slice(0,30), Status:x.Status, CT:String(x.ContentTypeId||'').slice(-18), Recipient:x.Recipient||'∅', SC:x.SCNumber||'∅', THU:x.THU||'∅', Related:!!x.RelatedItems, ResultTHU:x.ResultSearchTHU||x.ResultValue||'∅'}));
+    const comp = (tasks||[]).filter(x=>{ try{ const k=Object.keys(x.raw||{}); return k.some(kk=>kk.toLowerCase().includes('complete')) || String(x.Title||'').toLowerCase().includes('заверш'); }catch{return false;}});
+    console.log("[DBG:TasksView] tasks update", { tasksLen: tasks.length, fieldsLoading, tasksQueryEnabled, isTasksLoading, isTasksFetching, tasksDataUpdatedAt, resultFieldInternalNames, sample, completionCount: comp.length, completionSample: comp.slice(0,3).map(x=>({Id:x.Id, Title:x.Title, CT:x.ContentTypeId, rawKeys:Object.keys(x.raw||{}).filter(k=>k.toLowerCase().includes('result'))})) });
+  }catch(_e){ void _e; }
+  }, [tasksDataUpdatedAt, tasks?.length, fieldsLoading, isTasksLoading, isTasksFetching, resultFieldInternalNames.join(',')]);
+
   const loading = isTasksLoading && tasks.length===0;
   const isBackgroundFetching = isTasksFetching && !isTasksLoading;
   const error = tasksQueryError ? "Не удалось загрузить задачи." : "";
@@ -1343,6 +1362,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return () => { cancelled = true; };
   }, [userOfficeDept.office, userOfficeDept.department]);
 
+  // DBG: track fieldsLoading lifecycle
+  React.useEffect(()=>{ if(!__DBG_ENABLED__) return; __dlog("[DBG:TasksView] fieldsLoading", fieldsLoading, "resultFieldsMeta", resultFieldsMeta.length, resultFieldInternalNames); }, [fieldsLoading, resultFieldsMeta.length]);
   // Смерженные mount-эффекты: entityType, ResultSearchTHU/Status choices, AdditionalActionsRequired тип, resultFieldsMeta — всё параллельно, один эффект
   useEffect(() => {
     let cancelled = false;

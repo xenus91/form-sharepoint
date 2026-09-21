@@ -1,3 +1,14 @@
+/* eslint-disable */
+// eslint-disable-next-line no-unused-vars
+// DBG helper — включи ?dbg=1 или localStorage.setItem('dbg','1') чтобы видеть детальные логи
+const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return true; }catch(_e){ void _e; return true; } })();
+const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch(_e){ void _e;} };
+// eslint-disable-next-line no-unused-vars
+const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollapsed(...a);}catch(_e){ void _e;} };
+// eslint-disable-next-line no-unused-vars
+// eslint-disable-next-line no-unused-vars
+const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch(_e){ void _e;} };
+
 import apiClient, { normalizeNextUrl } from "../api";
 import { buildTaskListQuery } from "./listQuery";
 import { mapRawTask } from "./mapping";
@@ -8,6 +19,7 @@ import { mapRawTask } from "./mapping";
  * Используется TanStack Query queryFn.
  */
 export async function fetchTasks({ currentUserId, distribution, taskFieldNames = [], recipientField = null, scNumberField = null, resultFieldInternalNames = [] }) {
+  __dlog("[DBG:fetchTasks] start", { currentUserId, distribution: distribution?.Id||distribution?.OffDepKey||null, resultFieldInternalNames, taskFieldNamesLen: taskFieldNames.length });
   if (!currentUserId) return [];
   let useDueDate = true;
   let useAdditionalActions = true;
@@ -28,6 +40,7 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
     });
 
   let nextUrl = buildUrl();
+  __dlog("[DBG:fetchTasks] buildUrl", nextUrl.slice(0,1200));
   let all = [];
   let safety = 0;
   while (nextUrl && safety < 20) {
@@ -81,5 +94,16 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
   }
 
   const mapped = all.map((r) => mapRawTask(r, { recipientField: effectiveRecipientField, scNumberField }));
+  try{
+    const byType = {};
+    for(const m of mapped){ const ct = String(m.ContentTypeId||'').slice(0,18); byType[ct]=(byType[ct]||0)+1; }
+    __dlog("[DBG:fetchTasks] results", { rawCount: all.length, mappedCount: mapped.length, byContentTypePrefix: byType, sample: mapped.slice(0,3).map(m=>({Id:m.Id, Title:(m.Title||'').slice(0,40), Status:m.Status, ContentTypeId:String(m.ContentTypeId||'').slice(0,60), RelatedItems: !!m.RelatedItems, Recipient: m.Recipient||'(empty)', SCNumber:m.SCNumber||'(empty)', THU:m.THU||'(empty)', ResultTHU: m.ResultSearchTHU, ResultValue: m.ResultValue, rawKeys: Object.keys(m.raw||{}).filter(k=>k.toLowerCase().includes('result')).slice(0,5)})) });
+    // отдельно логируем задачи типа завершения поиска ЕО (где есть ResultSearchComplete в raw или ct содержит заверш)
+    const comp = mapped.filter(m=> {
+      const keys = Object.keys(m.raw||{});
+      return keys.some(k=>k.toLowerCase().includes('resultcomplete')||k.toLowerCase().includes('complete')) || String(m.Title||'').toLowerCase().includes('заверш') || String(m.raw?.ContentType?.Name||'').toLowerCase().includes('заверш');
+    });
+    if(comp.length){ __dlog("[DBG:fetchTasks] completion-type tasks", comp.map(m=>({Id:m.Id, Title:m.Title, ContentTypeId:m.ContentTypeId, rawResultKeys: Object.keys(m.raw||{}).filter(k=>k.toLowerCase().includes('result')), ResultSearchTHU:m.ResultSearchTHU, rawComplete: m.raw?.ResultSearchComplete||m.raw?.ResultComplete||m.raw?.Result||'(none)'}))); }
+  }catch(_e){ void _e; } // eslint-disable-line no-empty
   return mapped;
 }
