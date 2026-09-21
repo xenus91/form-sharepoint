@@ -25,6 +25,7 @@ import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefa
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
+import TaskList from "./features/tasks/components/TaskList";
 import {
   formatDueLeft,
   formatDueDateFull,
@@ -1596,205 +1597,34 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         "&::-webkit-scrollbar-track": { bgcolor: "rgba(23,28,143,0.08)", borderRadius: "5px", border: "1px solid rgba(23,28,143,0.04)" },
         "&::-webkit-scrollbar-thumb:hover": { bgcolor: "rgba(23,28,143,0.6)" },
       }}>
-      {loading && tasks.length === 0 ? (
-        <Box sx={{ display: "grid", placeItems: "center", py: 6, minHeight: 240 }}>
-          <CircularProgress />
-          <Typography sx={{ mt: 2, color: "text.secondary" }}>Загрузка задач...</Typography>
-        </Box>
-      ) : error ? (
-        <Paper sx={{ p: 3, borderRadius: 3, bgcolor: "rgba(229,57,53,0.06)", border: "1px solid rgba(229,57,53,0.2)" }}>
-          <Typography color="error" sx={{ fontWeight: 700 }}>
-            {error}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Проверьте, что список содержит поля AssignedTo, Body, ResultSearchTHU, Location1.
-          </Typography>
-          <Button sx={{ mt: 2 }} variant="outlined" onClick={loadTasks}>
-            Повторить
-          </Button>
-        </Paper>
-      ) : filteredTasks.length === 0 ? (
-        <Box sx={{ py: 4, textAlign: "center", minHeight: 120, display: "grid", placeItems: "center", width: "100%" }}>
-          <Box>
-            <Typography sx={{ color: "text.secondary", fontWeight: 700, fontSize: "0.95rem", lineHeight: 1.2 }}>
-              {tab === 0 ? "Нет активных задач" : "Нет завершенных задач"}
-            </Typography>
-            <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.8rem", lineHeight: 1.2, display: "block", mt: 0.5 }}>
-              {tab === 0 ? "Все задачи выполнены или не назначены на вас." : "Завершенные задачи появятся здесь."}
-            </Typography>
-          </Box>
-        </Box>
-      ) : (
-        <Box sx={{ minHeight: 320, width: "100%", maxWidth: "100%", minWidth: 0, boxSizing: "border-box", display: "block", opacity: isTabPending ? 0.7 : 1, transition: "opacity 120ms", flexShrink: 0 }}>
-          <Stack spacing={1.5} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
-            {groupedTasks.map(([sc, groupTasks]) => {
-              const overdueInGroup = groupTasks.filter((t) => { const d = new Date(t.DueDate); return t.DueDate && !isNaN(d) && d.getTime() < Date.now() && !isCompletedStatus(t.Status, t.PercentComplete); }).length;
-              const hideHeader = groupingEnabled === false && sc === "Все";
-              if (hideHeader) {
-                if (useVirtual) {
-                  const vItems = flatVirtualizer.getVirtualItems();
-                  return (
-                    <Box key={sc} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box", position: "relative" }}>
-                      <Box sx={{ height: `${flatVirtualizer.getTotalSize()}px`, width: "100%", position: "relative" }}>
-                        {vItems.map((virtualItem) => {
-                          const task = filteredTasks[virtualItem.index];
-                          if (!task) return null;
-                          const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
-                          const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
-                          return (
-                            <Box
-                              key={virtualItem.key}
-                              data-index={virtualItem.index}
-                              ref={flatVirtualizer.measureElement}
-                              sx={{
-                                position: "absolute",
-                                top: 0,
-                                left: 0,
-                                width: "100%",
-                                transform: `translateY(${virtualItem.start}px)`,
-                                pb: 1.5,
-                                boxSizing: "border-box",
-                              }}
-                            >
-                              <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
-                                task={task}
-                                isCompleted={isCompleted}
-                                isOverdue={isOverdue}
-                                choices={choices}
-                              resultFieldsMeta={resultFieldsMeta}
-                              ctResultMap={ctResultMap}
-                                updatingId={updatingId}
-                                updatingAction={updatingAction}
-                                onResultClick={handleResultClick}
-                                onTakeInWork={handleTakeInWork}
-                                onComplete={completeTask}
-                                currentUserId={currentUserId}
-                                currentUserTitle={currentUserTitle}
-                              />
-                            </Box>
-                          );
-                        })}
-                      </Box>
-                    </Box>
-                  );
-                }
-                return (
-                  <Stack key={sc} spacing={1.5} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
-                    {groupTasks.map((task) => {
-                      const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
-                      const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
-                      return (
-                        <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
-                          key={task.Id}
-                          task={task}
-                          isCompleted={isCompleted}
-                          isOverdue={isOverdue}
-                          choices={choices}
-                              resultFieldsMeta={resultFieldsMeta}
-                              ctResultMap={ctResultMap}
-                          updatingId={updatingId}
-                          updatingAction={updatingAction}
-                          onResultClick={handleResultClick}
-                          onTakeInWork={handleTakeInWork}
-                          onComplete={completeTask}
-                          currentUserId={currentUserId}
-                          currentUserTitle={currentUserTitle}
-                        />
-                      );
-                    })}
-                  </Stack>
-                );
-              }
-              const isExpanded = expandedGroups.has(sc);
-              return (
-                <Accordion
-                  key={sc}
-                  expanded={isExpanded}
-                  onChange={() => toggleGroup(sc)}
-                  disableGutters
-                  square={false}
-                  elevation={0}
-                  TransitionProps={{ timeout: 0 }}
-                  slotProps={{ transition: { timeout: 0 } }}
-                  sx={{
-                    width: "100%",
-                    maxWidth: "100%",
-                    boxSizing: "border-box",
-                    borderRadius: 1,
-                    border: "1px solid rgba(23,28,143,0.12)",
-                    background: "#fff",
-                    overflow: "hidden",
-                    "&:before": { display: "none" },
-                    "&.Mui-expanded": { margin: "8px 0 0 0", borderRadius: 1 },
-                    "&:first-of-type": { borderRadius: 1 },
-                    "&:last-of-type": { borderRadius: 1 },
-                    boxShadow: isExpanded ? "0 4px 16px rgba(23,28,143,0.08)" : "0 1px 4px rgba(0,0,0,0.04)",
-                    transition: "box-shadow 150ms",
-                  }}
-                >
-                  <AccordionSummary
-                    expandIcon={<ExpandMoreIcon sx={{ color: "#171c8f", fontSize: 22 }} />}
-                    sx={{
-                      minHeight: 56,
-                      height: 56,
-                      px: 1.5,
-                      bgcolor: isExpanded ? "rgba(23,28,143,0.08)" : "rgba(23,28,143,0.04)",
-                      borderRadius: isExpanded ? "4px 4px 0 0" : "4px",
-                      "&:hover": { bgcolor: "rgba(23,28,143,0.09)" },
-                      "& .MuiAccordionSummary-content": { margin: 0, alignItems: "center", gap: 1.25, minWidth: 0 },
-                      "& .MuiAccordionSummary-expandIconWrapper": { color: "#171c8f", transition: "transform 150ms" },
-                      transition: "background-color 150ms, border-radius 0ms",
-                    }}
-                  >
-                    <Box sx={{ width: 36, height: 36, borderRadius: 1, bgcolor: "rgba(23,28,143,0.12)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                      <FolderIcon sx={{ color: "#171c8f", fontSize: 20 }} />
-                    </Box>
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography sx={{ fontWeight: 800, color: "#171c8f", fontSize: "0.95rem", lineHeight: 1.1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {sc}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.75rem" }}>
-                        {groupTasks.length} {groupTasks.length === 1 ? "задача" : groupTasks.length < 5 ? "задачи" : "задач"} {overdueInGroup > 0 ? `• ${overdueInGroup} просрочено` : ""}
-                      </Typography>
-                    </Box>
-                    {overdueInGroup > 0 && <Chip label={`${overdueInGroup} просрочено`} size="small" color="error" sx={{ fontWeight: 700, height: 22, fontSize: "0.7rem", flexShrink: 0 }} />}
-                    <Chip label={`${groupTasks.length}`} size="small" sx={{ fontWeight: 800, bgcolor: "#171c8f", color: "white", height: 22, minWidth: 28, flexShrink: 0 }} />
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ p: 1.5, pt: 1, bgcolor: "#fafaff", borderRadius: "0 0 4px 4px" }}>
-                    <Stack spacing={1.5} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
-                      {groupTasks.map((task) => {
-                        const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
-                        const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
-                        return (
-                          <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
-                          key={task.Id}
-                          task={task}
-                          isCompleted={isCompleted}
-                          isOverdue={isOverdue}
-                          choices={choices}
-                              resultFieldsMeta={resultFieldsMeta}
-                              ctResultMap={ctResultMap}
-                          updatingId={updatingId}
-                          updatingAction={updatingAction}
-                          onResultClick={handleResultClick}
-                          onTakeInWork={handleTakeInWork}
-                          onComplete={completeTask}
-                          currentUserId={currentUserId}
-                          currentUserTitle={currentUserTitle}
-                        />
-                        );
-                      })}
-                    </Stack>
-                  </AccordionDetails>
-                </Accordion>
-              );
-            })}
-          </Stack>
-          {(loading || isBackgroundFetching) && tasks.length > 0 && (
-            <Box sx={{ display: "flex", justifyContent: "center", py: 2, gap: 1, alignItems: "center" }}><CircularProgress size={20} /><Typography variant="caption" color="text.secondary">Обновление...</Typography></Box>
-          )}
-        </Box>
-      )}
+      <TaskList
+        tasks={tasks}
+        tab={tab}
+        groupedTasks={groupedTasks}
+        filteredTasks={filteredTasks}
+        groupingEnabled={groupingEnabled}
+        expandedGroups={expandedGroups}
+        toggleGroup={toggleGroup}
+        useVirtual={useVirtual}
+        flatVirtualizer={flatVirtualizer}
+        isTabPending={isTabPending}
+        loading={loading}
+        error={error}
+        isBackgroundFetching={isBackgroundFetching}
+        taskConfig={taskConfiguration.data}
+        resultFieldsMeta={resultFieldsMeta}
+        ctResultMap={ctResultMap}
+        choices={choices}
+        fieldDefaultActions={fieldDefaultActions}
+        updatingId={updatingId}
+        updatingAction={updatingAction}
+        onResultClick={handleResultClick}
+        onTakeInWork={handleTakeInWork}
+        onComplete={completeTask}
+        currentUserId={currentUserId}
+        currentUserTitle={currentUserTitle}
+        onRetry={loadTasks}
+      />
       </Box>
 
       </>
