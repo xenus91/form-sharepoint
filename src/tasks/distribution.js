@@ -139,6 +139,85 @@ export async function resolveDistributionViaDcEmail(office, department) {
   return null;
 }
 
+// --- Single-flight cache for /fields (сливаем 3 параллельных запроса в один) ---
+let _fieldsCache = null;
+let _fieldsPromise = null;
+let _fieldsAt = 0;
+const _FIELDS_TTL_MS = 5 * 60 * 1000; // 5 минут — поля списка меняются редко, но кэш не должен протухать слишком долго
+
+async function fetchAllTasksFieldsRaw() {
+  const now = Date.now();
+  if (_fieldsCache && now - _fieldsAt < _FIELDS_TTL_MS) return _fieldsCache;
+  if (_fieldsPromise) return _fieldsPromise;
+  _fieldsPromise = (async () => {
+    try {
+      const { data } = await apiClient.get(
+        `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const fields = data?.d?.results || [];
+      _fieldsCache = fields;
+      _fieldsAt = Date.now();
+      return fields;
+    } catch (e) {
+      // fallback to cached if available, else empty
+      if (_fieldsCache) return _fieldsCache;
+      throw e;
+    } finally {
+      _fieldsPromise = null;
+    }
+  })();
+  return _fieldsPromise;
+}
+
+function detectRecipientFromFields(fields) {
+  let f = fields.find((x) => x.InternalName === "Recipient");
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.Title && x.Title.toLowerCase().includes("получатель"));
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.InternalName.toLowerCase().includes("recipient"));
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.TypeAsString === "Lookup" && x.Title && x.Title.toLowerCase().includes("recipient"));
+  if (f) return f.InternalName;
+  return null;
+}
+
+function detectSCNumberFromFields(fields) {
+  const candidates = ["SCNumber","ScNumber","SC_x0020_Number","SCNumber_x0020_","OrderNumber","ТК","SCNo"];
+  for (const c of candidates) {
+    const f = fields.find((x) => x.InternalName === c || x.InternalName.toLowerCase() === c.toLowerCase());
+    if (f) return f.InternalName;
+  }
+  let f = fields.find((x) => x.Title && /\bSC\b/i.test(x.Title) && x.Title.toLowerCase().includes("number"));
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.InternalName.toLowerCase().includes("sc") && x.InternalName.toLowerCase().includes("number"));
+  if (f) return f.InternalName;
+  return null;
+}
+
+/**
+ * Одним запросом получить всё: fieldNames + recipientField + scNumberField.
+ * Критично для трафика: раньше TasksView делал 3 параллельных GET на один и тот же /fields.
+ * @returns {Promise<{ fieldNames:string[], recipientField:string|null, scNumberField:string|null, fields:any[] }>}
+ */
+export async function getTasksListFieldsOverview() {
+  try {
+    const fields = await fetchAllTasksFieldsRaw();
+    const fieldNames = fields.map((f) => f.InternalName);
+    const recipientField = detectRecipientFromFields(fields);
+    const scNumberField = detectSCNumberFromFields(fields);
+    return { fieldNames, recipientField, scNumberField, fields };
+  } catch {
+    return { fieldNames: [], recipientField: null, scNumberField: null, fields: [] };
+  }
+}
+
+export function clearTasksFieldsCache() {
+  _fieldsCache = null;
+  _fieldsPromise = null;
+  _fieldsAt = 0;
+}
+
 /**
  * Получить InternalName всех полей в Tasks list (для динамического определения
  * какие поля доступны — Recipient, RelatedItems, WorkflowItemId, OffDepKey и т.д.).
@@ -146,11 +225,8 @@ export async function resolveDistributionViaDcEmail(office, department) {
  */
 export async function getTaskFieldNames() {
   try {
-    const { data } = await apiClient.get(
-      `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
-      { headers: { Accept: "application/json;odata=verbose" } }
-    );
-    return (data?.d?.results || []).map((f) => f.InternalName);
+    const fields = await fetchAllTasksFieldsRaw();
+    return fields.map((f) => f.InternalName);
   } catch {
     return [];
   }
@@ -163,20 +239,8 @@ export async function getTaskFieldNames() {
  */
 export async function detectRecipientField() {
   try {
-    const { data } = await apiClient.get(
-      `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
-      { headers: { Accept: "application/json;odata=verbose" } }
-    );
-    const fields = data?.d?.results || [];
-    let f = fields.find((x) => x.InternalName === "Recipient");
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.Title && x.Title.toLowerCase().includes("получатель"));
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.InternalName.toLowerCase().includes("recipient"));
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.TypeAsString === "Lookup" && x.Title && x.Title.toLowerCase().includes("recipient"));
-    if (f) return f.InternalName;
-    return null;
+    const fields = await fetchAllTasksFieldsRaw();
+    return detectRecipientFromFields(fields);
   } catch {
     return null;
   }
@@ -189,21 +253,8 @@ export async function detectRecipientField() {
  */
 export async function detectSCNumberField() {
   try {
-    const { data } = await apiClient.get(
-      `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
-      { headers: { Accept: "application/json;odata=verbose" } }
-    );
-    const fields = data?.d?.results || [];
-    const candidates = ["SCNumber","ScNumber","SC_x0020_Number","SCNumber_x0020_","OrderNumber","ТК","SCNo"];
-    for (const c of candidates) {
-      const f = fields.find((x) => x.InternalName === c || x.InternalName.toLowerCase() === c.toLowerCase());
-      if (f) return f.InternalName;
-    }
-    let f = fields.find((x) => x.Title && /\bSC\b/i.test(x.Title) && x.Title.toLowerCase().includes("number"));
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.InternalName.toLowerCase().includes("sc") && x.InternalName.toLowerCase().includes("number"));
-    if (f) return f.InternalName;
-    return null;
+    const fields = await fetchAllTasksFieldsRaw();
+    return detectSCNumberFromFields(fields);
   } catch {
     return null;
   }

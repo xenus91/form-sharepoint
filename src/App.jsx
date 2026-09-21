@@ -1855,7 +1855,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         </Drawer>
         {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
         <Box sx={{ pt: 0, width: "100%", minWidth: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
-          <TasksView userProfile={effectiveUserProfileForTasks} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onCountChange={setTasksActiveCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
+          <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onCountChange={setTasksActiveCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
         </Box>
         {/* Keep modals for operation date etc accessible in tasks view as well */}
       </ThemeProvider>

@@ -81,7 +81,28 @@ export function invalidate(matcher) {
 export function clearCache() {
   cache.clear();
   inflight.clear();
+  stats = { hits: 0, miss: 0, dedup: 0, errors: 0 };
 }
+
+// Хелпер для прод-дебага: window.getCacheStats() / window.clearCache() / window.printCacheStats()
+export function exposeCacheStats() {
+  try {
+    if (typeof window !== "undefined") {
+      window.getCacheStats = getCacheStats;
+      window.clearCache = clearCache;
+      window.printCacheStats = () => {
+        const s = getCacheStats();
+        console.table(s);
+        console.log(`[cache] hits=${s.hits} miss=${s.miss} dedup=${s.dedup} errors=${s.errors} cached=${s.cached} inflight=${s.inflight}`);
+        return s;
+      };
+      console.log("[cache] helper exposed: window.getCacheStats(), window.clearCache(), window.printCacheStats()");
+    }
+  } catch {}
+}
+
+// Авто-expose в браузере
+exposeCacheStats();
 
 // Декоратор для axios-клиента: автоматически кэширует успешные GET.
 // Уважает config.__noCache (true = пропустить кэш, для polling/refresh).

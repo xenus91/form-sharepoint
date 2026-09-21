@@ -58,9 +58,12 @@ export function buildTaskListQuery(opts = {}) {
     }
   }
   if (taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
-  if (recipientField) {
-    extraFields.push(`${recipientField}/Id`);
-    extraFields.push(`${recipientField}/Title`);
+  // По умолчанию считаем, что поле Recipient существует (критично для экономии трафика — большинство задач получают Recipient сразу, без докачки)
+  // Если recipientField === null и список полей ещё не загружен (первый рендер), используем дефолт "Recipient"
+  const effectiveRecipientField = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
+  if (effectiveRecipientField) {
+    extraFields.push(`${effectiveRecipientField}/Id`);
+    extraFields.push(`${effectiveRecipientField}/Title`);
   }
   if (taskFieldNames.includes("RelatedItems")) extraFields.push("RelatedItems");
   if (taskFieldNames.includes("WorkflowItemId")) extraFields.push("WorkflowItemId");
@@ -89,7 +92,8 @@ export function buildTaskListQuery(opts = {}) {
 
   // Expand
   const expands = ["AssignedTo", "Editor"];
-  if (recipientField) expands.push(recipientField);
+  const effectiveExpandRecipient = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
+  if (effectiveExpandRecipient) expands.push(effectiveExpandRecipient);
 
   // Filter по AssignedToId — серверный фильтр по группе + текущему юзеру (OR), чтобы персональные задачи не терялись.
   // OffDepKey в Tasks больше не используем как фолбэк — он ненадёжен (поле может быть пустым/неиндексированным и даёт 0).

@@ -11,12 +11,15 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
   if (!currentUserId) return [];
   let useDueDate = true;
   let useAdditionalActions = true;
+  let useRecipient = !!recipientField || taskFieldNames.length === 0;
+  // если recipientField === null на первом рендере, пробуем дефолт "Recipient" (см. listQuery)
+  let effectiveRecipientField = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
   const buildUrl = () =>
     buildTaskListQuery({
       taskFieldNames,
       useDueDate,
       useAdditionalActions,
-      recipientField,
+      recipientField: effectiveRecipientField,
       resultFieldInternalNames,
       distribution,
       currentUserId,
@@ -46,6 +49,12 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
         nextUrl = buildUrl();
         continue;
       }
+      if (useRecipient && effectiveRecipientField && msg.includes("recipient")) {
+        useRecipient = false;
+        effectiveRecipientField = null;
+        nextUrl = buildUrl();
+        continue;
+      }
       if (nextUrl.includes("AssignedToId")) {
         nextUrl = nextUrl.replace(/AssignedToId/g, "AssignedTo/Id");
         continue;
@@ -55,6 +64,6 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
     safety += 1;
   }
 
-  const mapped = all.map((r) => mapRawTask(r, { recipientField, scNumberField }));
+  const mapped = all.map((r) => mapRawTask(r, { recipientField: effectiveRecipientField, scNumberField }));
   return mapped;
 }
