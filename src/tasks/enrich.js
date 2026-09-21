@@ -10,6 +10,53 @@ import apiClient from "../api";
 import { extractTKNumberFromTask } from "./formatters";
 import { runWithConcurrency } from "../utils/concurrency";
 
+// Глобальный кэш для всех типов задач (ResultSearchTHU, ResultSearchComplete) — чтобы не мигало на любом типе
+const GLOBAL_ENRICH_TTL = 10 * 60 * 1000;
+const _globalEnrichCache = new Map();
+try {
+  const raw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("sp:globalEnrichCache") : null;
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      for (const [k,v] of parsed) {
+        if (v && v.at) _globalEnrichCache.set(k, v);
+      }
+    }
+  }
+} catch {}
+function persistGlobalEnrichCache() {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      const arr = Array.from(_globalEnrichCache.entries()).slice(-100);
+      sessionStorage.setItem("sp:globalEnrichCache", JSON.stringify(arr));
+    }
+  } catch {}
+}
+export function getGlobalEnrichCache(listId, itemId) {
+  const key = `${listId}:${itemId}`;
+  const hit = _globalEnrichCache.get(key);
+  if (hit && Date.now() - hit.at < GLOBAL_ENRICH_TTL) return hit.data;
+  return null;
+}
+export function setGlobalEnrichCache(listId, itemId, data) {
+  const key = `${listId}:${itemId}`;
+  _globalEnrichCache.set(key, { data, at: Date.now() });
+  if (_globalEnrichCache.size > 200) {
+    const first = _globalEnrichCache.keys().next().value;
+    _globalEnrichCache.delete(first);
+  }
+  persistGlobalEnrichCache();
+}
+export function getGlobalEnrichCacheByTaskId(taskId) {
+  const hit = _globalEnrichCache.get(`task:${taskId}`);
+  if (hit && Date.now() - hit.at < GLOBAL_ENRICH_TTL) return hit.data;
+  return null;
+}
+export function setGlobalEnrichCacheByTaskId(taskId, data) {
+  _globalEnrichCache.set(`task:${taskId}`, { data, at: Date.now() });
+  persistGlobalEnrichCache();
+}
+
 /**
  * Парсит RelatedItems задачи. Может быть строкой-JSON или массивом объектов {ListId, ItemId}.
  */
@@ -145,24 +192,48 @@ async function fetchRelatedBatch(listId, itemIds) {
   const expands = ["Recipient"];
   const selectStr = selects.join(",");
   const expandStr = expands.join(",");
-  // SharePoint REST $filter с Or: (Id eq 1) or (Id eq 2) — URL может быть длинным, батчим по 30
   const chunks = chunk(itemIds, 30);
   const results = [];
   for (const c of chunks) {
-    const filter = c.map((id)=> `(Id eq ${id})`).join(" or ");
-    const url = `/web/lists(guid'${listId}')/items?$filter=${encodeURIComponent(filter)}&$select=Id,${selectStr}&$expand=${expandStr}&$top=${c.length * 2}`;
+    // Проверяем глобальный кэш для всех типов задач — если всё в кэше, не делаем сеть
+    const uncached = c.filter((id) => !getGlobalEnrichCache(listId, id));
+    if (uncached.length === 0) {
+      for (const id of c) {
+        const cached = getGlobalEnrichCache(listId, id);
+        if (cached) results.push(cached);
+      }
+      continue;
+    }
+    const filter = uncached.map((id)=> `(Id eq ${id})`).join(" or ");
+    const url = `/web/lists(guid'${listId}')/items?$filter=${encodeURIComponent(filter)}&$select=Id,${selectStr}&$expand=${expandStr}&$top=${uncached.length}`;
     try {
       const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
       const arr = data?.d?.results || [];
+      for (const r of arr) {
+        if (r && r.Id != null) setGlobalEnrichCache(listId, r.Id, r);
+      }
       results.push(...arr);
-    } catch (e) {
-      // fallback to single fetch for this chunk if batch failed
-      console.warn("[enrich] batch failed for", listId, c.length, e?.response?.status);
+      // Добавляем уже кэшированные для тех что были в кэше
       for (const id of c) {
+        if (uncached.includes(id)) continue;
+        const cached = getGlobalEnrichCache(listId, id);
+        if (cached && !arr.find((x) => String(x.Id) === String(id))) results.push(cached);
+      }
+    } catch (e) {
+      console.warn("[enrich] batch failed for", listId, uncached.length, e?.response?.status);
+      for (const id of uncached) {
         try {
           const d = await fetchRelatedElement(listId, id);
-          if (d) results.push(d);
+          if (d) {
+            setGlobalEnrichCache(listId, id, d);
+            results.push(d);
+          }
         } catch {}
+      }
+      for (const id of c) {
+        if (uncached.includes(id)) continue;
+        const cached = getGlobalEnrichCache(listId, id);
+        if (cached) results.push(cached);
       }
     }
   }
@@ -195,10 +266,11 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
       for (const [listId, g] of groups.entries()) {
         const raws = await fetchRelatedBatch(listId, g.itemIds);
         for (const r of raws) {
-          if (r && r.Id != null) itemById.set(`${listId}:${r.Id}`, r);
-          // Fallback where Id may be missing but we have data
+          if (r && r.Id != null) {
+            itemById.set(`${listId}:${r.Id}`, r);
+            setGlobalEnrichCache(listId, r.Id, r);
+          }
           if (r && !r.Id && r.Title) {
-            // try to keep without Id? skip
           }
         }
       }

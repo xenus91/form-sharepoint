@@ -3,7 +3,7 @@ import { fetchTasks } from "./fetchTasks";
 import { enrichTasksWithRelated } from "./enrich";
 // eslint-disable-next-line no-unused-vars
 import { extractTKNumberFromTask, extractTKNumber } from "./formatters";
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 
 export function useTasksQuery({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames = [], enabled = true }) {
   const queryClient = useQueryClient();
@@ -18,17 +18,32 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
     (resultFieldInternalNames || []).join(","),
   ];
 
-  // Кэш обогащения чтобы не мигало ТК → ЕО → ТК на каждом рефетче
-  const enrichCacheRef = React.useRef(new Map()); // Map<taskId, {Recipient, SCNumber, THU}>
+  // Глобальный кэш для всех типов задач (ResultSearchTHU, ResultSearchComplete) — чтобы не мигало на любом типе
   const query = useQuery({
     queryKey,
     queryFn: async () => {
       const raw = await fetchTasks({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames });
-      // Сразу накладываем кэш enrich чтобы не мигало "ЕО 808..." → "ТК 107 • ЕО ..."
-      if (enrichCacheRef.current.size > 0 && raw.length > 0) {
+      // Сразу накладываем глобальный кэш enrich (по taskId и по RelatedItems) чтобы не мигало "ЕО 808..." → "ТК 107 • ЕО ..."
+      // Кэш работает для всех типов: и Поиск ЕО (ResultSearchTHU), и ЕО найдена (ResultSearchComplete)
+      const { getGlobalEnrichCacheByTaskId, getGlobalEnrichCache } = await import("./enrich");
+      if (raw.length > 0) {
         let changed = false;
         const merged = raw.map((t) => {
-          const cached = enrichCacheRef.current.get(t.Id);
+          // 1) Кэш по taskId
+          let cached = getGlobalEnrichCacheByTaskId(t.Id);
+          // 2) Кэш по RelatedItems (listId:itemId) — если taskId кэша нет, пробуем по связанному элементу
+          if (!cached && t.RelatedItems) {
+            try {
+              const rel = typeof t.RelatedItems === "string" ? JSON.parse(t.RelatedItems) : t.RelatedItems;
+              if (Array.isArray(rel) && rel[0]) {
+                const listId = String(rel[0].ListId || rel[0].listId || "").replace(/[{}]/g, "");
+                const itemId = rel[0].ItemId || rel[0].itemId;
+                if (listId && itemId) {
+                  cached = getGlobalEnrichCache(listId, itemId);
+                }
+              }
+            } catch (_e) { void _e; }
+          }
           if (!cached) return t;
           let need = false;
           if (cached.Recipient && t.Recipient !== cached.Recipient) need = true;
@@ -66,22 +81,31 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
         const { recipientMap, scNumberMap, thuMap } = await enrichTasksWithRelated(data, { concurrency: 5, useBatch: true });
         if (cancelled) return;
         if (recipientMap.size === 0 && scNumberMap.size === 0 && thuMap.size === 0) return;
-        // Кэшируем для следующего fetch чтобы не мигало
+        // Кэшируем глобально для всех типов задач
+        const { setGlobalEnrichCacheByTaskId, setGlobalEnrichCache, getGlobalEnrichCacheByTaskId } = await import("./enrich");
         for (const [id, rec] of recipientMap.entries()) {
-          const cur = enrichCacheRef.current.get(id) || {};
-          enrichCacheRef.current.set(id, { ...cur, Recipient: rec });
+          const cur = getGlobalEnrichCacheByTaskId(id) || {};
+          setGlobalEnrichCacheByTaskId(id, { ...cur, Recipient: rec });
+          // Также кэшируем по RelatedItems для кросс-типового доступа
+          const task = data.find((x) => x.Id === id);
+          if (task && task.RelatedItems) {
+            try {
+              const rel = typeof task.RelatedItems === "string" ? JSON.parse(task.RelatedItems) : task.RelatedItems;
+              if (Array.isArray(rel) && rel[0]) {
+                const listId = String(rel[0].ListId || rel[0].listId || "").replace(/[{}]/g, "");
+                const itemId = rel[0].ItemId || rel[0].itemId;
+                if (listId && itemId) setGlobalEnrichCache(listId, itemId, { Recipient: rec, SCNumber: scNumberMap.get(id), THU: thuMap.get(id) });
+              }
+            } catch (_e) { void _e; }
+          }
         }
         for (const [id, sc] of scNumberMap.entries()) {
-          const cur = enrichCacheRef.current.get(id) || {};
-          enrichCacheRef.current.set(id, { ...cur, SCNumber: sc });
+          const cur = getGlobalEnrichCacheByTaskId(id) || {};
+          setGlobalEnrichCacheByTaskId(id, { ...cur, SCNumber: sc });
         }
         for (const [id, thu] of thuMap.entries()) {
-          const cur = enrichCacheRef.current.get(id) || {};
-          enrichCacheRef.current.set(id, { ...cur, THU: thu });
-        }
-        if (enrichCacheRef.current.size > 200) {
-          const first = enrichCacheRef.current.keys().next().value;
-          enrichCacheRef.current.delete(first);
+          const cur = getGlobalEnrichCacheByTaskId(id) || {};
+          setGlobalEnrichCacheByTaskId(id, { ...cur, THU: thu });
         }
         queryClient.setQueryData(queryKey, (prev) => {
           if (!Array.isArray(prev) || prev.length === 0) return prev;
