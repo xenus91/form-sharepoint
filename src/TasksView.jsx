@@ -1043,10 +1043,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               return (
                 <>
                   <Box sx={{ mt: 1.5, display: "flex", flexWrap: "wrap", gap: 1 }}>
-                    {notFoundChoice && (
+                    {notFoundChoice && (() => {
+                      const cfg = getResultUiConfig(notFoundChoice);
+                      return (
                       <Button
-                        variant="contained"
-                        color="error"
+                        variant={cfg.variant}
+                        color={cfg.color}
                         size="large"
                         disabled={isUpdating}
                         onClick={() => setConfirmNotFoundMode(true)}
@@ -1058,18 +1060,19 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           minWidth: "48%",
                           height: 48,
                           fontSize: "1rem",
-                          backgroundImage: "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)",
-                          color: "#fff",
-                          borderColor: "#e53935",
+                          ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: cfg.color === "error" ? "#e53935" : "transparent" } : {}),
                         }}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : notFoundChoice}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : (cfg.label || notFoundChoice)}
                       </Button>
-                    )}
-                    {foundChoice && (
+                      );
+                    })()}
+                    {foundChoice && (() => {
+                      const cfg = getResultUiConfig(foundChoice);
+                      return (
                       <Button
-                        variant="contained"
-                        color="success"
+                        variant={cfg.variant}
+                        color={cfg.color}
                         size="large"
                         disabled={isUpdating}
                         onClick={() => setFoundInputMode(true)}
@@ -1081,18 +1084,22 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           minWidth: "48%",
                           height: 48,
                           fontSize: "1rem",
-                          backgroundImage: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)",
-                          color: "#fff",
+                          ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: "transparent" } : { color: "#fff" }),
                         }}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : foundChoice}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : (cfg.label || foundChoice)}
                       </Button>
-                    )}
-                    {/* Render any extra choices as outlined — динамически из displayedChoices */}
-                    {(displayedChoices || choices).filter((c) => c !== foundChoice && c !== notFoundChoice).map((choice) => (
+                      );
+                    })()}
+                    {/* Render any extra choices — через RESULT_UI_CONFIG, _default теперь зелёная */}
+                    {(displayedChoices || choices).filter((c) => c !== foundChoice && c !== notFoundChoice).map((choice) => {
+                      const cfg = getResultUiConfig(choice);
+                      const isContained = cfg.variant === "contained";
+                      return (
                       <Button
                         key={choice}
-                        variant="outlined"
+                        variant={cfg.variant}
+                        color={cfg.color}
                         size="large"
                         disabled={isUpdating}
                         onClick={() => onResultClick(task, choice)}
@@ -1104,10 +1111,14 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           minWidth: "48%",
                           height: 48,
                           fontSize: "1rem",
+                          ...(isContained && cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: "transparent", "&:hover": { backgroundImage: cfg.gradient, filter: "brightness(0.92)" } } : {}),
+                          ...(!isContained ? { borderWidth: 1.5 } : {}),
                         }}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "inherit" }} /> : choice}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: isContained ? "#fff" : "inherit" }} /> : (cfg.label || choice)}
                       </Button>
+                      );
+                    })}
                     ))}
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
