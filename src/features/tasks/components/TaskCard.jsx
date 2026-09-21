@@ -7,6 +7,7 @@ import apiClient from "../../../api";
 import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
 import { getResultUiConfig } from "../../../tasks/resultConfig";
+import { resolveResultUiConfig } from "../../../services/taskResultDefinitions";
 import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import AdditionalActionsField from "./AdditionalActionsField";
@@ -39,6 +40,14 @@ function stripHtml(html) {
 
 
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
+  // Динамический UI конфиг без ребилда: приоритет TaskResultDefinitions (SP list), fallback к hardcoded resultConfig.js
+  const getUiConfig = React.useCallback((choiceVal) => {
+    const ctId = task?.contentTypeId || task?.ContentTypeId || "";
+    if (taskConfig?.taskResultDefinitions) {
+      return resolveResultUiConfig(choiceVal, ctId, taskConfig.taskResultDefinitions);
+    }
+    return getResultUiConfig(choiceVal);
+  }, [task?.contentTypeId, task?.ContentTypeId, taskConfig?.taskResultDefinitions]);
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
   const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
@@ -625,7 +634,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               const foundChoice = (() => {
                 // 1) по конфигу: requiresLocation / AdditionalActions
                 let c = choicesForButtons.find((ch) => {
-                  const cfg = getResultUiConfig(ch);
+                  const cfg = getUiConfig(ch);
                   return cfg.requiresLocation || cfg.requiresAdditionalActions;
                 });
                 if (c) return c;
@@ -645,7 +654,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 return null;
               })();
               const notFoundChoice = (() => {
-                let c = choicesForButtons.find((ch) => getResultUiConfig(ch).confirm);
+                let c = choicesForButtons.find((ch) => getUiConfig(ch).confirm);
                 if (c) return c;
                 c = choicesForButtons.find((ch) => {
                   const n = String(ch).trim().toLowerCase();
@@ -859,7 +868,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 <>
                   <Box sx={{ mt: 1.5, display: "flex", flexWrap: "wrap", gap: 1 }}>
                     {notFoundChoice && (() => {
-                      const cfg = getResultUiConfig(notFoundChoice);
+                      const cfg = getUiConfig(notFoundChoice);
                       return (
                       <Button
                         variant={cfg.variant}
@@ -883,7 +892,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       );
                     })()}
                     {foundChoice && (() => {
-                      const cfg = getResultUiConfig(foundChoice);
+                      const cfg = getUiConfig(foundChoice);
                       return (
                       <Button
                         variant={cfg.variant}
@@ -908,7 +917,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     })()}
                     {/* Render any extra choices — через RESULT_UI_CONFIG, _default теперь зелёная */}
                     {(displayedChoices || choices).filter((c) => c !== foundChoice && c !== notFoundChoice).map((choice) => {
-                      const cfg = getResultUiConfig(choice);
+                      const cfg = getUiConfig(choice);
                       const isContained = cfg.variant === "contained";
                       return (
                       <Button

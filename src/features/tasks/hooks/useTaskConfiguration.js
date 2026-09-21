@@ -1,12 +1,16 @@
 // src/features/tasks/hooks/useTaskConfiguration.js
-// Phase 7 — единый React Query кэш конфигурации (изолирован от polling Tasks)
+// Phase 7+17 — единый React Query кэш конфигурации (изолирован от polling Tasks)
 // queryKey: ['task-configuration'], stale 30м, gc несколько часов, no refetchOnWindowFocus
+// Включает: ResultField discovery, ContentType map, TaskTypeConfiguration, TaskResultDefinitions, TaskActionDefinitions
+// Все 3 SP списка — без ребилда, graceful 404 → fallback к hardcoded/field metadata.
 
 import { useQuery } from "@tanstack/react-query";
 import apiClient from "../../../api";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap } from "../../../tasks/resultField";
 import { TASKS_LIST_API } from "../../../tasks/config";
 import { fetchTaskTypeConfigurationMap } from "../../../services/taskTypeConfiguration";
+import { fetchTaskResultDefinitions } from "../../../services/taskResultDefinitions";
+import { fetchTaskActionDefinitions, resolveActionChoices } from "../../../services/taskActionDefinitions";
 
 async function fetchAdditionalActionsMetaByName(internalName) {
   const name = String(internalName || "AdditionalActions").trim() || "AdditionalActions";
@@ -36,10 +40,12 @@ export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
     queryKey: ["task-configuration"],
     queryFn: async () => {
-      const [resultFields, ctMap, taskTypeMap] = await Promise.all([
+      const [resultFields, ctMap, taskTypeMap, resultDefs, actionDefs] = await Promise.all([
         fetchResultFieldsMeta(apiClient),
         fetchContentTypeResultMap(apiClient),
         fetchTaskTypeConfigurationMap(apiClient).catch(() => null),
+        fetchTaskResultDefinitions(apiClient).catch(() => null),
+        fetchTaskActionDefinitions(apiClient).catch(() => null),
       ]);
       const additionalMeta = await fetchAdditionalActionsMeta();
       // Если TaskTypeConfiguration задаёт разные AdditionalActions поля — догружаем их метаданные
@@ -63,6 +69,7 @@ export function useTaskConfiguration({ enabled = true } = {}) {
         );
       }
       // Нормализация O(1) lookup (§28): Map<ContentTypeId, TaskConfig>
+      // Merge TaskActionDefinitions в choices без ребилда
       const ctConfigMap = new Map();
       for (const [ctId, fieldMeta] of ctMap.entries()) {
         let additionalField = additionalMeta;
@@ -87,20 +94,67 @@ export function useTaskConfiguration({ enabled = true } = {}) {
             source = "task-type-config";
           }
         }
+        // Merge TaskActionDefinitions без ребилда: если список существует и есть записи — используем его,
+        // иначе fallback к полевым choices. Union с dedup чтобы не потерять FillIn кастомы.
+        let effectiveAdditionalField = additionalField;
+        if (additionalField || actionDefs) {
+          const baseChoices = additionalField?.choices || [];
+          const defChoices = resolveActionChoices(ctId, actionDefs, null);
+          let mergedChoices = baseChoices;
+          let mergedSource = source;
+          if (defChoices && defChoices.length > 0) {
+            // Если TaskActionDefinitions есть — приоритет списку, но сохраняем уникальные из поля
+            const seen = new Set(defChoices.map(c=> String(c.value).toLowerCase()));
+            const extra = baseChoices.filter(c=>{
+              const v = typeof c==='string'? c : c.value;
+              return !seen.has(String(v).toLowerCase());
+            }).map(v=> typeof v==='string'? {value:v,label:v}:{value:v,label:v.label||v});
+            mergedChoices = [...defChoices, ...extra];
+            mergedSource = source === "sharepoint-metadata" && actionDefs ? "task-action-definitions" : source + "+task-action-definitions";
+          }
+          if (additionalField) {
+            effectiveAdditionalField = { ...additionalField, choices: mergedChoices };
+          } else if (mergedChoices.length) {
+            effectiveAdditionalField = {
+              internalName: "AdditionalActions",
+              title: "Дополнительные действия",
+              typeAsString: "MultiChoice",
+              choices: mergedChoices.map(c=> typeof c==='string'? c : c.value),
+              allowFillIn: true,
+              allowMultiple: true,
+            };
+            // normalize to same shape as additionalField
+            effectiveAdditionalField.choices = mergedChoices.map(c=> typeof c==='string'? c : c.value);
+          }
+          // keep source for diagnostics
+          source = mergedSource;
+        }
         ctConfigMap.set(ctId, {
           contentTypeId: ctId,
           resultField: fieldMeta,
-          additionalActionsField: additionalField,
+          additionalActionsField: effectiveAdditionalField,
           source,
           taskTypeConfig: taskTypeMap?.get(ctId) || null,
         });
       }
+      // Ensure __default also merges action defs
       if (!ctConfigMap.has("__default") && resultFields[0]) {
+        let defAdd = additionalMeta;
+        if (actionDefs) {
+          const defChoices = resolveActionChoices("__default", actionDefs, additionalMeta?.choices || []);
+          if (defChoices && defChoices.length) {
+            const base = additionalMeta?.choices || [];
+            const seen = new Set(defChoices.map(c=> String(c.value).toLowerCase()));
+            const extra = base.filter(c=> !seen.has(String(typeof c==='string'? c : c.value).toLowerCase()));
+            const merged = [...defChoices, ...extra.map(v=> typeof v==='string'? {value:v,label:v}:{value:v,label:v})];
+            defAdd = additionalMeta ? { ...additionalMeta, choices: merged.map(c=> typeof c==='string'? c : c.value) } : { internalName:"AdditionalActions", title:"Дополнительные действия", typeAsString:"MultiChoice", choices: merged.map(c=>c.value), allowFillIn:true, allowMultiple:true };
+          }
+        }
         ctConfigMap.set("__default", {
           contentTypeId: "__default",
           resultField: resultFields[0],
-          additionalActionsField: additionalMeta,
-          source: taskTypeMap && taskTypeMap.size>0 ? "task-type-config" : "fallback",
+          additionalActionsField: defAdd,
+          source: taskTypeMap && taskTypeMap.size>0 ? "task-type-config" : (actionDefs ? "task-action-definitions" : "fallback"),
         });
       }
       return {
@@ -109,6 +163,8 @@ export function useTaskConfiguration({ enabled = true } = {}) {
         additionalMeta,
         additionalMetaByName,
         taskTypeMap,
+        taskResultDefinitions: resultDefs,
+        taskActionDefinitions: actionDefs,
         ctConfigMap,
         fetchedAt: Date.now(),
       };
