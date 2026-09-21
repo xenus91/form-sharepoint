@@ -102,16 +102,35 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
   const cacheKey = ctId || "__default";
   if (_normalizedCache.has(cacheKey)) return _normalizedCache.get(cacheKey);
 
-  // 1) Пробуем TaskTypeConfiguration (если список существует)
+  // 1) Пробуем TaskTypeConfiguration (план §17: Title/ContentTypeId/AdditionalActionsFieldInternalName/AdditionalActionsRequired/Enabled)
   let fieldInternalName = ADDITIONAL_ACTIONS_FIELD;
   let source = "sharepoint-field";
+  let typeCfg = null;
   if (apiClient && ctId) {
-    const typeCfg = await getTaskTypeConfig(ctId, apiClient);
-    if (typeCfg && typeCfg.additionalActionsFieldInternalName) {
-      fieldInternalName = typeCfg.additionalActionsFieldInternalName;
-      source = "task-type-config";
-    } else if (typeCfg) {
-      source = "task-type-config";
+    typeCfg = await getTaskTypeConfig(ctId, apiClient);
+    if (typeCfg) {
+      if (typeCfg.enabled === false) {
+        // Enabled=false → контрол отсутствует (план §18)
+        const cfgDisabled = {
+          enabled: false,
+          required: false,
+          fieldInternalName: typeCfg.additionalActionsFieldInternalName || fieldInternalName,
+          fieldTitle: typeCfg.additionalActionsFieldInternalName || fieldInternalName,
+          fieldType: "DisabledByConfig",
+          allowFillIn: true,
+          choices: [],
+          contentTypeId: ctId,
+          source: "task-type-config-disabled",
+        };
+        _normalizedCache.set(cacheKey, cfgDisabled);
+        return cfgDisabled;
+      }
+      if (typeCfg.additionalActionsFieldInternalName) {
+        fieldInternalName = typeCfg.additionalActionsFieldInternalName;
+        source = "task-type-config";
+      } else {
+        source = "task-type-config";
+      }
     }
   }
 
@@ -138,13 +157,16 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
     return cfg;
   }
 
-  // 3) Required — из TaskTypeConfiguration или из task.AdditionalActionsRequired (legacy)
-  // Если required=false — контрол отсутствует (Business rule §18)
+  // 3) Required — приоритет: TaskTypeConfiguration.AdditionalActionsRequired (план §17), затем task.AdditionalActionsRequired / task.additionalActions.required
+  // Если required=false — контрол отсутствует (план §18)
   let required = false;
-  if (task?.additionalActions?.required !== undefined) {
+  // Сначала из TaskTypeConfiguration (если задан)
+  if (typeCfg && typeCfg.additionalActionsRequired !== null && typeCfg.additionalActionsRequired !== undefined) {
+    required = !!typeCfg.additionalActionsRequired;
+  } else if (task?.additionalActions?.required !== undefined) {
     required = String(task.additionalActions.required).toLowerCase() === "да" || task.additionalActions.required === true;
-  } else if (task?.AdditionalActionsRequired) {
-    required = String(task.AdditionalActionsRequired).toLowerCase() === "да";
+  } else if (task?.AdditionalActionsRequired !== undefined && task?.AdditionalActionsRequired !== null && String(task.AdditionalActionsRequired).trim() !== "") {
+    required = String(task.AdditionalActionsRequired).toLowerCase() === "да" || String(task.AdditionalActionsRequired).toLowerCase() === "true" || String(task.AdditionalActionsRequired).toLowerCase() === "yes";
   }
 
   const cfg = {

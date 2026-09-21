@@ -7,7 +7,7 @@ import apiClient from "../../../api";
 import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
 import { getResultUiConfig } from "../../../tasks/resultConfig";
-import { resolveResultUiConfig } from "../../../services/taskResultDefinitions";
+import { resolveResultUiConfig, resolveTaskResultDefinition } from "../../../services/taskResultDefinitions";
 import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import AdditionalActionsField from "./AdditionalActionsField";
@@ -41,12 +41,21 @@ function stripHtml(html) {
 
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
   // Динамический UI конфиг без ребилда: приоритет TaskResultDefinitions (SP list), fallback к hardcoded resultConfig.js
+  // План §14: TaskResultDefinitions.ShowAdditionalActions / AdditionalActionsRequired — управляет видимостью AdditionalActions
   const getUiConfig = React.useCallback((choiceVal) => {
     const ctId = task?.contentTypeId || task?.ContentTypeId || "";
     if (taskConfig?.taskResultDefinitions) {
       return resolveResultUiConfig(choiceVal, ctId, taskConfig.taskResultDefinitions);
     }
     return getResultUiConfig(choiceVal);
+  }, [task?.contentTypeId, task?.ContentTypeId, taskConfig?.taskResultDefinitions]);
+
+  const getResultDef = React.useCallback((choiceVal) => {
+    const ctId = task?.contentTypeId || task?.ContentTypeId || "";
+    if (taskConfig?.taskResultDefinitions) {
+      return resolveTaskResultDefinition(choiceVal, ctId, taskConfig.taskResultDefinitions);
+    }
+    return null;
   }, [task?.contentTypeId, task?.ContentTypeId, taskConfig?.taskResultDefinitions]);
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
@@ -632,8 +641,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // Для открытой задачи используем displayedChoices (свежие по ContentType)
               const choicesForButtons = displayedChoices || choices;
               const foundChoice = (() => {
-                // 1) по конфигу: requiresLocation / AdditionalActions
+                // 1) по плану §14: TaskResultDefinitions.ShowAdditionalActions
                 let c = choicesForButtons.find((ch) => {
+                  const def = getResultDef(ch);
+                  if (def) return def.showAdditionalActions;
                   const cfg = getUiConfig(ch);
                   return cfg.requiresLocation || cfg.requiresAdditionalActions;
                 });
@@ -654,7 +665,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 return null;
               })();
               const notFoundChoice = (() => {
-                let c = choicesForButtons.find((ch) => getUiConfig(ch).confirm);
+                // План §14: ShowAdditionalActions=false для confirm-типа (Не найдена) не требует AA
+                let c = choicesForButtons.find((ch) => {
+                  const def = getResultDef(ch);
+                  if (def) return !def.showAdditionalActions && def.cfg; // Show=false → confirm типа
+                  return getUiConfig(ch).confirm;
+                });
                 if (c) return c;
                 c = choicesForButtons.find((ch) => {
                   const n = String(ch).trim().toLowerCase();
