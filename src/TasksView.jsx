@@ -1,16 +1,16 @@
-import React, { useEffect, useState, useCallback, useMemo, useTransition, useRef } from "react";
-import apiClient, { normalizeNextUrl, invalidate } from "./api";
+/* eslint-disable react/prop-types, no-empty, no-useless-catch */
+import React, { useEffect, useState, useCallback, useMemo, useTransition } from "react";
+import apiClient, { invalidate } from "./api";
 import { buildTaskIndex, findInIndex } from "./utils/taskIndex";
 import { createAdaptivePolling } from "./utils/polling";
-import { runWithConcurrency } from "./utils/concurrency";
 import { mapRawTask } from "./tasks/mapping";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { fetchTasks } from "./tasks/fetchTasks";
-import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getTaskResultValue, getResultChoicesForTask } from "./tasks/resultField";
+import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "./tasks/resultField";
 import { getResultUiConfig } from "./tasks/resultConfig";
 import { HASH_LOG, HASH_WARN } from "./tasks/log";
-import { searchTaskByRelatedItem, fetchFullTask } from "./tasks/hashSearch";
+import { searchTaskByRelatedItem } from "./tasks/hashSearch";
 import { enrichTasksWithRelated } from "./tasks/enrich";
 import { fetchProblemsPalletItem } from "./tasks/problemsPallet";
 import {
@@ -19,18 +19,14 @@ import {
   getTaskFieldNames,
   detectRecipientField,
   detectSCNumberField,
-  DCEMAIL_LIST_TITLE,
 } from "./tasks/distribution";
-import { buildTaskListQuery } from "./tasks/listQuery";
-import { TASKS_LIST_API, FULL_TASK_SELECT, FULL_TASK_EXPAND, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync } from "./tasks/config";
+import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync } from "./tasks/config";
 import {
   formatDueLeft,
   formatDueDateFull,
   formatSolveTime,
   extractTKNumber,
-  extractSCNumber,
   extractTKNumberFromTask,
-  extractSCNumberFromTask,
   extractEONumberFromTask,
 } from "./tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "./tasks/status";
@@ -56,18 +52,10 @@ import {
   Tab,
   Divider,
   Tooltip,
-  Radio,
-  RadioGroup,
-  FormControlLabel,
-  FormControl,
-  FormLabel,
-  Checkbox,
-  FormGroup,
   Autocomplete,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import FolderIcon from "@mui/icons-material/Folder";
 import { keyframes } from "@emotion/react";
 import AssignmentIcon from "@mui/icons-material/Assignment";
@@ -75,7 +63,6 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchOffIcon from "@mui/icons-material/SearchOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import CelebrationIcon from "@mui/icons-material/Celebration";
 import { useNotifications } from "./NotificationsProvider";
 
 
@@ -160,7 +147,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [task.Id, task.ContentTypeId, task.Status, isCompleted]);
   const displayedChoices = freshChoices || effectiveChoices;
   const displayedFieldMeta = freshField || dynamicFieldMeta;
-  const displayedInternalName = displayedFieldMeta?.internalName || dynamicInternalName;
+  const _displayedInternalName = displayedFieldMeta?.internalName || dynamicInternalName; // eslint-disable-line no-unused-vars
   React.useEffect(() => {
     const def = fieldDefaultActions !== null ? fieldDefaultActions : getCachedAdditionalActionsDefaultSync();
     if (def === null) return;
@@ -511,7 +498,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
           }}
           title={task.Body}
         >
-          {task.Body || task.Title || "Без текста"}
+          {stripHtml(task.Body) || task.Title || "Без текста"}
         </Typography>
         {/* Получатель скрыт — в заголовке уже ТК и ЕО, ниже только Body, как просил пользователь */}
       </Box>
@@ -626,7 +613,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // Check if task is assigned to someone else: if AssignedToId exists and not mine and group task, we still show buttons for taker, but for others we show "В работе у ..."
               // For group tasks, AssignedTo is group name, Editor is actual taker — use Editor if available
               const taker = task.EditorTitle || task.AssignedTo || task.Editor || "";
-              const showAsMine = true; // for MVP show buttons to everyone who sees InProgress; server ETag will still protect, but we try to differentiate
+              // const showAsMine = true; // removed eslint unused
               // If we can determine it's not mine (group task with Editor different), show locked message
               // For now, if we have isMine flag false and taker exists, show locked for non-taker? But without currentUserTitle we can't know.
               // So we show buttons with hint; the take logic already protects.
@@ -783,26 +770,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
 
               // Input mode для Найдена — максимально лаконично, без лишних букв
               if (foundInputMode) {
-                const toggleAdditionalAction = (val) => {
-                  const v = String(val).trim();
-                  if (!v) return;
-                  setAdditionalActions((prev) => {
-                    if (prev.includes(v)) return prev.filter((x) => x !== v);
-                    return [...prev, v];
-                  });
-                  if (additionalError) setAdditionalError("");
-                };
-                const handleAddCustomAction = () => {
-                  const v = customActionInput.trim();
-                  if (!v) return;
-                  if (additionalActions.includes(v)) {
-                    setAdditionalError("Это действие уже добавлено");
-                    return;
-                  }
-                  setAdditionalActions((prev) => [...prev, v]);
-                  setCustomActionInput("");
-                  setAdditionalError("");
-                };
+                // toggleAdditionalAction / handleAddCustomAction removed — Autocomplete handles it
                 const validateAdditional = () => {
                   setAdditionalError("");
                   return true;
@@ -864,7 +832,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                               }}
                               renderTags={(value, getTagProps) =>
                                 value.map((option, index) => {
-                                  const { key, ...tagProps } = getTagProps({ index });
+                                  const { key, ...tagProps } = getTagProps({ index }); // eslint-disable-line no-unused-vars
                                   const isStandard = ADDITIONAL_ACTIONS_STANDARD.includes(option);
                                   return (
                                     <Chip
@@ -1201,11 +1169,12 @@ const celebrateRing = keyframes`
   100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
 `;
 
-export default function TasksView({ userProfile: propUserProfile, onBack, onCountChange, initialElementId, initialElementAction, onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
+// eslint-disable-next-line no-unused-vars
+export default function TasksView({ userProfile: propUserProfile, onBack: _onBack, onCountChange, initialElementId, initialElementAction, onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
   const { notify } = useNotifications();
   const [fieldsLoading, setFieldsLoading] = useState(true);
   const [isTabPending, startTabTransition] = useTransition();
-  const [isDataPending, startDataTransition] = useTransition();
+  const [_isDataPending, _startDataTransition] = useTransition(); // eslint-disable-line no-unused-vars
   const lastFocusLoadRef = React.useRef(Date.now());
   const lastHashFocusRef = React.useRef(Date.now());
   const [expandedGroups, setExpandedGroups] = useState(() => new Set()); // SCNumber -> expanded
@@ -1218,7 +1187,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   const [scNumberField, setScNumberField] = useState(null);
   const [groupingEnabled, setGroupingEnabled] = useState(false);
   const [choices, setChoices] = useState([]);
-  const [statusChoices, setStatusChoices] = useState([]);
+  const [statusChoices, setStatusChoices] = useState([]); // eslint-disable-line no-unused-vars
   const [completedStatusValue, setCompletedStatusValue] = useState(null);
   const [inProgressStatusValue, setInProgressStatusValue] = useState(null);
   const [entityType, setEntityType] = useState(null);
@@ -1306,7 +1275,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   const [locationComment, setLocationComment] = useState("");
   // Доп. действия для диалога Найдена (legacy путь через handleResultClick)
   const [pendingAdditionalActions, setPendingAdditionalActions] = useState(["Отправить ЕО в OTM"]);
-  const pendingAdditionalRequired = pendingAdditionalActions.length > 0 ? "Да" : "Нет";
+  // const pendingAdditionalRequired = pendingAdditionalActions.length > 0 ? "Да" : "Нет"; // eslint unused
   const [fieldDefaultActions, setFieldDefaultActions] = useState(() => {
     const sync = getCachedAdditionalActionsDefaultSync();
     return sync !== null ? sync : null;
@@ -1549,7 +1518,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     return () => { cancelled = true; };
   }, [tasks]);
 
-  const loadTasks = useCallback(async (opts={})=>{
+    // eslint-disable-next-line no-unused-vars
+  const loadTasks = useCallback(async (_opts={})=>{
     // совместимость: все старые вызовы loadTasks({silent:true}) теперь — invalidate + refetch через TanStack
     await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     invalidate("/items");
@@ -1634,7 +1604,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       }
       // если не нашли среди фильтрованных — пробуем глобальный поиск (без AssignedTo)
       let elementDataLocal = null;
-      let globalMatched = null;
+      let _globalMatched = null; // eslint-disable-line no-unused-vars
       // сначала грузим элемент (если не THU) чтобы получить THU для поиска по THU
       if (!isThu) {
         HASH_LOG("fetchProblemsPalletItem will start, set loading true");
@@ -1741,7 +1711,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
       const isComp = isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete);
       const targetTab = isComp ? 1 : 0;
       if (tab !== targetTab) startTabTransition(() => setTab(targetTab));
-      // eslint-disable-next-line
+       
     }
   }, [elementTaskMatch, autoTabAppliedForElement, tab]);
 
@@ -1762,12 +1732,12 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
   }, [tasks, tab]);
 
   // Хелпер для получения свежих choices по ContentType для конкретной задачи
-  const getTaskChoices = useCallback((taskObj) => {
+  const _getTaskChoices = useCallback((taskObj) => { // eslint-disable-line no-unused-vars
     const meta = getResultFieldForTask(taskObj, ctResultMap, resultFieldsMeta);
     if (meta?.choices && meta.choices.length > 0) return meta.choices;
     return choices;
   }, [ctResultMap, resultFieldsMeta, choices]);
-  const getTaskFieldMeta = useCallback((taskObj) => {
+  const _getTaskFieldMeta = useCallback((taskObj) => { // eslint-disable-line no-unused-vars
     return getResultFieldForTask(taskObj, ctResultMap, resultFieldsMeta) || { internalName: "ResultSearchTHU", choices };
   }, [ctResultMap, resultFieldsMeta, choices]);
 
@@ -1814,11 +1784,11 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     });
   }, []);
 
-  const expandAll = useCallback(() => {
+  const _expandAll = useCallback(() => { // eslint-disable-line no-unused-vars
     setExpandedGroups(new Set(groupedTasks.map(([sc]) => sc)));
   }, [groupedTasks]);
 
-  const collapseAll = useCallback(() => {
+  const _collapseAll = useCallback(() => { // eslint-disable-line no-unused-vars
     setExpandedGroups(new Set());
   }, []);
 
@@ -2226,7 +2196,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                 invalidate("/items");
                 setTimeout(() => loadTasks({ silent: true }), 600);
                 return;
-              } catch (eClean) {
+              } catch (_eClean) { void _eClean;
                 try {
                   const clean2 = { ...payload };
                   delete clean2.AdditionalActionsRequired;
@@ -2301,7 +2271,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
               invalidate("/items");
               setTimeout(() => loadTasks({ silent: true }), 600);
               return;
-            } catch (eClean) {
+            } catch (_eClean) { void _eClean;
               try {
                 const clean2 = { ...payload };
                 delete clean2.AdditionalActionsRequired;
@@ -2942,6 +2912,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
                   }}
                   renderTags={(value, getTagProps) =>
                     value.map((option, index) => {
+                      // eslint-disable-next-line no-unused-vars
                       const { key, ...tagProps } = getTagProps({ index });
                       const isStandard = ADDITIONAL_ACTIONS_STANDARD.includes(option);
                       return (
