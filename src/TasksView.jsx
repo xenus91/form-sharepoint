@@ -1839,10 +1839,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 }}
               >
                 <AdditionalActionsField
-                  fieldInternalName={taskConfig?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.internalName || "AdditionalActions"}
+                  fieldInternalName={taskConfiguration.data?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.internalName || "AdditionalActions"}
                   required={pendingAdditionalActions.length > 0}
-                  choices={(taskConfig?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.choices || ADDITIONAL_ACTIONS_STANDARD).map(v=>typeof v==='string'?{value:v,label:v}:v)}
-                  allowFillIn={taskConfig?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.allowFillIn ?? true}
+                  choices={(taskConfiguration.data?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.choices || ADDITIONAL_ACTIONS_STANDARD).map(v=>typeof v==='string'?{value:v,label:v}:v)}
+                  allowFillIn={taskConfiguration.data?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.allowFillIn ?? true}
                   value={pendingAdditionalActions}
                   onChange={(next)=>{ setPendingAdditionalActions(next); if (pendingAdditionalError) setPendingAdditionalError(""); if (pendingCustomAction) setPendingCustomAction(""); }}
                   error={pendingAdditionalError}
