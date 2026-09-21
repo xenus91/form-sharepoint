@@ -2500,9 +2500,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               </Button>
             )}
             <Tooltip title="Обновить">
-              <IconButton onClick={loadTasks} disabled={loading}>
-                <RefreshIcon />
-              </IconButton>
+              <span>
+                <IconButton onClick={loadTasks} disabled={loading}>
+                  <RefreshIcon />
+                </IconButton>
+              </span>
             </Tooltip>
           </Box>
         </Box>

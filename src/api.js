@@ -91,11 +91,31 @@ try {
   const _stored = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("sp:recipientMissing") : null;
   if (_stored === "1") _recipientMissing = true;
 } catch (_e) { void _e; }
+// Авто-сброс флага если он был установлен старой версией (которая чистила Recipient и для связанных списков)
+if (_recipientMissing) {
+  console.warn("[api] _recipientMissing flag is set (from old Tasks error) - will auto-clear in 3s to allow related Recipient fetch");
+  setTimeout(() => {
+    try {
+      if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("sp:recipientMissing");
+      _recipientMissing = false;
+      console.warn("[api] auto-cleared sp:recipientMissing to allow related Recipient");
+    } catch (_e) { void _e; }
+  }, 3000);
+}
+export function clearRecipientMissingFlag() {
+  _recipientMissing = false;
+  try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("sp:recipientMissing"); } catch (_e) { void _e; }
+  console.warn("[api] cleared recipientMissing flag");
+}
+if (typeof window !== "undefined") {
+  window.clearRecipientMissingFlag = clearRecipientMissingFlag;
+}
 // Для небезопасных методов добавляем X-RequestDigest + чистим EndJob
 apiClient.interceptors.request.use(async (config) => {
   try {
-    if (_recipientMissing && config.url && config.url.toLowerCase().includes("recipient")) {
-      console.warn("[api] stripping Recipient from URL (previously missing)", config.url);
+    const isTasksList = config.url && config.url.toLowerCase().includes("463b634e-a71a-4fef-9a1f-b803431d8639");
+    if (_recipientMissing && isTasksList && config.url.toLowerCase().includes("recipient")) {
+      console.warn("[api] stripping Recipient from URL (previously missing, Tasks only)", config.url);
       config.url = stripRecipient(config.url);
     }
     if (config.url && config.url.toLowerCase().includes("endjob")) {
@@ -169,8 +189,9 @@ apiClient.interceptors.response.use(
         }
       } catch (_e) { void _e; }
     }
-    if (msg.includes("recipient")) {
-      console.warn("[api] Recipient error detected, invalidating cache", err?.config?.url);
+    const isTasksUrl = err?.config?.url && err.config.url.toLowerCase().includes("463b634e-a71a-4fef-9a1f-b803431d8639");
+    if (msg.includes("recipient") && isTasksUrl) {
+      console.warn("[api] Recipient error detected (Tasks), invalidating cache", err?.config?.url);
       _recipientMissing = true;
       try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem("sp:recipientMissing", "1"); } catch (_e) { void _e; }
       try { invalidate("Recipient"); } catch (_e) { void _e; }
@@ -190,6 +211,8 @@ apiClient.interceptors.response.use(
           }
         }
       } catch (_e) { void _e; }
+    } else if (msg.includes("recipient")) {
+      console.warn("[api] Recipient error on non-Tasks list (ignored for flag)", err?.config?.url);
     }
     console.error('API Error:', err?.response?.status, err?.response?.data || err?.message);
     return Promise.reject(err);
