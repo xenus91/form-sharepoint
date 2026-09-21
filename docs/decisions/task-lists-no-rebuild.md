@@ -42,15 +42,16 @@ ContentTypeId | AdditionalActionsFieldInternalName | Required
 0x010802...   | PickingAdditionalActions           | Yes
 ```
 
-### §21 TaskActionDefinitions
+### §21 TaskActionDefinitions — ActionId = стабильный английский ключ
 ```
-Title
-ActionId
-ContentTypeId
-SortOrder
-Enabled
+Title              // display label (ru)  — "Отправить ЕО в OTM"
+ActionId           // stable English key — "send_eo_to_otm" (snake_case, без пробелов/кириллицы)
+ContentTypeId      // ""=global или полный StringValue "0x01080100..."
+SortOrder          // 10,20,30
+Enabled            // Yes/No
 ```
-НЕ заменяет Choice metadata автоматически (план §21: если field metadata уже описывает — сначала использовать metadata). Использовать только если реально нужен внешний словарь.
+`ActionId` — **английский `snake_case`/`camelCase` ключ** (например `send_eo_to_otm`, `move_to_correct_line`, `repack`), а не русский. `Title` — человекочитаемый русский label для UI. Хранится в Task `AdditionalActions` — `ActionId` (стабилен при переименовании Title), отображается `Title`. Legacy русские `ActionId` поддерживаются, но новые — только английские.
+НЕ заменяет Choice metadata автоматически (план §21: если field metadata уже описывает — сначала использовать metadata). Использовать только если нужен внешний словарь без правки поля.
 
 ---
 
@@ -91,6 +92,90 @@ Title=Сборка      | ContentTypeId=0x01080100BB... | AdditionalActionsField
 ```
 
 После заполнения — `sessionStorage` 30м или `sessionStorage.clear()` + `location.reload()`.
+
+---
+
+## Пример полного флоу (настройка без ребилда) — как работают 2 списка + AdditionalActions поле
+
+**Исходно:** один общий `Site Column` `AdditionalActions` (`Choice MultiChoice AllowMultiple=Yes AllowFillIn=Yes`, Choices: `Отправить ЕО в OTM` etc., `DefaultValue` пусто) + пустые списки (404 → fallback). После настройки — без `npm run build`.
+
+### Шаг 1 — Админ заводит действия (без кода)
+
+`Site Contents → TaskActionDefinitions → New` (3 строки, глобально):
+
+| Title | ActionId | ContentTypeId | SortOrder | Enabled |
+|---|---|---|---|---|
+| Отправить ЕО в OTM | `send_eo_to_otm` | *(пусто)* | 10 | Да |
+| Переместить в корректную линию | `move_to_correct_line` | *(пусто)* | 20 | Да |
+| Перебрать | `repack` | *(пусто)* | 30 | Да |
+
+Хочет для CT `Сборка` (`0x01080100BB...`) особый набор — добавляет:
+
+| Title | ActionId | ContentTypeId | SortOrder |
+|---|---|---|---|
+| Проверить документы | `check_documents` | `0x01080100BB...` | 10 |
+
+`useTaskConfiguration` → `resolveActionChoices("0x01080100BB...", defs)` → берёт per-CT (exact→prefix) → `["check_documents"]` + уникальные из поля. Для других CT → глобальные 3. `AdditionalActionsField` (`freeSolo`) сразу показывает новые `Title` как `label`, хранит `ActionId`.
+
+### Шаг 2 — Админ заводит поведение Result (без кода)
+
+`TaskResultDefinitions` → глобальные строки (ContentTypeId пусто):
+
+| Title | ContentTypeId | ResultValue | ShowAdditionalActions | AdditionalActionsRequired | SortOrder | Enabled |
+|---|---|---|---|---|---|---|
+| Найдена | "" | `Найдена` | Да | Да | 10 | Да |
+| Найден | "" | `Найден` | Да | Да | 11 | Да |
+| Не найдена | "" | `Не найдена` | Нет | Нет | 20 | Да |
+| Не найден | "" | `Не найден` | Нет | Нет | 21 | Да |
+
+Хочет для CT `Поиск ЕО` (`0x01080100AA...`) чтобы `Поврежден` тоже требовал действия — добавляет строку `ContentTypeId=0x01080100AA... | ResultValue=Поврежден | Show=Да | Required=Нет`.
+
+### Шаг 3 — Пользователь открывает Task `Сборка` (CT `0x01080100BB...`, Status `Назначена`)
+
+`TasksView → useTaskConfiguration` (30м кэш) → `ctConfigMap.get("0x01080100BB...")`:
+- `resultField` из `FieldLinks` (например `ResultSearchPallet` с `Choices: [Найдена, Не найдена, Поврежден]` — из discovery `resultField.js`)
+- `additionalActionsField`: `InternalName=AdditionalActions`, `choices` = `resolveActionChoices` → `["check_documents"]` (т.к. per-CT) + `AllowFillIn=true`
+
+`TaskCard` рендерит `choicesForButtons = ["Найдена","Не найдена","Поврежден"]` + `getResultDef("Поврежден")` → `Show=Да` → кнопка `Поврежден` считается `foundChoice` (требует AA).
+
+### Шаг 4 — Пользователь жмёт `Найдена`
+
+`TaskCard` → `setFoundInputMode(true)` → показывает:
+- `Location1` (`TextField` "Где найдена? (необязательно)")
+- `AdditionalActionsField` с `choices=[{value:"check_documents", label:"Проверить документы"}]` (из `TaskActionDefinitions` per-CT), `value=["send_eo_to_otm"]` дефолт? Нет, для этого CT дефолт `check_documents`, но `AdditionalActionsField` `value` берёт из `fieldDefaultActions` (поле `DefaultValue`) + `sessionStorage` — админ может задать `DefaultValue` в поле `AdditionalActions` как `check_documents` без ребилда.
+
+Пользователь выбирает `Проверить документы` + вводит `проверить упаковку` (fill-in, `AllowFillIn=Yes`).
+
+### Шаг 5 — Сохранение (план §18, §23)
+
+`User changes selection → local state → additionalActionsResolver`:
+
+```
+Task {ContentTypeId:0x01080100BB...}
+  → resolveTaskTypeConfig (отключён, fallback) → fieldInternalName="AdditionalActions"
+  → field metadata (Choices, AllowFillIn, Multi)
+  → normalized config {fieldInternalName:"AdditionalActions", choices:[{check_documents...}], allowFillIn:true}
+```
+
+`TasksView.handleComplete(task, "Найдена", "Зона 5", "Да", ["check_documents","проверить упаковку"])`:
+
+```js
+payload = {
+  Status:"Завершена", PercentComplete:1,
+  [resultFieldName]:"Найдена", // dynamic result field via getResultFieldForTask
+  AdditionalActions: ["check_documents","проверить упаковку"], // ActionId английские, fill-in тоже
+  AdditionalActionsRequired:"Да", // из TaskTypeConfiguration.AdditionalActionsRequired || length>0
+  Location1:"Зона 5"
+}
+// POST /web/lists(guid'...')/items(123) X-HTTP-Method:MERGE If-Match:*
+// Если поле другое (случай B, SearchAdditionalActions) — отправит {SearchAdditionalActions:[...]} , а не универсально AdditionalActions
+```
+
+`field Choices` **не меняется** (план §20: fill-in не меняет metadata, проверяется отдельным `GET .../fields/getbytitle` до/после — `Choices` остаются `["check_documents"]`, fill-in хранится только в Task item).
+
+Другая Task `Task_SearchPallet` (CT `0x01080100AA...`) с тем же `Result=Не найдена` → `resolveTaskResultDefinition("Не найдена", "0x01080100AA...", defs)` → `Show=Нет` → `AdditionalActionsField` скрыт, `payload AdditionalActions=[]`, `Required=Нет`.
+
+**Итог:** новый `ActionId`/`ResultValue` → строка в SP списке → 30м (или `sessionStorage.clear()`) → UI без `npm run build`. `ContentTypeId` — полный `StringValue` (audit) пусто=global, exact→prefix, `Enabled`/`SortOrder` управляют видимостью/порядком.
 
 ---
 
@@ -158,16 +243,19 @@ Task → ContentTypeId → TaskTypeConfiguration → fieldInternalName → field
 - `SortOrder` (Number) — `10,20`
 - `Enabled` (Yes/No) — `Yes`
 
-**TaskActionDefinitions** → Columns `Title, ActionId, ContentTypeId, SortOrder, Enabled` (ActionId если пусто → Title).
+**TaskActionDefinitions** → Columns `Title (ru label), ActionId (en key snake_case), ContentTypeId, SortOrder, Enabled` (ActionId `send_eo_to_otm`, `move_to_correct_line`, `repack`; если пусто → `Title`).
 
-**TaskTypeConfiguration** → Columns `Title, ContentTypeId, AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled` (последнее `Yes/No`).
+**TaskTypeConfiguration** → Columns `Title, ContentTypeId, AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled` (последнее `Yes/No`) — **отключён до аудита §16**, создавать только для случая B.
 
-Пример данных (план):
+Пример данных (план + текущий флоу — ActionId английский):
 ```
-TaskResultDefinitions: 0x0108A | Найден | No | No
-TaskResultDefinitions: 0x0108A | Не найден | Yes | Yes
-TaskTypeConfiguration: 0x010801 | SearchAdditionalActions | Yes
-TaskActionDefinitions: Title=Переместить, ActionId=Переместить, ContentTypeId=0x010801, SortOrder=10
+TaskResultDefinitions: 0x0108 | Найдена | Show=Yes Required=Yes  (AdditionalActionsField виден, Required)
+TaskResultDefinitions: 0x0108 | Не найдена | Show=No Required=No
+TaskActionDefinitions: Title="Отправить ЕО в OTM" | ActionId=send_eo_to_otm | ContentTypeId="" (global) | SortOrder=10
+TaskActionDefinitions: Title="Переместить в корректную линию" | ActionId=move_to_correct_line | ContentTypeId="" | SortOrder=20
+TaskActionDefinitions: Title="Перебрать" | ActionId=repack | ContentTypeId="" | SortOrder=30
+TaskActionDefinitions (per-CT пример): Title="Проверить документы" | ActionId=check_documents | ContentTypeId=0x01080100BB... | SortOrder=10
+TaskTypeConfiguration (случай B, после аудита): ContentTypeId=0x01080100AA... | SearchAdditionalActions | AdditionalActionsRequired=Да
 ```
 
 После заполнения — `sessionStorage` 30м или `invalidateQueries(['task-configuration'])` без ребилда.
