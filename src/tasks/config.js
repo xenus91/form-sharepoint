@@ -67,8 +67,8 @@ export function getCachedAdditionalActionsDefaultSync() {
   return _cachedDefaultActions;
 }
 
-// Select/expand для fetchFullTask (используется в TasksView и hashSearch).
-export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,WorkflowItemId,ContentTypeId";
+// Select/expand для fetchFullTask (используется в TasksView и hashSearch). WorkflowItemId выпилен — всегда null
+export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,ContentTypeId";
 export const FULL_TASK_EXPAND = "AssignedTo,Editor";
 
 // Минимальный select для hash-polling (60с) — нужны только поля для диффа статуса, а не весь Title/Body

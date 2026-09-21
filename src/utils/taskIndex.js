@@ -4,9 +4,8 @@
 // Вместо O(n) JSON.stringify + regex на каждом полле —
 // один раз строим Map-индекс за O(n), затем O(1) lookup.
 //
-// Индекс содержит три карты:
-//   - byElementId:  Map<elementId, Task[]>   (может быть несколько задач)
-//   - byWorkflowItemId: Map<workflowItemId, Task>
+// Индекс содержит две карты (WorkflowItemId выпилен):
+//   - byElementId:  Map<elementId, Task[]>   (может быть несколько задач на один ItemId)
 //   - byThu:        Map<thu, Task>
 // Несколько задач для одного elementId — норма: 396-старая и 403-новая.
 
@@ -43,26 +42,20 @@ function extractRelatedElementIds(task) {
 /**
  * Построить индекс по списку задач.
  * @param {Array} tasks
- * @returns {{ byElementId: Map<string, Task[]>, byWorkflowItemId: Map<string, Task>, byThu: Map<string, Task>, all: Task[] }}
+ * @returns {{ byElementId: Map<string, Task[]>, byThu: Map<string, Task>, all: Task[] }}
  */
 export function buildTaskIndex(tasks) {
   const byElementId = new Map();
-  const byWorkflowItemId = new Map();
   const byThu = new Map();
 
   if (!Array.isArray(tasks) || tasks.length === 0) {
-    return { byElementId, byWorkflowItemId, byThu, all: [] };
+    return { byElementId, byThu, all: [] };
   }
 
   for (const t of tasks) {
     if (!t) continue;
-    // 1) WorkflowItemId / RelatedItemId / ItemId (на верхнем уровне)
-    const wf = t.WorkflowItemId ?? t.raw?.WorkflowItemId ?? t.raw?.RelatedItemId ?? t.raw?.ItemId;
-    if (wf != null) {
-      const key = String(wf);
-      if (!byWorkflowItemId.has(key)) byWorkflowItemId.set(key, t);
-    }
-    // 2) RelatedItems JSON
+    // 1) RelatedItems JSON — единственный источник (WorkflowItemId выпилен)
+
     const eids = extractRelatedElementIds(t);
     for (const id of eids) {
       let arr = byElementId.get(id);
@@ -77,7 +70,7 @@ export function buildTaskIndex(tasks) {
     if (thu && !byThu.has(thu)) byThu.set(thu, t);
   }
 
-  return { byElementId, byWorkflowItemId, byThu, all: tasks };
+  return { byElementId, byThu, all: tasks };
 }
 
 function extractThuFromTask(task) {
@@ -113,9 +106,7 @@ export function findInIndex(index, elementId) {
     return null;
   }
 
-  // WorkflowItemId (точный)
-  const byWf = index.byWorkflowItemId.get(idStr);
-  if (byWf) return byWf;
+  // WorkflowItemId выпилен — ищем только по RelatedItems/THU
 
   // RelatedItems.ItemId
   const arr = index.byElementId.get(idStr);

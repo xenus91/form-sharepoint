@@ -225,7 +225,7 @@ export function clearTasksFieldsCache() {
 
 /**
  * Получить InternalName всех полей в Tasks list (для динамического определения
- * какие поля доступны — Recipient, RelatedItems, WorkflowItemId, OffDepKey и т.д.).
+ * какие поля доступны — RelatedItems, OffDepKey и т.д. (Recipient/WorkflowItemId выпилены).
  * @returns {Promise<string[]>}
  */
 export async function getTaskFieldNames() {

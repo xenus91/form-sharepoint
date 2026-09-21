@@ -13,7 +13,7 @@ const SELECT_ADDITIONAL = "AdditionalActionsRequired,AdditionalActions";
 
 /**
  * @typedef {object} BuildTaskListQueryOpts
- * @property {string[]} [taskFieldNames=[]] — доступные поля в списке (OffDepKey, RelatedItems, WorkflowItemId)
+ * @property {string[]} [taskFieldNames=[]] — доступные поля в списке (OffDepKey, RelatedItems)
  * @property {boolean} [useDueDate=true] — выбирать ли поле DueDate
  * @property {boolean} [useAdditionalActions=true] — включать ли AdditionalActions поля
  * @property {string|null} [recipientField=null] — InternalName поля Recipient (Lookup)
@@ -54,7 +54,7 @@ export function buildTaskListQuery(opts = {}) {
     console.warn("[listQuery] filtered EndJob from taskFieldNames");
     taskFieldNames = taskFieldNames.filter((f) => String(f).toLowerCase() !== "endjob");
   }
-  // Extra select fields (OffDepKey, Recipient expand, RelatedItems, WorkflowItemId, AdditionalActions, Result fields)
+  // Extra select fields (OffDepKey, RelatedItems, AdditionalActions, Result fields)
   const extraFields = [];
   // Динамические поля результата — фильтруем удалённые поля (EndJob был удалён)
   if (opts.resultFieldInternalNames && Array.isArray(opts.resultFieldInternalNames)) {
@@ -81,7 +81,6 @@ export function buildTaskListQuery(opts = {}) {
   }
   // RelatedItems — критично для enrich (там лежит ListId/ItemId → оттуда тянем Recipient/THU), поэтому всегда берём на первом рендере
   if (taskFieldNames.length === 0 || taskFieldNames.includes("RelatedItems")) extraFields.push("RelatedItems");
-  if (taskFieldNames.length === 0 || taskFieldNames.includes("WorkflowItemId")) extraFields.push("WorkflowItemId");
   // AdditionalActions поля — включаем если useAdditionalActions и поле есть в списке или ещё не загружен список полей (для первой загрузки)
   // Это безопасно для старых списков без этих полей — при 400 ошибке loadTasks сделает retry без них.
   const hasAdditionalFields = taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions") || taskFieldNames.includes("AdditionalActionsRequired");

@@ -35,7 +35,7 @@ export async function fetchFullTask(id) {
     // Fallback если новые поля AdditionalActions ещё не созданы в списке (старый деплой)
     if (msg.includes("additionalactions")) {
       try {
-        const fallbackSelect = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,WorkflowItemId";
+        const fallbackSelect = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems";
         const { data } = await apiClient.get(
           `${TASKS_LIST_API}/items(${id})?$select=${fallbackSelect}&$expand=${FULL_TASK_EXPAND}`,
           { headers: { Accept: "application/json;odata=verbose" } }

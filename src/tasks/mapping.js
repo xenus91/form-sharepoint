@@ -122,7 +122,6 @@ export function mapRawTask(r, opts = {}) {
     Recipient: recipientVal || "",
     SCNumber: scNumberVal || "",
     RelatedItems: r.RelatedItems || null,
-    WorkflowItemId: r.WorkflowItemId || null,
     ContentTypeId: contentTypeIdVal || null,
     raw: r,
   };
