@@ -55,13 +55,15 @@ export const RESULT_UI_CONFIG = {
   // "отклонено": { label: "Отклонено", color: "error", variant: "contained", confirm: true },
   // "требует уточнения": { label: "Требует уточнения", color: "warning", variant: "outlined" },
 
-  // Fallback для всех остальных — определяется автоматически
+  // Fallback для всех остальных — по требованию всегда зелёная
   "_default": {
-    color: "primary",
-    variant: "outlined",
+    label: undefined,
+    color: "success",
+    variant: "contained",
     requiresLocation: false,
     requiresAdditionalActions: false,
     confirm: false,
+    gradient: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)",
   },
 };
 
