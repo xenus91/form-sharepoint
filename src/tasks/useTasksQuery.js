@@ -6,11 +6,29 @@ import { enrichTasksWithRelated } from "./enrich";
 import { extractTKNumberFromTask, extractTKNumber } from "./formatters";
 import { useEffect } from "react";
 // DBG helper — включи ?dbg=1 или localStorage.setItem('dbg','1') чтобы видеть детальные логи
-const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return true; }catch{ return true; } })();
+const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return false; }catch{ return false; } })();
 const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
 const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollapsed(...a);}catch{} };
 const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch{} };
 
+
+// Attempt tracking to avoid infinite loop for tasks with no Recipient (e.g. 537 Item 24792 has no Recipient)
+const _enrichAttemptedAt = new Map(); // taskId -> timestamp
+const ENRICH_RETRY_MS = 5 * 60_000;
+function shouldSkipEnrich(taskId) {
+  const at = _enrichAttemptedAt.get(taskId);
+  if (at && Date.now() - at < ENRICH_RETRY_MS) return true;
+  return false;
+}
+function markEnrichAttempted(taskIds) {
+  const now = Date.now();
+  for (const id of taskIds) _enrichAttemptedAt.set(id, now);
+  // cleanup
+  if (_enrichAttemptedAt.size > 500) {
+    const first = _enrichAttemptedAt.keys().next().value;
+    _enrichAttemptedAt.delete(first);
+  }
+}
 
 export function useTasksQuery({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames = [], enabled = true }) {
   const queryClient = useQueryClient();
@@ -89,16 +107,31 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
       try {
         // Не обогащаем если данные уже обогащены (все задачи с ТК или без RelatedItems)
         __dlog("[DBG:useTasksQuery] effect check", { sample: data.slice(0,3).map(t=>({Id:t.Id, R:t.Recipient||'∅', SC:t.SCNumber||'∅', THU:t.THU||'∅', hasRel:!!t.RelatedItems, ct:String(t.ContentTypeId||'').slice(-12)})) });
-        const needEnrich = data.some((t) => (!t.Recipient || !t.SCNumber) && t.RelatedItems);
-        if (!needEnrich) return;
-        __dlog("[DBG:useTasksQuery] calling enrichTasksWithRelated", data.length);
-        const { recipientMap, scNumberMap, thuMap } = await enrichTasksWithRelated(data, { concurrency: 5, useBatch: true });
+        // Фильтруем задачи которые недавно пытались обогатить но не получили Recipient (чтобы не спамить, напр. 537)
+        const candidates = data.filter((t) => (!t.Recipient || !t.SCNumber) && t.RelatedItems && !shouldSkipEnrich(t.Id));
+        const needEnrich = candidates.length > 0;
+        if (!needEnrich) { __dlog("[DBG:useTasksQuery] skip enrich — all recently attempted or already enriched"); return; }
+        __dlog("[DBG:useTasksQuery] calling enrichTasksWithRelated", candidates.length, candidates.map(c=>c.Id));
+        const { recipientMap, scNumberMap, thuMap } = await enrichTasksWithRelated(candidates, { concurrency: 5, useBatch: true });
         if (cancelled) return;
         __dlog("[DBG:useTasksQuery] enrich result", { r: recipientMap.size, sc: scNumberMap.size, thu: thuMap.size });
-        if (recipientMap.size === 0 && scNumberMap.size === 0 && thuMap.size === 0) { __dlog("[DBG:useTasksQuery] enrich empty -> skip setQueryData"); return; }
+        // Если enrich не вернул Recipient/SC, помечаем как attempted чтобы не спамить (например 537)
+        if (recipientMap.size === 0 && scNumberMap.size === 0) {
+          if (thuMap.size > 0) {
+            // THU уже был — но всё равно помечаем, чтобы не крутить бесконечно
+            markEnrichAttempted(candidates.map(c=>c.Id));
+          } else {
+            markEnrichAttempted(candidates.map(c=>c.Id));
+          }
+          __dlog("[DBG:useTasksQuery] enrich no Recipient/SC -> mark attempted and skip setQueryData");
+          return;
+        }
+        // Помечаем те что обогатились
+        markEnrichAttempted([...recipientMap.keys(), ...scNumberMap.keys()]);
         // Кэшируем глобально для всех типов задач
         const { setGlobalEnrichCacheByTaskId, setGlobalEnrichCache, getGlobalEnrichCacheByTaskId } = await import("./enrich");
         for (const [id, rec] of recipientMap.entries()) {
+          if (!rec) continue;
           const cur = getGlobalEnrichCacheByTaskId(id) || {};
           setGlobalEnrichCacheByTaskId(id, { ...cur, Recipient: rec });
           // Также кэшируем по RelatedItems для кросс-типового доступа

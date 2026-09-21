@@ -10,7 +10,7 @@ import apiClient from "../api";
 import { extractTKNumberFromTask } from "./formatters";
 import { runWithConcurrency } from "../utils/concurrency";
 // DBG helper — включи ?dbg=1 или localStorage.setItem('dbg','1') чтобы видеть детальные логи
-const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return true; }catch{ return true; } })();
+const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return false; }catch{ return true; } })();
 const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
 const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollapsed(...a);}catch{} };
 const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch{} };
@@ -262,10 +262,17 @@ async function fetchRelatedBatch(listId, itemIds) {
  * @param {{ concurrency?: number, onProgress?: (done:number, total:number) => void }} [opts]
  * @returns {Promise<{ recipientMap: Map<number,string>, scNumberMap: Map<number,string> }>}
  */
+const _enrichAttemptedAt2 = new Map();
+function shouldSkipEnrich2(taskId){ const at=_enrichAttemptedAt2.get(taskId); if(at && Date.now()-at<5*60_000) return true; return false; }
+
 export async function enrichTasksWithRelated(mapped, opts = {}) {
   const { concurrency = 5, useBatch = true } = opts;
   __dlog("[DBG:enrich] enrichTasksWithRelated start", { mappedCount: mapped.length, opts, sampleContentTypes: mapped.slice(0,2).map(m=>({Id:m.Id, ContentTypeId:String(m.ContentTypeId||'').slice(0,40), Title:(m.Title||'').slice(0,30)})) });
-  const tasks = needsEnrichment(mapped);
+  let tasks = needsEnrichment(mapped);
+  // Фильтруем недавно попытка без Recipient (аналогично useTasksQuery, напр. 537)
+  const origLen = tasks.length;
+  tasks = tasks.filter(t=>!shouldSkipEnrich2(t.Id));
+  if (tasks.length !== origLen) __dlog("[DBG:enrich] skip recently attempted", origLen - tasks.length);
   const recipientMap = new Map();
   const scNumberMap = new Map();
   const thuMap = new Map();
@@ -315,6 +322,12 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
         } catch {}
       }
       __dlog("[DBG:enrich] batch result", { recipientMap: Array.from(recipientMap.entries()), scNumberMap: Array.from(scNumberMap.entries()), thuMap: Array.from(thuMap.entries()) });
+      // mark attempted for those with no recipient
+      for (const tsk of tasks) {
+        if (!recipientMap.has(tsk.Id) && !scNumberMap.has(tsk.Id)) {
+          _enrichAttemptedAt2.set(tsk.Id, Date.now());
+        }
+      }
       return { recipientMap, scNumberMap, thuMap };
     } catch (e) {
       console.warn("[enrich] batch failed, fallback to fan-out", e?.message);
