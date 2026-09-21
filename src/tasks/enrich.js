@@ -1,10 +1,12 @@
 // src/tasks/enrich.js
+/* eslint-disable no-empty */
 // Докачка Recipient/SCNumber для задач с пустыми полями — через RelatedItems -> ProblemsPallet.
 // Fan-out с concurrency-ограничением, неблокирующий (запускается в фоне после основного рендера).
 //
 // Раньше жило inline в loadTasks (~60 строк) — вынесено сюда в рамках Tier 3 (Q11).
 
 import apiClient from "../api";
+// eslint-disable-next-line no-unused-vars
 import { extractTKNumberFromTask } from "./formatters";
 import { runWithConcurrency } from "../utils/concurrency";
 
@@ -97,8 +99,10 @@ async function fetchRecipientForTask(task) {
  * есть RelatedItems, и пока не определили TK-номер.
  */
 export function needsEnrichment(mapped) {
+  // Убрали проверку на "Без ТК" — обогащаем любую задачу без Recipient/SCNumber/THU с RelatedItems
+  // Фикс для #527: ЕО без ТК в Title, но с Recipient в связанном элементе — раньше не попадала в enrich
   return mapped.filter(
-    (m) => (!m.Recipient || !m.SCNumber) && m.RelatedItems && extractTKNumberFromTask(m) === "Без ТК"
+    (m) => (!m.Recipient || !m.SCNumber || !m.THU) && m.RelatedItems
   );
 }
 

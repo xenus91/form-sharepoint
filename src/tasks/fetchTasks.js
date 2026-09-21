@@ -11,9 +11,10 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
   if (!currentUserId) return [];
   let useDueDate = true;
   let useAdditionalActions = true;
-  let useRecipient = !!recipientField || taskFieldNames.length === 0;
-  // если recipientField === null на первом рендере, пробуем дефолт "Recipient" (см. listQuery)
-  let effectiveRecipientField = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
+  let useRecipient = !!recipientField;
+  // Recipient в Tasks может отсутствовать (как сейчас - поле удалено). Не пробуем дефолт "Recipient" на первом рендере,
+  // чтобы не падать с 400 "Recipient не существует". Данные Recipient теперь берём только из связанного элемента через enrich.
+  let effectiveRecipientField = recipientField || null;
   const buildUrl = () =>
     buildTaskListQuery({
       taskFieldNames,

@@ -1179,7 +1179,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [userOfficeDept, setUserOfficeDept] = useState({ office: "", department: "" });
   const [distribution, setDistribution] = useState(null); // DcEmail item
   const [taskFieldNames, setTaskFieldNames] = useState([]);
-  const [recipientField, setRecipientField] = useState("Recipient");
+  const [recipientField, setRecipientField] = useState(null);
   const [scNumberField, setScNumberField] = useState(null);
   const [groupingEnabled, setGroupingEnabled] = useState(false);
   const [choices, setChoices] = useState([]);
@@ -1316,7 +1316,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     // Один запрос вместо 3 параллельных на один и тот же /fields (критично для трафика)
     getTasksListFieldsOverview().then(({ fieldNames, recipientField: rf, scNumberField: scf }) => {
       setTaskFieldNames(fieldNames);
+      // rf может быть null если поле Recipient удалено — не ставим дефолт "Recipient", данные берём из связанного элемента
       if (rf) setRecipientField(rf);
+      else setRecipientField(null);
       if (scf) setScNumberField(scf);
     }).catch(() => {});
   }, [propUserProfile, propCurrentUserId]);

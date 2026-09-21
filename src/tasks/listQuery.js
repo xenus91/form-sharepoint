@@ -65,11 +65,11 @@ export function buildTaskListQuery(opts = {}) {
     }
   }
   if (taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
-  // По умолчанию считаем, что поле Recipient существует (критично для экономии трафика — большинство задач получают Recipient сразу, без докачки)
-  // Если recipientField === null и список полей ещё не загружен (первый рендер), используем дефолт "Recipient"
-  // useRecipient === false явно отключает Recipient (после 400 ошибки "Recipient не существует")
-  const shouldUseRecipient = useRecipient !== null ? useRecipient : (recipientField ? true : taskFieldNames.length === 0);
-  const effectiveRecipientFieldRaw = shouldUseRecipient ? (recipientField || (taskFieldNames.length === 0 ? "Recipient" : null)) : null;
+  // Recipient в Tasks отсутствует — не используем дефолт "Recipient" на первом рендере.
+  // Раньше делали fallback "Recipient" при taskFieldNames.length===0, что давало 400 "Recipient не существует" и кучу ретраев.
+  // Теперь Recipient берём только если он явно определён (recipientField !== null) или useRecipient === true.
+  const shouldUseRecipient = useRecipient !== null ? useRecipient : !!recipientField;
+  const effectiveRecipientFieldRaw = shouldUseRecipient ? (recipientField || null) : null;
   const effectiveRecipientField = effectiveRecipientFieldRaw && effectiveRecipientFieldRaw.toLowerCase() === "endjob" ? null : effectiveRecipientFieldRaw;
   if (effectiveRecipientField && shouldUseRecipient) {
     if (effectiveRecipientField.toLowerCase() === "endjob" || effectiveRecipientField.toLowerCase() === "recipient" && !shouldUseRecipient) {
@@ -106,7 +106,7 @@ export function buildTaskListQuery(opts = {}) {
 
   // Expand
   const expands = ["AssignedTo", "Editor"];
-  const effectiveExpandRecipient = shouldUseRecipient ? (recipientField || (taskFieldNames.length === 0 ? "Recipient" : null)) : null;
+  const effectiveExpandRecipient = shouldUseRecipient ? (recipientField || null) : null;
   if (effectiveExpandRecipient && shouldUseRecipient) expands.push(effectiveExpandRecipient);
 
   // Filter по AssignedToId — серверный фильтр по группе + текущему юзеру (OR), чтобы персональные задачи не терялись.
