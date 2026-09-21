@@ -1,7 +1,7 @@
 // src/services/taskResultDefinitions.js
 // Phase 17 — строго по плану §14: TaskResultDefinitions
 // Поля списка (план):
-// Title (Text), ContentTypeId (Text), ResultValue (Text), ShowAdditionalActions (Yes/No), AdditionalActionsRequired (Yes/No), SortOrder (Number), Enabled (Yes/No)
+// Title (Text), CType (Text) — was ContentTypeId/ContentTypeId0 (system collision), ResultValue (Text), ShowAdditionalActions (Yes/No), AdditionalActionsRequired (Yes/No), SortOrder (Number), Enabled (Yes/No)
 // НЕ заменяет реальное Result field (FieldLinks), описывает UI поведение для уже существующих Result values.
 // Graceful 404 → fallback к hardcoded resultConfig.js. Кэш 30м.
 
@@ -59,16 +59,45 @@ function parseBool(v, fallback=false){
   return fallback;
 }
 
+function getCtypeFromItem(item){
+  const v = item.CType ?? item.ContentTypeId0 ?? item.ContentTypeId;
+  return String(v||"").trim();
+}
+async function fetchWithCtypeFallback(apiClient, forceRefresh){
+  const selCType = `Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled`;
+  const selFallback = `Id,Title,ContentTypeId0,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled`;
+  const selLegacy = `Id,Title,ContentTypeId,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled`;
+  const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
+  const tries = [
+    `${base}?$select=${selCType}&$top=200&$orderby=SortOrder asc`,
+    `${base}?$select=${selFallback}&$top=200&$orderby=SortOrder asc`,
+    `${base}?$select=${selLegacy}&$top=200&$orderby=SortOrder asc`,
+  ];
+  let lastErr=null;
+  for(const url of tries){
+    try{
+      const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+      return {data, url};
+    }catch(e){
+      const status=e?.response?.status;
+      const msg=String(e?.message||"")+String(e?.response?.data?.error?.message?.value||"");
+      const isMissingField = status===400 && /CType|ContentTypeId0|ContentTypeId|does not exist|не существует/i.test(msg);
+      if(isMissingField){ lastErr=e; continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 export async function fetchTaskResultDefinitions(apiClient, opts={}){
   const {forceRefresh=false}=opts;
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
 
-  // План §14: Title, ContentTypeId, ResultValue, ShowAdditionalActions, AdditionalActionsRequired, SortOrder, Enabled
+  // План §14: Title, CType (was ContentTypeId), ResultValue, ShowAdditionalActions, AdditionalActionsRequired, SortOrder, Enabled
   // Для совместимости также читаем legacy поля (Label/Color/Variant/RequiresLocation/RequiresConfirm/Gradient) — игнорируем, но не падаем если они есть
-  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ContentTypeId,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
   try{
-    const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+    const {data}= (await fetchWithCtypeFallback(apiClient, forceRefresh)).data;
     const results=data?.d?.results||[];
     const global=new Map();
     const byCt=new Map();
@@ -80,7 +109,7 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
       const resultValue=String(item.ResultValue||title||"").trim();
       if(!resultValue) continue;
       const key=norm(resultValue);
-      const ctId=String(item.ContentTypeId||"").trim();
+      const ctId=getCtypeFromItem(item);
       // План §14: ShowAdditionalActions → enabled для AdditionalActions контрола, AdditionalActionsRequired → required
       // Legacy: RequiresLocation/RequiresAdditionalActions/RequiresConfirm/Color/Variant/Gradient — маппим только если план-поля пустые
       let show = parseBool(item.ShowAdditionalActions, null);

@@ -1,7 +1,7 @@
 // src/services/taskTypeConfiguration.js
 // Phase 17 — строго по плану §17: TaskTypeConfiguration
 // Поля списка (план):
-// Title (Text), ContentTypeId (Text full 0x0108...), AdditionalActionsFieldInternalName (Text), AdditionalActionsRequired (Yes/No или Да/Нет), Enabled (Yes/No)
+// Title (Text), CType (Text full 0x0108...) — was ContentTypeId/ContentTypeId0 (system collision), AdditionalActionsFieldInternalName (Text), AdditionalActionsRequired (Yes/No или Да/Нет), Enabled (Yes/No)
 // Graceful 404 → fallback к sharepoint-metadata (одно поле AdditionalActions). Кэш 30м.
 
 import { TASKS_LIST_API } from "../tasks/config";
@@ -49,20 +49,49 @@ function parseBool(v, fallback=null){
   return fallback;
 }
 
+function getCtypeFromItem(item){
+  const v = item.CType ?? item.ContentTypeId0 ?? item.ContentTypeId;
+  return String(v||"").trim();
+}
+async function fetchWithCtypeFallback(apiClient, forceRefresh){
+  const selCType = `Id,Title,CType,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled`;
+  const selFallback = `Id,Title,ContentTypeId0,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled`;
+  const selLegacy = `Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled`;
+  const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
+  const tries = [
+    `${base}?$select=${selCType}&$top=100`,
+    `${base}?$select=${selFallback}&$top=100`,
+    `${base}?$select=${selLegacy}&$top=100`,
+  ];
+  let lastErr=null;
+  for(const url of tries){
+    try{
+      const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+      return {data, url};
+    }catch(e){
+      const status=e?.response?.status;
+      const msg=String(e?.message||"")+String(e?.response?.data?.error?.message?.value||"");
+      const isMissingField = status===400 && /CType|ContentTypeId0|ContentTypeId|does not exist|не существует/i.test(msg);
+      if(isMissingField){ lastErr=e; continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 export async function fetchTaskTypeConfigurationMap(apiClient, opts={}){
   const {forceRefresh=false}=opts;
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
 
-  // План §17: Title, ContentTypeId, AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled
+  // План §17: Title, CType (was ContentTypeId), AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled
   // Для совместимости также читаем legacy Required и ResultFieldInternalName (не план, но был в 870062a)
-  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled&$top=100`;
   try{
-    const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+    const {data}= (await fetchWithCtypeFallback(apiClient, forceRefresh)).data;
     const results = data?.d?.results || [];
     const map=new Map();
     for(const item of results){
-      const ctId=String(item.ContentTypeId||"").trim();
+      const ctId=getCtypeFromItem(item);
       if(!ctId) continue;
       // Enabled — если пусто считаем true (совместимость)
       const enabled = parseBool(item.Enabled, true);

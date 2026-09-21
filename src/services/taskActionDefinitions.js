@@ -1,7 +1,7 @@
 // src/services/taskActionDefinitions.js
 // Phase 17 — строго по плану §21: TaskActionDefinitions
 // Поля списка (план):
-// Title (Text), ActionId (Text), ContentTypeId (Text), SortOrder (Number), Enabled (Yes/No)
+// Title (Text), ActionId (Text), CType (Text) — was ContentTypeId/ContentTypeId0 (system collision, see fix 2026-09-23), SortOrder (Number), Enabled (Yes/No)
 // НЕ заменяет Choice metadata автоматически (план §21: если field metadata уже описывает действия — сначала использовать metadata)
 // Использовать только если реально нужен внешний словарь. Graceful 404 → fallback к полю AdditionalActions. Кэш 30м.
 
@@ -48,14 +48,45 @@ function parseBool(v, fallback=true){
   return fallback;
 }
 
+function getCtypeFromItem(item){
+  // Canonical CType (user renamed from ContentTypeId → ContentTypeId0 → CType to avoid collision with system ContentTypeId)
+  // Fallback ContentTypeId0 (auto-renamed SP column) and legacy ContentTypeId for pre-migration items
+  const v = item.CType ?? item.ContentTypeId0 ?? item.ContentTypeId;
+  return String(v||"").trim();
+}
+async function fetchWithCtypeFallback(apiClient, forceRefresh){
+  const selCType = `Id,Title,ActionId,CType,SortOrder,Enabled`;
+  const selFallback = `Id,Title,ActionId,ContentTypeId0,SortOrder,Enabled`;
+  const selLegacy = `Id,Title,ActionId,ContentTypeId,SortOrder,Enabled`;
+  const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
+  const tries = [
+    `${base}?$select=${selCType}&$top=200&$orderby=SortOrder asc`,
+    `${base}?$select=${selFallback}&$top=200&$orderby=SortOrder asc`,
+    `${base}?$select=${selLegacy}&$top=200&$orderby=SortOrder asc`,
+  ];
+  let lastErr=null;
+  for(const url of tries){
+    try{
+      const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+      return {data, url};
+    }catch(e){
+      const status=e?.response?.status;
+      const msg=String(e?.message||"")+String(e?.response?.data?.error?.message?.value||"");
+      const isMissingField = status===400 && /CType|ContentTypeId0|ContentTypeId|does not exist|не существует/i.test(msg);
+      if(isMissingField){ lastErr=e; continue; }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 export async function fetchTaskActionDefinitions(apiClient, opts={}){
   const {forceRefresh=false}=opts;
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
-  // План §21: Title, ActionId, ContentTypeId, SortOrder, Enabled + для совместимости legacy ActionValue/Label/Title
-  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ActionId,ContentTypeId,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
+  // План §21: Title, ActionId, CType (was ContentTypeId), SortOrder, Enabled + для совместимости legacy ActionValue/Label/Title/ContentTypeId0
   try{
-    const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+    const {data}= (await fetchWithCtypeFallback(apiClient, forceRefresh)).data;
     const results=data?.d?.results||[];
     const global=[]; const byCt=new Map(); const raw=[];
     for(const item of results){
@@ -65,7 +96,7 @@ export async function fetchTaskActionDefinitions(apiClient, opts={}){
       // План: ActionId — приоритет, fallback к legacy ActionValue/Title
       const actionId = String(item.ActionId||item.ActionValue||title||"").trim();
       if(!actionId) continue;
-      const ctId=String(item.ContentTypeId||"").trim();
+      const ctId=getCtypeFromItem(item);
       // Label legacy — если есть, используем как label иначе Title
       const label = item.Label ? String(item.Label).trim() : title;
       const entry={ value: actionId, label: label||actionId, sortOrder: item.SortOrder!=null? Number(item.SortOrder):999, id:item.Id, contentTypeId: ctId||null, title, actionId };

@@ -1,17 +1,17 @@
-# Decision: Без ребилда — AdditionalActions и 2 SP списка (строго по плану §14, §17, §21) — ContentTypeId полный StringValue
+# Decision: Без ребилда — AdditionalActions и 2 SP списка (строго по плану §14, §17, §21) — CType (Tasks ContentTypeId StringValue) — ContentTypeId занято
 
-> Дата: 2026-09-22 — исправление левых полей + 2026-09-23 отключён TaskTypeConfiguration до аудита (нет 404)
+> Дата: 2026-09-22 — исправление левых полей + 2026-09-23 отключён TaskTypeConfiguration до аудита + **2026-09-23 fix CType (was ContentTypeId)** — системное поле `ContentTypeId` занято, кастомное автопереименовалось в `ContentTypeId0`, теперь канонически `CType`
 > Статус: **IMPLEMENTED — §14 TaskResultDefinitions + §21 TaskActionDefinitions активны (graceful 404), §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита `docs/audit/content-types.md`**
 > Связано: `src/services/taskResultDefinitions.js` (§14), `src/services/taskActionDefinitions.js` (§21), `src/services/taskTypeConfiguration.js` (§17 — закомментирован), `src/features/tasks/hooks/useTaskConfiguration.js`, `src/features/tasks/components/TaskCard.jsx`, `src/services/additionalActionsResolver.js` (§18)
-> Принцип: *Preserve business architecture* — SPD Workflow не трогаем, UI конфигурируется списками, graceful 404 → fallback. ContentTypeId — полный `StringValue` (`0x01080100...`), не Name.
+> Принцип: *Preserve business architecture* — SPD Workflow не трогаем, UI конфигурируется списками, graceful 404 → fallback. `Tasks.ContentTypeId` (системное) — полный `StringValue` (`0x01080100...`), а в 3 кастомных списках колонка называется `CType` (single line text) и хранит тот же `StringValue` Tasks CT. Исторически в плане она называлась `ContentTypeId` — на SP это занято → авто-`ContentTypeId0`. Код читает `CType ?? ContentTypeId0 ?? ContentTypeId` (fallback). При создании новых списков называй колонку `CType`.
 
 ## План выдержка (точные поля)
 
 ### §14 TaskResultDefinitions
-Поля списка (план):
+Поля списка (факт, фикс 2026-09-23):
 ```
 Title
-ContentTypeId
+CType              // was ContentTypeId/ContentTypeId0 — хранит Tasks ContentTypeId StringValue, ""=global
 ResultValue
 ShowAdditionalActions
 AdditionalActionsRequired
@@ -21,8 +21,8 @@ Enabled
 НЕ заменяет реальное Result field (FieldLinks). Описывает поведение UI для уже существующих Result values.
 Пример из плана:
 ```
-ContentTypeId | ResultValue | ShowAdditionalActions | Required
-0x0108A...    | Найден      | No                   | No
+CType      | ResultValue | ShowAdditionalActions | Required
+0x0108A... | Найден      | No                   | No
 0x0108A...    | Не найден   | Yes                  | Yes
 0x0108A...    | Поврежден   | Yes                  | No
 ```
@@ -30,15 +30,15 @@ ContentTypeId | ResultValue | ShowAdditionalActions | Required
 ### §17 TaskTypeConfiguration
 ```
 Title
-ContentTypeId
+CType              // was ContentTypeId — хранит Tasks ContentTypeId StringValue
 AdditionalActionsFieldInternalName
 AdditionalActionsRequired
 Enabled
 ```
 Пример:
 ```
-ContentTypeId | AdditionalActionsFieldInternalName | Required
-0x010801...   | SearchAdditionalActions            | Yes
+CType      | AdditionalActionsFieldInternalName | Required
+0x010801...| SearchAdditionalActions            | Yes
 0x010802...   | PickingAdditionalActions           | Yes
 ```
 
@@ -46,7 +46,7 @@ ContentTypeId | AdditionalActionsFieldInternalName | Required
 ```
 Title              // display label (ru)  — "Отправить ЕО в OTM"
 ActionId           // stable English key — "send_eo_to_otm" (snake_case, без пробелов/кириллицы)
-ContentTypeId      // ""=global или полный StringValue "0x01080100..."
+CType              // was ContentTypeId/ContentTypeId0 — ""=global или полный Tasks ContentTypeId StringValue "0x01080100..."
 SortOrder          // 10,20,30
 Enabled            // Yes/No
 ```
@@ -62,18 +62,19 @@ Enabled            // Yes/No
 - `TaskActionDefinitions`: `ActionValue, Label` — заменено на `ActionId` (план), `Label` оставлен как legacy fallback.
 - `TaskTypeConfiguration`: `ResultFieldInternalName, Required` (без `AdditionalActionsRequired/Enabled`) — заменено на план-поля, legacy `Required`/`ResultFieldInternalName` читаются для совместимости.
 
-**После:**
-- Все 3 сервиса читают **только план-поля** (`Title/ContentTypeId/ResultValue/ShowAdditionalActions/AdditionalActionsRequired/SortOrder/Enabled` и т.д.), legacy поля читаются дополнительно и игнорируются если план-поля заданы.
+**После (2026-09-23):**
+- Все 3 сервиса читают **только план-поля** (`Title/CType/ResultValue/ShowAdditionalActions/AdditionalActionsRequired/SortOrder/Enabled` и т.д.), legacy `ContentTypeId`/`ContentTypeId0` читаются fallback `CType ?? ContentTypeId0 ?? ContentTypeId` + `$select` пробует `CType` → `ContentTypeId0` → `ContentTypeId` (чтобы не 400 на старых tenant). При создании колонки называй `CType` (InternalName `CType`), а не `ContentTypeId` (занято системой → авто `ContentTypeId0`).
+- `GET /lists/getbytitle('TaskActionDefinitions')?$select=Id,Title,ActionId,ContentTypeId,...` 400 `Поле не существует` — исправлено 59ab12b (убраны несуществующие `ActionValue,Label` из select). Теперь `CType` фикс.
 
 ---
 
-## Полноценное определение: как заполнять ContentTypeId (ключ — полный StringValue)
+## Полноценное определение: как заполнять CType (ключ — Tasks ContentTypeId StringValue, фикс 2026-09-23)
 
 **Где взять полный StringValue:**
 1. На `https://portal.lenta.com/sites/obrazceo` открой любую Task → F12 Console → вставь скрипт из `docs/audit/content-types.md` шаг 1 (CT) → `window._cts.map(c=>({Name:c.Name, StringValue:c.Id.StringValue||c.StringId}))`.
 2. Скопируй `StringValue` вида `0x01080100A94D5A38B1E04A...00112233` — это ключ, не `Name` (`Поиск ЕО`) и не `0x0108`.
 
-**Правила ContentTypeId во всех 3 списках:**
+**Правила CType во всех 3 списках (значение — Tasks ContentTypeId StringValue):**
 - `пусто` = **глобально для всех CT** (случай A §15, один набор). Используй пока аудит §16 не показал разные наборы.
 - `полный StringValue` = **только для этого CT** (exact match). Пример: `0x01080100A94D...` → только `Task_SearchPallet`.
 - **Дочерний CT наследует:** `0x01080100AA` (родитель) и `0x01080100AA001122` (child). Резолвер берёт **longest prefix**: `ctId.startsWith(key)` → самый длинный ключ побеждает. Поэтому строка с `0x01080100AA` покроет child, а с `0x01080100AA001122` — только child.
@@ -81,14 +82,14 @@ Enabled            // Yes/No
 - `SortOrder` — 10,20,30 (порядок в UI), `Enabled=Да` иначе игнор.
 
 **Когда что заполнять (сейчас — случай A, один AdditionalActions):**
-- **Аудит §16 не пройден / наборы одинаковы** → `TaskResultDefinitions` и `TaskActionDefinitions` — глобальные строки (`ContentTypeId` пусто), `TaskTypeConfiguration` **не создавать** (отключён до аудита, fallback к `sharepoint-metadata` — один `AdditionalActions`). `404` в Network — норма, теперь скрыт.
-- **После аудита случай B** (разные наборы) → заведи отдельные поля `SearchAdditionalActions` (`Choice Multi+FillIn`) и строки с `ContentTypeId=полный StringValue` для каждого CT + строку в `TaskTypeConfiguration`:
+- **Аудит §16 не пройден / наборы одинаковы** → `TaskResultDefinitions` и `TaskActionDefinitions` — глобальные строки (`CType` пусто), `TaskTypeConfiguration` **не создавать** (отключён до аудита, fallback к `sharepoint-metadata` — один `AdditionalActions`). `404` в Network — норма, теперь скрыт.
+- **После аудита случай B** (разные наборы) → заведи отдельные поля `SearchAdditionalActions` (`Choice Multi+FillIn`) и строки с `CType=полный StringValue` для каждого CT + строку в `TaskTypeConfiguration`:
 
 ```
 TaskTypeConfiguration:
-Title=Поиск ЕО | ContentTypeId=0x01080100A94D... | AdditionalActionsFieldInternalName=SearchAdditionalActions | AdditionalActionsRequired=Да | Enabled=Да
+Title=Поиск ЕО | CType=0x01080100A94D... | AdditionalActionsFieldInternalName=SearchAdditionalActions | AdditionalActionsRequired=Да | Enabled=Да
 TaskTypeConfiguration:
-Title=Сборка      | ContentTypeId=0x01080100BB... | AdditionalActionsFieldInternalName=PickingAdditionalActions | AdditionalActionsRequired=Да | Enabled=Да
+Title=Сборка      | CType=0x01080100BB... | AdditionalActionsFieldInternalName=PickingAdditionalActions | AdditionalActionsRequired=Да | Enabled=Да
 ```
 
 После заполнения — `sessionStorage` 30м или `sessionStorage.clear()` + `location.reload()`.
@@ -103,7 +104,7 @@ Title=Сборка      | ContentTypeId=0x01080100BB... | AdditionalActionsField
 
 `Site Contents → TaskActionDefinitions → New` (3 строки, глобально):
 
-| Title | ActionId | ContentTypeId | SortOrder | Enabled |
+| Title | ActionId | CType | SortOrder | Enabled |
 |---|---|---|---|---|
 | Отправить ЕО в OTM | `send_eo_to_otm` | *(пусто)* | 10 | Да |
 | Переместить в корректную линию | `move_to_correct_line` | *(пусто)* | 20 | Да |
@@ -111,7 +112,7 @@ Title=Сборка      | ContentTypeId=0x01080100BB... | AdditionalActionsField
 
 Хочет для CT `Сборка` (`0x01080100BB...`) особый набор — добавляет:
 
-| Title | ActionId | ContentTypeId | SortOrder |
+| Title | ActionId | CType | SortOrder |
 |---|---|---|---|
 | Проверить документы | `check_documents` | `0x01080100BB...` | 10 |
 
@@ -121,14 +122,14 @@ Title=Сборка      | ContentTypeId=0x01080100BB... | AdditionalActionsField
 
 `TaskResultDefinitions` → глобальные строки (ContentTypeId пусто):
 
-| Title | ContentTypeId | ResultValue | ShowAdditionalActions | AdditionalActionsRequired | SortOrder | Enabled |
+| Title | CType | ResultValue | ShowAdditionalActions | AdditionalActionsRequired | SortOrder | Enabled |
 |---|---|---|---|---|---|---|
 | Найдена | "" | `Найдена` | Да | Да | 10 | Да |
 | Найден | "" | `Найден` | Да | Да | 11 | Да |
 | Не найдена | "" | `Не найдена` | Нет | Нет | 20 | Да |
 | Не найден | "" | `Не найден` | Нет | Нет | 21 | Да |
 
-Хочет для CT `Поиск ЕО` (`0x01080100AA...`) чтобы `Поврежден` тоже требовал действия — добавляет строку `ContentTypeId=0x01080100AA... | ResultValue=Поврежден | Show=Да | Required=Нет`.
+Хочет для CT `Поиск ЕО` (`0x01080100AA...`) чтобы `Поврежден` тоже требовал действия — добавляет строку `CType=0x01080100AA... | ResultValue=Поврежден | Show=Да | Required=Нет`.
 
 ### Шаг 3 — Пользователь открывает Task `Сборка` (CT `0x01080100BB...`, Status `Назначена`)
 
@@ -175,7 +176,7 @@ payload = {
 
 Другая Task `Task_SearchPallet` (CT `0x01080100AA...`) с тем же `Result=Не найдена` → `resolveTaskResultDefinition("Не найдена", "0x01080100AA...", defs)` → `Show=Нет` → `AdditionalActionsField` скрыт, `payload AdditionalActions=[]`, `Required=Нет`.
 
-**Итог:** новый `ActionId`/`ResultValue` → строка в SP списке → 30м (или `sessionStorage.clear()`) → UI без `npm run build`. `ContentTypeId` — полный `StringValue` (audit) пусто=global, exact→prefix, `Enabled`/`SortOrder` управляют видимостью/порядком.
+**Итог:** новый `ActionId`/`ResultValue` → строка в SP списке (`CType` хранит Tasks `ContentTypeId` StringValue) → 30м (или `sessionStorage.clear()`) → UI без `npm run build`. `CType` — полный `StringValue` (audit) пусто=global, exact→prefix, `Enabled`/`SortOrder` управляют видимостью/порядком. Код толерантен к старым `ContentTypeId0`/`ContentTypeId` (fallback).
 
 ---
 
@@ -184,7 +185,8 @@ payload = {
 ### TaskResultDefinitions (§14)
 `src/services/taskResultDefinitions.js`
 ```js
-GET /_api/web/lists/getbytitle('TaskResultDefinitions')/items?$select=Id,Title,ContentTypeId,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc
+GET /_api/web/lists/getbytitle('TaskResultDefinitions')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc
+// fallback: пробует ContentTypeId0 затем ContentTypeId если CType 400, читает CType ?? ContentTypeId0 ?? ContentTypeId
 → {global: Map<norm, cfg>, byCt: Map<ctId, Map<norm,cfg>>} // TTL 30м
 ```
 `resolveTaskResultDefinition(resultValue, contentTypeId, defs)` → `{showAdditionalActions, additionalActionsRequired}` (per-CT exact→prefix→global→substring).
@@ -201,7 +203,8 @@ foundChoice = choices.find(ch => {
 
 ### TaskActionDefinitions (§21)
 ```js
-GET /_api/web/lists/getbytitle('TaskActionDefinitions')/items?$select=Id,Title,ActionId,ContentTypeId,SortOrder,Enabled
+GET /_api/web/lists/getbytitle('TaskActionDefinitions')/items?$select=Id,Title,ActionId,CType,SortOrder,Enabled
+// fallback: ContentTypeId0/ContentTypeId
 → {global: Array, byCt: Map}
 ```
 `resolveActionChoices(ctId, defs, fallbackFieldChoices)` — если `defs==null` (404) → сразу `fallbackFieldChoices` (план: "если metadata достаточно — использовать metadata"). Иначе `per-CT → prefix → global → fallback`.
@@ -217,12 +220,13 @@ merged = defChoices.length ? [...defChoices, ...uniqueBaseFieldChoices] : baseFi
 
 ### TaskTypeConfiguration (§17)
 ```js
-GET /_api/web/lists/getbytitle('TaskTypeConfiguration')/items?$select=Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled&$top=100
+GET /_api/web/lists/getbytitle('TaskTypeConfiguration')/items?$select=Id,Title,CType,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled&$top=100
+// fallback: ContentTypeId0/ContentTypeId
 → Map<ctId, {additionalActionsFieldInternalName, additionalActionsRequired, enabled}>
 ```
 `additionalActionsResolver.js` (§18):
 ```
-Task → ContentTypeId → TaskTypeConfiguration → fieldInternalName → field metadata → {enabled, required, choices}
+Task.ContentTypeId (системное) → CType (кастомных списков) → TaskTypeConfiguration → fieldInternalName → field metadata → {enabled, required, choices}
 ```
 Если `Enabled=false` → `enabled:false` (контрол отсутствует). Если `AdditionalActionsRequired` задан → `required` из него, иначе из `task.AdditionalActionsRequired`.
 
@@ -236,26 +240,26 @@ Task → ContentTypeId → TaskTypeConfiguration → fieldInternalName → field
 
 **TaskResultDefinitions** → Site Contents → New List → Custom List → Columns:
 - `Title` (Single line, required) — пример `Найден`
-- `ContentTypeId` (Single line) — `0x01080100...` или пусто=глобально
+- `CType` (Single line, InternalName `CType`) — `0x01080100...` или пусто=глобально (в UI назвать `CType`; **не** `ContentTypeId` — занято → авто `ContentTypeId0`; код поддерживает старое `ContentTypeId0` fallback)
 - `ResultValue` (Single line) — `Найден` (если пусто → Title)
 - `ShowAdditionalActions` (Yes/No) — `No` для `Найден`, `Yes` для `Не найден`
 - `AdditionalActionsRequired` (Yes/No) — `No`/`Yes`
 - `SortOrder` (Number) — `10,20`
 - `Enabled` (Yes/No) — `Yes`
 
-**TaskActionDefinitions** → Columns `Title (ru label), ActionId (en key snake_case), ContentTypeId, SortOrder, Enabled` (ActionId `send_eo_to_otm`, `move_to_correct_line`, `repack`; если пусто → `Title`).
+**TaskActionDefinitions** → Columns `Title (ru label), ActionId (en key snake_case), CType, SortOrder, Enabled` (InternalName `CType`; старое `ContentTypeId0` тоже читается) (ActionId `send_eo_to_otm`, `move_to_correct_line`, `repack`; если пусто → `Title`).
 
-**TaskTypeConfiguration** → Columns `Title, ContentTypeId, AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled` (последнее `Yes/No`) — **отключён до аудита §16**, создавать только для случая B.
+**TaskTypeConfiguration** → Columns `Title, CType, AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled` (InternalName `CType`) (последнее `Yes/No`) — **отключён до аудита §16**, создавать только для случая B.
 
 Пример данных (план + текущий флоу — ActionId английский):
 ```
-TaskResultDefinitions: 0x0108 | Найдена | Show=Yes Required=Yes  (AdditionalActionsField виден, Required)
-TaskResultDefinitions: 0x0108 | Не найдена | Show=No Required=No
-TaskActionDefinitions: Title="Отправить ЕО в OTM" | ActionId=send_eo_to_otm | ContentTypeId="" (global) | SortOrder=10
-TaskActionDefinitions: Title="Переместить в корректную линию" | ActionId=move_to_correct_line | ContentTypeId="" | SortOrder=20
-TaskActionDefinitions: Title="Перебрать" | ActionId=repack | ContentTypeId="" | SortOrder=30
-TaskActionDefinitions (per-CT пример): Title="Проверить документы" | ActionId=check_documents | ContentTypeId=0x01080100BB... | SortOrder=10
-TaskTypeConfiguration (случай B, после аудита): ContentTypeId=0x01080100AA... | SearchAdditionalActions | AdditionalActionsRequired=Да
+TaskResultDefinitions: CType="" | Найдена | Show=Yes Required=Yes  (AdditionalActionsField виден, Required)
+TaskResultDefinitions: CType="" | Не найдена | Show=No Required=No
+TaskActionDefinitions: Title="Отправить ЕО в OTM" | ActionId=send_eo_to_otm | CType="" (global) | SortOrder=10
+TaskActionDefinitions: Title="Переместить в корректную линию" | ActionId=move_to_correct_line | CType="" | SortOrder=20
+TaskActionDefinitions: Title="Перебрать" | ActionId=repack | CType="" | SortOrder=30
+TaskActionDefinitions (per-CT пример): Title="Проверить документы" | ActionId=check_documents | CType=0x01080100BB... | SortOrder=10
+TaskTypeConfiguration (случай B, после аудита): CType=0x01080100AA... | SearchAdditionalActions | AdditionalActionsRequired=Да
 ```
 
 После заполнения — `sessionStorage` 30м или `invalidateQueries(['task-configuration'])` без ребилда.
@@ -264,14 +268,14 @@ TaskTypeConfiguration (случай B, после аудита): ContentTypeId=0
 
 ## Функционал каждой колонки — для чего используется
 
-> Все 3 списка — `Custom List`, читаются `GET /web/lists/getbytitle('...')/items` (30м `sessionStorage`), `Enabled=Нет` — строка игнорируется, `SortOrder` — порядок, `ContentTypeId` — `""`=global или полный `StringValue` `0x01080100...` (prefix `longest` для дочерних).
+> Все 3 списка — `Custom List`, читаются `GET /web/lists/getbytitle('...')/items` (30м `sessionStorage`), `Enabled=Нет` — строка игнорируется, `SortOrder` — порядок, `CType` (хранит Tasks `ContentTypeId` StringValue) — `""`=global или полный `StringValue` `0x01080100...` (prefix `longest` для дочерних). Код читает `CType ?? ContentTypeId0 ?? ContentTypeId`.
 
 ### TaskResultDefinitions (§14) — поведение UI для выбранного Result
 
 | Колонка (InternalName) | Тип SP | Обяз. | Значения | Для чего, где используется, что если пусто |
 |---|---|---|---|---|
 | `Title` | Single line `Text` | Да | `Найдена`, `Не найдена` | **Display label** для админа (удобочитаемо). Если `ResultValue` пусто — используется как `ResultValue`. В коде `label: Title` (fallback). Пусто → строка игнор (нет `ResultValue`). |
-| `ContentTypeId` | Single line `Text` | Нет | `""` или `0x01080100A94D...` | **Ключ CT.** `""` = для всех CT (случай A). Полный `StringValue` = только для этого CT (exact). Дочерний `0x01080100AA0011` наследует `0x01080100AA` (longest prefix). Используется `resolveTaskResultDefinition(resultValue, ctId, defs)` → `Map<ctId,Map<norm,cfg>>`. Пусто → global. Получить: `window._cts[].Id.StringValue` из аудита. |
+| `CType` | Single line `Text` | Нет | `""` или `0x01080100A94D...` | **Ключ CT (Tasks ContentTypeId).** `""` = для всех CT (случай A). Полный `StringValue` = только для этого CT (exact). Дочерний `0x01080100AA0011` наследует `0x01080100AA` (longest prefix). Используется `resolveTaskResultDefinition(resultValue, ctId, defs)` → `Map<ctId,Map<norm,cfg>>`. Пусто → global. Получить: `window._cts[].Id.StringValue` из аудита. **InternalName `CType` (не `ContentTypeId` — занято системой → авто `ContentTypeId0`, fallback поддерживается).** |
 | `ResultValue` | Single line `Text` | Да* | `Найдена`, `Не найдена`, `Поврежден` | **Ключ Result**. Нормализуется `lowerCase` (`norm`). Совпадает с `Choices` из `Result` поля (`FieldLinks`). Если пусто → берётся `Title`. Используется для матчинга выбранного `Result` (кнопка). |
 | `ShowAdditionalActions` | Yes/No (`Boolean` или `Да/Нет`) | Нет | `Да`/`Нет` | **Показывать ли `AdditionalActionsField` при этом Result.** `true` → в `TaskCard` `foundInputMode` показывает `Location1` + `AdditionalActionsField` (план §14 пример: `Найден|No`, `Не найден|Yes` — но у нас `Найдена|Yes`). Используется `getResultDef(result).showAdditionalActions`. Пусто/ legacy → `false`. `false` → контрол отсутствует. |
 | `AdditionalActionsRequired` | Yes/No | Нет | `Да`/`Нет` | **Обязателен ли AA если показан.** `true` → `required=true`, валидация `length>0` иначе ошибка, `payload AdditionalActionsRequired="Да"`. `false` → можно `[]`. Используется только если `Show=Да`. Пусто → `false`. |
@@ -286,7 +290,7 @@ TaskTypeConfiguration (случай B, после аудита): ContentTypeId=0
 |---|---|---|---|---|
 | `Title` | Single line `Text` | Да | `Отправить ЕО в OTM` | **Русский label** для `Autocomplete` (`label`). Показывается пользователю. Пусто → игнор. |
 | `ActionId` | Single line `Text` | Да* | `send_eo_to_otm`, `move_to_correct_line`, `repack` | **Стабильный английский ключ** `snake_case` без пробелов/кириллицы, хранится в `AdditionalActions` (`["send_eo_to_otm"]`). Если пусто → берётся `Title` (legacy русские). Используется `value` в `resolveActionChoices` → `choices={value, label}`. Позволяет переименовать `Title` без лома старых Tasks. |
-| `ContentTypeId` | Single line `Text` | Нет | `""` или `0x01080100...` | **Ключ CT** как выше. `""` = для всех CT (общий набор случай A). Полный `StringValue` = только для этого CT (per-CT набор случай B §15). `longest prefix` для дочерних. Пусто → global. |
+| `CType` | Single line `Text` | Нет | `""` или `0x01080100...` | **Ключ CT (Tasks ContentTypeId)** как выше. `""` = для всех CT (общий набор случай A). Полный `StringValue` = только для этого CT (per-CT набор случай B §15). `longest prefix` для дочерних. Пусто → global. **InternalName `CType`.** |
 | `SortOrder` | Number | Нет | `10,20,30` | **Порядок** в `Autocomplete` (`&$orderby=SortOrder asc`). Пусто → `999`. |
 | `Enabled` | Yes/No | Нет | `Да`/`Нет` | **Включение.** `Нет` → скрыть действие без удаления, без ребилда. Пусто → `Да`. |
 
@@ -297,14 +301,14 @@ TaskTypeConfiguration (случай B, после аудита): ContentTypeId=0
 | Колонка | Тип | Обяз. | Значения | Для чего |
 |---|---|---|---|---|
 | `Title` | Single line `Text` | Да | `Поиск ЕО` | Label для админа (имя CT). |
-| `ContentTypeId` | Single line `Text` | Да | `0x01080100A94D...` | **Ключ CT** (обязателен, полный `StringValue`, не пусто). `longest prefix` для дочерних. Используется `resolveTaskTypeConfig(ctId, map)`. Пусто → игнор. |
+| `CType` | Single line `Text` | Да | `0x01080100A94D...` | **Ключ CT (Tasks ContentTypeId)** (обязателен, полный `StringValue`, не пусто). `longest prefix` для дочерних. Используется `resolveTaskTypeConfig(ctId, map)`. Пусто → игнор. **InternalName `CType`.** |
 | `AdditionalActionsFieldInternalName` | Single line `Text` | Да* | `AdditionalActions` или `SearchAdditionalActions` | **InternalName поля** (`Choice Multi AllowMultiple+FillIn`) где хранить AA для этого CT (случай B §15). Если пусто → `AdditionalActions` (fallback). Используется `additionalActionsResolver` → `fieldInternalName` → `field metadata` → `PATCH {SearchAdditionalActions:[...]}` вместо универсального `AdditionalActions`. |
 | `AdditionalActionsRequired` | Yes/No | Нет | `Да`/`Нет` | **Обязателен ли AA для этого CT** (глобально для CT, не per-Result). `true` → `required=true` (если `ShowAdditionalActions` из `TaskResultDefinitions` тоже `true` — тогда оба `true`). Используется приоритет `TaskTypeConfiguration` → `task.AdditionalActionsRequired`. Пусто → берётся из Task item. Legacy `Required` fallback. |
 | `Enabled` | Yes/No | Нет | `Да`/`Нет` | **Включение.** `Нет` → строка игнор → fallback к `AdditionalActions` (как будто списка нет). Пусто → `Да`. |
 
 **Статус:** **ОТКЛЮЧЁН до аудита `docs/audit/content-types.md` §16** (в коде `taskTypeMap=null`, нет `404` в Network). Вернётся после аудита когда доказан случай B (разные наборы). Пока `useTaskConfiguration` и `additionalActionsResolver` возвращают `null` → `sharepoint-metadata` (один `AdditionalActions`). После аудита — раскомментировать `fetchTaskTypeConfigurationMap` в `useTaskConfiguration.js` и `getTaskTypeConfig` в `additionalActionsResolver.js`.
 
-**ContentTypeId заполнение (общее для всех 3):** см. раздел выше *Полноценное определение: как заполнять ContentTypeId* — `""`=global, полный `StringValue` из `window._cts` (`0x01080100...`), `Enabled=Нет` скрывает без удаления, `SortOrder` 10,20...
+**CType заполнение (общее для всех 3):** см. раздел выше *Полноценное определение: как заполнять CType* — `""`=global, полный Tasks `ContentTypeId` `StringValue` из `window._cts` (`0x01080100...`), `Enabled=Нет` скрывает без удаления, `SortOrder` 10,20... При создании колонки выбирай InternalName `CType` (Single line). Если уже есть `ContentTypeId0` (авто-переименован) — код его прочитает, но для новых — используй `CType`.
 
 ---
 
