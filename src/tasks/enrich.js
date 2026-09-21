@@ -29,7 +29,8 @@ async function fetchRelatedElement(listId, itemId) {
     const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
     return data?.d;
   };
-  const selects = ["Recipient/Title", "Recipient/Id", "Recipient/SCNumberText", "Title"];
+  // THU — номер ЕО, берём напрямую из связанного элемента (шаг 1)
+  const selects = ["Recipient/Title", "Recipient/Id", "Recipient/SCNumberText", "Title", "THU", "DC_THU"];
   const expands = ["Recipient"];
   try {
     return await tryFetch(`/web/lists(guid'${listId}')/items(${itemId})?$select=${selects.join(",")}&$expand=${expands.join(",")}`);
@@ -41,7 +42,7 @@ async function fetchRelatedElement(listId, itemId) {
       throw new Error("filter empty");
     } catch {
       try {
-        return await tryFetch(`/web/lists(guid'${listId}')/items(${itemId})?$select=Recipient/Title,Title&$expand=Recipient`);
+        return await tryFetch(`/web/lists(guid'${listId}')/items(${itemId})?$select=Recipient/Title,Title,THU,DC_THU&$expand=Recipient`);
       } catch {
         return null;
       }
@@ -57,6 +58,7 @@ function extractRecipientAndSC(d) {
   const rec = d.Recipient;
   let recTitle = "";
   let scVal = "";
+  let thuVal = d.THU || d.DC_THU || "";
   if (rec) {
     if (rec.Title) recTitle = rec.Title;
     else if (rec.results && rec.results[0]?.Title) recTitle = rec.results[0].Title;
@@ -65,7 +67,7 @@ function extractRecipientAndSC(d) {
     else if (rec.results && rec.results[0]?.SCNumberText) scVal = rec.results[0].SCNumberText;
   }
   if (!scVal) scVal = d.Recipient_x003a_SCNumberText || d.Recipient_x003A_SCNumberText || "";
-  if (recTitle || scVal) return { recipient: recTitle, scNumber: scVal ? String(scVal) : "" };
+  if (recTitle || scVal || thuVal) return { recipient: recTitle, scNumber: scVal ? String(scVal) : "", thu: thuVal ? String(thuVal).trim() : "" };
   return null;
 }
 
@@ -113,7 +115,8 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
   const tasks = needsEnrichment(mapped);
   const recipientMap = new Map();
   const scNumberMap = new Map();
-  if (tasks.length === 0) return { recipientMap, scNumberMap };
+  const thuMap = new Map();
+  if (tasks.length === 0) return { recipientMap, scNumberMap, thuMap };
 
   const results = await runWithConcurrency(tasks, concurrency, async (t) => {
     const res = await fetchRecipientForTask(t);
@@ -124,6 +127,7 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
     if (!r || !r.res || typeof r.res !== "object") continue;
     if (r.res.recipient) recipientMap.set(r.id, r.res.recipient);
     if (r.res.scNumber) scNumberMap.set(r.id, r.res.scNumber);
+    if (r.res.thu) thuMap.set(r.id, r.res.thu);
   }
-  return { recipientMap, scNumberMap };
+  return { recipientMap, scNumberMap, thuMap };
 }

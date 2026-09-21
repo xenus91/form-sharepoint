@@ -1248,21 +1248,23 @@ export default function TasksView({ userProfile: propUserProfile, onBack, onCoun
     let cancelled = false;
     (async () => {
       try {
-        const { recipientMap, scNumberMap } = await enrichTasksWithRelated(data, { concurrency: 5 });
+        const { recipientMap, scNumberMap, thuMap } = await enrichTasksWithRelated(data, { concurrency: 5 });
         if (cancelled) return;
-        if (recipientMap.size===0 && scNumberMap.size===0) return;
+        if (recipientMap.size===0 && scNumberMap.size===0 && thuMap.size===0) return;
         queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => {
           if (!Array.isArray(prev) || prev.length===0) return prev;
           let changed=false;
           const next = prev.map((p)=>{
             const newRec = recipientMap.get(p.Id);
             const newSc = scNumberMap.get(p.Id);
-            if (newRec===undefined && newSc===undefined) return p;
-            if (newRec!==undefined && p.Recipient!==newRec) {} else if (newSc!==undefined && p.SCNumber!==newSc) {} else return p;
+            const newThu = thuMap.get(p.Id);
+            if (newRec===undefined && newSc===undefined && newThu===undefined) return p;
+            if (newRec!==undefined && p.Recipient!==newRec) {} else if (newSc!==undefined && p.SCNumber!==newSc) {} else if (newThu!==undefined && p.THU!==newThu && p.raw?.THU!==newThu) {} else return p;
             changed=true;
-            const upd={...p};
+            const upd={...p, raw:{...p.raw}};
             if (newRec!==undefined) upd.Recipient=newRec;
             if (newSc!==undefined) { upd.SCNumber=newSc; upd.TKNumber=newSc; }
+            if (newThu!==undefined) { upd.THU=newThu; upd.raw.THU=newThu; }
             return upd;
           });
           return changed? next : prev;
