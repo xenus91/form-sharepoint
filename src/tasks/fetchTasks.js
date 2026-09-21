@@ -12,6 +12,7 @@ const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}
 import apiClient, { normalizeNextUrl } from "../api";
 import { buildTaskListQuery } from "./listQuery";
 import { mapRawTask } from "./mapping";
+import { toDomainTask } from "../domain/tasks/taskModel";
 
 /**
  * Чистая fetch-функция для списка задач (без React state).
@@ -93,7 +94,8 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
     safety += 1;
   }
 
-  const mapped = all.map((r) => mapRawTask(r, { recipientField: effectiveRecipientField, scNumberField }));
+  // Domain mapping — централизованно, сохраняет legacy поля для совместимости ( §9 )
+  const mapped = all.map((r) => toDomainTask(r, { recipientField: effectiveRecipientField, scNumberField }));
   try{
     const byType = {};
     for(const m of mapped){ const ct = String(m.ContentTypeId||'').slice(0,18); byType[ct]=(byType[ct]||0)+1; }
