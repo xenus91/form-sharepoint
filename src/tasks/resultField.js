@@ -20,10 +20,10 @@ const STORAGE_KEY_CTMAP = "sp:resultFields:ctMap";
 function getStorage() {
   try {
     if (typeof localStorage !== "undefined") return localStorage;
-  } catch {}
+  } catch (_e) { void _e; }
   try {
     if (typeof sessionStorage !== "undefined") return sessionStorage;
-  } catch {}
+  } catch (_e) { void _e; }
   return null;
 }
 
@@ -53,7 +53,7 @@ function loadFromStorage() {
         }
       }
     }
-  } catch {}
+  } catch (_e) { void _e; }
 }
 
 function saveToStorage() {
@@ -66,7 +66,7 @@ function saveToStorage() {
     if (_ctMapCache) {
       storage.setItem(STORAGE_KEY_CTMAP, JSON.stringify({ map: Array.from(_ctMapCache.entries()), at: _ctMapCacheAt }));
     }
-  } catch {}
+  } catch (_e) { void _e; }
 }
 
 // Нормализация строки для сравнения
@@ -99,6 +99,7 @@ export async function fetchResultFieldsMeta(apiClient, opts = {}) {
     const results = data?.d?.results || [];
     if (results.length > 0) {
       const mapped = results
+        .filter((f) => f.InternalName && f.InternalName.toLowerCase() !== "endjob")
         .filter((f) => !f.Hidden)
         .map((f) => ({
           internalName: f.InternalName,
@@ -127,6 +128,7 @@ export async function fetchResultFieldsMeta(apiClient, opts = {}) {
   const results = data?.d?.results || data?.d || [];
   const all = Array.isArray(results) ? results : [];
   const filtered = all
+    .filter((f) => f.InternalName && f.InternalName.toLowerCase() !== "endjob")
     .filter((f) => {
       if (f.Hidden) return false;
       const td = norm(f.TypeDisplayName);
@@ -201,6 +203,7 @@ export async function fetchContentTypeResultMap(apiClient, opts = {}) {
       const { data } = await apiClient.get(ctUrl, { headers: { Accept: "application/json;odata=verbose" }, __noCache: forceRefresh });
       const cts = data?.d?.results || [];
       const map = new Map();
+      // eslint-disable-next-line no-unused-vars
       const fieldIdNorm = norm(resultFields[0].id);
       for (const ct of cts) {
         const ctId = ct.StringId || ct.Id?.StringValue || "";
@@ -377,5 +380,5 @@ export function clearResultFieldCache() {
       localStorage.removeItem(STORAGE_KEY_FIELDS);
       localStorage.removeItem(STORAGE_KEY_CTMAP);
     }
-  } catch {}
+  } catch (_e) { void _e; }
 }

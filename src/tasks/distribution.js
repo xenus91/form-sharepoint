@@ -203,7 +203,7 @@ function detectSCNumberFromFields(fields) {
 export async function getTasksListFieldsOverview() {
   try {
     const fields = await fetchAllTasksFieldsRaw();
-    const fieldNames = fields.map((f) => f.InternalName);
+    const fieldNames = fields.map((f) => f.InternalName).filter((n) => n.toLowerCase() !== "endjob");
     const recipientField = detectRecipientFromFields(fields);
     const scNumberField = detectSCNumberFromFields(fields);
     return { fieldNames, recipientField, scNumberField, fields };

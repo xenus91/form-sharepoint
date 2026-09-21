@@ -74,3 +74,6 @@ export const FULL_TASK_EXPAND = "AssignedTo,Editor";
 // Минимальный select для hash-polling (60с) — нужны только поля для диффа статуса, а не весь Title/Body
 export const HASH_POLL_SELECT = "Id,Status,PercentComplete,Modified,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions";
 export const HASH_POLL_EXPAND = "";
+
+// EndJob поле удалено из списка Tasks — гарантируем, что его нет ни в одном select
+export const REMOVED_FIELDS = ["EndJob"];

@@ -2369,7 +2369,26 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         // __noCache: polling в hash-режиме — всегда хотим свежие данные.
         const _hashSelect = HASH_POLL_SELECT;
         const _hashExpand = HASH_POLL_EXPAND ? `&$expand=${HASH_POLL_EXPAND}` : "";
-        const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${_hashSelect}${_hashExpand}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
+        // EndJob удалён — если вдруг в HASH_POLL_SELECT попадёт EndJob из кэша, фильтруем
+        const _cleanHashSelect = _hashSelect.split(",").filter((f) => f.trim().toLowerCase() !== "endjob").join(",");
+        // Доп. защита: если _cleanHashSelect пуст, используем минимум Id,Modified
+        const _finalHashSelect = _cleanHashSelect.trim() ? _cleanHashSelect : "Id,Modified";
+        let _hashData = null;
+        try {
+          const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${_finalHashSelect}${_hashExpand}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
+          _hashData = data;
+        } catch (eHash) {
+          const _m = String(eHash?.response?.data?.error?.message?.value || eHash?.message || "").toLowerCase();
+          if (_m.includes("endjob")) {
+            console.warn("[hashPoll] EndJob error, retry without EndJob", _m);
+            try {
+              const { data: _retry } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=Id,Modified,Status,PercentComplete`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
+              _hashData = _retry;
+            } catch {}
+          }
+          if (!_hashData) throw eHash;
+        }
+        const data = _hashData;
         const raw = data?.d;
         if (!raw || cancelled) return;
         const mapped = mapRawTask(raw, { recipientField, scNumberField });

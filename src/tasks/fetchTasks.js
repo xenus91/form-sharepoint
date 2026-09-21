@@ -39,6 +39,20 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
       nextUrl = data?.d?.__next ? normalizeNextUrl(data.d.__next) : null;
     } catch (e) {
       const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
+      if (msg.includes("endjob")) {
+        console.warn("[fetchTasks] EndJob field missing, retry without it (field was deleted)");
+        // EndJob был удалён — фильтруем его из всех списков и ретраим
+        taskFieldNames = taskFieldNames.filter((f) => f.toLowerCase() !== "endjob");
+        resultFieldInternalNames = resultFieldInternalNames.filter((f) => f.toLowerCase() !== "endjob");
+        if (effectiveRecipientField && effectiveRecipientField.toLowerCase() === "endjob") {
+          effectiveRecipientField = null;
+          useRecipient = false;
+        }
+        // также чистим кэш, чтобы не возвращать старый URL с EndJob
+        try { const { invalidate } = await import("../sp/cache.js"); invalidate("EndJob"); } catch (_e) { void _e; }
+        nextUrl = buildUrl();
+        continue;
+      }
       if (useDueDate && msg.includes("duedate")) {
         useDueDate = false;
         nextUrl = buildUrl();

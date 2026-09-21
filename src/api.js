@@ -32,8 +32,74 @@ const apiClient = axios.create({
   },
 });
 
-// Для небезопасных методов добавляем X-RequestDigest
+// Удаляем удалённое поле EndJob из любых URL и payload (поле удалено из списка Tasks)
+function stripEndJob(url) {
+  if (!url || typeof url !== "string") return url;
+  if (!url.toLowerCase().includes("endjob")) return url;
+  // Убираем EndJob из $select, $filter, $expand и т.д.
+  let cleaned = url;
+  // Из $select=... - убираем EndJob с запятыми
+  cleaned = cleaned.replace(/,?EndJob,?/gi, (m) => {
+    if (m === ",EndJob," ) return ",";
+    if (m === ",EndJob") return "";
+    if (m === "EndJob,") return "";
+    if (m === "EndJob") return "";
+    return m;
+  });
+  // Убираем оставшиеся двойные запятые и ,& / ,$ / =,
+  cleaned = cleaned.replace(/,+/g, ",").replace(/\$select=,/g, "$select=").replace(/,\$expand/g, "&$expand").replace(/,\$filter/g, "&$filter").replace(/\?&/, "?").replace(/,,/g, ",");
+  // Если после чистки остался пустой $select= -> убираем
+  cleaned = cleaned.replace(/\$select=&/g, "&").replace(/\$select=$/, "");
+  return cleaned;
+}
+// eslint-disable-next-line no-unused-vars
+function stripEndJobFromData(data) {
+  if (!data || typeof data !== "object") return data;
+  try {
+    if (data.EndJob !== undefined) delete data.EndJob;
+    // Также если это JSON строка
+  } catch (_e) { void _e; }
+  return data;
+}
+// Для небезопасных методов добавляем X-RequestDigest + чистим EndJob
 apiClient.interceptors.request.use(async (config) => {
+  try {
+    if (config.url && config.url.toLowerCase().includes("endjob")) {
+      console.warn("[api] stripping EndJob from URL", config.url);
+      config.url = stripEndJob(config.url);
+    }
+    if (config.data && typeof config.data === "object" && config.data.EndJob !== undefined) {
+      console.warn("[api] stripping EndJob from payload");
+      delete config.data.EndJob;
+    }
+    // Если data — JSON строка
+    if (typeof config.data === "string" && config.data.toLowerCase().includes("endjob")) {
+      try {
+        const parsed = JSON.parse(config.data);
+        if (parsed && parsed.EndJob !== undefined) {
+          delete parsed.EndJob;
+          config.data = JSON.stringify(parsed);
+          console.warn("[api] stripped EndJob from JSON payload");
+        }
+      } catch (_e) { void _e; }
+      // CAML XML: <FieldRef Name='EndJob' /> или <ViewFields><FieldRef Name='EndJob'/></ViewFields>
+      if (config.data.toLowerCase().includes("fieldref") && config.data.toLowerCase().includes("endjob")) {
+        const before = config.data;
+        let cleaned = config.data.replace(/<FieldRef[^>]*Name=['"]EndJob['"][^>]*\/?>/gi, "");
+        cleaned = cleaned.replace(/,\s*EndJob/gi, "").replace(/EndJob\s*,/gi, "");
+        if (cleaned !== before) {
+          config.data = cleaned;
+          console.warn("[api] stripped EndJob FieldRef from CAML");
+        }
+      }
+      // Также чистим URL-encoded EndJob в теле (например, $select с EndJob)
+      if (config.data.toLowerCase().includes("endjob")) {
+        console.warn("[api] data still contains EndJob after cleaning", config.data.slice(0, 200));
+      }
+    }
+  } catch (e) {
+    console.warn("[api] strip EndJob failed", e);
+  }
   const method = (config.method || 'get').toUpperCase();
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
     const digest = await getDigest();
@@ -45,10 +111,31 @@ apiClient.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Централизованный лог ошибок
+// Централизованный лог ошибок + авто-очистка кэша для удалённого поля EndJob
 apiClient.interceptors.response.use(
   (r) => r,
   (err) => {
+    const msg = String(err?.response?.data?.error?.message?.value || err?.response?.data || err?.message || "").toLowerCase();
+    if (msg.includes("endjob")) {
+      console.warn("[api] EndJob error detected, invalidating cache", err?.config?.url);
+      try { invalidate("EndJob"); } catch (_e) { void _e; }
+      try {
+        const ls = typeof localStorage !== "undefined" ? localStorage : null;
+        if (ls) {
+          for (let i = ls.length - 1; i >= 0; i--) {
+            try {
+              const k = ls.key(i);
+              if (k && k.toLowerCase().includes("endjob")) ls.removeItem(k);
+              const v = ls.getItem(k);
+              if (v && v.toLowerCase().includes("endjob")) {
+                // не удаляем весь ключ, но логируем
+                console.warn("[api] localStorage", k, "contains EndJob");
+              }
+            } catch (_e) { void _e; }
+          }
+        }
+      } catch (_e) { void _e; }
+    }
     console.error('API Error:', err?.response?.status, err?.response?.data || err?.message);
     return Promise.reject(err);
   }

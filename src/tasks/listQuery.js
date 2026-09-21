@@ -8,6 +8,7 @@ import { getGroupIdsFromDistribution } from "./distribution";
 
 const SELECT_BASE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,ContentTypeId";
 const SELECT_BASE_NO_DUE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,Editor/Id,Editor/Title,ContentTypeId";
+// eslint-disable-next-line no-unused-vars
 const SELECT_ADDITIONAL = "AdditionalActionsRequired,AdditionalActions";
 
 /**
@@ -36,7 +37,7 @@ const SELECT_ADDITIONAL = "AdditionalActionsRequired,AdditionalActions";
  * @returns {string}
  */
 export function buildTaskListQuery(opts = {}) {
-  const {
+  let {
     taskFieldNames = [],
     useDueDate = true,
     useAdditionalActions = true,
@@ -47,12 +48,17 @@ export function buildTaskListQuery(opts = {}) {
     orderBy = "Created asc",
   } = opts;
 
+  // Защита: удалённое поле EndJob фильтруем из всех входных массивов
+  if (Array.isArray(taskFieldNames) && taskFieldNames.some((f) => String(f).toLowerCase() === "endjob")) {
+    console.warn("[listQuery] filtered EndJob from taskFieldNames");
+    taskFieldNames = taskFieldNames.filter((f) => String(f).toLowerCase() !== "endjob");
+  }
   // Extra select fields (OffDepKey, Recipient expand, RelatedItems, WorkflowItemId, AdditionalActions, Result fields)
   const extraFields = [];
-  // Динамические поля результата (по TypeDisplayName "Результирующий выбор") — добавляем все InternalName, чтобы выборка работала для любого ContentType
+  // Динамические поля результата — фильтруем удалённые поля (EndJob был удалён)
   if (opts.resultFieldInternalNames && Array.isArray(opts.resultFieldInternalNames)) {
     for (const fn of opts.resultFieldInternalNames) {
-      if (fn && typeof fn === "string" && fn.trim() && !extraFields.includes(fn.trim())) {
+      if (fn && typeof fn === "string" && fn.trim() && fn.trim().toLowerCase() !== "endjob" && !extraFields.includes(fn.trim())) {
         extraFields.push(fn.trim());
       }
     }
@@ -60,10 +66,15 @@ export function buildTaskListQuery(opts = {}) {
   if (taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
   // По умолчанию считаем, что поле Recipient существует (критично для экономии трафика — большинство задач получают Recipient сразу, без докачки)
   // Если recipientField === null и список полей ещё не загружен (первый рендер), используем дефолт "Recipient"
-  const effectiveRecipientField = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
+  const effectiveRecipientFieldRaw = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
+  const effectiveRecipientField = effectiveRecipientFieldRaw && effectiveRecipientFieldRaw.toLowerCase() === "endjob" ? null : effectiveRecipientFieldRaw;
   if (effectiveRecipientField) {
-    extraFields.push(`${effectiveRecipientField}/Id`);
-    extraFields.push(`${effectiveRecipientField}/Title`);
+    if (effectiveRecipientField.toLowerCase() === "endjob") {
+      console.warn("[listQuery] blocked EndJob as recipient field");
+    } else {
+      extraFields.push(`${effectiveRecipientField}/Id`);
+      extraFields.push(`${effectiveRecipientField}/Title`);
+    }
   }
   if (taskFieldNames.includes("RelatedItems")) extraFields.push("RelatedItems");
   if (taskFieldNames.includes("WorkflowItemId")) extraFields.push("WorkflowItemId");

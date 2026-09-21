@@ -64,6 +64,38 @@ export async function getCached(key, loader, { ttlMs = 60_000 } = {}) {
   return p;
 }
 
+// При старте чистим кэш от удалённого поля EndJob (поле удалено из списка Tasks)
+try {
+  const _toDelete = [];
+  for (const k of cache.keys()) if (k.toLowerCase().includes("endjob")) _toDelete.push(k);
+  for (const k of _toDelete) cache.delete(k);
+  if (_toDelete.length) console.warn("[cache] cleared", _toDelete.length, "keys with EndJob");
+  const _toDeleteFly = [];
+  for (const k of inflight.keys()) if (k.toLowerCase().includes("endjob")) _toDeleteFly.push(k);
+  for (const k of _toDeleteFly) inflight.delete(k);
+  // Также чистим localStorage от старых resultFields с EndJob
+  try {
+    const ls = typeof localStorage !== "undefined" ? localStorage : null;
+    if (ls) {
+      const raw = ls.getItem("sp:resultFields:meta");
+      if (raw && raw.toLowerCase().includes("endjob")) {
+        ls.removeItem("sp:resultFields:meta");
+        console.warn("[cache] cleared sp:resultFields:meta with EndJob");
+      }
+      const raw2 = ls.getItem("sp:resultFields:ctMap");
+      if (raw2 && raw2.toLowerCase().includes("endjob")) {
+        ls.removeItem("sp:resultFields:ctMap");
+        console.warn("[cache] cleared sp:resultFields:ctMap with EndJob");
+      }
+      const raw3 = ls.getItem("sp:tasks:overview");
+      if (raw3 && raw3.toLowerCase().includes("endjob")) {
+        ls.removeItem("sp:tasks:overview");
+        console.warn("[cache] cleared sp:tasks:overview with EndJob");
+      }
+    }
+  } catch (_e) { void _e; }
+} catch (_e) { void _e; }
+
 export function invalidate(matcher) {
   if (typeof matcher === "string") {
     for (const k of cache.keys()) {
@@ -98,7 +130,7 @@ export function exposeCacheStats() {
       };
       console.log("[cache] helper exposed: window.getCacheStats(), window.clearCache(), window.printCacheStats()");
     }
-  } catch {}
+  } catch (_e) { void _e; }
 }
 
 // Авто-expose в браузере
