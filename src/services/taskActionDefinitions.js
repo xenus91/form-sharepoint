@@ -53,7 +53,7 @@ export async function fetchTaskActionDefinitions(apiClient, opts={}){
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
   // План §21: Title, ActionId, ContentTypeId, SortOrder, Enabled + для совместимости legacy ActionValue/Label/Title
-  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ActionId,ContentTypeId,SortOrder,Enabled,ActionValue,Label&$top=200&$orderby=SortOrder asc`;
+  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ActionId,ContentTypeId,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
   try{
     const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
     const results=data?.d?.results||[];

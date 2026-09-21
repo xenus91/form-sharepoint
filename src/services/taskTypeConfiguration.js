@@ -56,7 +56,7 @@ export async function fetchTaskTypeConfigurationMap(apiClient, opts={}){
 
   // План §17: Title, ContentTypeId, AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled
   // Для совместимости также читаем legacy Required и ResultFieldInternalName (не план, но был в 870062a)
-  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled,Required,ResultFieldInternalName&$top=100`;
+  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled&$top=100`;
   try{
     const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
     const results = data?.d?.results || [];

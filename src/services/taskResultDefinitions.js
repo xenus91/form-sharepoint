@@ -66,7 +66,7 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
 
   // План §14: Title, ContentTypeId, ResultValue, ShowAdditionalActions, AdditionalActionsRequired, SortOrder, Enabled
   // Для совместимости также читаем legacy поля (Label/Color/Variant/RequiresLocation/RequiresConfirm/Gradient) — игнорируем, но не падаем если они есть
-  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ContentTypeId,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled,Label,Color,Variant,RequiresLocation,RequiresAdditionalActions,RequiresConfirm,Gradient&$top=200&$orderby=SortOrder asc`;
+  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,ContentTypeId,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
   try{
     const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
     const results=data?.d?.results||[];
