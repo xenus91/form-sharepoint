@@ -262,6 +262,52 @@ TaskTypeConfiguration (случай B, после аудита): ContentTypeId=0
 
 ---
 
+## Функционал каждой колонки — для чего используется
+
+> Все 3 списка — `Custom List`, читаются `GET /web/lists/getbytitle('...')/items` (30м `sessionStorage`), `Enabled=Нет` — строка игнорируется, `SortOrder` — порядок, `ContentTypeId` — `""`=global или полный `StringValue` `0x01080100...` (prefix `longest` для дочерних).
+
+### TaskResultDefinitions (§14) — поведение UI для выбранного Result
+
+| Колонка (InternalName) | Тип SP | Обяз. | Значения | Для чего, где используется, что если пусто |
+|---|---|---|---|---|
+| `Title` | Single line `Text` | Да | `Найдена`, `Не найдена` | **Display label** для админа (удобочитаемо). Если `ResultValue` пусто — используется как `ResultValue`. В коде `label: Title` (fallback). Пусто → строка игнор (нет `ResultValue`). |
+| `ContentTypeId` | Single line `Text` | Нет | `""` или `0x01080100A94D...` | **Ключ CT.** `""` = для всех CT (случай A). Полный `StringValue` = только для этого CT (exact). Дочерний `0x01080100AA0011` наследует `0x01080100AA` (longest prefix). Используется `resolveTaskResultDefinition(resultValue, ctId, defs)` → `Map<ctId,Map<norm,cfg>>`. Пусто → global. Получить: `window._cts[].Id.StringValue` из аудита. |
+| `ResultValue` | Single line `Text` | Да* | `Найдена`, `Не найдена`, `Поврежден` | **Ключ Result**. Нормализуется `lowerCase` (`norm`). Совпадает с `Choices` из `Result` поля (`FieldLinks`). Если пусто → берётся `Title`. Используется для матчинга выбранного `Result` (кнопка). |
+| `ShowAdditionalActions` | Yes/No (`Boolean` или `Да/Нет`) | Нет | `Да`/`Нет` | **Показывать ли `AdditionalActionsField` при этом Result.** `true` → в `TaskCard` `foundInputMode` показывает `Location1` + `AdditionalActionsField` (план §14 пример: `Найден|No`, `Не найден|Yes` — но у нас `Найдена|Yes`). Используется `getResultDef(result).showAdditionalActions`. Пусто/ legacy → `false`. `false` → контрол отсутствует. |
+| `AdditionalActionsRequired` | Yes/No | Нет | `Да`/`Нет` | **Обязателен ли AA если показан.** `true` → `required=true`, валидация `length>0` иначе ошибка, `payload AdditionalActionsRequired="Да"`. `false` → можно `[]`. Используется только если `Show=Да`. Пусто → `false`. |
+| `SortOrder` | Number | Нет | `10,20,30` | **Порядок** в списке (`&$orderby=SortOrder asc`). Не влияет на кнопки Result (они из поля `Choices`), но влияет на `raw` порядок. Пусто → `999`. |
+| `Enabled` | Yes/No | Нет | `Да`/`Нет` | **Включение строки.** `Нет` → строка игнорируется (как удалена). Пусто → `Да`. |
+
+**Как читается:** `fetchTaskResultDefinitions` → `{global:Map<norm,cfg>, byCt:Map}` → `TaskCard.getResultDef(choice)` → `def.showAdditionalActions` → решает `foundChoice`/`notFoundChoice` и `AdditionalActionsField` видимость.
+
+### TaskActionDefinitions (§21) — словарь действий (без правки поля)
+
+| Колонка | Тип | Обяз. | Значения | Для чего |
+|---|---|---|---|---|
+| `Title` | Single line `Text` | Да | `Отправить ЕО в OTM` | **Русский label** для `Autocomplete` (`label`). Показывается пользователю. Пусто → игнор. |
+| `ActionId` | Single line `Text` | Да* | `send_eo_to_otm`, `move_to_correct_line`, `repack` | **Стабильный английский ключ** `snake_case` без пробелов/кириллицы, хранится в `AdditionalActions` (`["send_eo_to_otm"]`). Если пусто → берётся `Title` (legacy русские). Используется `value` в `resolveActionChoices` → `choices={value, label}`. Позволяет переименовать `Title` без лома старых Tasks. |
+| `ContentTypeId` | Single line `Text` | Нет | `""` или `0x01080100...` | **Ключ CT** как выше. `""` = для всех CT (общий набор случай A). Полный `StringValue` = только для этого CT (per-CT набор случай B §15). `longest prefix` для дочерних. Пусто → global. |
+| `SortOrder` | Number | Нет | `10,20,30` | **Порядок** в `Autocomplete` (`&$orderby=SortOrder asc`). Пусто → `999`. |
+| `Enabled` | Yes/No | Нет | `Да`/`Нет` | **Включение.** `Нет` → скрыть действие без удаления, без ребилда. Пусто → `Да`. |
+
+**Как читается:** `fetchTaskActionDefinitions` → `{global:Array, byCt:Map}` → `resolveActionChoices(ctId, defs, fallbackFieldChoices)` (`per-CT exact→prefix→global→fallback` к полю `AdditionalActions` `Choices` — план §21). `useTaskConfiguration` мержит: `defChoices + уникальные из поля` (dedup `lowerCase`) → `ctConfigMap.additionalActionsField.choices`. `freeSolo` (`AllowFillIn=Yes`) показывает `Title` как `label`, хранит `ActionId`; пользовательский ввод `проверить упаковку` (fill-in) сохраняется только в Task item, **не меняет `Field Choices`** (§20).
+
+### TaskTypeConfiguration (§17) — какой `AdditionalActions` поле использовать для CT (отключён до аудита)
+
+| Колонка | Тип | Обяз. | Значения | Для чего |
+|---|---|---|---|---|
+| `Title` | Single line `Text` | Да | `Поиск ЕО` | Label для админа (имя CT). |
+| `ContentTypeId` | Single line `Text` | Да | `0x01080100A94D...` | **Ключ CT** (обязателен, полный `StringValue`, не пусто). `longest prefix` для дочерних. Используется `resolveTaskTypeConfig(ctId, map)`. Пусто → игнор. |
+| `AdditionalActionsFieldInternalName` | Single line `Text` | Да* | `AdditionalActions` или `SearchAdditionalActions` | **InternalName поля** (`Choice Multi AllowMultiple+FillIn`) где хранить AA для этого CT (случай B §15). Если пусто → `AdditionalActions` (fallback). Используется `additionalActionsResolver` → `fieldInternalName` → `field metadata` → `PATCH {SearchAdditionalActions:[...]}` вместо универсального `AdditionalActions`. |
+| `AdditionalActionsRequired` | Yes/No | Нет | `Да`/`Нет` | **Обязателен ли AA для этого CT** (глобально для CT, не per-Result). `true` → `required=true` (если `ShowAdditionalActions` из `TaskResultDefinitions` тоже `true` — тогда оба `true`). Используется приоритет `TaskTypeConfiguration` → `task.AdditionalActionsRequired`. Пусто → берётся из Task item. Legacy `Required` fallback. |
+| `Enabled` | Yes/No | Нет | `Да`/`Нет` | **Включение.** `Нет` → строка игнор → fallback к `AdditionalActions` (как будто списка нет). Пусто → `Да`. |
+
+**Статус:** **ОТКЛЮЧЁН до аудита `docs/audit/content-types.md` §16** (в коде `taskTypeMap=null`, нет `404` в Network). Вернётся после аудита когда доказан случай B (разные наборы). Пока `useTaskConfiguration` и `additionalActionsResolver` возвращают `null` → `sharepoint-metadata` (один `AdditionalActions`). После аудита — раскомментировать `fetchTaskTypeConfigurationMap` в `useTaskConfiguration.js` и `getTaskTypeConfig` в `additionalActionsResolver.js`.
+
+**ContentTypeId заполнение (общее для всех 3):** см. раздел выше *Полноценное определение: как заполнять ContentTypeId* — `""`=global, полный `StringValue` из `window._cts` (`0x01080100...`), `Enabled=Нет` скрывает без удаления, `SortOrder` 10,20...
+
+---
+
 ## Self-check (план)
 
 - [ ] `GET .../TaskResultDefinitions` 404 → TaskCard как раньше (Show из hardcoded fallback)
