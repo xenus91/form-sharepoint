@@ -70,3 +70,8 @@ export function getCachedAdditionalActionsDefaultSync() {
 // Select/expand для fetchFullTask (используется в TasksView и hashSearch).
 export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,WorkflowItemId,ContentTypeId";
 export const FULL_TASK_EXPAND = "AssignedTo,Editor";
+
+// Лёгкий select для polling/hash-refresh — только то, что реально
+// сравнивается в диффе (Status/ResultSearchTHU/PercentComplete/Location1/Modified).
+// Экономит трафик: 6 полей вместо 18+ каждые 60 секунд.
+export const HASH_REFRESH_SELECT = "Id,Status,ResultSearchTHU,Location1,PercentComplete,Modified";

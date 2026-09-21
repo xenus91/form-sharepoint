@@ -1,8 +1,14 @@
 // src/tasks/enrich.js
-// Докачка Recipient/SCNumber для задач с пустыми полями — через RelatedItems -> ProblemsPallet.
-// Fan-out с concurrency-ограничением, неблокирующий (запускается в фоне после основного рендера).
+// Докачка Recipient/SCNumber/THU для задач с пустыми полями — через RelatedItems.
 //
-// Раньше жило inline в loadTasks (~60 строк) — вынесено сюда в рамках Tier 3 (Q11).
+// Tier-1 оптимизация: вместо fan-out по одному запросу на каждую задачу
+// (плюс до 3 fallback URL на каждый) делаем ОДИН POST /GetItems с CAML
+// <In>...</In> для всех itemId по каждому listId. Экономия трафика:
+//   N задач → 1 запрос на каждый уникальный listId (а не N*3 в худшем случае).
+//
+// Старый fan-out (fetchRelatedElement + runWithConcurrency) остаётся как
+// fallback — на случай если серверный $top лимит /In> срежет результат
+// (по факту SP обычно тянет до ~500 значений, наш типичный кейс 20-50).
 
 import apiClient from "../api";
 import { extractTKNumberFromTask } from "./formatters";
@@ -13,41 +19,13 @@ import { runWithConcurrency } from "../utils/concurrency";
  */
 function parseRelatedItems(related) {
   if (typeof related === "string") {
-    try { return JSON.parse(related); } catch { return null; }
-  }
-  return related;
-}
-
-/**
- * Делает GET к связанному элементу с тремя fallback-стратегиями:
- *   1) items(itemId) с расширенным select
- *   2) items?$filter=Id eq itemId
- *   3) items(itemId) с минимальным select
- */
-async function fetchRelatedElement(listId, itemId) {
-  const tryFetch = async (url) => {
-    const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
-    return data?.d;
-  };
-  // THU — номер ЕО, берём напрямую из связанного элемента (шаг 1)
-  const selects = ["Recipient/Title", "Recipient/Id", "Recipient/SCNumberText", "Title", "THU", "DC_THU"];
-  const expands = ["Recipient"];
-  try {
-    return await tryFetch(`/web/lists(guid'${listId}')/items(${itemId})?$select=${selects.join(",")}&$expand=${expands.join(",")}`);
-  } catch {
     try {
-      const filterRes = await tryFetch(`/web/lists(guid'${listId}')/items?$filter=Id eq ${itemId}&$select=${selects.join(",")}&$expand=${expands.join(",")}&$top=1`);
-      if (filterRes?.results && filterRes.results[0]) return filterRes.results[0];
-      if (filterRes?.Id) return filterRes;
-      throw new Error("filter empty");
+      return JSON.parse(related);
     } catch {
-      try {
-        return await tryFetch(`/web/lists(guid'${listId}')/items(${itemId})?$select=Recipient/Title,Title,THU,DC_THU&$expand=Recipient`);
-      } catch {
-        return null;
-      }
+      return null;
     }
   }
+  return related;
 }
 
 /**
@@ -67,28 +45,108 @@ function extractRecipientAndSC(d) {
     else if (rec.results && rec.results[0]?.SCNumberText) scVal = rec.results[0].SCNumberText;
   }
   if (!scVal) scVal = d.Recipient_x003a_SCNumberText || d.Recipient_x003A_SCNumberText || "";
-  if (recTitle || scVal || thuVal) return { recipient: recTitle, scNumber: scVal ? String(scVal) : "", thu: thuVal ? String(thuVal).trim() : "" };
+  if (recTitle || scVal || thuVal) {
+    return {
+      recipient: recTitle,
+      scNumber: scVal ? String(scVal) : "",
+      thu: thuVal ? String(thuVal).trim() : "",
+    };
+  }
   return null;
 }
 
 /**
- * Докачивает Recipient/SCNumber для одной задачи.
- * @param {object} task наш Task
- * @returns {Promise<{recipient:string, scNumber:string}|null>}
+ * Группировка задач по listId из RelatedItems[0].ListId.
+ * Возвращает Map<listId, Array<{task, itemId}>>.
  */
-async function fetchRecipientForTask(task) {
-  try {
-    const related = parseRelatedItems(task.RelatedItems);
-    if (!Array.isArray(related) || related.length === 0) return null;
+function groupByListId(tasks) {
+  const groups = new Map();
+  for (const t of tasks) {
+    const related = parseRelatedItems(t.RelatedItems);
+    if (!Array.isArray(related) || related.length === 0) continue;
     const first = related[0];
     const listIdRaw = first.ListId || first.listId;
     const itemId = first.ItemId || first.itemId || first.ItemID;
-    if (!listIdRaw || !itemId) return null;
+    if (!listIdRaw || !itemId) continue;
     const listId = String(listIdRaw).replace(/[{}]/g, "");
-    const d = await fetchRelatedElement(listId, itemId);
-    return extractRecipientAndSC(d);
+    let arr = groups.get(listId);
+    if (!arr) {
+      arr = [];
+      groups.set(listId, arr);
+    }
+    arr.push({ task: t, itemId });
+  }
+  return groups;
+}
+
+/**
+ * Batch-выборка связанных элементов ОДНИМ POST /GetItems с CAML <In>.
+ * @param {string} listId
+ * @param {Array<number|string>} itemIds
+ * @returns {Promise<Array>} массив raw-объектов (data.d.results)
+ */
+async function fetchRelatedElementsBatch(listId, itemIds) {
+  if (!itemIds.length) return [];
+  const valuesXml = itemIds
+    .map((id) => `<Value Type='Number'>${Number(id)}</Value>`)
+    .join("");
+  const viewXml =
+    `<View><Query><Where><In><FieldRef Name='Id'/><Values>${valuesXml}</Values></In></Where>` +
+    `</Query><ViewFields>` +
+    `<FieldRef Name='Id'/><FieldRef Name='Title'/>` +
+    `<FieldRef Name='THU'/><FieldRef Name='DC_THU'/>` +
+    `<FieldRef Name='Recipient'/><FieldRef Name='Recipient_x003a_SCNumberText'/>` +
+    `</ViewFields><RowLimit>${itemIds.length}</RowLimit></View>`;
+  const payload = {
+    query: { __metadata: { type: "SP.CamlQuery" }, ViewXml: viewXml },
+  };
+  const { data } = await apiClient.post(
+    `/web/lists(guid'${listId}')/GetItems`,
+    payload,
+    {
+      headers: {
+        Accept: "application/json;odata=verbose",
+        "Content-Type": "application/json;odata=verbose",
+      },
+    }
+  );
+  return data?.d?.results || [];
+}
+
+/**
+ * Старый fallback — одиночный fetch с 3 fallback URL.
+ * Используется только если batch не сработал (пустой ответ / ошибка).
+ */
+async function fetchRelatedElement(listId, itemId) {
+  const tryFetch = async (url) => {
+    const { data } = await apiClient.get(url, {
+      headers: { Accept: "application/json;odata=verbose" },
+    });
+    return data?.d;
+  };
+  const selects = ["Recipient/Title", "Recipient/Id", "Recipient/SCNumberText", "Title", "THU", "DC_THU"];
+  const expands = ["Recipient"];
+  try {
+    return await tryFetch(
+      `/web/lists(guid'${listId}')/items(${itemId})?$select=${selects.join(",")}&$expand=${expands.join(",")}`
+    );
   } catch {
-    return null;
+    try {
+      const filterRes = await tryFetch(
+        `/web/lists(guid'${listId}')/items?$filter=Id eq ${itemId}&$select=${selects.join(",")}&$expand=${expands.join(",")}&$top=1`
+      );
+      if (filterRes?.results && filterRes.results[0]) return filterRes.results[0];
+      if (filterRes?.Id) return filterRes;
+      throw new Error("filter empty");
+    } catch {
+      try {
+        return await tryFetch(
+          `/web/lists(guid'${listId}')/items(${itemId})?$select=Recipient/Title,Title,THU,DC_THU&$expand=Recipient`
+        );
+      } catch {
+        return null;
+      }
+    }
   }
 }
 
@@ -103,12 +161,12 @@ export function needsEnrichment(mapped) {
 }
 
 /**
- * Обогатить набор задач Recipient/SCNumber через fan-out к RelatedItems-элементам.
- * Concurrency ограничен `concurrency` (по умолчанию 5) — чтобы не заспамить SP.
+ * Обогатить набор задач Recipient/SCNumber/THU через batch POST /GetItems
+ * (по одному запросу на каждый уникальный listId).
  *
  * @param {Array} mapped массив наших Task
  * @param {{ concurrency?: number, onProgress?: (done:number, total:number) => void }} [opts]
- * @returns {Promise<{ recipientMap: Map<number,string>, scNumberMap: Map<number,string> }>}
+ * @returns {Promise<{ recipientMap: Map<number,string>, scNumberMap: Map<number,string>, thuMap: Map<number,string> }>}
  */
 export async function enrichTasksWithRelated(mapped, opts = {}) {
   const { concurrency = 5 } = opts;
@@ -118,16 +176,60 @@ export async function enrichTasksWithRelated(mapped, opts = {}) {
   const thuMap = new Map();
   if (tasks.length === 0) return { recipientMap, scNumberMap, thuMap };
 
-  const results = await runWithConcurrency(tasks, concurrency, async (t) => {
-    const res = await fetchRecipientForTask(t);
-    return { id: t.Id, res };
+  const groups = groupByListId(tasks);
+
+  // Build map itemId -> [tasks...] (одна и та же RelatedItems может повторяться)
+  const idToTasks = new Map();
+  for (const [, list] of groups) {
+    for (const { task, itemId } of list) {
+      const k = String(itemId);
+      let arr = idToTasks.get(k);
+      if (!arr) {
+        arr = [];
+        idToTasks.set(k, arr);
+      }
+      arr.push(task);
+    }
+  }
+
+  // Параллельно шлём по одному POST /GetItems на каждый listId
+  const groupEntries = Array.from(groups.entries());
+  const groupResults = await runWithConcurrency(groupEntries, concurrency, async ([listId, list]) => {
+    const itemIds = list.map((x) => x.itemId);
+    let rawItems = [];
+    try {
+      rawItems = await fetchRelatedElementsBatch(listId, itemIds);
+    } catch {
+      // batch упал — ничего страшного, ниже уйдём в fan-out fallback
+      rawItems = [];
+    }
+    if (rawItems.length === 0) {
+      // Fallback: одиночные запросы с тремя fallback URL (старая логика)
+      const singleResults = await runWithConcurrency(list, concurrency, async ({ task, itemId }) => {
+        const d = await fetchRelatedElement(listId, itemId);
+        return { id: task.Id, res: extractRecipientAndSC(d) };
+      });
+      return singleResults;
+    }
+    return rawItems.map((d) => {
+      const r = extractRecipientAndSC(d);
+      const id = d?.Id;
+      return { id, res: r };
+    });
   });
 
-  for (const r of results) {
-    if (!r || !r.res || typeof r.res !== "object") continue;
-    if (r.res.recipient) recipientMap.set(r.id, r.res.recipient);
-    if (r.res.scNumber) scNumberMap.set(r.id, r.res.scNumber);
-    if (r.res.thu) thuMap.set(r.id, r.res.thu);
+  for (const arr of groupResults) {
+    for (const r of arr) {
+      if (!r || !r.res || typeof r.res !== "object") continue;
+      // Один raw item мог покрывать несколько наших задач (если RelatedItems совпадают)
+      const ts = idToTasks.get(String(r.id));
+      if (!ts) continue;
+      for (const t of ts) {
+        if (r.res.recipient) recipientMap.set(t.Id, r.res.recipient);
+        if (r.res.scNumber) scNumberMap.set(t.Id, r.res.scNumber);
+        if (r.res.thu) thuMap.set(t.Id, r.res.thu);
+      }
+    }
   }
   return { recipientMap, scNumberMap, thuMap };
 }

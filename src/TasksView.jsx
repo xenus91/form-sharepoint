@@ -16,11 +16,11 @@ import { fetchProblemsPalletItem } from "./tasks/problemsPallet";
 import {
   getGroupIdsFromDistribution,
   resolveDistributionViaDcEmail,
-  getTaskFieldNames,
-  detectRecipientField,
-  detectSCNumberField,
 } from "./tasks/distribution";
-import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync } from "./tasks/config";
+import { fetchTasksFieldsMeta } from "./tasks/fieldsMeta";
+import { useCurrentUser } from "./hooks/useCurrentUser";
+import { useUserProfile } from "./hooks/useUserProfile";
+import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_REFRESH_SELECT } from "./tasks/config";
 import {
   formatDueLeft,
   formatDueDateFull,
@@ -1327,39 +1327,51 @@ export default function TasksView({ userProfile: propUserProfile, onBack: _onBac
 
   // fields loading flag - no discovery, use GUID directly
 
-  // get current user + Office/Department via GetMyProperties for DcEmail distribution
+  // Текущий пользователь + Office/Department — общий хук через TanStack Query
+  // (раздаётся с App.jsx — никаких дублей /web/currentuser и GetMyProperties).
+  const { data: currentUser } = useCurrentUser();
+  const { data: profileData } = useUserProfile();
   useEffect(() => {
-    apiClient
-      .get("/web/currentuser", { headers: { Accept: "application/json;odata=verbose" } })
-      .then((r) => {
-        setCurrentUserId(r?.data?.d?.Id || null);
-        if (r?.data?.d?.Title) setCurrentUserTitle(r.data.d.Title);
-      })
-      .catch(() => setCurrentUserId(null));
-    // Fetch Office/Department for distribution filtering (group assignment)
+    if (currentUser?.Id && currentUser.Id !== currentUserId) {
+      setCurrentUserId(currentUser.Id);
+    }
+    if (currentUser?.Title && !currentUserTitle) {
+      setCurrentUserTitle(currentUser.Title);
+    }
+  }, [currentUser?.Id, currentUser?.Title, currentUserId, currentUserTitle]);
+
+  useEffect(() => {
+    // propUserProfile приходит из App — там уже резолвлено; этот код
+    // подхватывает данные, если TasksView открыт до того, как App успел
+    // (что маловероятно — App монтируется первым, но fallback безопасен).
+    if (propUserProfile && (propUserProfile.userOffice || propUserProfile.userDepartment)) {
+      const office = propUserProfile.userOffice || "";
+      const dept = propUserProfile.userDepartment || "";
+      if (office || dept) setUserOfficeDept({ office, department: dept });
+    } else if (profileData && (profileData.userOffice || profileData.userDepartment)) {
+      setUserOfficeDept({
+        office: profileData.userOffice || "",
+        department: profileData.userDepartment || "",
+      });
+    }
+  }, [propUserProfile, profileData]);
+
+  // Fetch task field names (один сетевой запрос на все 3 derive)
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        if (propUserProfile && (propUserProfile.userOffice || propUserProfile.userDepartment)) {
-          const office = propUserProfile.userOffice || "";
-          const dept = propUserProfile.userDepartment || "";
-          if (office || dept) {
-            setUserOfficeDept({ office, department: dept });
-          }
-        } else {
-          const resp = await apiClient.get("/SP.UserProfiles.PeopleManager/GetMyProperties", { headers: { Accept: "application/json;odata=verbose" } });
-          const props = resp?.data?.d?.UserProfileProperties?.results || [];
-          const find = (k) => props.find((p) => p.Key === k)?.Value || "";
-          const office = find("Office") || "";
-          const dept = find("Department") || "";
-          if (office || dept) setUserOfficeDept({ office, department: dept });
-        }
+        const meta = await fetchTasksFieldsMeta();
+        if (cancelled) return;
+        setTaskFieldNames(meta.taskFieldNames || []);
+        setRecipientField(meta.recipientField);
+        setScNumberField(meta.scNumberField);
       } catch {}
     })();
-    // Fetch task field names to know if OffDepKey/Distribution exists
-    getTaskFieldNames().then(setTaskFieldNames).catch(() => {});
-    detectRecipientField().then(setRecipientField).catch(() => {});
-    detectSCNumberField().then(setScNumberField).catch(() => {});
-  }, [propUserProfile]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Синхронизация hash elementId/action из App.jsx
   useEffect(() => {
@@ -1492,30 +1504,49 @@ export default function TasksView({ userProfile: propUserProfile, onBack: _onBac
     return () => { cancelled = true; };
   }, []);
 
-  // Для открытой задачи — всегда свежие choices по ContentType
+  // Один раз при появлении открытой задачи — подтянуть свежие choices по ContentType.
+  // Раньше зависели от [tasks] → срабатывало на каждом refetch (каждые 60с) при
+  // открытой задаче, гоняя 2 тяжёлых запроса (forceRefresh в resultField.js).
+  // Сейчас: ref'ы с lastUpdatedAt, минимальный интервал — 5 минут, и только если
+  // появилась новая открытая задача (а не при каждом апдейте).
+  const lastResultRefreshRef = React.useRef(0);
+  const lastOpenTaskIdRef = React.useRef(null);
   useEffect(() => {
     if (!tasks || tasks.length === 0) return;
-    const hasOpen = tasks.some((tk) => isInProgressStatus(tk.Status) && !isCompletedStatus(tk.Status, tk.PercentComplete));
-    if (!hasOpen) return;
+    const openTask = tasks.find(
+      (tk) => isInProgressStatus(tk.Status) && !isCompletedStatus(tk.Status, tk.PercentComplete)
+    );
+    if (!openTask) return;
+
+    // Только если новая открытая задача или прошло > 5 мин
+    const now = Date.now();
+    const isNewOpen = lastOpenTaskIdRef.current !== openTask.Id;
+    const stale = now - lastResultRefreshRef.current > 5 * 60_000;
+    if (!isNewOpen && !stale) return;
+    lastOpenTaskIdRef.current = openTask.Id;
+    lastResultRefreshRef.current = now;
+
     let cancelled = false;
     (async () => {
       try {
-        const metas = await fetchResultFieldsMeta(apiClient, { forceRefresh: true });
+        const metas = await fetchResultFieldsMeta(apiClient);
         if (cancelled) return;
         setResultFieldsMeta(metas);
-        const map = await fetchContentTypeResultMap(apiClient, { forceRefresh: true });
+        const map = await fetchContentTypeResultMap(apiClient);
         if (cancelled) return;
         setCtResultMap(map);
         if (metas.length > 0 && metas[0].choices?.length) {
           const fresh = metas[0].choices;
           setChoices((prev) => {
-            if (fresh.length !== prev.length || fresh.some((v,i)=> v!==prev[i])) return fresh;
+            if (fresh.length !== prev.length || fresh.some((v, i) => v !== prev[i])) return fresh;
             return prev;
           });
         }
       } catch {}
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [tasks]);
 
     // eslint-disable-next-line no-unused-vars
@@ -2397,7 +2428,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack: _onBac
       setIsHashTaskRefreshing(true);
       try {
         // __noCache: polling в hash-режиме — всегда хотим свежие данные.
-        const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,WorkflowItemId&$expand=AssignedTo,Editor`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
+        const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${HASH_REFRESH_SELECT}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
         const raw = data?.d;
         if (!raw || cancelled) return;
         const mapped = mapRawTask(raw, { recipientField, scNumberField });
@@ -2415,7 +2446,7 @@ export default function TasksView({ userProfile: propUserProfile, onBack: _onBac
         const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
         if (msg.includes("additionalactions")) {
           try {
-            const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,WorkflowItemId&$expand=AssignedTo,Editor`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
+            const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${HASH_REFRESH_SELECT}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
             const raw = data?.d;
             if (!raw || cancelled) return;
             const mapped = mapRawTask(raw, { recipientField, scNumberField });

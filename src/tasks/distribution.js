@@ -1,10 +1,10 @@
 // src/tasks/distribution.js
-// Резолвинг distribution (DcEmail) + определение полей в Tasks list.
+// Резолвинг distribution (DcEmail).
 // Раньше жили inline в TasksView.jsx на module-scope (~100 строк) —
-// вынесены в Tier 3 (Q11).
+// вынесены в Tier 3 (Q11). getTaskFieldNames / detectRecipientField /
+// detectSCNumberField теперь живут в ./fieldsMeta (единый fetcher с дедупом).
 
 import apiClient from "../api";
-import { TASKS_LIST_API } from "./config";
 
 export const DCEMAIL_LIST_TITLE = "DcEmail";
 
@@ -139,72 +139,14 @@ export async function resolveDistributionViaDcEmail(office, department) {
   return null;
 }
 
-/**
- * Получить InternalName всех полей в Tasks list (для динамического определения
- * какие поля доступны — Recipient, RelatedItems, WorkflowItemId, OffDepKey и т.д.).
- * @returns {Promise<string[]>}
- */
-export async function getTaskFieldNames() {
-  try {
-    const { data } = await apiClient.get(
-      `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
-      { headers: { Accept: "application/json;odata=verbose" } }
-    );
-    return (data?.d?.results || []).map((f) => f.InternalName);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Определить InternalName поля Recipient в Tasks list.
- * Ищет: "Recipient" → title "получатель" → InternalName "recipient" → Lookup "recipient".
- * @returns {Promise<string|null>}
- */
-export async function detectRecipientField() {
-  try {
-    const { data } = await apiClient.get(
-      `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
-      { headers: { Accept: "application/json;odata=verbose" } }
-    );
-    const fields = data?.d?.results || [];
-    let f = fields.find((x) => x.InternalName === "Recipient");
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.Title && x.Title.toLowerCase().includes("получатель"));
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.InternalName.toLowerCase().includes("recipient"));
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.TypeAsString === "Lookup" && x.Title && x.Title.toLowerCase().includes("recipient"));
-    if (f) return f.InternalName;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Определить InternalName поля SCNumber (ТК номер) в Tasks list.
- * Ищет по списку кандидатов + по title содержащему SC + number.
- * @returns {Promise<string|null>}
- */
-export async function detectSCNumberField() {
-  try {
-    const { data } = await apiClient.get(
-      `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
-      { headers: { Accept: "application/json;odata=verbose" } }
-    );
-    const fields = data?.d?.results || [];
-    const candidates = ["SCNumber","ScNumber","SC_x0020_Number","SCNumber_x0020_","OrderNumber","ТК","SCNo"];
-    for (const c of candidates) {
-      const f = fields.find((x) => x.InternalName === c || x.InternalName.toLowerCase() === c.toLowerCase());
-      if (f) return f.InternalName;
-    }
-    let f = fields.find((x) => x.Title && /\bSC\b/i.test(x.Title) && x.Title.toLowerCase().includes("number"));
-    if (f) return f.InternalName;
-    f = fields.find((x) => x.InternalName.toLowerCase().includes("sc") && x.InternalName.toLowerCase().includes("number"));
-    if (f) return f.InternalName;
-    return null;
-  } catch {
-    return null;
-  }
-}
+// getTaskFieldNames / detectRecipientField / detectSCNumberField
+// раньше жили здесь и делали по отдельному GET /fields — теперь они импортированы
+// и реэкспортированы из ./fieldsMeta (единый fetcher с дедупом и общим кэшем).
+export {
+  getTaskFieldNames,
+  detectRecipientField,
+  detectSCNumberField,
+  fetchTasksFieldsMeta,
+  clearTasksFieldsMetaCache,
+  getCachedTasksFieldsMeta,
+} from "./fieldsMeta";

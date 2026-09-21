@@ -66,6 +66,8 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import TasksView from "./TasksView";
 import { useNotifications } from './NotificationsProvider';
+import { useCurrentUser } from "./hooks/useCurrentUser";
+import { useUserProfile } from "./hooks/useUserProfile";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -597,9 +599,28 @@ const App = () => {
   });
 
   useEffect(() => {
-    fetchUserProfile();
     fetchChoices();
   }, []);
+
+  // Текущий пользователь и профиль через общий TanStack Query хук —
+  // раздаётся всем потребителям (App, TasksView) без дубля запросов.
+  const { data: currentUser } = useCurrentUser();
+  const { data: profileData } = useUserProfile();
+  useEffect(() => {
+    if (currentUser?.Id && currentUser.Id !== currentUserId) {
+      setCurrentUserId(currentUser.Id);
+    }
+  }, [currentUser?.Id, currentUserId]);
+  useEffect(() => {
+    if (profileData) {
+      setUserProfile({
+        userDepartment: profileData.userDepartment,
+        userOffice: profileData.userOffice,
+        userDisplayName: profileData.userDisplayName,
+        userTitle: profileData.userTitle,
+      });
+    }
+  }, [profileData]);
 
   useEffect(() => {
     if (dcThuOverride) {
@@ -801,44 +822,6 @@ const App = () => {
       else console.error("Поле выбора не найдено или не содержит значений");
     } catch (error) {
       console.error("Ошибка при получении вариантов выбора для поля:", error);
-    }
-  };
-
-  const fetchUserProfile = async () => {
-    try {
-      const response = await apiClient.get(
-        "/SP.UserProfiles.PeopleManager/GetMyProperties",
-        { headers: { Accept: "application/json;odata=verbose" } }
-      );
-      const userProperties = response.data.d.UserProfileProperties.results;
-
-      const userDepartment =
-        findUserProfileProperty(userProperties, "Department")?.Value || "Не указано";
-      const userOffice =
-        findUserProfileProperty(userProperties, "Office")?.Value || "Не указано";
-      const userDisplayName =
-        findUserProfileProperty(userProperties, "PreferredName")?.Value || "Не указано";
-      const userTitle = response.data.d.Title;
-
-      let updatedUserOffice = userOffice;
-      if (userOffice === "РЦ-8117" && userDepartment === "Группа отгрузки РЦ") {
-        updatedUserOffice = "РЦ-8114";
-      }
-
-      setUserProfile({
-        userDepartment,
-        userOffice: updatedUserOffice,
-        userDisplayName,
-        userTitle,
-      });
-
-      // Также получим ID пользователя для фильтрации дубликатов
-      const meResp = await apiClient.get("/web/currentuser");
-      if (meResp.data?.d?.Id) {
-        setCurrentUserId(meResp.data.d.Id);
-      }
-    } catch (error) {
-      console.error("Ошибка при получении профиля пользователя:", error);
     }
   };
 
@@ -1382,9 +1365,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     );
     return response.data.d.GetContextWebInformation.FormDigestValue;
   };
-
-  const findUserProfileProperty = (properties, propertyName) =>
-    properties.find((prop) => prop.Key === propertyName);
 
   const handleBarcodeScanSuccess = (decodedText) => {
     setEoNumber(decodedText);
