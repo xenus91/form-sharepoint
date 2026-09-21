@@ -86,10 +86,11 @@ import { useNotifications } from "./NotificationsProvider";
 
 function stripHtml(html) {
   if (!html) return "";
-  // remove tags, decode entities roughly
   const tmp = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
-  // decode basic entities
-  return tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  let s = tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  // Чистим артефакты JSON (хвост "))}" и пробел перед запятой "28 ,")
+  s = s.replace(/\s*\)+\s*\}+\s*$/, "").replace(/\s+,/g, ",");
+  return s;
 }
 
 // formatDueLeft / formatDueDateFull / formatSolveTime / extractTKNumber /

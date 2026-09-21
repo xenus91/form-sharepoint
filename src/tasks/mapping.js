@@ -13,7 +13,9 @@
 function stripHtml(html) {
   if (!html) return "";
   const tmp = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
-  return tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  let s = tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  s = s.replace(/\s*\)+\s*\}+\s*$/, "").replace(/\s+,/g, ",");
+  return s;
 }
 
 /**
