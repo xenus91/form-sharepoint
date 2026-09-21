@@ -54,7 +54,7 @@ async function getTaskTypeConfig(contentTypeId, apiClient) {
  */
 async function getFieldMetadata(apiClient, internalName) {
   try {
-    const url = `/_api/web/lists(guid'463B634E-A71A-4FEF-9A1F-B803431D8639')/fields/getbyinternalnameormtitle('${internalName}')?$select=InternalName,Title,TypeAsString,Choices,FillInChoice,AllowMultipleValues,Hidden,ReadOnlyField`;
+    const url = `/web/lists(guid'463B634E-A71A-4FEF-9A1F-B803431D8639')/fields/getbyinternalnameormtitle('${internalName}')?$select=InternalName,Title,TypeAsString,Choices,FillInChoice,AllowMultipleValues,Hidden,ReadOnlyField`;
     // Fallback: используем getbytitle
     const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
     const f = data?.d;
@@ -71,7 +71,7 @@ async function getFieldMetadata(apiClient, internalName) {
   } catch (e) {
     // fallback via getbytitle
     try {
-      const fb = `/_api/web/lists(guid'463B634E-A71A-4FEF-9A1F-B803431D8639')/fields/getbytitle('${internalName}')?$select=InternalName,Title,TypeAsString,Choices,FillInChoice,AllowMultipleValues`;
+      const fb = `/web/lists(guid'463B634E-A71A-4FEF-9A1F-B803431D8639')/fields/getbytitle('${internalName}')?$select=InternalName,Title,TypeAsString,Choices,FillInChoice,AllowMultipleValues`;
       const { data } = await apiClient.get(fb, { headers: { Accept: "application/json;odata=verbose" } });
       const f = data?.d;
       if (!f) return null;
