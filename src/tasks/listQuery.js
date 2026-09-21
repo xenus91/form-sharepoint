@@ -64,7 +64,7 @@ export function buildTaskListQuery(opts = {}) {
       }
     }
   }
-  if (taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
+  if (taskFieldNames.length === 0 || taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
   // Recipient в Tasks отсутствует — не используем дефолт "Recipient" на первом рендере.
   // Раньше делали fallback "Recipient" при taskFieldNames.length===0, что давало 400 "Recipient не существует" и кучу ретраев.
   // Теперь Recipient берём только если он явно определён (recipientField !== null) или useRecipient === true.
@@ -79,8 +79,9 @@ export function buildTaskListQuery(opts = {}) {
       extraFields.push(`${effectiveRecipientField}/Title`);
     }
   }
-  if (taskFieldNames.includes("RelatedItems")) extraFields.push("RelatedItems");
-  if (taskFieldNames.includes("WorkflowItemId")) extraFields.push("WorkflowItemId");
+  // RelatedItems — критично для enrich (там лежит ListId/ItemId → оттуда тянем Recipient/THU), поэтому всегда берём на первом рендере
+  if (taskFieldNames.length === 0 || taskFieldNames.includes("RelatedItems")) extraFields.push("RelatedItems");
+  if (taskFieldNames.length === 0 || taskFieldNames.includes("WorkflowItemId")) extraFields.push("WorkflowItemId");
   // AdditionalActions поля — включаем если useAdditionalActions и поле есть в списке или ещё не загружен список полей (для первой загрузки)
   // Это безопасно для старых списков без этих полей — при 400 ошибке loadTasks сделает retry без них.
   const hasAdditionalFields = taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions") || taskFieldNames.includes("AdditionalActionsRequired");
