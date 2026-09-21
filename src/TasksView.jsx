@@ -512,11 +512,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         >
           {task.Body || task.Title || "Без текста"}
         </Typography>
-        {(task.Recipient || task.SCNumber) && (
-          <Typography variant="caption" sx={{ color: "#5c6bc0", fontWeight: 600, display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap" }}>
-            {task.Recipient ? `Получатель: ${task.Recipient}` : ""} {task.SCNumber ? `• ТК: ${task.SCNumber}` : (extractSCNumber(task.Recipient) !== "Без ТК" && task.Recipient !== extractSCNumber(task.Recipient) ? `• ТК: ${extractSCNumber(task.Recipient)}` : (extractSCNumberFromTask(task) !== "Без ТК" ? `• ТК: ${extractSCNumberFromTask(task)}` : ""))}
-          </Typography>
-        )}
+        {/* Получатель скрыт — в заголовке уже ТК и ЕО, ниже только Body, как просил пользователь */}
       </Box>
 
       {isCompleted ? (
