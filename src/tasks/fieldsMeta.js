@@ -13,7 +13,9 @@
 import apiClient from "../api";
 import { TASKS_LIST_API } from "./config";
 
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 минут
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 дней — схема меняется крайне редко,
+                                                // а админский рефреш можно сделать через
+                                                // clearTasksFieldsMetaCache() из DevTools.
 
 // Возможные InternalName для поля SCNumber (ТК-номер). Совпадает с тем,
 // что было в detectSCNumberField — поведение сохраняем 1-в-1.

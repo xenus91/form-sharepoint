@@ -8,6 +8,37 @@ import apiClient from "../api";
 
 export const DCEMAIL_LIST_TITLE = "DcEmail";
 
+// In-memory + localStorage кэш для resolveDistributionViaDcEmail.
+// DcEmail меняется редко (рост/смена состава РЦ — раз в месяцы),
+// поэтому держим 7 дней и снимаем нагрузку с повторных резолвов.
+const DCEMAIL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 дней
+const DCEMAIL_STORAGE_KEY = "sp:distribution:dcemail:cache:v1";
+const _dcEmailMemCache = new Map(); // key = "${office}|${department}" → { at, item }
+
+function loadDcEmailFromStorage() {
+  try {
+    const raw = localStorage.getItem(DCEMAIL_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v && typeof v === "object" && v.at) _dcEmailMemCache.set(k, v);
+      }
+    }
+  } catch {}
+}
+
+function saveDcEmailToStorage() {
+  try {
+    const obj = {};
+    for (const [k, v] of _dcEmailMemCache) obj[k] = v;
+    localStorage.setItem(DCEMAIL_STORAGE_KEY, JSON.stringify(obj));
+  } catch {}
+}
+
+// Загрузить кэш один раз при первом импорте
+loadDcEmailFromStorage();
+
 /**
  * Извлечь group IDs из dist.Email (поле Пользователь/Группа в DcEmail).
  * Поле Email — множественный выбор (Allow Multiple = true), поэтому для одного
@@ -79,6 +110,11 @@ export async function resolveDistributionViaDcEmail(office, department) {
   if (!office || !department) return null;
   const officeStr = String(office).trim();
   const deptStr = String(department).trim();
+  const cacheKey = `${officeStr}|${deptStr}`;
+  const cached = _dcEmailMemCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < DCEMAIL_CACHE_TTL_MS) {
+    return cached.item;
+  }
   const full = `${officeStr}${deptStr}`;
   const candidates = [full];
   // Варианты для локального РЦ: suffix, "РЦ-XXXX…", без дефиса
@@ -102,7 +138,10 @@ export async function resolveDistributionViaDcEmail(office, department) {
       const items = data?.d?.results || [];
       if (items.length) {
         if (offDepKey !== full) console.log(`[DcEmail] resolved via variant "${offDepKey}" (full "${full}")`);
-        return items[0];
+        const found = items[0];
+        _dcEmailMemCache.set(cacheKey, { at: Date.now(), item: found });
+        saveDcEmailToStorage();
+        return found;
       }
     } catch {}
   }
@@ -118,6 +157,8 @@ export async function resolveDistributionViaDcEmail(office, department) {
       const found = items2.find((it) => String(it.OffDepKey || "").trim().toLowerCase() === norm);
       if (found) {
         if (cand !== full) console.log(`[DcEmail] resolved via client fallback variant "${cand}"`);
+        _dcEmailMemCache.set(cacheKey, { at: Date.now(), item: found });
+        saveDcEmailToStorage();
         return found;
       }
     }
@@ -131,12 +172,32 @@ export async function resolveDistributionViaDcEmail(office, department) {
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       const items = data?.d?.results || [];
-      if (items.length) return items[0];
+      if (items.length) {
+        const found = items[0];
+        _dcEmailMemCache.set(cacheKey, { at: Date.now(), item: found });
+        saveDcEmailToStorage();
+        return found;
+      }
     } catch (e2) {
       console.warn("DcEmail resolve failed", e2?.message);
     }
   }
+  // Даже null кэшируем на TTL, чтобы не перебирать кандидатов каждый раз,
+  // когда РЦ вообще не настроен (например, для нового сотрудника).
+  _dcEmailMemCache.set(cacheKey, { at: Date.now(), item: null });
+  saveDcEmailToStorage();
   return null;
+}
+
+/**
+ * Сбросить кэш распределения (например, после смены РЦ в модалке или
+ * ручного override администратором).
+ */
+export function clearDistributionCache() {
+  _dcEmailMemCache.clear();
+  try {
+    localStorage.removeItem(DCEMAIL_STORAGE_KEY);
+  } catch {}
 }
 
 // getTaskFieldNames / detectRecipientField / detectSCNumberField

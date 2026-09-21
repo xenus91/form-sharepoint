@@ -12,7 +12,10 @@ let _resultFieldsCache = null; // Array<{ internalName, title, choices, id, stri
 let _resultFieldsCacheAt = 0;
 let _ctMapCache = null; // Map<string CtStringId -> fieldMeta>
 let _ctMapCacheAt = 0;
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 часа — поле результата меняется редко
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 дней — поле результата меняется
+                                          // крайне редко (новый ContentType админы
+                                          // создают раз в месяцы). Если нужно
+                                          // сбросить — clearResultFieldsCache().
 const STORAGE_KEY_FIELDS = "sp:resultFields:meta";
 const STORAGE_KEY_CTMAP = "sp:resultFields:ctMap";
 

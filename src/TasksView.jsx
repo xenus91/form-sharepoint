@@ -88,9 +88,12 @@ function stripHtml(html) {
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap }) {
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
-  const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
+  // Заголовок карточки всегда одного формата: "ТК N • ЕО X" или "ТК Без ТК • ЕО X".
+  // Раньше при отсутствии TK префикс просто пропускался — карточки выглядели
+  // по-разному ("ТК 183 • ЕО ..." vs "ЕО ..."). Теперь структура идентичная.
+  const tkLabel = tkRaw !== "Без ТК" ? `ТК ${tkRaw.replace(/^TK/, "")}` : "ТК Без ТК";
   const eo = extractEONumberFromTask(task);
-  const headerTitle = [tk, eo ? `ЕО ${eo}` : ""].filter(Boolean).join(" • ") || task.Title || "Без текста";
+  const headerTitle = `${tkLabel}${eo ? ` • ЕО ${eo}` : ""}`;
   const isUpdating = updatingId === task.Id;
   const isTaking = isUpdating && isNotStartedStatus(task.Status);
   const [confirmNotFoundMode, setConfirmNotFoundMode] = React.useState(() => initialAction === "notfound" && isInProgressStatus(task.Status) && !isCompleted);
@@ -1203,7 +1206,6 @@ export default function TasksView({ userProfile: propUserProfile, onBack: _onBac
   const {
     data: tasksData,
     isLoading: isTasksLoading,
-    isFetching: isTasksFetching,
     error: tasksQueryError,
     refetch: refetchTasks,
     dataUpdatedAt: tasksDataUpdatedAt,
@@ -1264,7 +1266,6 @@ export default function TasksView({ userProfile: propUserProfile, onBack: _onBac
 
   const tasks = tasksData ?? [];
   const loading = isTasksLoading && tasks.length===0;
-  const isBackgroundFetching = isTasksFetching && !isTasksLoading;
   const error = tasksQueryError ? "Не удалось загрузить задачи." : "";
   const [tab, setTab] = useState(0); // 0 = active, 1 = completed
 
@@ -2880,9 +2881,8 @@ export default function TasksView({ userProfile: propUserProfile, onBack: _onBac
               );
             })}
           </Stack>
-          {(loading || isBackgroundFetching) && tasks.length > 0 && (
-            <Box sx={{ display: "flex", justifyContent: "center", py: 2, gap: 1, alignItems: "center" }}><CircularProgress size={20} /><Typography variant="caption" color="text.secondary">Обновление...</Typography></Box>
-          )}
+          {/* Refetch должен быть незаметным — спиннер "Обновление..." на каждом poll убран.
+              Начальная загрузка (loading) уже показывается выше отдельным блоком. */}
         </Box>
       )}
       </Box>

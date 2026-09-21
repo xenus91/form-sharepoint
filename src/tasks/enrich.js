@@ -30,6 +30,9 @@ function parseRelatedItems(related) {
 
 /**
  * Извлекает Recipient Title и SCNumber из сырого объекта Related-элемента.
+ *
+ * Поддерживает оба варианта: $expand=Recipient (один объект или {results:[...]})
+ * и projected column `Recipient_x003a_SCNumberText` (если есть в ответе).
  */
 function extractRecipientAndSC(d) {
   if (!d) return null;
@@ -80,36 +83,32 @@ function groupByListId(tasks) {
 }
 
 /**
- * Batch-выборка связанных элементов ОДНИМ POST /GetItems с CAML <In>.
+ * Batch-выборка связанных элементов через REST $filter (Id eq X or Id eq Y ...).
+ *
+ * Почему НЕ CAML /GetItems: запрос с CAML <In> + ViewFields (THU, DC_THU,
+ * Recipient, Recipient_x003a_SCNumberText) падает с SPException -2130575340
+ * "Один или несколько типов полей установлены неправильно" — потому что эти
+ * поля живут в списке Tasks, а не в списке RelatedItems (например
+ * ПроизводственныеЗадачи). CAML <In> + явный ViewFields ломается, если
+ * хотя бы одно поле отсутствует.
+ *
+ * REST $filter устойчив: используем только универсальные поля (Id, Title)
+ * + $expand=Recipient (он есть почти везде, где есть lookup на Tasks).
+ * Если $expand упадёт — мы просто не получим Recipient, но не словим 500.
+ *
  * @param {string} listId
  * @param {Array<number|string>} itemIds
  * @returns {Promise<Array>} массив raw-объектов (data.d.results)
  */
 async function fetchRelatedElementsBatch(listId, itemIds) {
   if (!itemIds.length) return [];
-  const valuesXml = itemIds
-    .map((id) => `<Value Type='Number'>${Number(id)}</Value>`)
-    .join("");
-  const viewXml =
-    `<View><Query><Where><In><FieldRef Name='Id'/><Values>${valuesXml}</Values></In></Where>` +
-    `</Query><ViewFields>` +
-    `<FieldRef Name='Id'/><FieldRef Name='Title'/>` +
-    `<FieldRef Name='THU'/><FieldRef Name='DC_THU'/>` +
-    `<FieldRef Name='Recipient'/><FieldRef Name='Recipient_x003a_SCNumberText'/>` +
-    `</ViewFields><RowLimit>${itemIds.length}</RowLimit></View>`;
-  const payload = {
-    query: { __metadata: { type: "SP.CamlQuery" }, ViewXml: viewXml },
-  };
-  const { data } = await apiClient.post(
-    `/web/lists(guid'${listId}')/GetItems`,
-    payload,
-    {
-      headers: {
-        Accept: "application/json;odata=verbose",
-        "Content-Type": "application/json;odata=verbose",
-      },
-    }
-  );
+  const filter = itemIds.map((id) => `Id eq ${Number(id)}`).join(" or ");
+  const url =
+    `/web/lists(guid'${listId}')/items?$filter=${encodeURIComponent(filter)}` +
+    `&$select=Id,Title&$expand=Recipient($select=Title,SCNumberText)`;
+  const { data } = await apiClient.get(url, {
+    headers: { Accept: "application/json;odata=verbose" },
+  });
   return data?.d?.results || [];
 }
 

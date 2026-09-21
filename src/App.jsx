@@ -68,6 +68,7 @@ import TasksView from "./TasksView";
 import { useNotifications } from './NotificationsProvider';
 import { useCurrentUser } from "./hooks/useCurrentUser";
 import { useUserProfile } from "./hooks/useUserProfile";
+import { useProblemChoices } from "./hooks/useProblemChoices";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -599,13 +600,15 @@ const App = () => {
   });
 
   useEffect(() => {
-    fetchChoices();
+    // Заменил fetchChoices на useProblemChoices ниже.
   }, []);
 
-  // Текущий пользователь и профиль через общий TanStack Query хук —
-  // раздаётся всем потребителям (App, TasksView) без дубля запросов.
+  // Текущий пользователь, профиль и набор Problems — через общие TanStack Query хуки.
+  // Раздаются всем потребителям (App, TasksView, ManagerPreview) без дубля запросов,
+  // с длинным staleTime для редко меняющихся данных (7 дней для Problems).
   const { data: currentUser } = useCurrentUser();
   const { data: profileData } = useUserProfile();
+  const { data: problemChoices } = useProblemChoices();
   useEffect(() => {
     if (currentUser?.Id && currentUser.Id !== currentUserId) {
       setCurrentUserId(currentUser.Id);
@@ -621,6 +624,11 @@ const App = () => {
       });
     }
   }, [profileData]);
+  useEffect(() => {
+    if (problemChoices && problemChoices.length > 0) {
+      setChoices(problemChoices);
+    }
+  }, [problemChoices]);
 
   useEffect(() => {
     if (dcThuOverride) {
@@ -812,19 +820,6 @@ const App = () => {
       }
     }
   };
-  const fetchChoices = async () => {
-    try {
-      const { data } = await apiClient.get(
-        `/web/lists/getbytitle('ProblemsPallet')/fields?$filter=InternalName eq 'Problems'`
-      );
-      const field = data?.d?.results?.[0];
-      if (field?.Choices?.results) setChoices(field.Choices.results);
-      else console.error("Поле выбора не найдено или не содержит значений");
-    } catch (error) {
-      console.error("Ошибка при получении вариантов выбора для поля:", error);
-    }
-  };
-
   const getOfficeSuffix = (office) => {
     if (!office) return "";
     const officeParts = office.split("-");
