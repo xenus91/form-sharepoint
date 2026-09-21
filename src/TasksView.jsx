@@ -1120,7 +1120,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       </Button>
                       );
                     })}
-                    ))}
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
