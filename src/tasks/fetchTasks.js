@@ -20,6 +20,7 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
       useDueDate,
       useAdditionalActions,
       recipientField: effectiveRecipientField,
+      useRecipient,
       resultFieldInternalNames,
       distribution,
       currentUserId,

@@ -52,6 +52,31 @@ function stripEndJob(url) {
   cleaned = cleaned.replace(/\$select=&/g, "&").replace(/\$select=$/, "");
   return cleaned;
 }
+function stripRecipient(url) {
+  if (!url || typeof url !== "string") return url;
+  if (!url.toLowerCase().includes("recipient")) return url;
+  let cleaned = url;
+  // Clean Recipient/Id and Recipient/Title
+  cleaned = cleaned.replace(/,Recipient\/Id/gi, "");
+  cleaned = cleaned.replace(/,Recipient\/Title/gi, "");
+  cleaned = cleaned.replace(/Recipient\/Id,/gi, "");
+  cleaned = cleaned.replace(/Recipient\/Title,/gi, "");
+  cleaned = cleaned.replace(/Recipient\/Id/gi, "");
+  cleaned = cleaned.replace(/Recipient\/Title/gi, "");
+  // Clean ,Recipient and Recipient,
+  cleaned = cleaned.replace(/,Recipient/gi, "");
+  cleaned = cleaned.replace(/Recipient,/gi, "");
+  // Clean $expand Recipient
+  cleaned = cleaned.replace(/,Recipient/gi, "");
+  cleaned = cleaned.replace(/Recipient,/gi, "");
+  cleaned = cleaned.replace(/\$expand=,/g, "$expand=").replace(/&\$expand=,/g, "&$expand=").replace(/\$expand=Recip[^&]*&/g, "&").replace(/\$expand=Recip[^&]*$/g, "");
+  cleaned = cleaned.replace(/,+/g, ",").replace(/\$select=,/g, "$select=").replace(/,\$expand/g, "&$expand").replace(/\?&/, "?").replace(/,,/g, ",");
+  cleaned = cleaned.replace(/\$select=&/g, "&").replace(/\$select=$/, "");
+  // Final cleanup of expand if empty
+  cleaned = cleaned.replace(/&\$expand=&/g, "&").replace(/\$expand=&/g, "&").replace(/\?$expand=$/, "");
+  cleaned = cleaned.replace(/,+/g, ",").replace(/,\$expand/g, "&$expand");
+  return cleaned;
+}
 // eslint-disable-next-line no-unused-vars
 function stripEndJobFromData(data) {
   if (!data || typeof data !== "object") return data;
@@ -61,9 +86,18 @@ function stripEndJobFromData(data) {
   } catch (_e) { void _e; }
   return data;
 }
+let _recipientMissing = false;
+try {
+  const _stored = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("sp:recipientMissing") : null;
+  if (_stored === "1") _recipientMissing = true;
+} catch (_e) { void _e; }
 // Для небезопасных методов добавляем X-RequestDigest + чистим EndJob
 apiClient.interceptors.request.use(async (config) => {
   try {
+    if (_recipientMissing && config.url && config.url.toLowerCase().includes("recipient")) {
+      console.warn("[api] stripping Recipient from URL (previously missing)", config.url);
+      config.url = stripRecipient(config.url);
+    }
     if (config.url && config.url.toLowerCase().includes("endjob")) {
       console.warn("[api] stripping EndJob from URL", config.url);
       config.url = stripEndJob(config.url);
@@ -111,7 +145,7 @@ apiClient.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Централизованный лог ошибок + авто-очистка кэша для удалённого поля EndJob
+// Централизованный лог ошибок + авто-очистка кэша для удалённых полей
 apiClient.interceptors.response.use(
   (r) => r,
   (err) => {
@@ -128,8 +162,29 @@ apiClient.interceptors.response.use(
               if (k && k.toLowerCase().includes("endjob")) ls.removeItem(k);
               const v = ls.getItem(k);
               if (v && v.toLowerCase().includes("endjob")) {
-                // не удаляем весь ключ, но логируем
                 console.warn("[api] localStorage", k, "contains EndJob");
+              }
+            } catch (_e) { void _e; }
+          }
+        }
+      } catch (_e) { void _e; }
+    }
+    if (msg.includes("recipient")) {
+      console.warn("[api] Recipient error detected, invalidating cache", err?.config?.url);
+      _recipientMissing = true;
+      try { if (typeof sessionStorage !== "undefined") sessionStorage.setItem("sp:recipientMissing", "1"); } catch (_e) { void _e; }
+      try { invalidate("Recipient"); } catch (_e) { void _e; }
+      try { invalidate("recipient"); } catch (_e) { void _e; }
+      // Also clear from LS if needed
+      try {
+        const ls2 = typeof localStorage !== "undefined" ? localStorage : null;
+        if (ls2) {
+          for (let i = ls2.length - 1; i >= 0; i--) {
+            try {
+              const k2 = ls2.key(i);
+              const v2 = k2 ? ls2.getItem(k2) : null;
+              if (k2 && k2.toLowerCase().includes("recipient") && v2 && v2.toLowerCase().includes("recipient")) {
+                console.warn("[api] localStorage", k2, "contains Recipient");
               }
             } catch (_e) { void _e; }
           }

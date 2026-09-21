@@ -206,6 +206,11 @@ export async function getTasksListFieldsOverview() {
     const fieldNames = fields.map((f) => f.InternalName).filter((n) => n.toLowerCase() !== "endjob");
     const recipientField = detectRecipientFromFields(fields);
     const scNumberField = detectSCNumberFromFields(fields);
+    // Если Recipient снова появился, сбрасываем флаг "missing" чтобы будущие запросы снова пробовали его
+    if (recipientField) {
+      try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("sp:recipientMissing"); } catch (_e) { void _e; }
+      try { if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("sp:recipientMissing") === "1") sessionStorage.removeItem("sp:recipientMissing"); } catch (_e) { void _e; }
+    }
     return { fieldNames, recipientField, scNumberField, fields };
   } catch {
     return { fieldNames: [], recipientField: null, scNumberField: null, fields: [] };

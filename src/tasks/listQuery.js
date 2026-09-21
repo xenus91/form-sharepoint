@@ -42,6 +42,7 @@ export function buildTaskListQuery(opts = {}) {
     useDueDate = true,
     useAdditionalActions = true,
     recipientField = null,
+    useRecipient = null,
     distribution = null,
     currentUserId = null,
     top = 100,
@@ -66,11 +67,13 @@ export function buildTaskListQuery(opts = {}) {
   if (taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
   // По умолчанию считаем, что поле Recipient существует (критично для экономии трафика — большинство задач получают Recipient сразу, без докачки)
   // Если recipientField === null и список полей ещё не загружен (первый рендер), используем дефолт "Recipient"
-  const effectiveRecipientFieldRaw = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
+  // useRecipient === false явно отключает Recipient (после 400 ошибки "Recipient не существует")
+  const shouldUseRecipient = useRecipient !== null ? useRecipient : (recipientField ? true : taskFieldNames.length === 0);
+  const effectiveRecipientFieldRaw = shouldUseRecipient ? (recipientField || (taskFieldNames.length === 0 ? "Recipient" : null)) : null;
   const effectiveRecipientField = effectiveRecipientFieldRaw && effectiveRecipientFieldRaw.toLowerCase() === "endjob" ? null : effectiveRecipientFieldRaw;
-  if (effectiveRecipientField) {
-    if (effectiveRecipientField.toLowerCase() === "endjob") {
-      console.warn("[listQuery] blocked EndJob as recipient field");
+  if (effectiveRecipientField && shouldUseRecipient) {
+    if (effectiveRecipientField.toLowerCase() === "endjob" || effectiveRecipientField.toLowerCase() === "recipient" && !shouldUseRecipient) {
+      console.warn("[listQuery] blocked", effectiveRecipientField, "as recipient field");
     } else {
       extraFields.push(`${effectiveRecipientField}/Id`);
       extraFields.push(`${effectiveRecipientField}/Title`);
@@ -103,8 +106,8 @@ export function buildTaskListQuery(opts = {}) {
 
   // Expand
   const expands = ["AssignedTo", "Editor"];
-  const effectiveExpandRecipient = recipientField || (taskFieldNames.length === 0 ? "Recipient" : null);
-  if (effectiveExpandRecipient) expands.push(effectiveExpandRecipient);
+  const effectiveExpandRecipient = shouldUseRecipient ? (recipientField || (taskFieldNames.length === 0 ? "Recipient" : null)) : null;
+  if (effectiveExpandRecipient && shouldUseRecipient) expands.push(effectiveExpandRecipient);
 
   // Filter по AssignedToId — серверный фильтр по группе + текущему юзеру (OR), чтобы персональные задачи не терялись.
   // OffDepKey в Tasks больше не используем как фолбэк — он ненадёжен (поле может быть пустым/неиндексированным и даёт 0).
