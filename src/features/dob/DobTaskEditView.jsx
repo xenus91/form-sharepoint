@@ -124,16 +124,60 @@ export default function DobTaskEditView({ id }) {
           continue;
         }
         if (editableSet.has(k)) {
-          // Для User полей SharePoint ждёт <Field>Id — но пока шлём как есть, retry выкинет если не существует
-          // Если значение — объект {Id, Title}, берём Id
+          const meta = (fields || []).find(f => f.InternalName === k);
+          const t = (meta?.TypeAsString || '').toLowerCase();
+          // User/Lookup — нужен Id суффикс, иначе 400 "value without type"
+          if (t === 'user' || t === 'lookup' || t === 'lookupmulti' || meta?.LookupList) {
+            const idKeyRaw = `${k}Id`;
+            const odataIdKey = toODataKey(idKeyRaw);
+            let val = v;
+            if (val && typeof val === 'object') {
+              if ('Id' in val) val = val.Id;
+              else if ('ID' in val) val = val.ID;
+              else if (val.Title) { console.log('[DobEdit][save] skip User/Lookup without Id', k, val); continue; }
+            }
+            // также пробуем взять Id из item
+            if ((val === null || val === undefined || val === '') && item) {
+              const alt = getODataValue(item, idKeyRaw) ?? item[idKeyRaw];
+              if (alt !== undefined) val = alt;
+            }
+            if (val === null || val === undefined || val === '') {
+              console.log('[DobEdit][save] skip empty User/Lookup', k);
+              continue;
+            }
+            const num = Number(val);
+            if (!isNaN(num)) payload[odataIdKey] = num;
+            else console.log('[DobEdit][save] skip non-numeric User/Lookup', k, val);
+            continue;
+          }
+          // Пропускаем сложные типы которые требуют __metadata
+          if (['taxonomyfieldtype','taxonomyfieldtypemulti','user','lookup','lookupmulti','url','calculated','computed'].includes(t)) {
+            // URL — объект {Url, Description}, шлём только Url если строка
+            if (t === 'url' && v && typeof v === 'object' && v.Url) {
+              payload[odataK] = v.Url;
+              continue;
+            }
+            if (t === 'taxonomyfieldtype' || t === 'taxonomyfieldtypemulti') {
+              console.log('[DobEdit][save] skip taxonomy', k);
+              continue;
+            }
+          }
           let val = v;
-          if (val && typeof val === 'object' && 'Id' in val && Object.keys(val).length <= 3) {
-            // Попытка вытащить Id для User
-            val = val.Id;
+          if (val && typeof val === 'object' && !Array.isArray(val)) {
+            // Если объект с Url — берём Url, иначе скипаем (иначе 400 без типа)
+            if ('Url' in val) val = val.Url;
+            else if ('Results' in val) val = val.Results;
+            else { console.log('[DobEdit][save] skip object value', k, t, val); continue; }
+          }
+          if (val === undefined) continue;
+          // DateTime — SharePoint ждёт ISO
+          if (t === 'datetime' && val) {
+            try {
+              const d = new Date(val);
+              if (!isNaN(d)) val = d.toISOString();
+            } catch {}
           }
           payload[odataK] = val;
-          // Также для совместимости оставляем raw ключ если OData не сработает — updateDobItem попробует оба
-          // Но основной — odataK
         }
       }
       // Remove system fields (оба варианта)
@@ -143,9 +187,31 @@ export default function DobTaskEditView({ id }) {
       delete payload['OData_Author'];
       delete payload.Editor;
       delete payload['OData_Editor'];
-      console.log('[DobEdit][save] payload keys', Object.keys(payload), 'chekInternal', chekInternal, 'odataChek', toODataKey(chekInternal));
+      console.log('[DobEdit][save] payload keys', Object.keys(payload), 'chekInternal', chekInternal, 'odataChek', toODataKey(chekInternal), 'payload', payload);
       // Ensure boolean/null handling
-      await updateDobItem(id, payload);
+      try {
+        await updateDobItem(id, payload);
+      } catch (e) {
+        const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
+        const lower = String(rawMsg).toLowerCase();
+        if (lower.includes('без имени типа') || lower.includes('without type') || lower.includes('expected type')) {
+          console.warn('[DobEdit][save] fallback to minimal payload (ChekResult only) due to type error', rawMsg.slice(0,300));
+          const chekKey = toODataKey(chekInternal);
+          const minimal = { [chekKey]: payload[chekKey] ?? form[chekInternal] ?? '' };
+          // Title тоже попробуем если есть
+          if (payload.Title) minimal.Title = payload.Title;
+          if (payload['OData_Title']) minimal['OData_Title'] = payload['OData_Title'];
+          console.log('[DobEdit][save] minimal keys', Object.keys(minimal));
+          await updateDobItem(id, minimal);
+          // успех — не кидаем дальше
+          notify(`Заявка ${id} сохранена (только ${chekKey})`, { severity: 'success' });
+          qc.invalidateQueries({ queryKey: ['dob-items'] });
+          qc.invalidateQueries({ queryKey: ['dob-item', id] });
+          getDobAttachments(id).then(setAttachments).catch(()=>{});
+          return;
+        }
+        throw e;
+      }
       notify(`Заявка ${id} сохранена`, { severity: 'success' });
       // Invalidate list and item
       qc.invalidateQueries({ queryKey: ['dob-items'] });
