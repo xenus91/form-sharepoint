@@ -96,6 +96,8 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
   const fileInputRef = useRef(null);
   const base64MapRef = useRef(new Map());
   const lastEmittedRef = useRef(value || '');
+  const [zoom, setZoom] = useState(1);
+  const editorScrollRef = useRef(null);
   const [internalUploading, setInternalUploading] = useState(false);
   const uploading = isUploading || internalUploading;
 
@@ -349,6 +351,22 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
     editor.chain().focus().updateAttributes('image', { width: `${pct}%`, style: `width: ${pct}%` }).run();
   }, [editor]);
 
+  const handleWheel = useCallback((e) => {
+    // Ctrl/Cmd + колесо — зум, иначе обычный скролл
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = -e.deltaY * 0.0015;
+      setZoom(z => {
+        const nz = Math.min(3, Math.max(0.5, z + delta));
+        return Math.round(nz * 100) / 100;
+      });
+    }
+  }, []);
+
+  const zoomIn = useCallback(() => setZoom(z => Math.min(3, Math.round((z + 0.1)*10)/10)), []);
+  const zoomOut = useCallback(() => setZoom(z => Math.max(0.5, Math.round((z - 0.1)*10)/10)), []);
+  const zoomReset = useCallback(() => setZoom(1), []);
+
   const handleImage = useCallback(async () => {
     if (!editor) return;
     const input = document.createElement('input');
@@ -505,6 +523,10 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
             </>
           )}
 
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+          <Tooltip title="Уменьшить (Ctrl+колесо)"><IconButton size="small" onClick={zoomOut} sx={{ fontSize: 14 }}>−</IconButton></Tooltip>
+          <Tooltip title="Сбросить зум"><Button size="small" onClick={zoomReset} sx={{ minWidth: 40, px: 0.5, fontSize: 12 }}>{Math.round(zoom*100)}%</Button></Tooltip>
+          <Tooltip title="Увеличить (Ctrl+колесо)"><IconButton size="small" onClick={zoomIn} sx={{ fontSize: 14 }}>+</IconButton></Tooltip>
           <Box sx={{ flex: 1 }} />
           <Tooltip title="Очистить формат"><Button size="small" onClick={()=> editor.chain().focus().unsetAllMarks().clearNodes().run()} sx={{ borderRadius: 2 }}>Очистить</Button></Tooltip>
         </Paper>
@@ -546,7 +568,7 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
         </BubbleMenu>
       )}
 
-      {/* Editor area with scroll */}
+      {/* Editor area with scroll — actual size, horizontal scroll, zoom via Ctrl+wheel */}
       <Box
         sx={{
           p: 0,
@@ -558,24 +580,48 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
         }}
       >
         {/* hint for paste */}
-        <Box sx={{ px: 1.5, py: 0.5, bgcolor: 'rgba(46,125,50,0.06)', borderBottom: '1px solid rgba(46,125,50,0.1)', display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Typography variant="caption" color="text.secondary">
+        <Box sx={{ px: 1.5, py: 0.5, bgcolor: 'rgba(46,125,50,0.06)', borderBottom: '1px solid rgba(46,125,50,0.1)', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
             Подсказка: скопируйте картинку в буфер (PrintScreen, Ctrl+C в Paint) и нажмите <b>Ctrl+V</b> прямо в тексте — она загрузится как вложение. Перетаскивание файла тоже работает.
           </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>Зум: Ctrl+колесо / кнопки в тулбаре</Typography>
         </Box>
         <Box
+          ref={editorScrollRef}
+          onWheel={handleWheel}
           sx={{
             flex: 1,
-            overflowY: 'auto',
-            overflowX: 'hidden',
-            p: 1.5,
-            '& .tiptap': {
-              outline: 'none',
-              fontSize: 14,
-              lineHeight: 1.55,
-              minHeight: 180,
-              maxWidth: '100%',
-            },
+            overflow: 'auto',
+            p: 0,
+            position: 'relative',
+            bgcolor: '#fff',
+          }}
+        >
+          <Box
+            sx={{
+              p: 1.5,
+              minWidth: '100%',
+              width: 'max-content',
+              zoom: zoom,
+              // для Firefox где zoom не поддерживается — fallback через transform
+              '@supports not (zoom: 1)': {
+                transform: `scale(${zoom})`,
+                transformOrigin: '0 0',
+                width: `${100/zoom}%`,
+              },
+            }}
+          >
+            <Box
+              sx={{
+                '& .tiptap': {
+                  outline: 'none',
+                  fontSize: 14,
+                  lineHeight: 1.55,
+                  minHeight: 180,
+                  minWidth: '100%',
+                  width: 'max-content',
+                  maxWidth: 'none',
+                },
             '& .tiptap p': { margin: '0.5em 0' },
             '& .tiptap h1': { fontSize: '1.6em', fontWeight: 800, margin: '0.6em 0 0.3em', color: '#171c8f' },
             '& .tiptap h2': { fontSize: '1.3em', fontWeight: 700, margin: '0.6em 0 0.3em' },
@@ -594,14 +640,16 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
             '& .tiptap table:hover .column-resize-handle': { opacity: 1 },
             '& .tiptap table th': { background: '#f4f5f7', fontWeight: 700, textAlign: 'left' },
             '& .tiptap table .selectedCell': { background: 'rgba(23,28,143,0.08)' },
-            '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 0, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block', cursor: 'pointer' },
+            '& .tiptap img': { maxWidth: 'none', height: 'auto', borderRadius: 0, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block', cursor: 'pointer' },
             '& .tiptap img[width]': { width: 'attr(width %)', maxWidth: '100%' },
             '& .tiptap img.ProseMirror-selectednode': { outline: '2px solid #171c8f', outlineOffset: 2 },
             // Placeholder
             '& .tiptap p.is-editor-empty:first-of-type::before': { content: 'attr(data-placeholder)', float: 'left', color: 'rgba(0,0,0,0.35)', pointerEvents: 'none', height: 0 },
-          }}
-        >
-          <EditorContent editor={editor} />
+              }}
+            >
+              <EditorContent editor={editor} />
+            </Box>
+          </Box>
         </Box>
       </Box>
     </Box>
