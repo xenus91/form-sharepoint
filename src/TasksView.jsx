@@ -27,7 +27,10 @@ import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguratio
 import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
 import { useDistribution } from "./features/tasks/hooks/useDistribution";
 import { useTasksMetadata } from "./features/tasks/hooks/useTasksMetadata";
-// import { useTasksFiltering } from "./features/tasks/hooks/useTasksFiltering"; // PR1 следующий шаг
+// import { useTasksFiltering } from "./features/tasks/hooks/useTasksFiltering";
+import TasksHeader from "./features/tasks/components/TasksHeader";
+import TasksTabs from "./features/tasks/components/TasksTabs";
+import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle"; // PR1 следующий шаг
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
 import TaskList from "./features/tasks/components/TaskList";
@@ -1361,93 +1364,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         </Box>
       )}
       <Box sx={{ position: "relative", zIndex: 10, bgcolor: "#ffffff", backdropFilter: "none", transform: "translateZ(0)", willChange: "transform", mx: 0, px: { xs: 1, sm: 2 }, pt: 1, pb: 1, mb: 1, borderRadius: '28px', border: "1px solid rgba(23,28,143,0.12)", boxShadow: "0 2px 8px rgba(23,28,143,0.06)", overflow: 'visible', boxSizing: 'border-box', flexShrink: 0, contain: "layout paint" }}>
-        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5, mt: 0, pl: { xs: 6, sm: 6 } }}>
-          <Typography variant="h6" sx={{ display: "flex", alignItems: "center", gap: 1, fontWeight: 800, color: "#171c8f" }}>
-            <AssignmentIcon /> {isHashMode ? `Элемент #${elementIdParam}` : "Задачи"}
-          </Typography>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-            {isHashMode && (
-              <Button size="small" variant="outlined" onClick={() => onClearElementHash?.()} sx={{ borderRadius: 1.5, fontWeight: 700, textTransform: "none" }}>
-                ← К списку
-              </Button>
-            )}
-            <Tooltip title="Обновить">
-              <span>
-                <IconButton onClick={loadTasks} disabled={loading}>
-                  <RefreshIcon />
-                </IconButton>
-              </span>
-            </Tooltip>
-          </Box>
-        </Box>
+        <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={clearElementHashParam} onRefresh={loadTasks} loading={loading} />
         {!isHashMode && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0 }}>
-            <Paper sx={{ borderRadius: '28px', overflow: "hidden", mb: 1.5, height: 56, minHeight: 56, maxHeight: 56, display: "flex", alignItems: "stretch", width: "100%", minWidth: 0, flexShrink: 0, alignSelf: "stretch", boxSizing: "border-box", flex: "0 0 auto", boxShadow: "0 2px 8px rgba(23,28,143,0.06)" }}>
-              <Tabs
-                value={tab}
-                onChange={(_, v) => startTabTransition(() => setTab(v))}
-                variant="fullWidth"
-                textColor="primary"
-                indicatorColor="primary"
-                sx={{
-                  height: 56,
-                  minHeight: 56,
-                  maxHeight: 56,
-                  width: "100%",
-                  minWidth: 0,
-                  flex: 1,
-                  "& .MuiTabs-flexContainer": { height: 56, minHeight: 56, alignItems: "stretch", width: "100%", display: "flex", flexWrap: "nowrap" },
-                  "& .MuiTabs-scroller": { height: 56, width: "100%", minWidth: 0, flex: "1 1 auto", overflow: "hidden !important" },
-                  "& .MuiTab-root": { fontWeight: 700, textTransform: "none", minHeight: 56, height: 56, maxHeight: 56, flex: "1 1 0", minWidth: 0, maxWidth: "50%", width: "50%", fontSize: "0.92rem", px: 1 },
-                  "& .MuiTab-iconWrapper": { marginRight: 1 },
-                  "& .MuiTabs-indicator": { height: 3 },
-                }}
-              >
-                <Tab
-                  icon={<HourglassEmptyIcon />}
-                  iconPosition="start"
-                  label={`Активные (${activeCount})`}
-                  sx={{ opacity: isTabPending && tab !== 0 ? 0.6 : 1, flex: 1, minWidth: 0 }}
-                />
-                <Tab
-                  icon={<CheckCircleOutlineIcon />}
-                  iconPosition="start"
-                  label={`Завершенные (${completedCount})`}
-                  sx={{ opacity: isTabPending && tab !== 1 ? 0.6 : 1, flex: 1, minWidth: 0 }}
-                />
-              </Tabs>
-            </Paper>
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1, minHeight: 32, height: 32, width: "100%", flexShrink: 0 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                <Typography variant="caption" sx={{ fontWeight: 600, color: "text.secondary" }}>Группировка по ТК</Typography>
-                <Box
-                  onClick={() => setGroupingEnabled((v) => !v)}
-                  sx={{
-                    width: 44,
-                    height: 24,
-                    borderRadius: 12,
-                    bgcolor: groupingEnabled ? "#171c8f" : "rgba(0,0,0,0.2)",
-                    position: "relative",
-                    cursor: "pointer",
-                    transition: "background 150ms",
-                    flexShrink: 0,
-                  }}
-                >
-                  <Box sx={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: "50%",
-                    bgcolor: "white",
-                    position: "absolute",
-                    top: 3,
-                    left: groupingEnabled ? 23 : 3,
-                    transition: "left 150ms",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-                  }} />
-                </Box>
-              </Box>
-              {/* глобальные кнопки убраны — красивые аккордеоны */}
-            </Box>
+            <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedCount} completedCount={completedCount} hashMode={isHashMode} isTabPending={isTabPending} />
+            <TasksGroupingToggle groupingEnabled={groupingEnabled} onToggle={setGroupingEnabled} countGroups={groupedTasks.length} isHashMode={isHashMode} tab={tab} />
           </Box>
         )}
       </Box>
