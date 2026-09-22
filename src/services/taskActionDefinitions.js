@@ -7,8 +7,8 @@
 
 const LIST_TITLE = "TaskActionDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskActionDefs:map:v3";
-const STORAGE_AT = "sp:taskActionDefs:at:v3";
+const STORAGE_KEY = "sp:taskActionDefs:map:v4";
+const STORAGE_AT = "sp:taskActionDefs:at:v4";
 
 let _cache = null; // { global: Array<{value,label,sortOrder,actionId}>, byCt: Map<ctId,Array>, raw: Array }
 let _cacheAt = 0;
@@ -86,7 +86,7 @@ export async function fetchTaskActionDefinitions(apiClient, opts={}){
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
   // План §21: Title, ActionId, CType (was ContentTypeId), SortOrder, Enabled + для совместимости legacy ActionValue/Label/Title/ContentTypeId0
   try{
-    const {data}= (await fetchWithCtypeFallback(apiClient, forceRefresh)).data;
+    const {data}= await fetchWithCtypeFallback(apiClient, forceRefresh);
     const results=data?.d?.results||[];
     const global=[]; const byCt=new Map(); const raw=[];
     for(const item of results){

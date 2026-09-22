@@ -9,8 +9,8 @@ import { RESULT_UI_CONFIG } from "../tasks/resultConfig";
 
 const LIST_TITLE = "TaskResultDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskResultDefs:map:v3";
-const STORAGE_AT = "sp:taskResultDefs:at:v3";
+const STORAGE_KEY = "sp:taskResultDefs:map:v4";
+const STORAGE_AT = "sp:taskResultDefs:at:v4";
 
 let _cache = null; // { global: Map<norm, cfg>, byCt: Map<ctId, Map<norm,cfg>>, raw: Array }
 let _cacheAt = 0;

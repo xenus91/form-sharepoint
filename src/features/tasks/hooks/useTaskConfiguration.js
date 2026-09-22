@@ -38,7 +38,7 @@ async function fetchAdditionalActionsMeta() {
 
 export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
-    queryKey: ["task-configuration","v3"], // bumped v2 to force refetch after Enabled fix
+    queryKey: ["task-configuration","v4"], // bumped v2 to force refetch after Enabled fix
     queryFn: async () => {
       // §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита content-types.md — нет 404 в Network
       // Оставлен только TaskResultDefinitions (§14) + TaskActionDefinitions (§21)
@@ -133,6 +133,26 @@ export function useTaskConfiguration({ enabled = true } = {}) {
           source,
           taskTypeConfig: taskTypeMap?.get(ctId) || null,
         });
+      }
+      // Дополнительно: создаём ctConfigMap записи для CT из TaskActionDefinitions, даже если их нет в ctMap (поле Result не найдено, но действия есть)
+      if (actionDefs && actionDefs.byCt) {
+        for (const [ctIdFromDefs, arr] of actionDefs.byCt.entries()) {
+          if (!ctConfigMap.has(ctIdFromDefs)) {
+            const baseField = additionalMeta;
+            const defChoicesForCt = resolveActionChoices(ctIdFromDefs, actionDefs, null);
+            let effField = baseField;
+            if (defChoicesForCt && defChoicesForCt.length > 0) {
+              effField = baseField ? { ...baseField, choices: defChoicesForCt.map(c=> typeof c==='string'? c : c.value) } : { internalName: "AdditionalActions", title: "Дополнительные действия", typeAsString: "MultiChoice", choices: defChoicesForCt.map(c=>c.value), allowFillIn:true, allowMultiple:true };
+            }
+            ctConfigMap.set(ctIdFromDefs, {
+              contentTypeId: ctIdFromDefs,
+              resultField: resultFields[0] || null,
+              additionalActionsField: effField,
+              source: defChoicesForCt && defChoicesForCt.length ? "task-action-definitions" : "fallback",
+              taskTypeConfig: null,
+            });
+          }
+        }
       }
       // Ensure __default also merges action defs
       if (!ctConfigMap.has("__default") && resultFields[0]) {

@@ -8,8 +8,8 @@ import { TASKS_LIST_API } from "../tasks/config";
 
 const LIST_TITLE = "TaskTypeConfiguration";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskTypeConfig:map:v3";
-const STORAGE_AT = "sp:taskTypeConfig:at:v3";
+const STORAGE_KEY = "sp:taskTypeConfig:map:v4";
+const STORAGE_AT = "sp:taskTypeConfig:at:v4";
 
 let _cache = null; // Map<ctId -> {contentTypeId, additionalActionsFieldInternalName, additionalActionsRequired: boolean|null, enabled: boolean, title, id}>
 let _cacheAt = 0;
@@ -106,7 +106,7 @@ export async function fetchTaskTypeConfigurationMap(apiClient, opts={}){
   // План §17: Title, CType (was ContentTypeId), AdditionalActionsFieldInternalName, AdditionalActionsRequired, Enabled
   // Для совместимости также читаем legacy Required и ResultFieldInternalName (не план, но был в 870062a)
   try{
-    const {data}= (await fetchWithCtypeFallback(apiClient, forceRefresh)).data;
+    const {data}= await fetchWithCtypeFallback(apiClient, forceRefresh);
     const results = data?.d?.results || [];
     const map=new Map();
     for(const item of results){
