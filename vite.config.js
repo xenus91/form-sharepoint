@@ -27,12 +27,17 @@ export default defineConfig(({ command, mode }) => {
               secure: false,
               rewrite: (path) => path.replace(/^\/api/, ''),
             },
-            // cross-site dob — отдельный прокси на origin (без /sites/obrazceo), чтоб /dob-api/sites/dob/... → https://portal.len.com/sites/dob/...
+            // cross-site dob — отдельный прокси. Важно: когда mainTarget = http://localhost:5000/api (NTLM), Vite должен сохранить префикс /dob-api
+            // чтобы NTLM получил /dob-api/sites/dob/... и смог отличить от /api. Поэтому НЕ делаем rewrite для localhost.
             '/dob-api': {
               target: dobOrigin || mainTarget,
               changeOrigin: true,
               secure: false,
-              rewrite: (path) => path.replace(/^\/dob-api/, ''),
+              rewrite: (path) => {
+                // Если проксируем на NTLM localhost — оставляем /dob-api, иначе режем для прямого SharePoint
+                const isLocalhost = (dobOrigin || mainTarget || '').includes('localhost');
+                return isLocalhost ? path : path.replace(/^\/dob-api/, '');
+              },
             },
           },
         }
