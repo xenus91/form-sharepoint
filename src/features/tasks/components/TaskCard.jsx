@@ -985,7 +985,18 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         color={cfg.color}
                         size="large"
                         disabled={isUpdating}
-                        onClick={() => setFoundInputMode(true)}
+                        onClick={() => {
+                          if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
+                            setAdditionalActions([...task.AdditionalActions]);
+                          } else {
+                            const def = getDefaultsForThisTask() || [];
+                            setAdditionalActions([...def]);
+                          }
+                          setFoundLocation("");
+                          setAdditionalError("");
+                          setCustomActionInput("");
+                          setFoundInputMode(true);
+                        }}
                         sx={{
                           borderRadius: 1.5,
                           fontWeight: 800,
