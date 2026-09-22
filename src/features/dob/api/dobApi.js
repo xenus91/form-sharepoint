@@ -31,7 +31,7 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
     const sys = new Set(['ID','Title','Created','Modified','Author','Editor','Attachments','AttachmentFiles','Guid','GUID','ContentTypeId','ContentType','FileSystemObjectType','Id']);
     const dyn = fields
       .filter(f => !f.Hidden && f.InternalName && !sys.has(f.InternalName))
-      .filter(f => !['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo'].includes(f.InternalName))
+      .filter(f => !['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo','AppAuthor','AppEditor','LinkTitleNoMenu','_UIVersionString','DocIcon','ItemChildCount','FolderChildCount'].includes(f.InternalName))
       .map(f => f.InternalName);
     // Author/Editor уже в baseSelects как expand, исключаем дубликаты InternalName Author/Editor
     selects = [...baseSelects, ...dyn.filter(n => !baseSelects.join(',').includes(n))];

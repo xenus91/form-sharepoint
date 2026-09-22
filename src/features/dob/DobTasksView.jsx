@@ -10,17 +10,28 @@ import { useQueryClient } from '@tanstack/react-query';
 export default function DobTasksView() {
   const fieldsQ = useDobFields(true);
   const fieldsData = fieldsQ.data || null;
-  // Фильтр только Открытые — вычисляемое поле Статус (Title 'Статус', InternalName типа _x0421__x0442__x0430__x0442__x04...)
-  const statusFilter = React.useMemo(() => {
-    if (!fieldsData || !fieldsData.length) return '';
-    const f = fieldsData.find(x => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус' || x.InternalName?.toLowerCase().includes('_x0421__x0442__x0430__x0442__x04'));
-    const internal = f?.InternalName;
-    if (!internal) return '';
-    // OData eq 'Открыт' — для Calculated поля с типом Text
-    return `${internal} eq 'Открыт'`;
-  }, [fieldsData]);
+  // Фильтр только Открытые — Статус calculated, OData фильтр не работает (Column does not exist), делаем клиентский
+  // Попытка OData__ prefix тоже падала, поэтому серверный фильтр отключен, клиентский ниже
+  const statusFilter = React.useMemo(() => '', [fieldsData]);
   const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: statusFilter });
   const qc = useQueryClient();
+
+  // Все хуки до условных return (Rules of Hooks)
+  const fields = fieldsData || [];
+  const rawRows = itemsQ.data || [];
+  // Клиентский фильтр Открыт — если серверный фильтр не сработал (из-за calculated), фильтруем тут
+  const rows = React.useMemo(() => {
+    if (!rawRows.length || !fields.length) return rawRows;
+    const statusField = fields.find(x => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус');
+    const internal = statusField?.InternalName;
+    if (!internal) return rawRows;
+    const filtered = rawRows.filter(r => String(r[internal] || '').trim() === 'Открыт');
+    if (filtered.length === 0 && rawRows.length > 0) {
+      const hasOpen = rawRows.some(r => String(r[internal]||'').trim()==='Открыт');
+      return hasOpen ? filtered : rawRows;
+    }
+    return filtered;
+  }, [rawRows, fields]);
 
   const handleRefresh = React.useCallback(() => {
     qc.invalidateQueries({ queryKey: ['dob'] });
@@ -54,32 +65,6 @@ export default function DobTasksView() {
       </Box>
     );
   }
-
-  const fields = fieldsData || [];
-  const rawRows = itemsQ.data || [];
-  // Клиентский фильтр Открыт — если серверный фильтр не сработал (из-за calculated), фильтруем тут
-  const rows = React.useMemo(() => {
-    if (!rawRows.length || !fields.length) return rawRows;
-    const statusField = fields.find(x => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус');
-    const internal = statusField?.InternalName;
-    if (!internal) return rawRows;
-    // если в данных уже есть только Открыт (сервер отфильтровал), не фильтруем повторно; иначе фильтруем
-    const hasFilter = statusField && rawRows.length && rawRows.every(r => r[internal] === 'Открыт' || r[internal] == null);
-    // простой клиентский фильтр: оставляем только где Status === 'Открыт'
-    const filtered = rawRows.filter(r => {
-      const v = r[internal];
-      // значения могут быть 'Открыт' или с пробелами
-      return String(v || '').trim() === 'Открыт';
-    });
-    // если фильтр дал 0 но rawRows имел данные — значит сервер уже отфильтровал или поле пустое, вернём rawRows
-    // Чтобы не скрыть всё при ошибке имени поля, проверяем: если filtered пустой но rawRows не пустой и серверный фильтр был — вернём rawRows
-    if (filtered.length === 0 && rawRows.length > 0) {
-      // проверим есть ли хоть один Открыт в raw
-      const hasOpen = rawRows.some(r => String(r[internal]||'').trim()==='Открыт');
-      return hasOpen ? filtered : rawRows;
-    }
-    return filtered;
-  }, [rawRows, fields]);
 
   return (
     <Box sx={{ p:{xs:1, sm:2}, maxWidth: 1600, mx:'auto', width:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', height:'calc(100vh - 8px)', minHeight:'calc(100vh - 8px)' }}>
