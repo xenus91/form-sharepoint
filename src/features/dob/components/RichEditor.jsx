@@ -262,9 +262,26 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
   });
 
   useEffect(() => {
-    if (editor && value !== undefined && value !== editor.getHTML()) {
-      const isSame = editor.getHTML() === value;
-      if (!isSame) editor.commands.setContent(value || '', false);
+    if (!editor || value === undefined) return;
+    const currentHtml = editor.getHTML();
+    if (currentHtml === value) return;
+    // Не перезаписываем base64 превью финальным URL в dev — иначе картинка ломается (прокси)
+    // Если value содержит finalUrl из base64Map, а в редакторе уже есть base64 — оставляем base64 для отображения
+    let shouldSkip = false;
+    try {
+      for (const [b64, url] of base64MapRef.current.entries()) {
+        if (url && value.includes(url) && currentHtml.includes(b64)) {
+          shouldSkip = true;
+          console.log('[RichEditor][sync] skip setContent: keep base64 display, value has finalUrl', url.slice(0,60));
+          break;
+        }
+      }
+    } catch {}
+    if (shouldSkip) return;
+    const isSame = currentHtml === value;
+    if (!isSame) {
+      console.log('[RichEditor][sync] setContent from value, len', value?.length);
+      editor.commands.setContent(value || '', false);
     }
   }, [value, editor]);
 
@@ -521,7 +538,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
             '& .tiptap table:hover .column-resize-handle': { opacity: 1 },
             '& .tiptap table th': { background: '#f4f5f7', fontWeight: 700, textAlign: 'left' },
             '& .tiptap table .selectedCell': { background: 'rgba(23,28,143,0.08)' },
-            '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 2, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block', cursor: 'pointer' },
+            '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 0, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block', cursor: 'pointer' },
             '& .tiptap img[width]': { width: 'attr(width %)', maxWidth: '100%' },
             '& .tiptap img.ProseMirror-selectednode': { outline: '2px solid #171c8f', outlineOffset: 2 },
             // Placeholder
