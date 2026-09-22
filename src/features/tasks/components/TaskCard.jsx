@@ -94,22 +94,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     return null;
   }, [task, propResultFieldsMeta, propCtResultMap]);
   const dynamicInternalName = dynamicFieldMeta?.internalName || "ResultSearchTHU";
-  // DEBUG: log taskConfig при изменении
-  React.useEffect(()=>{
-    if (__forceTaskDbg || __DBG_ENABLED__) {
-      try{
-        const ctDbg = String(task?.contentTypeId || task?.ContentTypeId || "").trim();
-        __dlogAlways("[DBG:TaskCard:taskConfig]", {
-          taskId: task.Id,
-          ct: ctDbg,
-          hasTaskConfig: !!taskConfig,
-          taskResultDefinitions: taskConfig?.taskResultDefinitions ? {byCtSize: taskConfig.taskResultDefinitions.byCt.size, globalSize: taskConfig.taskResultDefinitions.global.size, raw: taskConfig.taskResultDefinitions.raw} : null,
-          ctConfig: taskConfig?.ctConfigMap?.get(ctDbg) || null,
-          choices, displayedChoices, dynamicInternalName
-        });
-      }catch(e){ __dlogAlways(e); }
-    }
-  }, [task.Id, task?.contentTypeId, taskConfig?.taskResultDefinitions, choices, displayedChoices]);
   // Эффективные choices для этой задачи: из динамического поля или глобальные choices
   const effectiveChoices = React.useMemo(() => {
     if (dynamicFieldMeta?.choices && dynamicFieldMeta.choices.length > 0) return dynamicFieldMeta.choices;
@@ -140,6 +124,22 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const displayedChoices = freshChoices || effectiveChoices;
   const displayedFieldMeta = freshField || dynamicFieldMeta;
   const _displayedInternalName = displayedFieldMeta?.internalName || dynamicInternalName; // eslint-disable-line no-unused-vars
+  // DEBUG: log taskConfig при изменении (moved after displayedChoices to avoid TDZ)
+  React.useEffect(()=>{
+    if (__forceTaskDbg || __DBG_ENABLED__) {
+      try{
+        const ctDbg = String(task?.contentTypeId || task?.ContentTypeId || "").trim();
+        __dlogAlways("[DBG:TaskCard:taskConfig]", {
+          taskId: task.Id,
+          ct: ctDbg,
+          hasTaskConfig: !!taskConfig,
+          taskResultDefinitions: taskConfig?.taskResultDefinitions ? {byCtSize: taskConfig.taskResultDefinitions.byCt.size, globalSize: taskConfig.taskResultDefinitions.global.size, raw: taskConfig.taskResultDefinitions.raw} : null,
+          ctConfig: taskConfig?.ctConfigMap?.get(ctDbg) || null,
+          choices, displayedChoices, dynamicInternalName
+        });
+      }catch(e){ __dlogAlways(e); }
+    }
+  }, [task.Id, task?.contentTypeId, taskConfig?.taskResultDefinitions, choices, displayedChoices, dynamicInternalName]);
   React.useEffect(() => {
     const def = fieldDefaultActions !== null ? fieldDefaultActions : getCachedAdditionalActionsDefaultSync();
     if (def === null) return;
