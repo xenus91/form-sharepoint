@@ -38,7 +38,7 @@ async function fetchAdditionalActionsMeta() {
 
 export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
-    queryKey: ["task-configuration","v2"], // bumped v2 to force refetch after Enabled fix
+    queryKey: ["task-configuration","v3"], // bumped v2 to force refetch after Enabled fix
     queryFn: async () => {
       // §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита content-types.md — нет 404 в Network
       // Оставлен только TaskResultDefinitions (§14) + TaskActionDefinitions (§21)

@@ -7,8 +7,8 @@
 
 const LIST_TITLE = "TaskActionDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskActionDefs:map:v2";
-const STORAGE_AT = "sp:taskActionDefs:at:v2";
+const STORAGE_KEY = "sp:taskActionDefs:map:v3";
+const STORAGE_AT = "sp:taskActionDefs:at:v3";
 
 let _cache = null; // { global: Array<{value,label,sortOrder,actionId}>, byCt: Map<ctId,Array>, raw: Array }
 let _cacheAt = 0;
@@ -60,9 +60,9 @@ async function fetchWithCtypeFallback(apiClient, forceRefresh){
   const selLegacy = `Id,Title,ActionId,ContentTypeId,SortOrder,Enabled`;
   const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
   const tries = [
-    `${base}?$select=${selCType}&$top=200&$orderby=SortOrder asc`,
-    `${base}?$select=${selFallback}&$top=200&$orderby=SortOrder asc`,
-    `${base}?$select=${selLegacy}&$top=200&$orderby=SortOrder asc`,
+    `${base}?$select=${selCType}&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`,
+    `${base}?$select=${selFallback}&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`,
+    `${base}?$select=${selLegacy}&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`,
   ];
   let lastErr=null;
   for(const url of tries){

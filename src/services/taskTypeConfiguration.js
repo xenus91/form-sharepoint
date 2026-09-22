@@ -8,8 +8,8 @@ import { TASKS_LIST_API } from "../tasks/config";
 
 const LIST_TITLE = "TaskTypeConfiguration";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskTypeConfig:map";
-const STORAGE_AT = "sp:taskTypeConfig:at";
+const STORAGE_KEY = "sp:taskTypeConfig:map:v3";
+const STORAGE_AT = "sp:taskTypeConfig:at:v3";
 
 let _cache = null; // Map<ctId -> {contentTypeId, additionalActionsFieldInternalName, additionalActionsRequired: boolean|null, enabled: boolean, title, id}>
 let _cacheAt = 0;
@@ -59,9 +59,9 @@ async function fetchWithCtypeFallback(apiClient, forceRefresh){
   const selLegacy = `Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalsActionsRequired,Enabled`;
   const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
   const tries = [
-    `${base}?$select=${selCType}&$top=100`,
-    `${base}?$select=${selFallback}&$top=100`,
-    `${base}?$select=${selLegacy}&$top=100`,
+    `${base}?$select=${selCType}&$filter=Enabled eq 1&$top=100`,
+    `${base}?$select=${selFallback}&$filter=Enabled eq 1&$top=100`,
+    `${base}?$select=${selLegacy}&$filter=Enabled eq 1&$top=100`,
   ];
   let lastErr=null;
   for(const url of tries){

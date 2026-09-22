@@ -9,8 +9,8 @@ import { RESULT_UI_CONFIG } from "../tasks/resultConfig";
 
 const LIST_TITLE = "TaskResultDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskResultDefs:map";
-const STORAGE_AT = "sp:taskResultDefs:at";
+const STORAGE_KEY = "sp:taskResultDefs:map:v3";
+const STORAGE_AT = "sp:taskResultDefs:at:v3";
 
 let _cache = null; // { global: Map<norm, cfg>, byCt: Map<ctId, Map<norm,cfg>>, raw: Array }
 let _cacheAt = 0;
@@ -58,10 +58,10 @@ if(typeof window!=='undefined'){
       console.log("[DBG:fields] TaskResultDefinitions fields", (data?.d?.results||[]).map(f=>({InternalName:f.InternalName, Title:f.Title, TypeAsString:f.TypeAsString, Hidden:f.Hidden})));
     }catch(e){ console.error(e); }
     try{
-      const {data}= await client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$top=5`, {headers:{Accept:"application/json;odata=verbose"}}).catch(e=>{
+      const {data}= await client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$filter=Enabled eq 1&$top=5`, {headers:{Accept:"application/json;odata=verbose"}}).catch(e=>{
         const msg=String(e?.response?.data?.error?.message?.value||"").toLowerCase();
         if(e?.response?.status===400 && msg.includes("additionalactionsrequired")){
-          return client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=5`, {headers:{Accept:"application/json;odata=verbose"}});
+          return client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$filter=Enabled eq 1&$top=5`, {headers:{Accept:"application/json;odata=verbose"}});
         }
         throw e;
       });
@@ -89,9 +89,9 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
 
-  // План §14: Title, CType, ResultValue, ShowAdditionalActions, AdditionalsActionsRequired (typo prod с 's'), SortOrder, Enabled — только CType
-  const urlPrimary = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
-  const urlFallback = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
+  // План §14: Title, CType, ResultValue, ShowAdditionalActions, AdditionalsActionsRequired (typo prod с 's'), SortOrder, Enabled — только CType + серверный фильтр Enabled
+  const urlPrimary = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`;
+  const urlFallback = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`;
   let url = urlPrimary;
   let data;
   try{
