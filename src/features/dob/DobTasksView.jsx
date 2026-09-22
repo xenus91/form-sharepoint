@@ -1,6 +1,6 @@
 // src/features/dob/DobTasksView.jsx
 // Page for hash #dob_tasks — AG Grid editable over /sites/dob/doblogistic list 64DB263C...
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { Box, Paper, Typography, CircularProgress, Alert, Button } from '@mui/material';
 import { useDobFields } from './hooks/useDobFields';
 import { useDobItemsPaged } from './hooks/useDobItems';
@@ -14,6 +14,30 @@ export default function DobTasksView() {
   const statusFilter = React.useMemo(() => '', [fieldsData]);
   const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: statusFilter });
   const qc = useQueryClient();
+  useEffect(() => {
+    const reportLayout = () => {
+      const shell = document.querySelector('[data-dob-shell]');
+      const page = document.querySelector('[data-dob-page]');
+      const grid = document.querySelector('.ag-root-wrapper');
+      const chain = (node) => {
+        const result = [];
+        let current = node;
+        for (let i = 0; current && i < 7; i += 1, current = current.parentElement) {
+          const rect = current.getBoundingClientRect();
+          const style = getComputedStyle(current);
+          result.push({ tag: current.tagName, class: String(current.className).slice(0, 100), width: Math.round(rect.width), clientWidth: current.clientWidth, maxWidth: style.maxWidth, display: style.display, overflowX: style.overflowX });
+        }
+        return result;
+      };
+      console.groupCollapsed('[DOB layout] ширина #dob_tasks');
+      console.log({ viewport: window.innerWidth, document: document.documentElement.clientWidth, body: document.body.clientWidth, root: document.getElementById('root')?.clientWidth, shell: shell?.getBoundingClientRect().width, page: page?.getBoundingClientRect().width, grid: grid?.getBoundingClientRect().width, horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth });
+      console.table(chain(page || shell));
+      console.groupEnd();
+    };
+    const timer = window.setTimeout(reportLayout, 0);
+    window.addEventListener('resize', reportLayout);
+    return () => { window.clearTimeout(timer); window.removeEventListener('resize', reportLayout); };
+  }, []);
 
   // Все хуки до условных return (Rules of Hooks)
   const fields = fieldsData || [];
@@ -69,7 +93,7 @@ export default function DobTasksView() {
   }
 
   return (
-    <Box sx={{ p:{xs:1, sm:2}, maxWidth: 1600, mx:'auto', width:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', height:'calc(100vh - 8px)', minHeight:'calc(100vh - 8px)' }}>
+    <Box data-dob-page="true" sx={{ p:{xs:1, sm:2}, maxWidth: 'none', mx: 0, width:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', height:'calc(100vh - 8px)', minHeight:'calc(100vh - 8px)' }}>
       {(fieldsQ.isFetching || itemsQ.isFetching) && <Typography variant="caption" color="text.secondary" sx={{ mb:1 }}>обновление…</Typography>}
       {itemsQ.isError && <Alert severity="warning" sx={{ mb:1, borderRadius:2 }}>{String(itemsQ.error?.message||'Ошибка загрузки данных').slice(0,300)} <Button size="small" onClick={handleRefresh}>Повторить</Button></Alert>}
       <Box sx={{ flex:1, minHeight: 520, display:'flex' }}>
