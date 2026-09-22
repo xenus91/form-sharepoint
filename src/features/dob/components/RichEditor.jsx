@@ -1,7 +1,7 @@
 // src/features/dob/components/RichEditor.jsx
 // Advanced TipTap editor for ChekResult — tables, images (paste+upload), formatting, scroll
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Box, Button, Stack, Tooltip, Divider, Popover, IconButton, Typography, TextField, Paper } from '@mui/material';
+import { Box, Button, Stack, Tooltip, Divider, Popover, IconButton, Typography, TextField, Paper, LinearProgress, CircularProgress } from '@mui/material';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
@@ -88,11 +88,13 @@ function TablePicker({ onSelect }) {
   );
 }
 
-export default function RichEditor({ value, onChange, onUploadImage, readOnly = false }) {
+export default function RichEditor({ value, onChange, onUploadImage, readOnly = false, isUploading = false }) {
   const [linkPopoverAnchor, setLinkPopoverAnchor] = useState(null);
   const [linkUrl, setLinkUrl] = useState('');
   const [tablePopoverAnchor, setTablePopoverAnchor] = useState(null);
   const fileInputRef = useRef(null);
+  const [internalUploading, setInternalUploading] = useState(false);
+  const uploading = isUploading || internalUploading;
 
   const editor = useEditor({
     extensions: [
@@ -134,6 +136,9 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
         const images = items.filter(i => i.type.indexOf('image') === 0);
         if (images.length > 0) {
           event.preventDefault();
+          setInternalUploading(true);
+          let pending = images.length;
+          const done = () => { pending--; if (pending<=0) setInternalUploading(false); };
           images.forEach(item => {
             const file = item.getAsFile();
             if (file && onUploadImage) {
@@ -142,15 +147,17 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
                   const url = await onUploadImage(file);
                   if (url && editor) editor.chain().focus().setImage({ src: url, alt: file.name }).run();
                 } catch (e) { console.error('paste upload failed', e); }
+                finally { done(); }
               })();
             } else if (file && editor) {
-              // fallback base64 preview if no upload handler
               const reader = new FileReader();
               reader.onload = () => {
                 editor.chain().focus().setImage({ src: reader.result, alt: file.name }).run();
+                done();
               };
+              reader.onerror = () => done();
               reader.readAsDataURL(file);
-            }
+            } else { done(); }
           });
           return true;
         }
@@ -161,6 +168,9 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
           const files = Array.from(event.dataTransfer.files).filter(f => f.type.startsWith('image/'));
           if (files.length > 0) {
             event.preventDefault();
+            setInternalUploading(true);
+            let pending = files.length;
+            const done = () => { pending--; if (pending<=0) setInternalUploading(false); };
             files.forEach(async (file) => {
               try {
                 const url = onUploadImage ? await onUploadImage(file) : URL.createObjectURL(file);
@@ -169,6 +179,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
                   editor.chain().focus().setTextSelection(pos).setImage({ src: url, alt: file.name }).run();
                 }
               } catch (e) { console.error('drop upload failed', e); }
+              finally { done(); }
             });
             return true;
           }
@@ -197,14 +208,18 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
     input.multiple = true;
     input.onchange = async () => {
       const files = Array.from(input.files || []);
-      for (const file of files) {
-        try {
-          let url = null;
-          if (onUploadImage) url = await onUploadImage(file);
-          else url = URL.createObjectURL(file);
-          if (url) editor.chain().focus().setImage({ src: url, alt: file.name }).run();
-        } catch (e) { console.error('image upload failed', e); }
-      }
+      if (files.length===0) return;
+      setInternalUploading(true);
+      try {
+        for (const file of files) {
+          try {
+            let url = null;
+            if (onUploadImage) url = await onUploadImage(file);
+            else url = URL.createObjectURL(file);
+            if (url) editor.chain().focus().setImage({ src: url, alt: file.name }).run();
+          } catch (e) { console.error('image upload failed', e); }
+        }
+      } finally { setInternalUploading(false); }
     };
     input.click();
   }, [editor, onUploadImage]);
@@ -241,9 +256,10 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
   const isActive = (name, opts) => editor.isActive(name, opts);
 
   return (
-    <Box sx={{ border: '1px solid rgba(23,28,143,0.18)', borderRadius: '12px', overflow: 'hidden', bgcolor: '#fff', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ border: '1px solid rgba(23,28,143,0.18)', borderRadius: '8px', overflow: 'hidden', bgcolor: '#fff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      {(uploading) && <LinearProgress sx={{ height: 3, borderRadius: 0 }} />}
       {!readOnly && (
-        <Paper elevation={0} sx={{ p: 0.5, bgcolor: '#f8f9ff', borderBottom: '1px solid rgba(23,28,143,0.12)', borderRadius: 0, display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+        <Paper elevation={0} sx={{ p: 0.5, bgcolor: '#f8f9ff', borderBottom: '1px solid rgba(23,28,143,0.12)', borderRadius: 0, display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center', opacity: uploading ? 0.6 : 1, pointerEvents: uploading ? 'none' : 'auto' }}>
           {/* History */}
           <Tooltip title="Отменить (Ctrl+Z)"><IconButton size="small" onClick={()=> editor.chain().focus().undo().run()} disabled={!editor.can().undo()}><UndoIcon fontSize="small"/></IconButton></Tooltip>
           <Tooltip title="Повторить (Ctrl+Y)"><IconButton size="small" onClick={()=> editor.chain().focus().redo().run()} disabled={!editor.can().redo()}><RedoIcon fontSize="small"/></IconButton></Tooltip>
@@ -286,7 +302,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
           {isActive('link') && <Tooltip title="Убрать ссылку"><IconButton size="small" onClick={unsetLink}><LinkOffIcon fontSize="small"/></IconButton></Tooltip>}
 
           {/* Image */}
-          <Tooltip title="Вставить изображение (также Ctrl+V из буфера)"><IconButton size="small" onClick={handleImage} sx={{ color: '#2e7d32' }}><ImageIcon fontSize="small"/></IconButton></Tooltip>
+          <Tooltip title="Вставить изображение (также Ctrl+V из буфера)"><IconButton size="small" onClick={handleImage} disabled={uploading} sx={{ color: '#2e7d32' }}>{uploading ? <CircularProgress size={16} /> : <ImageIcon fontSize="small"/>}</IconButton></Tooltip>
 
           {/* Table insert */}
           <Tooltip title="Вставить таблицу (выбрать размер)">
@@ -377,10 +393,12 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
             '& .tiptap pre': { bgcolor: '#f5f5f5', p: 1, borderRadius: 1, overflowX: 'auto', fontSize: '0.9em', border: '1px solid rgba(0,0,0,0.08)' },
             '& .tiptap a': { color: '#171c8f', textDecoration: 'underline', textUnderlineOffset: '2px' },
             '& .tiptap hr': { border: 'none', borderTop: '1px solid rgba(0,0,0,0.12)', margin: '1em 0' },
-            // Table wrapper scroll
-            '& .tiptap .tableWrapper': { overflowX: 'auto', maxWidth: '100%', margin: '0.8em 0', border: '1px solid rgba(0,0,0,0.06)', borderRadius: '8px' },
+            // Table wrapper scroll + resize handle
+            '& .tiptap .tableWrapper': { overflowX: 'auto', maxWidth: '100%', margin: '0.8em 0', border: '1px solid rgba(0,0,0,0.06)', borderRadius: '6px', display: 'block' },
             '& .tiptap table': { borderCollapse: 'collapse', width: 'max-content', minWidth: '100%', fontSize: 13, tableLayout: 'fixed' },
-            '& .tiptap table td, & .tiptap table th': { border: '1px solid #c1c7d0', padding: '7px 10px', verticalAlign: 'top', minWidth: 80, wordBreak: 'break-word' },
+            '& .tiptap table td, & .tiptap table th': { border: '1px solid #c1c7d0', padding: '7px 10px', verticalAlign: 'top', minWidth: 80, wordBreak: 'break-word', position: 'relative' },
+            '& .column-resize-handle': { position: 'absolute', right: -2, top: 0, bottom: 0, width: 4, background: 'rgba(23,28,143,0.25)', cursor: 'col-resize', opacity: 0, transition: 'opacity 0.15s' },
+            '& .tiptap table:hover .column-resize-handle': { opacity: 1 },
             '& .tiptap table th': { background: '#f4f5f7', fontWeight: 700, textAlign: 'left' },
             '& .tiptap table .selectedCell': { background: 'rgba(23,28,143,0.08)' },
             '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 8, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block' },

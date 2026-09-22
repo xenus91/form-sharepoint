@@ -1,13 +1,14 @@
 // src/features/dob/DobTaskEditView.jsx
 // Full-screen edit form for single DOB item — with rich ChekResult editor
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Box, Button, Chip, CircularProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip } from '@mui/material';
+import { Box, Button, Chip, CircularProgress, LinearProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments } from './api/dobApi';
+import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment } from './api/dobApi';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
 
@@ -125,20 +126,53 @@ export default function DobTaskEditView({ id }) {
     }
   }, [id, form, fields, notify, qc]);
 
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
   const handleUploadImage = useCallback(async (file) => {
     if (!id) return null;
+    setIsUploadingImage(true);
     try {
       const res = await uploadDobAttachment(id, file);
       // Refresh attachments
       getDobAttachments(id).then(setAttachments).catch(()=>{});
       notify(`Изображение ${file.name} загружено`, { severity: 'success' });
-      return res?.url || res?.ServerRelativeUrl || null;
+      // Prefer proxy-aware url/src
+      return res?.url || res?.src || res?.ServerRelativeUrl || null;
     } catch (e) {
       const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка загрузки';
       notify(`Загрузка не удалась: ${String(msg).slice(0,200)}`, { severity: 'error' });
       throw e;
+    } finally {
+      setIsUploadingImage(false);
     }
   }, [id, notify]);
+
+  const handleDeleteAttachment = useCallback(async (fileName) => {
+    if (!id || !fileName) return;
+    try {
+      await deleteDobAttachment(id, fileName);
+      notify(`Вложение ${fileName} удалено`, { severity: 'success' });
+      // Remove from attachments state
+      setAttachments(prev => prev.filter(a => a.FileName !== fileName && a.ServerRelativeUrl !== fileName));
+      // Also remove image from ChekResult HTML if present
+      setForm(prev => {
+        const cur = prev[chekInternal] || '';
+        if (typeof cur === 'string' && cur.includes(fileName)) {
+          // remove img tags that contain fileName
+          const cleaned = cur.replace(new RegExp(`<img[^>]*${fileName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}[^>]*>`, 'gi'), '');
+          if (cleaned !== cur) {
+            // also save to server? keep local until Save
+            return { ...prev, [chekInternal]: cleaned };
+          }
+        }
+        return prev;
+      });
+      // Refresh from server
+      getDobAttachments(id).then(setAttachments).catch(()=>{});
+    } catch (e) {
+      const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка удаления';
+      notify(`Не удалось удалить: ${String(msg).slice(0,200)}`, { severity: 'error' });
+    }
+  }, [id, notify, chekInternal]);
 
   const handleBack = () => {
     window.location.hash = '#dob_tasks';
@@ -189,8 +223,8 @@ export default function DobTaskEditView({ id }) {
   }
 
   return (
-    <Box sx={{ width: '100%', maxWidth: 1200, mx: 'auto', display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 1, md: 2 } }}>
-      <Paper sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1, borderRadius: 2, border: '1px solid rgba(23,28,143,0.12)' }}>
+    <Box sx={{ width: '100%', maxWidth: '100%', mx: 0, display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 1, md: 2 }, boxSizing: 'border-box', overflowX: 'hidden' }}>
+      <Paper sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1, borderRadius: 1, border: '1px solid rgba(23,28,143,0.12)' }}>
         <Button startIcon={<ArrowBackIcon />} onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>К списку</Button>
         <Typography variant="h6" sx={{ fontWeight: 800, color: '#171c8f', ml: 1 }}>Заявка ДОБ — {form.Title ? `${form.Title} ` : ''}#{id}</Typography>
         <Chip label={getODataValue(item, '_x0421__x0442__x0430__x0442__x04') || item?.OData__x0421__x0442__x0430__x0442__x04 || '—'} size="small" sx={{ ml: 1, fontWeight: 700 }} />
@@ -205,29 +239,53 @@ export default function DobTaskEditView({ id }) {
       {saveError && <Alert severity="error" onClose={()=> setSaveError('')}>{saveError}</Alert>}
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
-      <Paper sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(23,28,143,0.08)' }}>
+      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1, color: '#171c8f' }}>Результат проверки — главное поле</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Поддерживает таблицы, списки, форматирование и вставку изображений. Изображения автоматически загружаются как вложения заявки и вставляются как {'<img src="...">'}.
         </Typography>
+        {isUploadingImage && <LinearProgress sx={{ mb: 1, borderRadius: 1 }} />}
         <RichEditor
           value={chekValue || ''}
           onChange={(html)=> handleChange(chekInternal, html)}
           onUploadImage={handleUploadImage}
+          isUploading={isUploadingImage}
         />
         {attachments.length > 0 && (
           <Box sx={{ mt: 1.5 }}>
             <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}><AttachFileIcon fontSize="small"/> Вложения ({attachments.length}):</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
-              {attachments.map(a => (
-                <Chip key={a.FileName || a.ServerRelativeUrl} label={a.FileName} size="small" component="a" href={a.ServerRelativeUrl} target="_blank" clickable />
-              ))}
+              {attachments.map(a => {
+                const fileName = a.FileName || a.ServerRelativeUrl?.split('/').pop();
+                // build href correctly for dev proxy
+                let href = a.ServerRelativeUrl;
+                try {
+                  const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+                  if (href && href.startsWith('/') && isDev) href = `/dob-api${href}`;
+                  else if (href && href.startsWith('/') && !isDev && typeof window !== 'undefined') href = `${window.location.origin}${href}`;
+                } catch {}
+                return (
+                  <Chip
+                    key={a.FileName || a.ServerRelativeUrl}
+                    label={a.FileName}
+                    size="small"
+                    component="a"
+                    href={href}
+                    target="_blank"
+                    clickable
+                    onDelete={()=> handleDeleteAttachment(a.FileName)}
+                    deleteIcon={<Tooltip title="Удалить вложение"><DeleteIcon fontSize="small" /></Tooltip>}
+                    sx={{ maxWidth: 220 }}
+                  />
+                );
+              })}
             </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Удаление вложения также уберёт картинку из текста (если она там есть) — не забудьте Сохранить.</Typography>
           </Box>
         )}
       </Paper>
 
-      <Paper sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(23,28,143,0.08)' }}>
+      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5, color: '#171c8f' }}>Остальные поля</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
           {editableFields.filter(f=> f.InternalName !== chekInternal).map(f => {

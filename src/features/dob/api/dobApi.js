@@ -211,7 +211,19 @@ export async function uploadDobAttachment(id, file) {
   const result = data?.d || data;
   let src = result?.ServerRelativeUrl || result?.ServerRelativePath?.DecodedUrl || null;
   if (!src) src = `/sites/dob/doblogistic/Lists/DobLogistic/Attachments/${id}/${fileName}`;
-  return { ...result, ServerRelativeUrl: src, fileName, url: src };
+  // В dev /sites/... не проксируется напрямую — нужно через /dob-api, в prod — абсолютный origin
+  let finalUrl = src;
+  try {
+    const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+    if (isDev) {
+      // /dob-api/sites/dob/... проксирует на https://portal.len.com
+      finalUrl = `/dob-api${src}`;
+    } else {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      if (src.startsWith('/')) finalUrl = `${origin}${src}`;
+    }
+  } catch { finalUrl = src; }
+  return { ...result, ServerRelativeUrl: src, fileName, url: finalUrl, src: finalUrl };
 }
 
 export async function deleteDobAttachment(id, fileName) {
