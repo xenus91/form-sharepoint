@@ -73,12 +73,25 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const [foundLocation, setFoundLocation] = React.useState("");
   // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice Fill-in)
   const [additionalActions, setAdditionalActions] = React.useState(() => {
+    // Initial may not have taskConfig yet — use field fallback, will sync via effect when taskConfig loads
     const sync = getCachedAdditionalActionsDefaultSync();
     if (sync !== null) return [...sync];
     if (Array.isArray(fieldDefaultActions)) return [...fieldDefaultActions];
-    return ["Отправить ЕО в OTM"];
+    return [];
   });
   const additionalRequired = additionalActions.length > 0 ? "Да" : "Нет";
+  // Helper: defaults from TaskActionDefinitions Default field (per CT) — приоритет над полем AdditionalActions DefaultValue
+  const getDefaultsForThisTask = React.useCallback(() => {
+    const ctId = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+    const cfg = taskConfig?.ctConfigMap?.get(ctId) || taskConfig?.ctConfigMap?.get("__default");
+    if (cfg && cfg.defaultActions !== null && cfg.defaultActions !== undefined) {
+      return cfg.defaultActions; // [] = nothing preselected, [values] = preselected
+    }
+    const sync = getCachedAdditionalActionsDefaultSync();
+    if (sync !== null) return sync;
+    if (Array.isArray(fieldDefaultActions)) return fieldDefaultActions;
+    return []; // user 2026-09-24: if no Default then nothing preselected (was ["Отправить ЕО в OTM"])
+  }, [task?.contentTypeId, task?.ContentTypeId, task?.raw, taskConfig, fieldDefaultActions]);
   // Динамическое поле результата для этой задачи (по ContentType) — для открытой задачи всегда свежие choices
   const dynamicFieldMeta = React.useMemo(() => {
     const fromProp = propResultFieldsMeta && propCtResultMap ? getResultFieldForTask(task, propCtResultMap, propResultFieldsMeta) : null;
@@ -141,19 +154,25 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     }
   }, [task.Id, task?.contentTypeId, taskConfig?.taskResultDefinitions, choices, displayedChoices, dynamicInternalName]);
   React.useEffect(() => {
-    const def = fieldDefaultActions !== null ? fieldDefaultActions : getCachedAdditionalActionsDefaultSync();
+    const def = getDefaultsForThisTask();
     if (def === null) return;
-    const isHardcoded = additionalActions.length === 1 && additionalActions[0] === "Отправить ЕО в OTM";
-    if (def.length === 0 && isHardcoded) {
+    // If def is [] and we have hardcoded legacy value, clear it
+    const isLegacyHardcoded = additionalActions.length === 1 && additionalActions[0] === "Отправить ЕО в OTM";
+    if (def.length === 0 && isLegacyHardcoded) {
       setAdditionalActions([]);
+      return;
+    }
+    if (def.length === 0 && additionalActions.length === 0) return;
+    // If task has no selection and def has values, apply def (once)
+    if (def.length > 0 && additionalActions.length === 0) {
+      setAdditionalActions([...def]);
+    } else if (isLegacyHardcoded && def.length > 0 && (def.length !== 1 || def[0] !== "Отправить ЕО в OTM")) {
+      setAdditionalActions([...def]);
     } else if (def.length > 0 && additionalActions.length === 0) {
       setAdditionalActions([...def]);
-    } else if (def.length > 0 && isHardcoded && (def.length !== 1 || def[0] !== "Отправить ЕО в OTM")) {
-      setAdditionalActions([...def]);
-    } else if (def.length === 0 && additionalActions.length === 0) {
-      // already empty, no need
     }
-  }, [fieldDefaultActions]);
+    // If defaults changed while empty, update
+  }, [fieldDefaultActions, taskConfig]);
   const [customActionInput, setCustomActionInput] = React.useState("");
   const [additionalError, setAdditionalError] = React.useState("");
   const [showCelebrate, setShowCelebrate] = React.useState(false);
@@ -164,12 +183,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       setConfirmNotFoundMode(false);
       setFoundInputMode(false);
       setFoundLocation("");
-      const defReset = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : ["Отправить ЕО в OTM"]);
-      setAdditionalActions(defReset);
+      const defReset = getDefaultsForThisTask() || [];
+      setAdditionalActions([...defReset]);
       setCustomActionInput("");
       setAdditionalError("");
     }
-  }, [task.Status, task.Id, fieldDefaultActions]);
+  }, [task.Status, task.Id, fieldDefaultActions, taskConfig]);
   // Also reset when task changes id
   React.useEffect(() => {
     if (initialAction === "notfound" && isInProgressStatus(task.Status) && !isCompleted) {
@@ -186,8 +205,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
       setAdditionalActions([...task.AdditionalActions]);
     } else {
-      const def = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : ["Отправить ЕО в OTM"]);
-      setAdditionalActions(def);
+      const def = getDefaultsForThisTask() || [];
+      setAdditionalActions([...def]);
     }
     setCustomActionInput("");
     setAdditionalError("");

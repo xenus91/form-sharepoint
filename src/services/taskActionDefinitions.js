@@ -1,16 +1,16 @@
 // src/services/taskActionDefinitions.js
 // Phase 17 — строго по плану §21: TaskActionDefinitions
 // Поля списка (план):
-// Title (Text), ActionId (Text), CType (Text) — was ContentTypeId/ContentTypeId0 (system collision, see fix 2026-09-23), SortOrder (Number), Enabled (Yes/No)
+// Title (Text), ActionId (Text), CType (Text) — was ContentTypeId/ContentTypeId0 (system collision, see fix 2026-09-23), SortOrder (Number), Enabled (Yes/No), Default (Yes/No) — new 2026-09-24 user request: multiple defaults per CT, if none → nothing preselected
 // НЕ заменяет Choice metadata автоматически (план §21: если field metadata уже описывает действия — сначала использовать metadata)
 // Использовать только если реально нужен внешний словарь. Graceful 404 → fallback к полю AdditionalActions. Кэш 30м.
 
 const LIST_TITLE = "TaskActionDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskActionDefs:map:v4";
-const STORAGE_AT = "sp:taskActionDefs:at:v4";
+const STORAGE_KEY = "sp:taskActionDefs:map:v5";
+const STORAGE_AT = "sp:taskActionDefs:at:v5";
 
-let _cache = null; // { global: Array<{value,label,sortOrder,actionId}>, byCt: Map<ctId,Array>, raw: Array }
+let _cache = null; // { global: Array<{value,label,sortOrder,actionId,isDefault}>, byCt: Map<ctId,Array>, raw: Array }
 let _cacheAt = 0;
 
 function getStorage(){ try{ if(typeof sessionStorage!=="undefined") return sessionStorage;}catch{} return null; }
@@ -54,26 +54,48 @@ function getCtypeFromItem(item){
   const v = item.CType ?? item.ContentTypeId0 ?? item.ContentTypeId;
   return String(v||"").trim();
 }
+
+function getDefaultFromItem(item){
+  // New field Default (Yes/No) — support multiple internal names to avoid collision with reserved Default
+  // Priority: Default → IsDefault → DefaultAction → IsDefaultAction → DefaultChoice → IsDefaultChoice
+  const v = item.Default ?? item.IsDefault ?? item.DefaultAction ?? item.IsDefaultAction ?? item.DefaultChoice ?? item.IsDefaultChoice ?? item.DefaultValue;
+  return v;
+}
+
 async function fetchWithCtypeFallback(apiClient, forceRefresh){
-  const selCType = `Id,Title,ActionId,CType,SortOrder,Enabled`;
-  const selFallback = `Id,Title,ActionId,ContentTypeId0,SortOrder,Enabled`;
-  const selLegacy = `Id,Title,ActionId,ContentTypeId,SortOrder,Enabled`;
   const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
-  const tries = [
-    `${base}?$select=${selCType}&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`,
-    `${base}?$select=${selFallback}&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`,
-    `${base}?$select=${selLegacy}&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`,
-  ];
+  const ctypeVariants = ["CType", "ContentTypeId0", "ContentTypeId"];
+  const defaultVariants = ["Default", "IsDefault", "DefaultAction", "IsDefaultAction", null];
+  const tries = [];
+  for(const ctype of ctypeVariants){
+    for(const defField of defaultVariants){
+      let sel = `Id,Title,ActionId,${ctype},SortOrder,Enabled`;
+      if(defField) sel += `,${defField}`;
+      tries.push({ url: `${base}?$select=${sel}&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`, ctype, defField });
+    }
+  }
   let lastErr=null;
-  for(const url of tries){
+  for(const {url, ctype, defField} of tries){
     try{
       const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
-      return {data, url};
+      // success — return with metadata about which fields were used (for debug)
+      return {data, url, ctype, defField};
     }catch(e){
       const status=e?.response?.status;
       const msg=String(e?.message||"")+String(e?.response?.data?.error?.message?.value||"");
-      const isMissingField = status===400 && /CType|ContentTypeId0|ContentTypeId|does not exist|не существует/i.test(msg);
-      if(isMissingField){ lastErr=e; continue; }
+      const isMissingField = status===400 && /does not exist|не существует|field.*not found|column.*not found/i.test(msg);
+      // Check if missing is due to this ctype or defField
+      const missingIsCtype = isMissingField && ctype && msg.toLowerCase().includes(ctype.toLowerCase());
+      const missingIsDef = isMissingField && defField && msg.toLowerCase().includes(defField.toLowerCase());
+      // If missing field is ctype or defField, try next variant; otherwise throw
+      if(isMissingField){
+        // If message mentions ctype or defField, or generic 400 without specific, continue to next try
+        // For safety, if we can't determine, continue (try next)
+        lastErr=e;
+        // If ctype missing, skip remaining default variants for this ctype? But we loop already, continuing will try next defField for same ctype — also will fail with ctype missing, so waste but okay.
+        // To optimize, if missingIsCtype, could skip all def variants for this ctype, but we'll just continue sequentially.
+        continue;
+      }
       throw e;
     }
   }
@@ -84,7 +106,7 @@ export async function fetchTaskActionDefinitions(apiClient, opts={}){
   const {forceRefresh=false}=opts;
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
-  // План §21: Title, ActionId, CType (was ContentTypeId), SortOrder, Enabled + для совместимости legacy ActionValue/Label/Title/ContentTypeId0
+  // План §21: Title, ActionId, CType (was ContentTypeId), SortOrder, Enabled, Default + для совместимости legacy ActionValue/Label/Title/ContentTypeId0
   try{
     const {data}= await fetchWithCtypeFallback(apiClient, forceRefresh);
     const results=data?.d?.results||[];
@@ -95,11 +117,17 @@ export async function fetchTaskActionDefinitions(apiClient, opts={}){
       const title=String(item.Title||"").trim();
       // План: ActionId — приоритет, fallback к legacy ActionValue/Title
       const actionId = String(item.ActionId||item.ActionValue||title||"").trim();
-      if(!actionId) continue;
+      if(!actionId && !title) continue;
       const ctId=getCtypeFromItem(item);
       // Label legacy — если есть, используем как label иначе Title
       const label = item.Label ? String(item.Label).trim() : title;
-      const entry={ value: actionId, label: label||actionId, sortOrder: item.SortOrder!=null? Number(item.SortOrder):999, id:item.Id, contentTypeId: ctId||null, title, actionId };
+      // Normal name fix (user 2026-09-24): value = Title (human русский) — stores human name, not English key. ActionId kept for reference but not used as stored value.
+      // User selected "title" — храним Title, показываем Title. If Title empty fallback to ActionId.
+      const value = (title || label || actionId).trim();
+      if(!value) continue;
+      const sortOrder = item.SortOrder!=null? Number(item.SortOrder):999;
+      const isDefault = parseBool(getDefaultFromItem(item), false);
+      const entry={ value, label: label||value, sortOrder, id:item.Id, contentTypeId: ctId||null, title, actionId, isDefault };
       raw.push(entry);
       if(ctId){
         if(!byCt.has(ctId)) byCt.set(ctId, []);
@@ -159,6 +187,39 @@ export function resolveActionChoices(contentTypeId, defs, fallbackChoices){
   // defs существует но пусто для этого CT — fallback к полю (план §21)
   if(Array.isArray(fallbackChoices) && fallbackChoices.length) return fallbackChoices.map(v=> typeof v==='string'? {value:v,label:v}: v);
   return [];
+}
+
+/**
+ * Новые дефолты по плану 2026-09-24: Default поле в TaskActionDefinitions
+ * Логика: если список существует, берём все записи с Default=Да для данного CT (exact→prefix→global). Если ни одной Default — возвращаем [] (ничего не предвыбрано).
+ * Если списка нет (defs==null) — возвращаем null для fallback к полю.
+ * @param {string} contentTypeId
+ * @param {{global:Array, byCt:Map}|null} defs
+ * @returns {Array<string>|null} — null means fallback to field, [] means no defaults
+ */
+export function resolveActionDefaults(contentTypeId, defs){
+  if(!defs) return null; // fallback to field
+  const ctId=String(contentTypeId||"").trim();
+  let candidates = null;
+  if(ctId && defs.byCt.has(ctId)){
+    candidates = defs.byCt.get(ctId);
+  } else if(ctId){
+    let best=null, bestLen=-1;
+    for(const [key, arr] of defs.byCt.entries()){
+      if(ctId.startsWith(key) && key.length>bestLen && arr.length){ best=arr; bestLen=key.length; }
+    }
+    if(best) candidates = best;
+    else if(defs.global.length) candidates = defs.global;
+  } else {
+    candidates = defs.global;
+  }
+  if(!candidates || candidates.length===0){
+    // No candidates for this CT — try global as fallback? If global empty too, then empty
+    if(defs.global.length>0 && candidates!==defs.global) candidates = defs.global;
+    else return [];
+  }
+  const defaults = candidates.filter(c=> !!c.isDefault).map(c=> c.value);
+  return defaults; // [] if none default
 }
 
 export const TASK_ACTION_DEFINITIONS_LIST_TITLE = LIST_TITLE;

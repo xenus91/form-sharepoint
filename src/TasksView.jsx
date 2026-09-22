@@ -175,8 +175,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [pendingTask, setPendingTask] = useState(null);
   const [pendingResult, setPendingResult] = useState("");
   const [locationComment, setLocationComment] = useState("");
-  // Доп. действия для диалога Найдена (legacy путь через handleResultClick)
-  const [pendingAdditionalActions, setPendingAdditionalActions] = useState(["Отправить ЕО в OTM"]);
+  // Доп. действия для диалога Найдена (legacy путь через handleResultClick) — теперь Default из TaskActionDefinitions
+  const [pendingAdditionalActions, setPendingAdditionalActions] = useState([]);
   // const pendingAdditionalRequired = pendingAdditionalActions.length > 0 ? "Да" : "Нет"; // eslint unused
   const [fieldDefaultActions, setFieldDefaultActions] = useState(() => {
     const sync = getCachedAdditionalActionsDefaultSync();
@@ -1349,7 +1349,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       setPendingResult(resultValue);
       setLocationComment("");
       {
-        const defPending = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : ["Отправить ЕО в OTM"]);
+        // Приоритет: TaskActionDefinitions Default (per CT) → поле DefaultValue
+        const ctIdForPending = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+        const cfgForPending = taskConfiguration.data?.ctConfigMap?.get(ctIdForPending) || taskConfiguration.data?.ctConfigMap?.get("__default");
+        let defPending;
+        if (cfgForPending && cfgForPending.defaultActions !== null && cfgForPending.defaultActions !== undefined) {
+          defPending = [...cfgForPending.defaultActions];
+        } else {
+          defPending = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : []);
+        }
         setPendingAdditionalActions(Array.isArray(task.AdditionalActions) && task.AdditionalActions.length ? [...task.AdditionalActions] : defPending);
       }
       setPendingCustomAction("");
@@ -1363,7 +1371,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       // Прочие результаты — без доп. действий
       completeTask(task, resultValue, undefined, "", []);
     }
-  }, [fieldDefaultActions, completeTask]);
+  }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
   const handleLocationSubmit = (skip) => {
     if (!pendingTask) return;
