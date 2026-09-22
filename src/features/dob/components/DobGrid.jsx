@@ -39,26 +39,30 @@ function mapTypeToEditor(f) {
 
 function buildColumnDefs(fields) {
   if (!fields || fields.length === 0) return [];
-  // Whitelist of fields to show (Hidden=false plus key calculated)
-  const allowed = new Set([
-    'ID','Title','_x0414__x0430__x0442__x0430_','_x0421__x043a__x043b__x0430__x04','_x043e__x0441__x043d__x043e__x04','_x0418__x0437__x043b__x0438__x04','_x0414__x0430__x0442__x0430__x000','_x041a__x043e__x043c__x043c__x04','_x0413__x0418__x0421_','_x2116__x0020__x0415__x041e__x00','_x041f__x0440__x043e__x0434__x04','_x041a__x0440__x0430__x0442__x04','_x041a__x043e__x043b__x0438__x04','_x0421__x0442__x043e__x0438__x04','_x0414__x0430__x0442__x0430__x00','_x0424__x0418__x041e__x0020__x04','_x2116__x0020__x0422__x041a__x00','_x041b__x043e__x0433__x0438__x04','_x0420__x0435__x0437__x0443__x04','_x041a__x043e__x043c__x043c__x040','_x041e__x0448__x0438__x0431__x040','_x041a__x043e__x043b__x002d__x040','_x041e__x0448__x0438__x0431__x04','_x041a__x043e__x043b__x002d__x04','_x0421__x0442__x0430__x0442__x04','_x041d__x0435__x0434__x0435__x04','_x0414__x0430__x0442__x0430__x001','_x041e__x0442__x043a__x043e__x04','_x041d__x0435__x0020__x0430__x04','UserFail','_x0417__x0430__x043f__x0438__x04','ChekResult','Created','Modified','Author','Editor','Attachments'
-  ]);
-  // Keep order as in allowed set but respect fields order for those present
+  // Динамический whitelist — берём все поля, которые реально вернулись из /fields (полные InternalName, без усечений)
+  // Хардкод truncated _x... удалён — иначе не найдётся _x0414__x0430__x0442__x0430__x0020__x... (Дата запроса)
+  const systemSkip = new Set(['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo','FileRef','FileDirRef','FileLeafRef','ContentTypeId','_UIVersionString','DocIcon','LinkTitleNoMenu','ItemChildCount','FolderChildCount']);
+  // Приоритетный порядок — ID/Title первые, затем остальные в порядке как пришли из SharePoint, но Calculated/ReadOnly тоже показываем
   const ordered = [];
-  // First add fields that are in allowed in the order of allowed set to keep UX stable
+  const priority = ['ID','Title'];
   const fieldMap = new Map(fields.map(f=> [f.InternalName, f]));
-  for (const name of allowed) {
+  for (const name of priority) {
     const f = fieldMap.get(name);
     if (f) ordered.push(f);
   }
-  // Also add any other non-hidden editable that we missed (fallback)
   for (const f of fields) {
-    if (!ordered.includes(f) && !f.Hidden && !f.ReadOnlyField && ['text','choice','number','currency','datetime','note','boolean','url','user'].includes((f.TypeAsString||'').toLowerCase())) {
-      if (!allowed.has(f.InternalName)) {
-        // skip system
-        if (['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo'].includes(f.InternalName)) continue;
-        ordered.push(f);
-      }
+    if (ordered.includes(f)) continue;
+    if (f.Hidden) continue;
+    if (systemSkip.has(f.InternalName)) continue;
+    // Пропускаем только явные системные, остальные показываем (включая Calculated, но они будут readOnly ниже)
+    // Для Calculated/Computed/ReadOnlyField — показываем, но editable=false
+    // Для остальных — показываем если тип известный
+    const t = (f.TypeAsString||'').toLowerCase();
+    if (['calculated','computed','text','choice','number','currency','datetime','note','boolean','url','user','integer','counter'].includes(t) || f.InternalName==='Attachments' || f.InternalName==='UserFail' || f.InternalName==='ChekResult') {
+      ordered.push(f);
+    } else if (!f.Hidden && !systemSkip.has(f.InternalName)) {
+      // fallback — покажем любые не-hidden, чтобы не потерять поля с новыми типами
+      ordered.push(f);
     }
   }
 
@@ -100,6 +104,20 @@ function buildColumnDefs(fields) {
           const v = p.data?.[internal];
           if (v && typeof v === 'object') return v.Title || v.Name || '';
           return p.data?.['UserFail/Title'] || p.data?.UserFailTitle || p.data?.['UserFailId'] || '';
+        },
+      });
+      continue;
+    }
+    if ((f.TypeAsString||'').toLowerCase()==='user') {
+      cols.push({
+        field: internal,
+        headerName: title + (f.Required ? ' *' : ''),
+        width: 140,
+        editable: false,
+        valueGetter: (p) => {
+          const v = p.data?.[internal];
+          if (v && typeof v === 'object') return v.Title || v.Name || '';
+          return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
         },
       });
       continue;
@@ -151,7 +169,8 @@ function buildColumnDefs(fields) {
     else if (t === 'boolean') col.width = 110;
 
     if (t === 'choice') {
-      const vals = (f.Choices || []).filter(Boolean);
+      const rawChoices = Array.isArray(f.Choices) ? f.Choices : (f.Choices?.results || f.Choices?.Results || []);
+      const vals = (rawChoices || []).filter(Boolean);
       col.cellEditor = 'agSelectCellEditor';
       col.cellEditorParams = { values: vals.length ? vals : [''] , valueListGap: 0 };
       col.filter = 'agSetColumnFilter';

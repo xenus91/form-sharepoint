@@ -21,40 +21,48 @@ export async function getDobFields() {
 }
 
 // Items with OData — supports pagination via $top &$skiptoken or flat fetch
-export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = true, filter = '' } = {}) {
-  const selects = [
-    'ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id',
-    '_x0414__x0430__x0442__x0430_', // Дата запроса
-    '_x0421__x043a__x043b__x0430__x04', // Подразделение
-    '_x043e__x0441__x043d__x043e__x04', // Основание
-    '_x0418__x0437__x043b__x0438__x04', // Излишек/Недогруз
-    '_x0414__x0430__x0442__x0430__x000', // Дата ПМ
-    '_x041a__x043e__x043c__x043c__x04', // Комментарии склада
-    '_x0413__x0418__x0421_', // ГИС
-    '_x2116__x0020__x0415__x041e__x00', // № ЕО
-    '_x041f__x0440__x043e__x0434__x04', // Продукт
-    '_x041a__x0440__x0430__x0442__x04', // Краткое описание
-    '_x041a__x043e__x043b__x0438__x04', // Количество
-    '_x0421__x0442__x043e__x0438__x04', // Стоимость
-    '_x0414__x0430__x0442__x0430__x00', // Дата СВН
-    '_x0424__x0418__x041e__x0020__x04', // ФИО СВН
-    '_x2116__x0020__x0422__x041a__x00', // № ТК/РЦ
-    '_x041b__x043e__x0433__x0438__x04', // Логин виновного
-    '_x0420__x0435__x0437__x0443__x04', // Результат проверки
-    '_x041a__x043e__x043c__x043c__x040', // Комментарий СОБ
-    '_x041e__x0448__x0438__x0431__x040', // Ошибка (Решение СОБ)
-    '_x041a__x043e__x043b__x002d__x040', // Кол-во ошибок (Решение)
-    '_x041e__x0448__x0438__x0431__x04', // Ошибка
-    '_x041a__x043e__x043b__x002d__x04', // Кол-во ошибок
-    '_x0421__x0442__x0430__x0442__x04', // Статус calculated
-    '_x041d__x0435__x0434__x0435__x04', // Неделя calc
-    '_x0414__x0430__x0442__x0430__x001', // Дата подтверждения
-    '_x041e__x0442__x043a__x043e__x04', // Откорректировано
-    '_x041d__x0435__x0020__x0430__x04', // Не актуально bool
-    'Attachments','AttachmentFiles','Guid','ContentTypeId'
-  ];
+export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = true, filter = '', fields = null } = {}) {
+  // fields: опционально массив метаданных из getDobFields — если передан, строим $select динамически (без усечённых хардкодов)
   const expands = ['Author','Editor','AttachmentFiles'].join(',');
-  let url = `${dobListApi()}/items?$select=${selects.join(',')}&$expand=${expands}&$top=${top}`;
+  // Базовый safe select — системные поля, которые точно есть
+  const baseSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id','Attachments','AttachmentFiles','Guid','ContentTypeId'];
+  let selects;
+  if (Array.isArray(fields) && fields.length) {
+    const sys = new Set(['ID','Title','Created','Modified','Author','Editor','Attachments','AttachmentFiles','Guid','ContentTypeId','ContentType','FileSystemObjectType','Id']);
+    const dyn = fields
+      .filter(f => !f.Hidden && f.InternalName && !sys.has(f.InternalName))
+      .filter(f => !['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo'].includes(f.InternalName))
+      .map(f => f.InternalName);
+    // Author/Editor уже в baseSelects как expand, исключаем дубликаты InternalName Author/Editor
+    selects = [...baseSelects, ...dyn.filter(n => !baseSelects.join(',').includes(n))];
+    // Для lookup полей типа Author/Editor — уже в expands, оставляем как есть
+    // Для User полей (если есть Логин виновного — lookup) — добавим expand динамически на основе TypeAsString
+    const lookupFields = fields.filter(f => (f.TypeAsString||'').toLowerCase()==='user' && dyn.includes(f.InternalName)).map(f=>f.InternalName);
+    if (lookupFields.length) {
+      const extraExpands = lookupFields.filter(n=>!['Author','Editor'].includes(n));
+      if (extraExpands.length) {
+        // расширим expands локально
+      }
+    }
+  } else {
+    selects = baseSelects;
+  }
+  // dynamic expands for User fields (кроме Author/Editor)
+  let dynamicExpands = expands;
+  if (Array.isArray(fields) && fields.length) {
+    const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && selects.includes(f.InternalName)).map(f=>f.InternalName);
+    const extra = userFields.filter(n=> !['Author','Editor'].includes(n));
+    if (extra.length) {
+      // для User полей нужно выбирать Title/Id, а не просто InternalName
+      selects = selects.filter(s=> !extra.includes(s));
+      for (const u of extra) {
+        selects.push(`${u}/Title`, `${u}/Id`);
+      }
+      dynamicExpands = [...new Set([...expands.split(','), ...extra])].join(',');
+    }
+  }
+  // Для совместимости: если fields не переданы, делаем минимальный запрос (без кириллических _x...), чтобы не падать на усечённых именах
+  let url = `${dobListApi()}/items?$select=${selects.join(',')}&$expand=${dynamicExpands}&$top=${top}`;
   if (orderBy) url += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
   if (filter) url += `&$filter=${encodeURIComponent(filter)}`;
   try {
@@ -64,31 +72,48 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
     return { results, next };
   } catch (e) {
     const msg = String(e?.response?.data?.error?.message?.value || e?.message || '').toLowerCase();
-    // fallback: if field not found / select error, retry without $select (return all fields)
-    if (msg.includes('does not exist') || msg.includes('field') || msg.includes('not found') || e?.response?.status === 400) {
+    if (msg.includes('does not exist') || msg.includes('field') || msg.includes('not found') || msg.includes('author') || e?.response?.status === 400) {
       // eslint-disable-next-line no-console
-      console.warn('[dobApi] select failed, fallback to minimal select', msg.slice(0,200));
-      let fbUrl = `${dobListApi()}/items?$expand=${expands}&$top=${top}`;
+      console.warn('[dobApi] select failed, fallback to minimal+safe select', msg.slice(0,300));
+      // fallback: минимальный select с корректным expand (Author/Title нужен в select если expand Author)
+      const fbSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
+      let fbUrl = `${dobListApi()}/items?$select=${fbSelects.join(',')}&$expand=${expands}&$top=${top}`;
       if (orderBy) fbUrl += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
       if (filter) fbUrl += `&$filter=${encodeURIComponent(filter)}`;
-      const { data } = await dobAxios.get(fbUrl);
-      const results = data?.d?.results || data?.value || [];
-      const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-      return { results, next };
+      try {
+        const { data } = await dobAxios.get(fbUrl);
+        const results = data?.d?.results || data?.value || [];
+        const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+        return { results, next };
+      } catch (e2) {
+        const msg2 = String(e2?.response?.data?.error?.message?.value || e2?.message || '').toLowerCase();
+        // последний fallback — без expand (если Author вообще не поддерживается на этом списке)
+        if (msg2.includes('author')) {
+          console.warn('[dobApi] fallback without Author expand', msg2.slice(0,200));
+          let fb2 = `${dobListApi()}/items?$select=ID,Title,Created,Modified&$top=${top}`;
+          if (orderBy) fb2 += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
+          if (filter) fb2 += `&$filter=${encodeURIComponent(filter)}`;
+          const { data } = await dobAxios.get(fb2);
+          const results = data?.d?.results || data?.value || [];
+          const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+          return { results, next };
+        }
+        throw e2;
+      }
     }
     throw e;
   }
 }
 
 // Paginated fetch helper — respects SharePoint __next
-export async function getDobItemsPaged({ pageSize = 50 } = {}) {
+export async function getDobItemsPaged({ pageSize = 50, fields = null } = {}) {
   const all = [];
   let nextUrl = null;
   let first = true;
   while (first || nextUrl) {
     let url;
     if (first) {
-      const { results, next } = await getDobItems({ top: pageSize });
+      const { results, next } = await getDobItems({ top: pageSize, fields });
       all.push(...results);
       nextUrl = next;
       first = false;

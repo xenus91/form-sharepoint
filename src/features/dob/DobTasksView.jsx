@@ -9,7 +9,8 @@ import { useQueryClient } from '@tanstack/react-query';
 
 export default function DobTasksView() {
   const fieldsQ = useDobFields(true);
-  const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100 });
+  const fieldsData = fieldsQ.data || null;
+  const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData });
   const qc = useQueryClient();
 
   const handleRefresh = React.useCallback(() => {
@@ -45,7 +46,7 @@ export default function DobTasksView() {
     );
   }
 
-  const fields = fieldsQ.data || [];
+  const fields = fieldsData || [];
   const rows = itemsQ.data || [];
 
   return (
