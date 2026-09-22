@@ -48,6 +48,21 @@ function saveToStorage(){
   }catch{}
 }
 export function clearTaskResultDefinitionsCache(){ _cache=null; _cacheAt=0; try{ const s=getStorage(); s?.removeItem(STORAGE_KEY); s?.removeItem(STORAGE_AT);}catch{} }
+export function getTaskResultDefinitionsCache(){ return _cache; }
+if(typeof window!=='undefined'){
+  window.__debugTaskResultDefs = async (apiClientParam)=>{
+    const client = apiClientParam || (await import("../api/sharepoint/client.js").then(m=>m.default).catch(()=>null));
+    if(!client){ console.warn("apiClient not available"); return; }
+    try{
+      const {data}= await client.get(`/web/lists/getbytitle('${LIST_TITLE}')/fields?$select=InternalName,Title,TypeAsString,Hidden&$top=100`, {headers:{Accept:"application/json;odata=verbose"}});
+      console.log("[DBG:fields] TaskResultDefinitions fields", (data?.d?.results||[]).map(f=>({InternalName:f.InternalName, Title:f.Title, TypeAsString:f.TypeAsString, Hidden:f.Hidden})));
+    }catch(e){ console.error(e); }
+    try{
+      const {data}= await client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=5`, {headers:{Accept:"application/json;odata=verbose"}});
+      console.log("[DBG:items] sample", data?.d?.results);
+    }catch(e){ console.error("items fetch failed", e?.response?.data); }
+  };
+}
 function norm(s){ return String(s||"").trim().toLowerCase(); }
 function parseBool(v, fallback=false){
   if(v===undefined||v===null||v==="") return fallback;
@@ -143,13 +158,37 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
     return _cache;
   }catch(e){
     const status=e?.response?.status;
+    const errVal = e?.response?.data?.error?.message?.value || e?.response?.data?.['odata.error']?.message?.value || e?.message || String(e);
+    const errCode = e?.response?.data?.error?.code || '';
     if(status===404){
       console.info(`[taskResultDefinitions] list '${LIST_TITLE}' not found (404) — fallback to resultConfig.js`);
       _cache=null; _cacheAt=Date.now();
       return null;
     }
-    console.warn(`[taskResultDefinitions] fetch failed ${status}`, e?.message);
+    // Detailed 400 logging for missing field (CType) — user asked to remove fallback, so 400 = column not exists
+    console.error(`[taskResultDefinitions] fetch failed ${status} code=${errCode}`, errVal, {url, err:e});
+    if(status===400 && /CType/i.test(errVal)){
+      console.error(`[taskResultDefinitions] Field 'CType' not found in list '${LIST_TITLE}'. Check internal names via: /_api/web/lists/getbytitle('TaskResultDefinitions')/fields?$select=InternalName,Title`);
+      // expose helper
+      try{ window.__taskResultDefsLastError = {status, errVal, errCode, url}; }catch{}
+      // try to list actual fields for diagnostics (single request, not fallback for data)
+      try{
+        apiClient.get(`/web/lists/getbytitle('${LIST_TITLE}')/fields?$select=InternalName,Title,TypeAsString&$top=100`, {headers:{Accept:"application/json;odata=verbose"}}).then(r=>{
+          const fields = r?.data?.d?.results||[];
+          console.warn("[DBG:taskResultDefinitions:fields] actual fields", fields.map(f=>({InternalName:f.InternalName, Title:f.Title, TypeAsString:f.TypeAsString})));
+          const hasCType = fields.some(f=>String(f.InternalName).toLowerCase()==="ctype");
+          if(!hasCType){
+            console.error("[taskResultDefinitions] CType column missing! Create column with InternalName 'CType' (Single line text). Current fields:", fields.map(f=>f.InternalName).join(", "));
+          }
+        }).catch(()=>{});
+      }catch{}
+    }
     if(_cache) return _cache;
+    // On 400 missing field, return null to fallback to hardcoded (hasDefs=false) instead of empty cache (hasDefs=true empty)
+    if(status===400){
+      _cache=null; _cacheAt=Date.now();
+      return null;
+    }
     _cache={global:new Map(), byCt:new Map(), raw:[]};
     _cacheAt=Date.now(); saveToStorage();
     return _cache;
