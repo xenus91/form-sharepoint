@@ -94,6 +94,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
   const [linkUrl, setLinkUrl] = useState('');
   const [tablePopoverAnchor, setTablePopoverAnchor] = useState(null);
   const fileInputRef = useRef(null);
+  const base64MapRef = useRef(new Map());
   const [internalUploading, setInternalUploading] = useState(false);
   const uploading = isUploading || internalUploading;
 
@@ -137,7 +138,12 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
     content: value || '',
     editable: !readOnly,
     onUpdate: ({ editor }) => {
-      const html = editor.getHTML();
+      let html = editor.getHTML();
+      if (base64MapRef.current.size > 0) {
+        for (const [b64, url] of base64MapRef.current.entries()) {
+          if (url && html.includes(b64)) html = html.split(b64).join(url);
+        }
+      }
       if (onChange) onChange(html);
     },
     editorProps: {
@@ -181,7 +187,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
                       if (has) {
                         const newHtml = html.split(base64).join(finalUrl);
                         console.log('[RichEditor][paste] replacing base64 with finalUrl, newHtml has finalUrl?', newHtml.includes(finalUrl));
-                        editor.commands.setContent(newHtml, false);
+                        if (onChange) onChange(newHtml); // keep base64 in editor, finalUrl for save
                         console.log('[RichEditor][paste] after setContent html has finalUrl?', editor.getHTML().includes(finalUrl));
                         // also log image element src after
                         setTimeout(()=> {
@@ -238,7 +244,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
                     if (has) {
                       const newHtml = html.split(base64).join(finalUrl);
                       console.log('[RichEditor][drop] newHtml has finalUrl?', newHtml.includes(finalUrl));
-                      editor.commands.setContent(newHtml, false);
+                      if (onChange) onChange(newHtml); // keep base64 in editor, finalUrl for save
                     } else console.warn('[RichEditor][drop] base64 not found');
                   }
                 } else if (base64 && editor) {
@@ -306,7 +312,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
                 if (has) {
                   const newHtml = html.split(base64).join(finalUrl);
                   console.log('[RichEditor][button] newHtml has finalUrl?', newHtml.includes(finalUrl));
-                  editor.commands.setContent(newHtml, false);
+                  if (onChange) onChange(newHtml); // keep base64 in editor, finalUrl for save
                   console.log('[RichEditor][button] after html has finalUrl?', editor.getHTML().includes(finalUrl));
                 } else console.warn('[RichEditor][button] base64 not in html');
               }
