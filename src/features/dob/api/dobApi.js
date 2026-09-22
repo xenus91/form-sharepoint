@@ -45,9 +45,20 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
   }
   let currentFilter = filter;
   let currentExpands = expands;
+  // для $expand SharePoint требует $select с целевыми полями Author/Title и т.д., иначе 400
+  // делаем $select=*,Author/Title,Author/Id,Editor/Title,Editor/Id + UserFail/Title...
+  function buildSelectForExpands(exp) {
+    const parts = ['*'];
+    for (const e of exp.split(',').filter(Boolean)) {
+      if (e === 'AttachmentFiles') continue; // коллекция, не требует Title/Id
+      parts.push(`${e}/Title`, `${e}/Id`);
+    }
+    return parts.join(',');
+  }
   let attempt = 0;
   while (attempt < 5) {
-    let url = `${dobListApi()}/items?$expand=${currentExpands}&$top=${top}`;
+    const selectForExpand = buildSelectForExpands(currentExpands);
+    let url = `${dobListApi()}/items?$select=${selectForExpand}&$expand=${currentExpands}&$top=${top}`;
     if (orderBy) url += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
     if (currentFilter) url += `&$filter=${encodeURIComponent(currentFilter)}`;
     try {
