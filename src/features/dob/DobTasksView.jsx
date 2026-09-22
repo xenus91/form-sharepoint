@@ -10,9 +10,16 @@ import { useQueryClient } from '@tanstack/react-query';
 export default function DobTasksView() {
   const fieldsQ = useDobFields(true);
   const fieldsData = fieldsQ.data || null;
-  // Фильтр только Открытые — Статус calculated, OData фильтр не работает (Column does not exist), делаем клиентский
-  // Попытка OData__ prefix тоже падала, поэтому серверный фильтр отключен, клиентский ниже
-  const statusFilter = React.useMemo(() => '', [fieldsData]);
+  // Фильтр только Открытые — по OData__x0421... (SP отдаёт OData__x..., а не _x...), ГрОт не фильтруем
+  const statusFilter = React.useMemo(() => {
+    if (!fieldsData || !fieldsData.length) return '';
+    const f = fieldsData.find(x => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус');
+    const internal = f?.InternalName; // _x0421__x0442__x0430__x0442__x04
+    if (!internal) return '';
+    // SP REST для _x полей требует OData__x... (без ведущего _)
+    const odataName = internal.startsWith('_') ? 'OData__' + internal.slice(1) : 'OData__' + internal;
+    return `${odataName} eq 'Открыт'`;
+  }, [fieldsData]);
   const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: statusFilter });
   const qc = useQueryClient();
 
