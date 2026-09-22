@@ -27,7 +27,9 @@ import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguratio
 import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
 import { useDistribution } from "./features/tasks/hooks/useDistribution";
 import { useTasksMetadata } from "./features/tasks/hooks/useTasksMetadata";
-// import { useTasksFiltering } from "./features/tasks/hooks/useTasksFiltering";
+import { useTasksFiltering } from "./features/tasks/hooks/useTasksFiltering";
+import LocalRcBanner from "./features/tasks/components/LocalRcBanner";
+import { useHashPolling, useTasksFocusPolling } from "./features/tasks/hooks/useHashPolling";
 import TasksHeader from "./features/tasks/components/TasksHeader";
 import TasksTabs from "./features/tasks/components/TasksTabs";
 import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle";
@@ -404,7 +406,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         <LocalRcBanner isLocalRcActive={isLocalRcActive} localRcValue={localRcValue} localRcOffice={localRcOffice} onClearLocalRc={onClearLocalRc} />
       )}
       <Box sx={{ position: "relative", zIndex: 10, bgcolor: "#ffffff", backdropFilter: "none", transform: "translateZ(0)", willChange: "transform", mx: 0, px: { xs: 1, sm: 2 }, pt: 1, pb: 1, mb: 1, borderRadius: '28px', border: "1px solid rgba(23,28,143,0.12)", boxShadow: "0 2px 8px rgba(23,28,143,0.06)", overflow: 'visible', boxSizing: 'border-box', flexShrink: 0, contain: "layout paint" }}>
-        <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={clearElementHashParam} onRefresh={loadTasks} loading={loading} />
+        <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={onClearElementHash} onRefresh={loadTasks} loading={loading} />
         {!isHashMode && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedCount} completedCount={completedCount} hashMode={isHashMode} isTabPending={isTabPending} />
