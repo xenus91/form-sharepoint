@@ -1,8 +1,9 @@
 // src/features/dob/DobTaskEditView.jsx
 // Full-screen edit form for single DOB item — with rich ChekResult editor
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { Box, Button, Chip, CircularProgress, LinearProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip } from '@mui/material';
+import { Box, Button, Chip, CircularProgress, LinearProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip, AppBar, Toolbar } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import MenuIcon from '@mui/icons-material/Menu';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
@@ -11,6 +12,22 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment } from './api/dobApi';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
+
+
+const HIDDEN_FORM_FIELDS = new Set([
+  'ComplianceAssetId', 'LinkTitleNoMenu', 'LinkTitle', 'Modified', 'UserFail',
+  '_UIVersionString', 'DocIcon', 'FolderChildCount', 'AppEditor', 'AppAuthor',
+  'ItemChildCount', 'Edit',
+  'x041d_x0435__x0434__x0435__x04', 'x0414_x0430__x0442__x0430__x001',
+  'x041b_x043e__x0433__x0438__x040', 'x0417_x0430__x043f__x0438__x04',
+  'x0443_x0432__x0435__x0434__x04',
+]);
+function isHiddenFormField(internal = '') {
+  const name = String(internal);
+  const normalized = name.replace(/^OData__?/, '').replace(/^_/, '');
+  return HIDDEN_FORM_FIELDS.has(name) || HIDDEN_FORM_FIELDS.has(normalized) ||
+    /^(?:x|_x)041d__x0435__x0434__x0435__x04|^(?:x|_x)0414__x0430__x0442__x0430__x001|^(?:x|_x)041b__x043e__x0433__x0438__x040|^(?:x|_x)0417__x0430__x043f__x0438__x04|^(?:x|_x)0443__x0432__x0435__x0434__x04/.test(normalized);
+}
 
 function isEditableField(f) {
   if (!f) return false;
@@ -33,7 +50,17 @@ function getODataValue(row, internal) {
   return undefined;
 }
 
-export default function DobTaskEditView({ id }) {
+function looksLikeHtml(value) {
+  return typeof value === 'string' && /(?:<\/?[a-z][^>]*>|&lt;\/?[a-z][^&]*&gt;)/i.test(value);
+}
+function normalizeHtmlValue(value) {
+  if (typeof value !== 'string') return value || '';
+  if (!value.includes('&lt;')) return value;
+  const doc = new DOMParser().parseFromString(value, 'text/html');
+  return doc.body.textContent || value;
+}
+
+export default function DobTaskEditView({ id, onOpenMenu }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
   const [form, setForm] = useState({});
@@ -302,6 +329,7 @@ export default function DobTaskEditView({ id }) {
     if (!fields) return [];
     return fields.filter(f => {
       if (['ID','Attachments','ContentType','ContentTypeId'].includes(f.InternalName)) return false;
+      if (isHiddenFormField(f.InternalName)) return false;
       // Show all except hidden system, but mark readOnly
       if (f.Hidden) return false;
       return true;
@@ -429,23 +457,24 @@ export default function DobTaskEditView({ id }) {
   }
 
   return (
-    <Box sx={{ width: '100%', maxWidth: 'none', mx: 0, display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 1, md: 2 }, boxSizing: 'border-box', overflowX: 'hidden', minWidth: 0 }}>
-      <Paper sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1, borderRadius: 1, border: '1px solid rgba(23,28,143,0.12)', maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}>
-        <Button startIcon={<ArrowBackIcon />} onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>К списку</Button>
-        <Typography variant="h6" sx={{ fontWeight: 800, color: '#171c8f', ml: 1 }}>Заявка ДОБ — {form.Title ? `${form.Title} ` : ''}#{id}</Typography>
-        <Chip label={getODataValue(item, '_x0421__x0442__x0430__x0442__x04') || item?.OData__x0421__x0442__x0430__x0442__x04 || '—'} size="small" sx={{ ml: 1, fontWeight: 700 }} />
-        <Box sx={{ flex: 1 }} />
-        {isFetching && <Typography variant="caption" color="text.secondary">обновление…</Typography>}
-        <Button variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={{ borderRadius: 2 }}>Обновить</Button>
-        <Button variant="contained" onClick={handleSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={{ borderRadius: 2, minWidth: 140, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)' }}>
-          {saving ? 'Сохранение…' : 'Сохранить'}
-        </Button>
-      </Paper>
+    <Box data-dob-edit-page="true" sx={{ width: '100%', maxWidth: 'none', mx: 0, display: 'flex', flexDirection: 'column', gap: .75, p: { xs: .5, md: .75 }, boxSizing: 'border-box', overflowX: 'hidden', minWidth: 0, '& .MuiOutlinedInput-root': { borderRadius: .5 }, '& .MuiButton-root': { borderRadius: .5 } }}>
+      <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1100, bgcolor: '#fff', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
+        <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
+          <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
+          <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="К списку"><ArrowBackIcon fontSize="small" /></IconButton>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>Заявка ДОБ #{id}</Typography>
+          {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
+          <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={{ borderRadius: .5 }}>Обновить</Button>
+          <Button size="small" variant="contained" onClick={handleSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={{ borderRadius: .5, minWidth: 120, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)', color: '#fff' }}>
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+        </Toolbar>
+      </AppBar>
 
       {saveError && <Alert severity="error" onClose={()=> setSaveError('')}>{saveError}</Alert>}
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
-      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
+      <Paper sx={{ p: { xs: 1, md: 1.25 }, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1, color: '#171c8f' }}>Результат проверки — главное поле</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Поддерживает таблицы, списки, форматирование и вставку изображений. Изображения автоматически загружаются как вложения заявки и вставляются как {'<img src="...">'}.
@@ -497,10 +526,10 @@ export default function DobTaskEditView({ id }) {
         )}
       </Paper>
 
-      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
+      <Paper sx={{ p: { xs: 1, md: 1.25 }, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5, color: '#171c8f' }}>Остальные поля</Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-          {editableFields.filter(f=> f.InternalName !== chekInternal).map(f => {
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: { xs: .75, md: 1 } }}>
+          {editableFields.filter(f => f.InternalName !== chekInternal && !/^(?:modified|откорректировано|изменено)$/i.test(String(f.InternalName || f.Title || '').trim()) && !/откорректировано|изменено/i.test(String(f.Title || ''))).map(f => {
             const internal = f.InternalName;
             const title = f.Title || internal;
             const t = (f.TypeAsString || '').toLowerCase();
@@ -511,7 +540,7 @@ export default function DobTaskEditView({ id }) {
             if (internal === 'Author' || internal === 'Editor') {
               const disp = item?.[internal]?.Title || value || '';
               return (
-                <TextField key={internal} label={title} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth helperText={internal} />
+                <TextField key={internal} label={title} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth />
               );
             }
             if (t === 'choice') {
@@ -527,7 +556,6 @@ export default function DobTaskEditView({ id }) {
                   size="small"
                   fullWidth
                   disabled={!editable}
-                  helperText={`${internal} — ${f.TypeAsString}${isCalculated ? ' (только чтение — формула)' : ''}`}
                 >
                   <MenuItem value=""><em>— не выбрано —</em></MenuItem>
                   {vals.map(v=> <MenuItem key={v} value={v}>{v}</MenuItem>)}
@@ -540,7 +568,7 @@ export default function DobTaskEditView({ id }) {
                 <FormControlLabel
                   key={internal}
                   control={<Checkbox checked={!!boolVal} onChange={e=> handleChange(internal, e.target.checked)} disabled={!editable} />}
-                  label={`${title}${f.Required ? ' *' : ''} (${internal})`}
+                  label={`${title}${f.Required ? ' *' : ''}`}
                   sx={{ alignItems: 'center' }}
                 />
               );
@@ -573,7 +601,6 @@ export default function DobTaskEditView({ id }) {
                   fullWidth
                   disabled={!editable}
                   InputLabelProps={{ shrink: true }}
-                  helperText={`${internal} — ${f.TypeAsString}${isCalculated ? ' (только чтение)' : ''}`}
                 />
               );
             }
@@ -588,8 +615,16 @@ export default function DobTaskEditView({ id }) {
                   fullWidth
                   disabled={!editable}
                   type="number"
-                  helperText={`${internal} — ${f.TypeAsString}`}
                 />
+              );
+            }
+            if ((t === 'note' || t === 'text') && looksLikeHtml(value)) {
+              const htmlValue = normalizeHtmlValue(value);
+              return (
+                <Box key={internal} sx={{ gridColumn: { md: '1 / -1' }, minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: .5 }}>{title}{f.Required ? ' *' : ''}</Typography>
+                  <RichEditor value={htmlValue} readOnly={!editable} onChange={html => handleChange(internal, html)} />
+                </Box>
               );
             }
             if (t === 'note') {
@@ -605,14 +640,13 @@ export default function DobTaskEditView({ id }) {
                   minRows={2}
                   maxRows={6}
                   disabled={!editable}
-                  helperText={`${internal} — ${f.TypeAsString}${isCalculated ? ' (только чтение)' : ''}`}
                 />
               );
             }
             if (t === 'user') {
               const disp = item?.[internal]?.Title || value || '';
               return (
-                <TextField key={internal} label={`${title}${f.Required ? ' *' : ''}`} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth helperText={`${internal} — User (только чтение в этой форме)`} />
+                <TextField key={internal} label={`${title}${f.Required ? ' *' : ''}`} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth />
               );
             }
             if (t === 'url') {
@@ -625,7 +659,6 @@ export default function DobTaskEditView({ id }) {
                   size="small"
                   fullWidth
                   disabled={!editable}
-                  helperText={`${internal} — ${f.TypeAsString}`}
                 />
               );
             }
@@ -639,7 +672,6 @@ export default function DobTaskEditView({ id }) {
                 size="small"
                 fullWidth
                 disabled={!editable || isCalculated}
-                helperText={`${internal} — ${f.TypeAsString}${isCalculated ? ' (только чтение — формула)' : editable ? '' : ' (только чтение)'}`}
               />
             );
           })}

@@ -2,16 +2,17 @@
 // AG Grid wrapper for DOB list — dynamic columns from fields metadata, inline edit + save
 import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
+import { ModuleRegistry, AllCommunityModule, themeQuartz } from 'ag-grid-community';
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-// AG Grid v32+ uses theming via CSS; simple quartz theme via class
-import 'ag-grid-community/styles/ag-grid.css';
-import 'ag-grid-community/styles/ag-theme-quartz.css';
 
-import { Box, Button, Chip, CircularProgress, Typography, Stack, Alert, Tooltip } from '@mui/material';
+import { Box, Button, Chip, CircularProgress, Typography, Alert, Tooltip, TextField, Menu, MenuItem, Checkbox, ListItemText, IconButton, Divider } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { updateDobItem } from '../api/dobApi';
 import { useNotifications } from '../../../NotificationsProvider';
 
@@ -56,6 +57,20 @@ function mapTypeToEditor(f) {
   return 'agTextCellEditor';
 }
 
+function htmlToCellText(value) {
+  if (value === null || value === undefined) return '';
+  const raw = String(value);
+  try {
+    const doc = new DOMParser().parseFromString(raw, 'text/html');
+    let text = doc.body.textContent || '';
+    // Some SharePoint fields contain HTML encoded once (for example &lt;div&gt;...).
+    if (/<\/?[a-z][^>]*>/i.test(text)) {
+      text = new DOMParser().parseFromString(text, 'text/html').body.textContent || text;
+    }
+    return text.replace(/[\u200b\u200c\ufeff]/g, '').replace(/\s+/g, ' ').trim();
+  } catch { return raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
+}
+
 function buildColumnDefs(fields) {
   if (!fields || fields.length === 0) return [];
   // Динамический whitelist — берём все поля, которые реально вернулись из /fields (полные InternalName, без усечений)
@@ -72,6 +87,7 @@ function buildColumnDefs(fields) {
   for (const f of fields) {
     if (ordered.includes(f)) continue;
     if (f.Hidden) continue;
+    if (f.InternalName === 'ChekResult' || /chekresult/i.test(f.InternalName || '') || /результат.*провер/i.test(f.Title || '')) continue;
     if (systemSkip.has(f.InternalName)) continue;
     if (f.InternalName === 'ContentType' || f.Title === 'Тип контента' || (f.Title||'').toLowerCase().includes('тип контента')) continue;
     // Пропускаем только явные системные, остальные показываем (включая Calculated, но они будут readOnly ниже)
@@ -164,27 +180,15 @@ function buildColumnDefs(fields) {
       });
       continue;
     }
-    if (internal === 'ChekResult' || internal === '_x041a__x043e__x043c__x043c__x04') {
-      // Note tall
-      cols.push({
-        field: internal,
-        headerName: title,
-        width: 220,
-        editable: editable,
-        cellEditor: 'agLargeTextCellEditor',
-        cellEditorParams: { maxLength: 1000, rows: 4, cols: 40 },
-        autoHeight: true,
-        wrapText: true,
-        cellStyle: { lineHeight: '1.2', paddingTop: 6, paddingBottom: 6 }
-      });
-      continue;
-    }
+    // ChekResult is edited in the dedicated rich-text editor, not in the list grid.
+    if (internal === 'ChekResult' || internal === '_x041a__x043e__x043c__x04') continue;
 
     const isODataField = internal.startsWith('_x');
     const col = {
       field: internal,
       headerName: title + (f.Required ? ' *' : ''),
-      width: 150,
+      flex: 1,
+      minWidth: 120,
       editable: editable && !isCalculated,
       headerTooltip: `${internal} — ${f.TypeAsString}${f.Description ? ' | '+String(f.Description).slice(0,80) : ''}`,
       tooltipValueGetter: (p)=> p.value ? String(p.value).slice(0, 120) : '',
@@ -194,6 +198,7 @@ function buildColumnDefs(fields) {
         valueSetter: (p) => { setODataValue(p.data, internal, p.newValue); return true; },
       } : {}),
     };
+    if (['text', 'note', 'url'].includes(t)) col.valueFormatter = p => htmlToCellText(p.value);
 
     // Width heuristics
     if (t === 'note') col.width = 220;
@@ -209,7 +214,7 @@ function buildColumnDefs(fields) {
       const vals = (rawChoices || []).filter(Boolean);
       col.cellEditor = 'agSelectCellEditor';
       col.cellEditorParams = { values: vals.length ? vals : [''] , valueListGap: 0 };
-      col.filter = 'agSetColumnFilter';
+      col.filter = 'agTextColumnFilter';
       col.cellStyle = { background: 'rgba(255,255,255,0.02)' };
       if (internal === '_x043e__x0441__x043d__x043e__x04') { // Основание required
         col.cellStyle = (p)=> ({ background: !p.value ? 'rgba(229,57,53,0.08)' : undefined, borderLeft: p.value ? undefined : '3px solid #e53935' });
@@ -217,7 +222,7 @@ function buildColumnDefs(fields) {
     } else if (t === 'boolean') {
       col.cellRenderer = (p) => p.value ? '☑ Да' : '☐ Нет';
       col.cellEditor = 'agCheckboxCellEditor';
-      col.filter = 'agSetColumnFilter';
+      col.filter = 'agTextColumnFilter';
       col.valueGetter = (p) => {
         const raw = p.data?.[internal];
         if (raw === true || raw === 1 || raw === '1' || String(raw).toLowerCase()==='true') return true;
@@ -293,6 +298,7 @@ function buildColumnDefs(fields) {
     // Pin ID
     if (internal === 'ID') {
       col.pinned = 'left';
+      col.flex = 0;
       col.width = 80;
       col.editable = false;
       col.sortable = true;
@@ -300,7 +306,8 @@ function buildColumnDefs(fields) {
     }
     if (internal === 'Title') {
       col.pinned = 'left';
-      col.width = 90;
+      col.flex = 0;
+      col.width = 140;
     }
     cols.push(col);
   }
@@ -313,16 +320,57 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
   const [dirty, setDirty] = useState(() => new Map()); // id -> payload diff
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [quickFilter, setQuickFilter] = useState('');
+  const [columnPrefs, setColumnPrefs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('dob_tasks_column_preferences') || '{}'); } catch { return {}; }
+  });
+  const [columnsMenuAnchor, setColumnsMenuAnchor] = useState(null);
 
-  const columnDefs = useMemo(() => buildColumnDefs(fields), [fields]);
+  const baseColumnDefs = useMemo(() => buildColumnDefs(fields), [fields]);
+  const columnDefs = useMemo(() => {
+    const order = Array.isArray(columnPrefs.order) ? columnPrefs.order : [];
+    const rank = new Map(order.map((name, index) => [name, index]));
+    return [...baseColumnDefs]
+      .sort((a, b) => (rank.get(a.field) ?? 100000) - (rank.get(b.field) ?? 100000))
+      .map(col => ({ ...col, hide: Array.isArray(columnPrefs.hidden) && columnPrefs.hidden.includes(col.field) }));
+  }, [baseColumnDefs, columnPrefs]);
+  const columnNames = useMemo(() => baseColumnDefs.map(col => ({ field: col.field, title: col.headerName || col.field })), [baseColumnDefs]);
+  const persistColumnPrefs = useCallback((next) => {
+    setColumnPrefs(next);
+    try { localStorage.setItem('dob_tasks_column_preferences', JSON.stringify(next)); } catch {}
+  }, []);
+  const toggleColumn = useCallback((field) => {
+    const hidden = new Set(columnPrefs.hidden || []);
+    hidden.has(field) ? hidden.delete(field) : hidden.add(field);
+    persistColumnPrefs({ ...columnPrefs, hidden: [...hidden] });
+  }, [columnPrefs, persistColumnPrefs]);
+  const moveColumn = useCallback((field, direction) => {
+    const current = (columnPrefs.order?.length ? [...columnPrefs.order] : columnNames.map(c => c.field));
+    const index = current.indexOf(field);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return;
+    [current[index], current[nextIndex]] = [current[nextIndex], current[index]];
+    persistColumnPrefs({ ...columnPrefs, order: current });
+  }, [columnPrefs, columnNames, persistColumnPrefs]);
+  const resetColumnPrefs = useCallback(() => {
+    persistColumnPrefs({ order: columnNames.map(c => c.field), hidden: [] });
+  }, [columnNames, persistColumnPrefs]);
 
   const defaultColDef = useMemo(() => ({
     sortable: true,
-    filter: true,
+    filter: 'agTextColumnFilter',
     resizable: true,
+    flex: 1,
+    minWidth: 120,
     floatingFilter: false,
-    suppressHeaderFilterButton: false,
-    cellStyle: { fontSize: 13 },
+    wrapHeaderText: true,
+    autoHeaderHeight: true,
+    suppressHeaderFilterButton: true,
+    wrapText: false,
+    autoHeight: false,
+    cellStyle: { fontSize: 13, lineHeight: '1.35', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+    cellDataType: false,
+    filterParams: { buttons: ['reset', 'apply'], closeOnApply: true },
   }), []);
 
   const rowData = useMemo(() => {
@@ -421,21 +469,29 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
     animateRows: true,
     rowSelection: { mode: 'singleRow', enableClickSelection: true },
     suppressRowHoverHighlight: false,
+    ensureDomOrder: true,
   }), []);
 
-  // Auto-size columns on fields change
-  useEffect(()=>{
-    if (gridRef.current?.api) {
-      setTimeout(()=> {
-        try { gridRef.current.api.autoSizeAllColumns(false); } catch {}
-      }, 300);
-    }
-  }, [columnDefs]);
-
   return (
-    <Box sx={{ width: '100%', height: '100%', display:'flex', flexDirection:'column', minHeight: 520 }}>
-      <Box sx={{ display:'flex', gap:1, alignItems:'center', flexWrap:'wrap', mb:1.5, p:1, border:'1px solid rgba(23,28,143,0.12)', borderRadius:'12px', bgcolor:'rgba(255,255,255,0.9)', backdropFilter:'blur(6px)' }}>
-        <Chip label={`${rows?.length ?? 0} записей`} size="small" sx={{ fontWeight:700 }} />
+    <Box className="dob-grid-shell" sx={{ width: '100%', height: '100%', display:'flex', flexDirection:'column', minHeight: 0, flex: '1 1 0px' }}>
+      <Box sx={{ display:'flex', gap:1, alignItems:'center', flexWrap:'wrap', mb:0.75, p:0.5, border:'1px solid rgba(23,28,143,0.12)', borderRadius:'6px', bgcolor:'rgba(255,255,255,0.9)', backdropFilter:'blur(6px)' }}>
+        <Chip label={`${rows?.length ?? 0} записей`} size="small" sx={{ fontWeight:700, bgcolor: 'rgba(23,28,143,0.08)' }} />
+        <TextField size="small" value={quickFilter} onChange={e=>setQuickFilter(e.target.value)} placeholder="Быстрый поиск…" aria-label="Быстрый поиск" sx={{ width: { xs: 160, sm: 220 }, '& .MuiOutlinedInput-root': { borderRadius: 1 } }} />
+        <Button size="small" variant="outlined" onClick={e=>setColumnsMenuAnchor(e.currentTarget)} startIcon={<MoreVertIcon />} sx={{ borderRadius: 1, minWidth: 0 }}>Поля</Button>
+        <Menu anchorEl={columnsMenuAnchor} open={Boolean(columnsMenuAnchor)} onClose={()=>setColumnsMenuAnchor(null)} MenuListProps={{ dense: true }}>
+          <MenuItem disabled sx={{ fontWeight: 700 }}>Настройка полей</MenuItem>
+          <Divider />
+          {columnNames.map((column, index) => (
+            <MenuItem key={column.field} dense>
+              <Checkbox size="small" checked={!(columnPrefs.hidden || []).includes(column.field)} onChange={()=>toggleColumn(column.field)} />
+              <ListItemText primary={column.title} />
+              <IconButton size="small" disabled={index === 0} onClick={()=>moveColumn(column.field, -1)}><ArrowUpwardIcon fontSize="inherit" /></IconButton>
+              <IconButton size="small" disabled={index === columnNames.length - 1} onClick={()=>moveColumn(column.field, 1)}><ArrowDownwardIcon fontSize="inherit" /></IconButton>
+            </MenuItem>
+          ))}
+          <Divider />
+          <MenuItem onClick={resetColumnPrefs}><RestartAltIcon fontSize="small" sx={{ mr: 1 }} />Сбросить порядок</MenuItem>
+        </Menu>
         {dirty.size>0 && <Chip label={`Изменено: ${dirty.size}`} color="warning" size="small" sx={{ fontWeight:800 }} />}
         {selectedId && <Chip label={`Выбран: ${selectedId}`} color="primary" size="small" sx={{ fontWeight:700 }} />}
         <Box sx={{ flex:1 }} />
@@ -447,21 +503,23 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
           </span>
         </Tooltip>
         <Tooltip title="Перезагрузить">
-          <Button size="small" variant="outlined" onClick={onRefresh} disabled={loading||isFetching} startIcon={isFetching ? <CircularProgress size={14}/> : <RefreshIcon/>} sx={{ borderRadius:2, minWidth: 110 }}>
-            Обновить
-          </Button>
+          <span>
+            <Button size="small" variant="outlined" onClick={onRefresh} disabled={loading||isFetching} startIcon={isFetching ? <CircularProgress size={14}/> : <RefreshIcon/>} sx={{ borderRadius:1, minWidth: 110 }}>
+              Обновить
+            </Button>
+          </span>
         </Tooltip>
         <Button size="small" variant="outlined" color="inherit" onClick={handleClearDirty} disabled={dirty.size===0 || saving} sx={{ borderRadius:2 }}>
           Сбросить
         </Button>
-        <Button size="small" variant="contained" onClick={handleSave} disabled={dirty.size===0 || saving} startIcon={saving ? <CircularProgress size={14} color="inherit"/> : <SaveIcon/>} sx={{ borderRadius:2, minWidth: 120, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)' }}>
+        <Button size="small" variant="contained" onClick={handleSave} disabled={dirty.size===0 || saving} startIcon={saving ? <CircularProgress size={14} color="inherit"/> : <SaveIcon/>} sx={{ borderRadius:2, minWidth: 120, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)', color: '#fff' }}>
           {saving ? 'Сохранение…' : `Сохранить${dirty.size ? ` (${dirty.size})` : ''}`}
         </Button>
       </Box>
 
       {saveError && <Alert severity="error" sx={{ mb:1, borderRadius:2 }} onClose={()=>setSaveError('')}>{saveError}</Alert>}
 
-      <Box className="ag-theme-quartz" sx={{ flex:1, width:'100%', minHeight: 420, borderRadius:'12px', overflow:'hidden', border:'1px solid rgba(23,28,143,0.12)', '& .ag-header': { background: '#f8f9ff' } }}>
+      <Box className="dob-ag-grid" sx={{ flex: '1 1 0px', width:'100%', minHeight: 0, borderRadius:'6px', overflow:'hidden' }}>
         {loading ? (
           <Box sx={{ display:'grid', placeItems:'center', height: 420, gap:1 }}>
             <CircularProgress />
@@ -470,8 +528,10 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
         ) : (
           <AgGridReact
             ref={gridRef}
+            theme={themeQuartz}
             columnDefs={columnDefs}
             rowData={rowData}
+            quickFilterText={quickFilter}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
             pagination={true}
@@ -483,8 +543,6 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
             stopEditingWhenCellsLoseFocus={true}
             getRowId={(p)=> String(p.data?.ID ?? p.data?.Id ?? p.data?.ID ?? Math.random())}
             overlayNoRowsTemplate={'<span style="padding:12px;color:#666">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'}
-            rowHeight={36}
-            headerHeight={36}
           />
         )}
       </Box>

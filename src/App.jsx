@@ -37,6 +37,8 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
+  AppBar,
+  Toolbar,
 } from "@mui/material";
 import ButtonGroup from "@mui/material/ButtonGroup";
 import { useDropzone } from "react-dropzone";
@@ -61,6 +63,7 @@ import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import MenuIcon from "@mui/icons-material/Menu";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import HomeIcon from "@mui/icons-material/Home";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import AssignmentIcon from "@mui/icons-material/Assignment";
@@ -1514,6 +1517,22 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
 
+  useEffect(() => {
+    if (currentView !== 'dob') return undefined;
+    const report = () => {
+      const shell = document.querySelector('[data-dob-shell]');
+      const page = document.querySelector('[data-dob-page]');
+      const editRoot = document.querySelector('[data-dob-edit-page]');
+      const root = document.getElementById('root');
+      console.groupCollapsed('[DOB layout] App diagnostic');
+      console.log({ hash: window.location.hash, viewport: window.innerWidth, documentWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth, rootWidth: root?.getBoundingClientRect().width, shellWidth: shell?.getBoundingClientRect().width, pageWidth: page?.getBoundingClientRect().width, editWidth: editRoot?.getBoundingClientRect().width, shellComputedWidth: shell ? getComputedStyle(shell).width : null, shellMaxWidth: shell ? getComputedStyle(shell).maxWidth : null });
+      console.groupEnd();
+    };
+    const timer = window.setTimeout(report, 50);
+    window.addEventListener('resize', report);
+    return () => { window.clearTimeout(timer); window.removeEventListener('resize', report); };
+  }, [currentView, hashElementId]);
+
   // синхронизация с hash — прямой переход по #tasks (+ elementId)
   useEffect(() => {
     const onHash = () => {
@@ -1779,11 +1798,16 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const isDobEdit = !!hashElementId && /^\d+$/.test(String(hashElementId));
     return (
       <ThemeProvider theme={figmaTheme}>
-        <Box sx={{ position: "fixed", top: 12, left: 12, zIndex: 1302, display: drawerOpen ? "none" : "block" }}>
-          <IconButton onClick={() => setDrawerOpen(true)} sx={{ bgcolor: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)", border: "1px solid rgba(23,28,143,0.15)", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", width: 44, height: 44, "&:hover": { bgcolor: "rgba(255,255,255,0.95)" } }}>
-            <MenuIcon sx={{ color: "#171c8f" }} />
-          </IconButton>
-        </Box>
+        {!isDobEdit && (
+        <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1200, bgcolor: 'rgba(255,255,255,.96)', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)', backdropFilter: 'blur(10px)' }}>
+          <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: 1, sm: 1.5 }, gap: 1 }}>
+            <IconButton onClick={() => setDrawerOpen(true)} size="small" sx={{ color: '#171c8f', borderRadius: 1 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
+            {isDobEdit && <IconButton onClick={() => { window.location.hash = "#dob_tasks"; setHashElementId(null); }} size="small" sx={{ color: '#171c8f', borderRadius: 1 }} aria-label="К списку"><ArrowBackIcon fontSize="small" /></IconButton>}
+            <Typography variant="subtitle1" sx={{ fontWeight: 800, letterSpacing: '-.01em' }}>Заявки ДОБ</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>{isDobEdit ? `Заявка #${hashElementId}` : 'Список заявок'}</Typography>
+          </Toolbar>
+        </AppBar>
+        )}
         <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)} PaperProps={{ sx: { width: 280, bgcolor: "rgba(255,255,255,0.92)", backdropFilter: "blur(16px)", borderRight: "1px solid rgba(23,28,143,0.1)" } }}>
           <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
@@ -1799,9 +1823,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </List>
           <Box sx={{ flex: 1 }} /><Divider /><Box sx={{ p: 2 }}><Typography variant="caption" color="text.secondary">{userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}</Typography></Box>
         </Drawer>
-        <Box sx={{ pt: 0, width: "100%", minWidth: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+        <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
           <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
-            {isDobEdit ? <DobTaskEditView id={String(hashElementId)} /> : <DobTasksView />}
+            {isDobEdit ? <DobTaskEditView id={String(hashElementId)} onOpenMenu={() => setDrawerOpen(true)} /> : <DobTasksView />}
           </React.Suspense>
         </Box>
       </ThemeProvider>
@@ -1913,7 +1937,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </Box>
         </Drawer>
         {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
-        <Box sx={{ pt: 0, width: "100%", minWidth: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+        <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
           <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onCountChange={setTasksActiveCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
         </Box>
         {/* Keep modals for operation date etc accessible in tasks view as well */}
