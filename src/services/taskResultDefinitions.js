@@ -152,6 +152,20 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
     _cache={global, byCt, raw};
     _cacheAt=Date.now();
     saveToStorage();
+    // DEBUG Phase 17.8 — логировать что пришло из SP
+    try{
+      const isDbg = (()=>{ try{ return new URLSearchParams(location.search).get('dbg')==='1' || localStorage.getItem('dbg')==='1' || localStorage.getItem('dbg_tasks')==='1'; }catch{return false}})();
+      if (isDbg || true) { // forced for this ticket
+        console.log("[DBG:taskResultDefinitions:fetch] parsed", {
+          urlTried: "CType fallback",
+          resultsCount: results.length,
+          raw: raw.map(r=>({Id:r.id, ResultValue:r.resultValue, CType:r.contentTypeId, Show:r.showAdditionalActions, Required:r.additionalActionsRequired, Title:r.title})),
+          byCtKeys: Array.from(byCt.keys()),
+          globalKeys: Array.from(global.keys()),
+          rawItems: results.map(it=>({Id:it.Id, Title:it.Title, ResultValue:it.ResultValue, CType:it.CType, ContentTypeId0:it.ContentTypeId0, ShowAdditionalActions:it.ShowAdditionalActions, AdditionalActionsRequired:it.AdditionalActionsRequired}))
+        });
+      }
+    }catch(e){ console.warn("[DBG:taskResultDefinitions:fetch log error]", e); }
     return _cache;
   }catch(e){
     const status=e?.response?.status;
@@ -177,9 +191,18 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
  * @returns {{showAdditionalActions:boolean, additionalActionsRequired:boolean, source:string, cfg:object|null}|null}
  */
 export function resolveTaskResultDefinition(resultValue, contentTypeId, defs){
-  if(!resultValue || !defs) return null;
+  if(!resultValue || !defs) {
+    // debug
+    try{ if (true) console.log("[DBG:resolveTaskResultDefinition] early null", {resultValue, contentTypeId, hasDefs:!!defs}); }catch{}
+    return null;
+  }
   const n=norm(resultValue);
   const ctId=String(contentTypeId||"").trim();
+  // debug forced
+  try{
+    const dbgByCtKeys = Array.from(defs.byCt.keys()).map(k=>k.slice(0,30));
+    console.log("[DBG:resolveTaskResultDefinition] lookup", {resultValue, norm:n, ctId:ctId.slice(0,60), ctFull:ctId, hasDefs:!!defs, byCtKeys: dbgByCtKeys, globalKeys: Array.from(defs.global.keys())});
+  }catch{}
   // per-CT exact → prefix
   if(ctId && defs.byCt.size){
     if(defs.byCt.has(ctId) && defs.byCt.get(ctId).has(n)){

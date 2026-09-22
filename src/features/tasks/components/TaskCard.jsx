@@ -28,6 +28,10 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 // DBG helper (shared with TasksView)
 const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return false; }catch(_e){ void _e; return false; } })();
 const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
+const __dlogAlways = (...a)=>{ try{ console.log(...a);}catch{} };
+// Forced debug for Phase 17.8 - always log taskResult resolution (user requested)
+const __forceTaskDbg = true;
+
 
 // stripHtml helper (was inline in TasksView, now local)
 function stripHtml(html) {
@@ -90,6 +94,22 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     return null;
   }, [task, propResultFieldsMeta, propCtResultMap]);
   const dynamicInternalName = dynamicFieldMeta?.internalName || "ResultSearchTHU";
+  // DEBUG: log taskConfig при изменении
+  React.useEffect(()=>{
+    if (__forceTaskDbg || __DBG_ENABLED__) {
+      try{
+        const ctDbg = String(task?.contentTypeId || task?.ContentTypeId || "").trim();
+        __dlogAlways("[DBG:TaskCard:taskConfig]", {
+          taskId: task.Id,
+          ct: ctDbg,
+          hasTaskConfig: !!taskConfig,
+          taskResultDefinitions: taskConfig?.taskResultDefinitions ? {byCtSize: taskConfig.taskResultDefinitions.byCt.size, globalSize: taskConfig.taskResultDefinitions.global.size, raw: taskConfig.taskResultDefinitions.raw} : null,
+          ctConfig: taskConfig?.ctConfigMap?.get(ctDbg) || null,
+          choices, displayedChoices, dynamicInternalName
+        });
+      }catch(e){ __dlogAlways(e); }
+    }
+  }, [task.Id, task?.contentTypeId, taskConfig?.taskResultDefinitions, choices, displayedChoices]);
   // Эффективные choices для этой задачи: из динамического поля или глобальные choices
   const effectiveChoices = React.useMemo(() => {
     if (dynamicFieldMeta?.choices && dynamicFieldMeta.choices.length > 0) return dynamicFieldMeta.choices;
@@ -637,26 +657,27 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   </>
                 );
               }
-              // Determine found / notFound choices — через конфиг + fallback на legacy строки, без хардкода конкретных значений
-              // Для открытой задачи используем displayedChoices (свежие по ContentType)
+              // Determine found / notFound choices — FIX Phase 17.8: уважать ShowAdditionalActions, не переопределять legacy строкой
               const choicesForButtons = displayedChoices || choices;
               const foundChoice = (() => {
-                // 1) по плану §14: TaskResultDefinitions.ShowAdditionalActions
+                // 1) по плану §14: TaskResultDefinitions.ShowAdditionalActions — авторитетно
+                // Если есть defs (список существует), не делаем legacy строковый fallback для уже определённых def show=false
+                const hasDefs = !!taskConfig?.taskResultDefinitions;
                 let c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
-                  if (def) return def.showAdditionalActions;
+                  if (def) return def.showAdditionalActions; // Show=true → found, Show=false → не found (уважаем)
+                  if (hasDefs) return false; // список есть, но записи нет для этого choice → не считаем found без дефа (fallback только если списка нет)
                   const cfg = getUiConfig(ch);
                   return cfg.requiresLocation || cfg.requiresAdditionalActions;
                 });
                 if (c) return c;
-                // 2) legacy: ищем "найден/найдена"
+                if (hasDefs) return null; // авторитетно: список есть → legacy строковый матч не применяем
+                // 2) legacy: ищем "найден/найдена" только когда списка нет (fallback)
                 c = choicesForButtons.find((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n === "найден" || n === "найдена";
                 });
                 if (c) return c;
-                // 3) fallback: только если среди choices есть legacy-паттерн, иначе не считаем none как found
-                // Для новых типов задач без legacy — foundChoice = null, чтобы не навязывать спец-экран
                 const hasLegacy = choicesForButtons.some((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n.includes("найден") || n.includes("не найден");
@@ -665,13 +686,15 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 return null;
               })();
               const notFoundChoice = (() => {
-                // План §14: ShowAdditionalActions=false для confirm-типа (Не найдена) не требует AA
+                const hasDefs = !!taskConfig?.taskResultDefinitions;
                 let c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
-                  if (def) return !def.showAdditionalActions && def.cfg; // Show=false → confirm типа
+                  if (def) return !def.showAdditionalActions && !!def.cfg; // Show=false → confirm типа (красный)
+                  if (hasDefs) return false; // список есть, но записи нет → не считаем confirm без дефа
                   return getUiConfig(ch).confirm;
                 });
                 if (c) return c;
+                if (hasDefs) return null;
                 c = choicesForButtons.find((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n === "не найдена" || n === "не найден" || n === "не найдено";
@@ -684,6 +707,29 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 if (hasLegacy && choicesForButtons.length > 1) return choicesForButtons[1] || null;
                 return null;
               })();
+              // DEBUG Phase 17.8 — всегда логировать (пользователь просил отладку, сброс кеша не помог)
+              if (__forceTaskDbg || __DBG_ENABLED__) {
+                try {
+                  const ctDbg = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+                  const dbgChoices = choicesForButtons.map(ch=>{
+                    const def = getResultDef(ch);
+                    const ui = getUiConfig(ch);
+                    return {choice:ch, def: def? {show:def.showAdditionalActions, required:def.additionalActionsRequired, source:def.source, ct:def.cfg?.contentTypeId}: null, ui: {requiresLocation:ui.requiresLocation, requiresAdditionalActions:ui.requiresAdditionalActions, confirm:ui.confirm, _source:ui._source}};
+                  });
+                  __dlogAlways("[DBG:TaskCard:foundNotFound]", {
+                    taskId: task.Id,
+                    taskCT: ctDbg.slice(0,60),
+                    taskCTfull: ctDbg,
+                    hasDefs: !!taskConfig?.taskResultDefinitions,
+                    byCtKeys: taskConfig?.taskResultDefinitions ? Array.from(taskConfig.taskResultDefinitions.byCt.keys()).map(k=>k.slice(0,24)+"…") : [],
+                    globalKeys: taskConfig?.taskResultDefinitions ? Array.from(taskConfig.taskResultDefinitions.global.keys()) : [],
+                    raw: taskConfig?.taskResultDefinitions?.raw?.map(r=>({ResultValue:r.resultValue, CType:r.contentTypeId, Show:r.showAdditionalActions})) || null,
+                    dbgChoices,
+                    foundChoice, notFoundChoice,
+                    displayedChoices: choicesForButtons
+                  });
+                } catch(e){ __dlogAlways("[DBG:TaskCard:error]", e); }
+              }
 
               // Confirm mode for Не найдена — как Взять в работу, но в красной гамме
               if (confirmNotFoundMode) {
