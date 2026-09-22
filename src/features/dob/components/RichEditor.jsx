@@ -136,7 +136,12 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
       TableHeader,
       TableCell,
     ],
-    content: value || '',
+    content: (() => {
+      if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV && value && typeof value === 'string' && value.includes('src="/sites/')) {
+        return value.replace(/src="\/sites\//g, 'src="/dob-api/sites/').replace(/src='\/sites\//g, "src='/dob-api/sites/");
+      }
+      return value || '';
+    })(),
     editable: !readOnly,
     onUpdate: ({ editor }) => {
       let html = editor.getHTML();
@@ -160,6 +165,10 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
         for (const [b64, url] of base64MapRef.current.entries()) {
           if (url && htmlForSave.includes(b64)) htmlForSave = htmlForSave.split(b64).join(url);
         }
+      }
+      // Нормализуем старые /dob-api/sites/... к /sites/... для продакшна (иначе на проде 404)
+      if (htmlForSave && typeof htmlForSave === 'string' && htmlForSave.includes('/dob-api/sites/')) {
+        htmlForSave = htmlForSave.replace(/\/dob-api\/sites\//g, '/sites/');
       }
       lastEmittedRef.current = htmlForSave;
       if (onChange) onChange(htmlForSave);
@@ -287,13 +296,25 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
     if (!editor || value === undefined) return;
     // Если value — это то что мы только что эмитили из onUpdate, скипаем (иначе лаг на каждый ввод)
     if (value === lastEmittedRef.current) return;
+    // Нормализуем /dob-api для сохранения — но для отображения в dev конвертим обратно
+    // value может содержать /sites/... (правильно для продакшна) или старый /dob-api/sites/... (из старых сохранений)
+    const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+    let displayValue = value;
+    if (isDev && value && typeof value === 'string') {
+      // Для отображения в dev: /sites/... -> /dob-api/sites/... чтобы грузилось через прокси
+      // Но не трогаем уже /dob-api
+      if (value.includes('src="/sites/') || value.includes("src='/sites/")) {
+        displayValue = value.replace(/src="\/sites\//g, 'src="/dob-api/sites/').replace(/src='\/sites\//g, "src='/dob-api/sites/");
+      }
+    }
     const currentHtml = editor.getHTML();
+    if (currentHtml === displayValue) return;
     if (currentHtml === value) return;
     // Не перезаписываем base64 превью финальным URL в dev — иначе картинка ломается (прокси)
     let shouldSkip = false;
     if (base64MapRef.current.size > 0) {
       for (const [b64, url] of base64MapRef.current.entries()) {
-        const hasUrl = url && value.includes(url);
+        const hasUrl = (url && (value.includes(url) || displayValue.includes(url))) || (url && isDev && url.includes('/sites/') && displayValue.includes(url.replace('/sites/', '/dob-api/sites/')));
         const hasB64 = currentHtml.includes(b64);
         const hasB64Short = !hasB64 && currentHtml.includes(b64.slice(0,30));
         if (url && hasUrl && (hasB64 || hasB64Short)) {
@@ -311,8 +332,10 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
         }
       }
     }
-    if (currentHtml !== value) {
-      editor.commands.setContent(value || '', false);
+    // Для отображения используем displayValue (в dev с /dob-api), а lastEmitted храним оригинальный value (без /dob-api) чтобы не триггерить лишние onUpdate
+    const targetHtml = displayValue;
+    if (currentHtml !== targetHtml) {
+      editor.commands.setContent(targetHtml || '', false);
       lastEmittedRef.current = value;
     }
   }, [value, editor]);

@@ -269,16 +269,19 @@ export default function DobTaskEditView({ id }) {
       // Refresh attachments
       getDobAttachments(id).then(a=> { console.log('[DobEdit][upload] attachments after', a); setAttachments(a); }).catch(()=>{});
       notify(`Изображение ${file.name} загружено`, { severity: 'success' });
-      const finalUrl = res?.url || res?.src || res?.ServerRelativeUrl || null;
-      console.log('[DobEdit][upload] finalUrl', finalUrl);
-      // Test image load
-      if (finalUrl) {
+      // Для сохранения в SharePoint нужен ServerRelativeUrl без /dob-api (иначе на проде 404). На проде это https://portal.lenta.com/sites/..., в dev — /sites/...
+      const serverRelative = res?.ServerRelativeUrl || res?.ServerRelativePath?.DecodedUrl || null;
+      const finalUrlForSave = serverRelative || res?.url || res?.src || null;
+      const finalUrlForTest = res?.url || res?.src || serverRelative;
+      console.log('[DobEdit][upload] finalUrlForSave', finalUrlForSave, 'finalUrlForTest', finalUrlForTest);
+      // Test image load — используем dev-прокси URL если есть
+      if (finalUrlForTest) {
         const testImg = new Image();
-        testImg.onload = () => console.log('[DobEdit][upload] test load OK', finalUrl);
-        testImg.onerror = (e) => console.error('[DobEdit][upload] test load FAIL', finalUrl, e);
-        testImg.src = finalUrl;
+        testImg.onload = () => console.log('[DobEdit][upload] test load OK', finalUrlForTest);
+        testImg.onerror = (e) => console.error('[DobEdit][upload] test load FAIL', finalUrlForTest, e);
+        testImg.src = finalUrlForTest;
       }
-      return finalUrl;
+      return finalUrlForSave;
     } catch (e) {
       const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка загрузки';
       notify(`Загрузка не удалась: ${String(msg).slice(0,200)}`, { severity: 'error' });
