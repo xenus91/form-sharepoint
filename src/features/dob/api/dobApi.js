@@ -33,140 +33,66 @@ function extractBadField(msg = '') {
 }
 
 // Items with OData — supports pagination via $top &$skiptoken or flat fetch
+// По просьбе — без $select, просто items + expand, SP вернёт всё сам
 export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = true, filter = '', fields = null } = {}) {
-  const expands = ['Author','Editor','AttachmentFiles'].join(',');
-  const baseSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
-  let selects;
-  let dynamicExpands = expands;
-  const badFields = new Set(['Guid','GUID']);
+  // expands: Author/Editor всегда, + динамические User поля из fields
+  let expands = ['Author','Editor','AttachmentFiles'].join(',');
   if (Array.isArray(fields) && fields.length) {
-    const sys = new Set(['ID','Title','Created','Modified','Author','Editor','Attachments','AttachmentFiles','Guid','GUID','ContentTypeId','ContentType','FileSystemObjectType','Id']);
-    const dyn = fields
-      .filter(f => !f.Hidden && f.InternalName && !sys.has(f.InternalName) && !badFields.has(f.InternalName))
-      .filter(f => !['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo','AppAuthor','AppEditor','LinkTitleNoMenu','_UIVersionString','DocIcon','ItemChildCount','FolderChildCount'].includes(f.InternalName))
-      .map(f => f.InternalName);
-    selects = [...baseSelects, ...dyn.filter(n => !baseSelects.join(',').includes(n))];
-  } else {
-    selects = [...baseSelects];
-  }
-  if (Array.isArray(fields) && fields.length) {
-    const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && selects.includes(f.InternalName)).map(f=>f.InternalName);
-    const extra = userFields.filter(n=> !['Author','Editor'].includes(n));
-    if (extra.length) {
-      selects = selects.filter(s=> !extra.includes(s));
-      for (const u of extra) {
-        selects.push(`${u}/Title`, `${u}/Id`);
-      }
-      dynamicExpands = [...new Set([...expands.split(','), ...extra])].join(',');
+    const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && !['Author','Editor'].includes(f.InternalName) && !f.Hidden).map(f=>f.InternalName);
+    if (userFields.length) {
+      expands = [...new Set([...expands.split(','), ...userFields])].join(',');
     }
   }
-
-  let attempt = 0;
-  let currentSelects = [...selects];
   let currentFilter = filter;
-  let currentExpands = dynamicExpands;
-
-  while (attempt < 15) {
-    let url = `${dobListApi()}/items?$select=${currentSelects.join(',')}&$expand=${currentExpands}&$top=${top}`;
+  let currentExpands = expands;
+  let attempt = 0;
+  while (attempt < 5) {
+    let url = `${dobListApi()}/items?$expand=${currentExpands}&$top=${top}`;
     if (orderBy) url += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
     if (currentFilter) url += `&$filter=${encodeURIComponent(currentFilter)}`;
     try {
       const { data } = await dobAxios.get(url);
       const results = data?.d?.results || data?.value || [];
       const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-      if (attempt > 0) console.warn(`[dobApi] auto-retry success after ${attempt} bad fields removed, final selects ${currentSelects.length}`);
       return { results, next };
     } catch (e) {
       const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
       const msg = String(rawMsg);
       const lower = msg.toLowerCase();
-      console.warn(`[dobApi] select/filter failed attempt ${attempt}:`, msg.slice(0,600));
-
-      // filter on calculated/unknown column -> drop filter
-      if (currentFilter && (lower.includes('does not exist') || lower.includes('не существует')) && (lower.includes('_x0') || lower.includes('column') || lower.includes('field') || lower.includes('guid'))) {
+      console.warn(`[dobApi] items without select failed attempt ${attempt}:`, msg.slice(0,600));
+      // если падает из-за $expand на User поле — убираем его
+      if (lower.includes('does not exist') || lower.includes('не существует') || lower.includes('field') || lower.includes('column')) {
         const bad = extractBadField(msg);
-        if (bad && currentFilter.includes(bad)) {
-          console.warn(`[dobApi] filter bad field "${bad}" -> drop filter`);
-          currentFilter = '';
+        if (bad && currentExpands.split(',').includes(bad)) {
+          console.warn(`[dobApi] remove bad expand "${bad}" and retry`);
+          currentExpands = currentExpands.split(',').filter(x=>x!==bad).join(',') || 'Author,Editor';
           attempt++;
           continue;
         }
-        if (lower.includes('column') || lower.includes('field')) {
-          console.warn('[dobApi] drop filter due to column error');
-          currentFilter = '';
-          attempt++;
-          continue;
-        }
-      }
-
-      if (lower.includes('does not exist') || lower.includes('не существует') || lower.includes('field') || lower.includes('column') || lower.includes('guid') || e?.response?.status === 400 || e?.response?.status === 500) {
-        const bad = extractBadField(msg);
-        if (bad) {
-          const normalized = bad.replace(/^\*+/, '_');
-          let toRemove = null;
-          if (currentSelects.includes(bad)) toRemove = bad;
-          else if (currentSelects.includes(normalized)) toRemove = normalized;
-          else {
-            const candidates = currentSelects.filter(s => s === bad || s === normalized || s.includes(bad) || bad.includes(s));
-            if (candidates.length === 1) toRemove = candidates[0];
-            else if (candidates.length > 1) toRemove = candidates.sort((a,b)=>a.length-b.length)[0];
-            else {
-              const badLower = bad.toLowerCase().replace(/^_/, '');
-              const cand2 = currentSelects.find(s => s.toLowerCase().replace(/^_/, '') === badLower || s.toLowerCase().includes(badLower));
-              if (cand2) toRemove = cand2;
-            }
-          }
+        if (bad && currentExpands.toLowerCase().includes(bad.toLowerCase())) {
+          const toRemove = currentExpands.split(',').find(x=> x.toLowerCase()===bad.toLowerCase() || x.toLowerCase().includes(bad.toLowerCase()));
           if (toRemove) {
-            console.warn(`[dobApi] remove bad field "${toRemove}" (reported "${bad}") and retry`);
-            currentSelects = currentSelects.filter(s => s !== toRemove && !s.startsWith(toRemove + '/'));
-            if (currentExpands.split(',').includes(toRemove)) {
-              currentExpands = currentExpands.split(',').filter(x=>x!==toRemove).join(',') || expands;
-            }
-            badFields.add(toRemove);
+            currentExpands = currentExpands.split(',').filter(x=>x!==toRemove).join(',') || 'Author,Editor';
             attempt++;
             continue;
-          } else {
-            console.warn(`[dobApi] bad field "${bad}" not in selects, blacklist and retry`);
-            badFields.add(bad);
-            if (bad.toLowerCase().includes('guid')) {
-              currentSelects = currentSelects.filter(s => !s.toLowerCase().includes('guid'));
-              currentExpands = currentExpands.split(',').filter(x=>!x.toLowerCase().includes('guid')).join(',') || expands;
-              attempt++;
-              continue;
-            }
-            if (attempt === 0) {
-              currentSelects = [...baseSelects];
-              currentExpands = expands;
-              if (currentFilter) currentFilter = '';
-              attempt++;
-              continue;
-            }
           }
         }
-        if (attempt === 0) {
-          console.warn('[dobApi] unknown bad field, fallback to minimal');
-          currentSelects = [...baseSelects];
-          currentExpands = expands;
-          if (currentFilter) currentFilter = '';
-          attempt++;
-          continue;
-        }
       }
-      // not recoverable -> throw to fallback
-      break;
+      if (currentFilter && (lower.includes('does not exist') || lower.includes('не существует') || lower.includes('column') || lower.includes('field'))) {
+        console.warn('[dobApi] drop filter due to column error (no select mode)');
+        currentFilter = '';
+        attempt++;
+        continue;
+      }
+      if (lower.includes('expand') && currentExpands !== 'Author,Editor') {
+        currentExpands = 'Author,Editor';
+        attempt++;
+        continue;
+      }
+      throw e;
     }
   }
-
-  // fallback minimal
-  console.warn('[dobApi] fallback to minimal select after auto-retry');
-  const fbSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
-  let fbUrl = `${dobListApi()}/items?$select=${fbSelects.join(',')}&$expand=${expands}&$top=${top}`;
-  if (orderBy) fbUrl += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
-  // filter already dropped
-  const { data } = await dobAxios.get(fbUrl);
-  const results = data?.d?.results || data?.value || [];
-  const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-  return { results, next };
+  throw new Error('getDobItems failed after retries');
 }
 
 // Paginated fetch helper — respects SharePoint __next
