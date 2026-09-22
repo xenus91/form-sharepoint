@@ -24,21 +24,30 @@ const config = {
 };
 
 const sharepointBaseUrl = (process.env.VITE_SP_SITE || process.env.VITE_PROXY_BASE_URL || "") + "/_api";
-// DOB cross-site — отдельный сайт https://portal.len.com/sites/dob/doblogistic
-const dobBaseUrl = (() => {
-  if (process.env.VITE_DOB_SITE) return process.env.VITE_DOB_SITE.replace(/\/$/, "") + "/_api";
+// DOB cross-site — отдельный сайт https://portal.lenta.com/sites/dob/doblogistic
+let dobOrigin = "";
+let dobSiteApi = "";
+(() => {
   try {
-    if (process.env.VITE_SP_SITE) return new URL(process.env.VITE_SP_SITE).origin + "/sites/dob/doblogistic/_api";
-    if (process.env.VITE_PROXY_BASE_URL && process.env.VITE_PROXY_BASE_URL.startsWith("http")) {
-      return new URL(process.env.VITE_PROXY_BASE_URL).origin + "/sites/dob/doblogistic/_api";
+    if (process.env.VITE_DOB_SITE) {
+      const u = new URL(process.env.VITE_DOB_SITE);
+      dobOrigin = u.origin;
+      dobSiteApi = process.env.VITE_DOB_SITE.replace(/\/$/, "") + "/_api";
+      return;
+    }
+    const src = process.env.VITE_SP_SITE || process.env.VITE_PROXY_BASE_URL || "";
+    if (src && src.startsWith("http")) {
+      dobOrigin = new URL(src).origin;
+      dobSiteApi = dobOrigin + "/sites/dob/doblogistic/_api";
     }
   } catch {}
-  return "";
 })();
+const dobBaseUrl = dobSiteApi; // alias для совместимости
 
 console.log("🚀 NTLM Proxy запущен");
 console.log("🔹 SharePoint Base URL:", sharepointBaseUrl);
-console.log("🔹 DOB Base URL:", dobBaseUrl || "(не настроен)");
+console.log("🔹 DOB Origin:", dobOrigin || "(не настроен)");
+console.log("🔹 DOB Site API:", dobSiteApi || "(не настроен)");
 console.log("🔹 Пользователь NTLM:", config.username);
 console.log("🔹 Домен NTLM:", config.domain);
 
@@ -52,7 +61,9 @@ function ensureApiUrl(originalUrl = "") {
   return fixed;
 }
 function ensureDobApiUrl(originalUrl = "") {
-  const fixed = dobBaseUrl + originalUrl.replace(/^\/dob-api/, "");
+  // dobOrigin без пути + /sites/dob/... из запроса (клиент уже шлет /dob-api/sites/dob/...)
+  const base = dobOrigin || "";
+  const fixed = base + originalUrl.replace(/^\/dob-api/, "");
   console.log(`🔹 Проксируем DOB в: ${fixed}`);
   return fixed;
 }
@@ -301,7 +312,7 @@ app.use("/dob-api/*", async (req, res) => {
     });
   }
   if (needsDigest(method, override)) {
-    const clientDigest = req.headers["x-requestdigest"]; const digest = clientDigest || (await getRequestDigest(dobBaseUrl)); if (digest) headers["X-RequestDigest"] = digest;
+    const clientDigest = req.headers["x-requestdigest"]; const digest = clientDigest || (await getRequestDigest(dobSiteApi)); if (digest) headers["X-RequestDigest"] = digest;
   }
   let bodyToSend = null;
   if (isAttachmentUpload(spUrl)) { const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || ""); headers["Content-Type"] = "application/octet-stream"; headers["Content-Length"] = String(buf.length); requestOptions.binary = true; bodyToSend = buf; console.log(`🔹 Вложение DOB: ${buf.length} байт, octet-stream`); }
