@@ -29,8 +29,10 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
   let selects;
   if (Array.isArray(fields) && fields.length) {
     const sys = new Set(['ID','Title','Created','Modified','Author','Editor','Attachments','AttachmentFiles','Guid','GUID','ContentTypeId','ContentType','FileSystemObjectType','Id']);
+    // проблемные поля, которые падают с does not exist (проверено 400/500) — выпиливаем совсем
+    const badFields = new Set(['Guid','GUID','_x0414__x0430__x0442__x0430_','_x0421__x0442__x0430__x0442__x04','_x0414__x0430__x0442__x0430_']);
     const dyn = fields
-      .filter(f => !f.Hidden && f.InternalName && !sys.has(f.InternalName))
+      .filter(f => !f.Hidden && f.InternalName && !sys.has(f.InternalName) && !badFields.has(f.InternalName))
       .filter(f => !['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo','AppAuthor','AppEditor','LinkTitleNoMenu','_UIVersionString','DocIcon','ItemChildCount','FolderChildCount'].includes(f.InternalName))
       .map(f => f.InternalName);
     // Author/Editor уже в baseSelects как expand, исключаем дубликаты InternalName Author/Editor
