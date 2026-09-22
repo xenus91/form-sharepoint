@@ -10,7 +10,7 @@ const rawSearch = {
   Status: "В процессе выполнения",
   ResultSearchTHU: "Найдена",
   Location1: "A-1",
-  AdditionalActionsRequired: "Да",
+  AdditionalsActionsRequired: "Да",
   AdditionalActions: { results: ["Отправить ЕО в OTM"] },
   Created: "2026-09-18T10:00:00Z",
   Modified: "2026-09-18T10:05:00Z",

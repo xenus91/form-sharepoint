@@ -103,7 +103,7 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
   const cacheKey = ctId || "__default";
   if (_normalizedCache.has(cacheKey)) return _normalizedCache.get(cacheKey);
 
-  // 1) Пробуем TaskTypeConfiguration (план §17: Title/ContentTypeId/AdditionalActionsFieldInternalName/AdditionalActionsRequired/Enabled)
+  // 1) Пробуем TaskTypeConfiguration (план §17: Title/ContentTypeId/AdditionalActionsFieldInternalName/AdditionalsActionsRequired/Enabled)
   let fieldInternalName = ADDITIONAL_ACTIONS_FIELD;
   let source = "sharepoint-field";
   let typeCfg = null;
@@ -158,7 +158,7 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
     return cfg;
   }
 
-  // 3) Required — приоритет: TaskTypeConfiguration.AdditionalActionsRequired (план §17), затем task.AdditionalActionsRequired / task.additionalActions.required
+  // 3) Required — приоритет: TaskTypeConfiguration.AdditionalsActionsRequired (план §17), затем task.AdditionalsActionsRequired / task.additionalActions.required
   // Если required=false — контрол отсутствует (план §18)
   let required = false;
   // Сначала из TaskTypeConfiguration (если задан)
@@ -166,8 +166,8 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
     required = !!typeCfg.additionalActionsRequired;
   } else if (task?.additionalActions?.required !== undefined) {
     required = String(task.additionalActions.required).toLowerCase() === "да" || task.additionalActions.required === true;
-  } else if (task?.AdditionalActionsRequired !== undefined && task?.AdditionalActionsRequired !== null && String(task.AdditionalActionsRequired).trim() !== "") {
-    required = String(task.AdditionalActionsRequired).toLowerCase() === "да" || String(task.AdditionalActionsRequired).toLowerCase() === "true" || String(task.AdditionalActionsRequired).toLowerCase() === "yes";
+  } else if (task?.AdditionalsActionsRequired !== undefined && task?.AdditionalsActionsRequired !== null && String(task.AdditionalsActionsRequired).trim() !== "") {
+    required = String(task.AdditionalsActionsRequired).toLowerCase() === "да" || String(task.AdditionalsActionsRequired).toLowerCase() === "true" || String(task.AdditionalsActionsRequired).toLowerCase() === "yes";
   }
 
   const cfg = {
@@ -196,7 +196,7 @@ export function resolveAdditionalActionsConfigSync(task, fieldMetaMap) {
   if (!meta) return null;
   return {
     enabled: true,
-    required: String(task?.AdditionalActionsRequired).toLowerCase() === "да",
+    required: String(task?.AdditionalsActionsRequired).toLowerCase() === "да",
     fieldInternalName: meta.internalName,
     fieldTitle: meta.title,
     fieldType: meta.typeAsString,

@@ -48,8 +48,8 @@ export function toDomainTask(raw, opts = {}) {
   const additionalActions = {
     fieldInternalName: opts.additionalFieldMeta?.internalName || "AdditionalActions",
     value: base.AdditionalActions || [],
-    required: base.AdditionalActionsRequired || "",
-    requiredField: "AdditionalActionsRequired",
+    required: base.AdditionalsActionsRequired || "",
+    requiredField: "AdditionalsActionsRequired",
     choices: opts.additionalFieldMeta?.choices || null,
     allowFillIn: opts.additionalFieldMeta?.allowFillIn ?? true,
   };

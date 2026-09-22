@@ -55,11 +55,11 @@ export function mapRawTask(r, opts = {}) {
   if (!scNumberVal) scNumberVal = r.SCNumber || r.ScNumber || r.SC_x0020_Number || "";
   if (typeof scNumberVal === 'object' && scNumberVal?.Title) scNumberVal = scNumberVal.Title;
 
-  // AdditionalActionsRequired — может быть Choice (Нет/Да) или Boolean (Yes/No). У пользователя поле булевое.
-  let additionalRequiredRaw = r.AdditionalActionsRequired;
-  // SharePoint может отдавать также AdditionalActionsRequired_x0020_ или другое имя — проверяем варианты
+  // AdditionalsActionsRequired — может быть Choice (Нет/Да) или Boolean (Yes/No). У пользователя поле булевое.
+  let additionalRequiredRaw = r.AdditionalsActionsRequired ?? r.AdditionalActionsRequired;
+  // SharePoint может отдавать также AdditionalsActionsRequired_x0020_ или другое имя — проверяем варианты
   if (additionalRequiredRaw == null) {
-    additionalRequiredRaw = r.AdditionalActionsRequired_x0020_ ?? r.OData__AdditionalActionsRequired ?? "";
+    additionalRequiredRaw = r.AdditionalsActionsRequired_x0020_ ?? r.OData__AdditionalsActionsRequired ?? "";
   }
   let additionalRequired = "";
   if (additionalRequiredRaw === true || additionalRequiredRaw === 1 || additionalRequiredRaw === "1") {
@@ -126,7 +126,8 @@ export function mapRawTask(r, opts = {}) {
     // Сохраняем также динамическое значение под универсальным ключом для новой логики
     ResultValue: dynamicResultVal || "",
     Location1: r.Location1 || "",
-    AdditionalActionsRequired: additionalRequired,
+    AdditionalsActionsRequired: additionalRequired,
+    AdditionalActionsRequired: additionalRequired, // alias for legacy / wrong spelling compat
     AdditionalActions: additionalActions,
     Created: r.Created || "",
     Modified: r.Modified || "",

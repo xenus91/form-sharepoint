@@ -9,7 +9,7 @@ import { getGroupIdsFromDistribution } from "./distribution";
 const SELECT_BASE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,ContentTypeId";
 const SELECT_BASE_NO_DUE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,Editor/Id,Editor/Title,ContentTypeId";
 // eslint-disable-next-line no-unused-vars
-const SELECT_ADDITIONAL = "AdditionalActionsRequired,AdditionalActions";
+const SELECT_ADDITIONAL = "AdditionalsActionsRequired,AdditionalActions";
 
 /**
  * @typedef {object} BuildTaskListQueryOpts
@@ -83,14 +83,23 @@ export function buildTaskListQuery(opts = {}) {
   if (taskFieldNames.length === 0 || taskFieldNames.includes("RelatedItems")) extraFields.push("RelatedItems");
   // AdditionalActions поля — включаем если useAdditionalActions и поле есть в списке или ещё не загружен список полей (для первой загрузки)
   // Это безопасно для старых списков без этих полей — при 400 ошибке loadTasks сделает retry без них.
-  const hasAdditionalFields = taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions") || taskFieldNames.includes("AdditionalActionsRequired");
+  const hasAdditionalFields = taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions") || taskFieldNames.includes("AdditionalsActionsRequired") || taskFieldNames.includes("AdditionalActionsRequired");
   if (useAdditionalActions && hasAdditionalFields) {
     // Добавляем оба поля разом, если хотя бы одно есть — сервер вернёт только существующие, но лучше проверить оба
-    if (taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActionsRequired")) extraFields.push("AdditionalActionsRequired");
+    // Поддержка обоих написаний: AdditionalsActionsRequired (typo в проде) и AdditionalActionsRequired (правильно) — пушим то, что есть в списке
+    const hasNew = taskFieldNames.includes("AdditionalsActionsRequired");
+    const hasOld = taskFieldNames.includes("AdditionalActionsRequired");
+    if (taskFieldNames.length === 0) {
+      extraFields.push("AdditionalsActionsRequired");
+    } else if (hasNew) {
+      extraFields.push("AdditionalsActionsRequired");
+    } else if (hasOld) {
+      extraFields.push("AdditionalActionsRequired");
+    }
     if (taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions")) extraFields.push("AdditionalActions");
     // Fallback: если taskFieldNames пустой, добавим оба — если одного нет, retry без них сработает
-    if (taskFieldNames.length === 0 && !extraFields.includes("AdditionalActionsRequired")) {
-      extraFields.push("AdditionalActionsRequired", "AdditionalActions");
+    if (taskFieldNames.length === 0 && !extraFields.includes("AdditionalsActionsRequired")) {
+      extraFields.push("AdditionalsActionsRequired", "AdditionalActions");
     }
   }
 
@@ -98,7 +107,7 @@ export function buildTaskListQuery(opts = {}) {
   // Если useAdditionalActions false — не добавляем AdditionalActions даже если они есть в extraFields (для retry)
   let finalExtra = extraFields;
   if (!useAdditionalActions) {
-    finalExtra = extraFields.filter((f) => f !== "AdditionalActionsRequired" && f !== "AdditionalActions");
+    finalExtra = extraFields.filter((f) => f !== "AdditionalsActionsRequired" && f !== "AdditionalActionsRequired" && f !== "AdditionalActions");
   }
   const selectFields = finalExtra.length
     ? `${selectFieldsBase},${finalExtra.join(",")}`

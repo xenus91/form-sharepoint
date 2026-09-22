@@ -45,7 +45,7 @@ function stripHtml(html) {
 
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
   // Динамический UI конфиг без ребилда: приоритет TaskResultDefinitions (SP list), fallback к hardcoded resultConfig.js
-  // План §14: TaskResultDefinitions.ShowAdditionalActions / AdditionalActionsRequired — управляет видимостью AdditionalActions
+  // План §14: TaskResultDefinitions.ShowAdditionalActions / AdditionalsActionsRequired — управляет видимостью AdditionalActions
   const getUiConfig = React.useCallback((choiceVal) => {
     const ctId = task?.contentTypeId || task?.ContentTypeId || "";
     if (taskConfig?.taskResultDefinitions) {
@@ -71,7 +71,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const [confirmNotFoundMode, setConfirmNotFoundMode] = React.useState(() => initialAction === "notfound" && isInProgressStatus(task.Status) && !isCompleted);
   const [foundInputMode, setFoundInputMode] = React.useState(() => initialAction === "found" && isInProgressStatus(task.Status) && !isCompleted);
   const [foundLocation, setFoundLocation] = React.useState("");
-  // Доп. действия по найденной ЕО (AdditionalActionsRequired + AdditionalActions Multi-Choice Fill-in)
+  // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice Fill-in)
   const [additionalActions, setAdditionalActions] = React.useState(() => {
     const sync = getCachedAdditionalActionsDefaultSync();
     if (sync !== null) return [...sync];
@@ -535,12 +535,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               );
             })()}
             {task.Location1 && <Chip label={`Где найдено: ${task.Location1}`} size="small" variant="outlined" />}
-            {task.AdditionalActionsRequired && (
+            {task.AdditionalsActionsRequired && (
               <Chip
-                label={`Доп. действия: ${task.AdditionalActionsRequired}`}
+                label={`Доп. действия: ${task.AdditionalsActionsRequired}`}
                 size="small"
                 variant="outlined"
-                color={task.AdditionalActionsRequired === "Да" ? "info" : "default"}
+                color={task.AdditionalsActionsRequired === "Да" ? "info" : "default"}
               />
             )}
             {Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0 && task.AdditionalActions.map((a) => (

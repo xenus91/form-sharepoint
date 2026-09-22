@@ -97,7 +97,7 @@ export async function fetchTaskTypeConfigurationMap(apiClient, opts={}){
       const enabled = parseBool(item.Enabled, true);
       if(!enabled) continue; // Enabled=false — игнор
       // AdditionalActionsRequired — legacy Required fallback
-      let required = parseBool(item.AdditionalActionsRequired, null);
+      let required = parseBool(item.AdditionalsActionsRequired ?? item.AdditionalActionsRequired, null);
       if(required===null) required = parseBool(item.Required, null);
       // поддержка legacy ResultFieldInternalName — не требуется планом, но сохраняем для обратной совместимости (не используем в резолвере если пусто)
       const resultFieldInternalName = item.ResultFieldInternalName ? String(item.ResultFieldInternalName).trim() : null;

@@ -288,7 +288,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   // DBG: track fieldsLoading lifecycle
   React.useEffect(()=>{ if(!__DBG_ENABLED__) return; __dlog("[DBG:TasksView] fieldsLoading", fieldsLoading, "resultFieldsMeta", resultFieldsMeta.length, resultFieldInternalNames); }, [fieldsLoading, resultFieldsMeta.length]);
-  // Смерженные mount-эффекты: entityType, ResultSearchTHU/Status choices, AdditionalActionsRequired тип, resultFieldsMeta — всё параллельно, один эффект
+  // Смерженные mount-эффекты: entityType, ResultSearchTHU/Status choices, AdditionalsActionsRequired тип, resultFieldsMeta — всё параллельно, один эффект
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -348,9 +348,17 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             }
           })
       );
-      // 4) AdditionalActionsRequired тип
+      // 4) AdditionalsActionsRequired тип
       promises.push(
-        apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'AdditionalActionsRequired'`, { headers: { Accept: "application/json;odata=verbose" } })
+        apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'AdditionalsActionsRequired'`, { headers: { Accept: "application/json;odata=verbose" } })
+          .catch((err)=>{
+            const msg=String(err?.response?.data?.error?.message?.value||"").toLowerCase();
+            const notFound = err?.response?.status===404 || msg.includes("не существует");
+            if(notFound){
+              return apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'AdditionalActionsRequired'`, { headers: { Accept: "application/json;odata=verbose" } });
+            }
+            throw err;
+          })
           .then(({ data }) => {
             const field = data?.d?.results?.[0];
             if (!cancelled && field) {
@@ -844,7 +852,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       additionalActions = [];
     } else {
       // Другой результат (на будущее) — сохраняем как есть или очищаем
-      additionalRequired = additionalRequired ? String(additionalRequired).trim() : (task.AdditionalActionsRequired || "");
+      additionalRequired = additionalRequired ? String(additionalRequired).trim() : (task.AdditionalsActionsRequired || "");
       additionalActions = Array.isArray(additionalActions) ? additionalActions : (task.AdditionalActions || []);
     }
     // optimistic: сразу показываем карточку как завершённую, без ожидания сервера
@@ -857,7 +865,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       [_resultFieldName]: resultValue,
       ResultSearchTHU: resultValue,
       Location1: locationValue !== undefined && locationValue !== null ? locationValue : task.Location1,
-      AdditionalActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalActionsRequired || "")),
+      AdditionalsActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalsActionsRequired || "")),
       AdditionalActions: _isNotFound ? [] : (_isFound ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
       Status: _targetStatusOpt,
       PercentComplete: 1,
@@ -870,7 +878,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       let serverEtag = "*";
       try {
         const resp = await apiClient.get(
-          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,${_resultFieldName},ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Modified,ContentTypeId`,
+          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,${_resultFieldName},ResultSearchTHU,Location1,AdditionalsActionsRequired,AdditionalActions,Modified,ContentTypeId`,
           { headers: { Accept: "application/json;odata=verbose" } }
         );
         const server = resp?.data?.d;
@@ -919,8 +927,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       } else if (pendingResult && String(pendingResult).toLowerCase().includes("найден") && locationValue === undefined) {
         // if skipped, not sending Location1 (leave as is)
       }
-      // Дополнительные действия (AdditionalActionsRequired + AdditionalActions Multi-Choice)
-      // AdditionalActionsRequired может быть Choice (Нет/Да) или Boolean (у пользователя булевое)
+      // Дополнительные действия (AdditionalsActionsRequired + AdditionalActions Multi-Choice)
+      // AdditionalsActionsRequired может быть Choice (Нет/Да) или Boolean (у пользователя булевое)
       const toSPRequired = (reqStr) => {
         if (additionalRequiredIsBoolean === true) {
           if (reqStr === "Да") return true;
@@ -940,12 +948,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       if (_isNotFound) {
         // ЕО не найдена → пусто / [] (для Boolean — false)
         const val = additionalRequiredIsBoolean === true ? false : (additionalRequiredIsBoolean === false ? null : false);
-        payload.AdditionalActionsRequired = val;
+        payload.AdditionalsActionsRequired = val;
         payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: [] };
       } else if (_isFound) {
         const reqToSave = additionalRequired || "Нет";
         const actsToSave = reqToSave === "Да" ? (additionalActions || []) : [];
-        payload.AdditionalActionsRequired = toSPRequired(reqToSave);
+        payload.AdditionalsActionsRequired = toSPRequired(reqToSave);
         payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: actsToSave };
       } else {
         // Для прочих результатов не трогаем доп. поля (обратная совместимость)
@@ -1012,16 +1020,16 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               throw e;
             }
             const msg = String(e?.response?.data?.error?.message?.value || e?.response?.data || e?.message || "").toLowerCase();
-            // Type mismatch: пользовательское поле AdditionalActionsRequired булевое, а мы отправили строку (или наоборот)
+            // Type mismatch: пользовательское поле AdditionalsActionsRequired булевое, а мы отправили строку (или наоборот)
             if (msg.includes("edm.boolean") || (msg.includes("boolean") && msg.includes("additional"))) {
-              console.warn("AdditionalActionsRequired type mismatch (expected Boolean, got String), retry with Boolean", msg);
+              console.warn("AdditionalsActionsRequired type mismatch (expected Boolean, got String), retry with Boolean", msg);
               try {
                 const flip = { ...payload };
                 // Конвертируем в Boolean
                 if (_isFound) {
-                  flip.AdditionalActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false;
+                  flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false;
                 } else if (_isNotFound) {
-                  flip.AdditionalActionsRequired = false;
+                  flip.AdditionalsActionsRequired = false;
                 }
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 // Пробуем с Boolean
@@ -1037,13 +1045,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               }
             }
             if (msg.includes("edm.string") || (msg.includes("choice") && msg.includes("additional")) || msg.includes("edm.choice")) {
-              console.warn("AdditionalActionsRequired type mismatch (expected String, got Boolean), retry with String", msg);
+              console.warn("AdditionalsActionsRequired type mismatch (expected String, got Boolean), retry with String", msg);
               try {
                 const flip = { ...payload };
                 if (_isFound) {
-                  flip.AdditionalActionsRequired = additionalRequired || "Нет";
+                  flip.AdditionalsActionsRequired = additionalRequired || "Нет";
                 } else if (_isNotFound) {
-                  flip.AdditionalActionsRequired = null;
+                  flip.AdditionalsActionsRequired = null;
                 }
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 await postUpdate(_isFound ? flipWithStatus : flip, "*");
@@ -1056,16 +1064,16 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 console.warn("Flip to String also failed", String(eFlip2?.message||"").toLowerCase());
               }
             }
-            // Type mismatch: пользовательское поле AdditionalActionsRequired булевое, а мы отправили строку (или наоборот)
+            // Type mismatch: пользовательское поле AdditionalsActionsRequired булевое, а мы отправили строку (или наоборот)
             if (msg.includes("edm.boolean") || (msg.includes("boolean") && msg.includes("additional"))) {
-              console.warn("AdditionalActionsRequired type mismatch (expected Boolean, got String), retry with Boolean", msg);
+              console.warn("AdditionalsActionsRequired type mismatch (expected Boolean, got String), retry with Boolean", msg);
               try {
                 const flip = { ...payload };
                 // Конвертируем в Boolean
                 if (_isFound) {
-                  flip.AdditionalActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false;
+                  flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false;
                 } else if (_isNotFound) {
-                  flip.AdditionalActionsRequired = false;
+                  flip.AdditionalsActionsRequired = false;
                 }
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 // Пробуем с Boolean
@@ -1081,13 +1089,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               }
             }
             if (msg.includes("edm.string") || (msg.includes("choice") && msg.includes("additional")) || msg.includes("edm.choice")) {
-              console.warn("AdditionalActionsRequired type mismatch (expected String, got Boolean), retry with String", msg);
+              console.warn("AdditionalsActionsRequired type mismatch (expected String, got Boolean), retry with String", msg);
               try {
                 const flip = { ...payload };
                 if (_isFound) {
-                  flip.AdditionalActionsRequired = additionalRequired || "Нет";
+                  flip.AdditionalsActionsRequired = additionalRequired || "Нет";
                 } else if (_isNotFound) {
-                  flip.AdditionalActionsRequired = null;
+                  flip.AdditionalsActionsRequired = null;
                 }
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 await postUpdate(_isFound ? flipWithStatus : flip, "*");
@@ -1104,7 +1112,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               console.warn("AdditionalActions field missing, retry without it", msg);
               try {
                 const clean = { ...payload };
-                delete clean.AdditionalActionsRequired;
+                delete clean.AdditionalsActionsRequired;
                 delete clean.AdditionalActions;
                 const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
                 await postUpdate(cleanWithStatus, "*");
@@ -1116,7 +1124,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               } catch (_eClean) { void _eClean;
                 try {
                   const clean2 = { ...payload };
-                  delete clean2.AdditionalActionsRequired;
+                  delete clean2.AdditionalsActionsRequired;
                   delete clean2.AdditionalActions;
                   await postUpdate(clean2, "*");
                   notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
@@ -1180,7 +1188,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             console.warn("AdditionalActions field missing, retry without it", msg);
             try {
               const clean = { ...payload };
-              delete clean.AdditionalActionsRequired;
+              delete clean.AdditionalsActionsRequired;
               delete clean.AdditionalActions;
               const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
               await postUpdate(cleanWithStatus, "*");
@@ -1191,7 +1199,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             } catch (_eClean) { void _eClean;
               try {
                 const clean2 = { ...payload };
-                delete clean2.AdditionalActionsRequired;
+                delete clean2.AdditionalsActionsRequired;
                 delete clean2.AdditionalActions;
                 await postUpdate(clean2, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
@@ -1252,8 +1260,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       const msg = e?.response?.data?.error?.message?.value || e?.message || "Ошибка обновления задачи";
       notify(msg, { severity: "error" });
       // rollback optimistic (включая доп. действия) — через TanStack
-      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
-      setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalActionsRequired: prevTaskSnapshot.AdditionalActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : prev));
+      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalsActionsRequired: prevTaskSnapshot.AdditionalsActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
+      setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalsActionsRequired: prevTaskSnapshot.AdditionalsActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : prev));
     } finally {
       setUpdatingId(null);
       setUpdatingAction(null);

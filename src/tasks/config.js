@@ -10,8 +10,8 @@ export const TASKS_LIST_API = `/web/lists(guid'${TASKS_LIST_GUID}')`;
 // + fetchFullTask только для лучшего кандидата.
 export const HASH_CAML_ROW_LIMIT = 20;
 
-// Доп. действия по найденной ЕО (AdditionalActionsRequired + AdditionalActions Multi-Choice)
-export const ADDITIONAL_ACTIONS_REQUIRED_FIELD = "AdditionalActionsRequired";
+// Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice)
+export const ADDITIONALS_ACTIONS_REQUIRED_FIELD = "AdditionalsActionsRequired";
 export const ADDITIONAL_ACTIONS_FIELD = "AdditionalActions";
 export const ADDITIONAL_ACTIONS_STANDARD = [
   "Отправить ЕО в OTM",
@@ -68,11 +68,11 @@ export function getCachedAdditionalActionsDefaultSync() {
 }
 
 // Select/expand для fetchFullTask (используется в TasksView и hashSearch). WorkflowItemId выпилен — всегда null
-export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,ContentTypeId";
+export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalsActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,ContentTypeId";
 export const FULL_TASK_EXPAND = "AssignedTo,Editor";
 
 // Минимальный select для hash-polling (60с) — нужны только поля для диффа статуса, а не весь Title/Body
-export const HASH_POLL_SELECT = "Id,Status,PercentComplete,Modified,ResultSearchTHU,Location1,AdditionalActionsRequired,AdditionalActions";
+export const HASH_POLL_SELECT = "Id,Status,PercentComplete,Modified,ResultSearchTHU,Location1,AdditionalsActionsRequired,AdditionalActions";
 export const HASH_POLL_EXPAND = "";
 
 // EndJob поле удалено из списка Tasks — гарантируем, что его нет ни в одном select

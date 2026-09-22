@@ -108,7 +108,7 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
         if(legacyShow!==null) show = legacyShow;
         else show = false; // по плану default: если нет записи — не показываем
       }
-      let required = parseBool(item.AdditionalActionsRequired, null);
+      let required = parseBool(item.AdditionalsActionsRequired ?? item.AdditionalActionsRequired, null);
       if(required===null) required = parseBool(item.RequiresAdditionalActions, false);
       const cfg={
         title,
@@ -151,7 +151,7 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
           raw: raw.map(r=>({Id:r.id, ResultValue:r.resultValue, CType:r.contentTypeId, Show:r.showAdditionalActions, Required:r.additionalActionsRequired, Title:r.title})),
           byCtKeys: Array.from(byCt.keys()),
           globalKeys: Array.from(global.keys()),
-          rawItems: results.map(it=>({Id:it.Id, Title:it.Title, ResultValue:it.ResultValue, CType:it.CType, ShowAdditionalActions:it.ShowAdditionalActions, AdditionalActionsRequired:it.AdditionalActionsRequired}))
+          rawItems: results.map(it=>({Id:it.Id, Title:it.Title, ResultValue:it.ResultValue, CType:it.CType, ShowAdditionalActions:it.ShowAdditionalActions, AdditionalActionsRequired:it.AdditionalsActionsRequired ?? it.AdditionalActionsRequired}))
         });
       }
     }catch(e){ console.warn("[DBG:taskResultDefinitions:fetch log error]", e); }
