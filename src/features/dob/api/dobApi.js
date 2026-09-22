@@ -24,11 +24,11 @@ export async function getDobFields() {
 export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = true, filter = '', fields = null } = {}) {
   // fields: опционально массив метаданных из getDobFields — если передан, строим $select динамически (без усечённых хардкодов)
   const expands = ['Author','Editor','AttachmentFiles'].join(',');
-  // Базовый safe select — системные поля, которые точно есть
-  const baseSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id','Attachments','AttachmentFiles','Guid','ContentTypeId'];
+  // Базовый safe select — только гарантированные (GUID/ContentTypeId/Attachments часто отсутствуют или требуют другой casing)
+  const baseSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
   let selects;
   if (Array.isArray(fields) && fields.length) {
-    const sys = new Set(['ID','Title','Created','Modified','Author','Editor','Attachments','AttachmentFiles','Guid','ContentTypeId','ContentType','FileSystemObjectType','Id']);
+    const sys = new Set(['ID','Title','Created','Modified','Author','Editor','Attachments','AttachmentFiles','Guid','GUID','ContentTypeId','ContentType','FileSystemObjectType','Id']);
     const dyn = fields
       .filter(f => !f.Hidden && f.InternalName && !sys.has(f.InternalName))
       .filter(f => !['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo'].includes(f.InternalName))
@@ -72,9 +72,11 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
     return { results, next };
   } catch (e) {
     const msg = String(e?.response?.data?.error?.message?.value || e?.message || '').toLowerCase();
-    if (msg.includes('does not exist') || msg.includes('field') || msg.includes('not found') || msg.includes('author') || e?.response?.status === 400) {
+    if (msg.includes('does not exist') || msg.includes('field') || msg.includes('not found') || msg.includes('column') || msg.includes('author') || msg.includes('guid') || e?.response?.status === 400 || e?.response?.status === 500) {
       // eslint-disable-next-line no-console
-      console.warn('[dobApi] select failed, fallback to minimal+safe select', msg.slice(0,300));
+      console.warn('[dobApi] select/filter failed, fallback to minimal+safe select', msg.slice(0,400));
+      // если фильтр на calculated поле (_x0421__...) не существует — пробуем без фильтра (клиентский фильтр позже)
+      const hasFilter = !!filter;
       // fallback: минимальный select с корректным expand (Author/Title нужен в select если expand Author)
       const fbSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
       let fbUrl = `${dobListApi()}/items?$select=${fbSelects.join(',')}&$expand=${expands}&$top=${top}`;
@@ -84,19 +86,43 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
         const { data } = await dobAxios.get(fbUrl);
         const results = data?.d?.results || data?.value || [];
         const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+        // если фильтр был и успешно — вернём; если фильтр падал из-за столбца — на следущем catch попробуем без фильтра
         return { results, next };
       } catch (e2) {
         const msg2 = String(e2?.response?.data?.error?.message?.value || e2?.message || '').toLowerCase();
+        // если ошибка из-за фильтра (столбца) — ретрай без фильтра
+        if (hasFilter && (msg2.includes('does not exist') || msg2.includes('column') || msg2.includes('_x0421__') || msg2.includes('field'))) {
+          console.warn('[dobApi] filter column not exists, retry without filter (client-side filter will be applied)', msg2.slice(0,300));
+          let fbNoFilter = `${dobListApi()}/items?$select=${fbSelects.join(',')}&$expand=${expands}&$top=${top}`;
+          if (orderBy) fbNoFilter += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
+          const { data } = await dobAxios.get(fbNoFilter);
+          const results = data?.d?.results || data?.value || [];
+          const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+          return { results, next };
+        }
         // последний fallback — без expand (если Author вообще не поддерживается на этом списке)
         if (msg2.includes('author')) {
           console.warn('[dobApi] fallback without Author expand', msg2.slice(0,200));
           let fb2 = `${dobListApi()}/items?$select=ID,Title,Created,Modified&$top=${top}`;
           if (orderBy) fb2 += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
           if (filter) fb2 += `&$filter=${encodeURIComponent(filter)}`;
-          const { data } = await dobAxios.get(fb2);
-          const results = data?.d?.results || data?.value || [];
-          const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-          return { results, next };
+          try {
+            const { data } = await dobAxios.get(fb2);
+            const results = data?.d?.results || data?.value || [];
+            const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+            return { results, next };
+          } catch (e3) {
+            const msg3 = String(e3?.response?.data?.error?.message?.value || e3?.message || '').toLowerCase();
+            if (hasFilter && (msg3.includes('does not exist') || msg3.includes('column'))) {
+              let fb3 = `${dobListApi()}/items?$select=ID,Title,Created,Modified&$top=${top}`;
+              if (orderBy) fb3 += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
+              const { data } = await dobAxios.get(fb3);
+              const results = data?.d?.results || data?.value || [];
+              const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+              return { results, next };
+            }
+            throw e3;
+          }
         }
         throw e2;
       }
