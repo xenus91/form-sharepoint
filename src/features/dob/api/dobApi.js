@@ -21,14 +21,24 @@ export async function getDobFields() {
 }
 
 function extractBadField(msg = '') {
-  const m1 = String(msg).match(/Поле или свойство\s+['"]?([^'"\s]+)['"]?\s+не существует/i);
-  if (m1) return m1[1].replace(/^['"]|['"]$/g, '');
-  const m2 = String(msg).match(/Столбца\s+['"]([^'"]+)['"]\s+не существует/i);
-  if (m2) return m2[1];
-  const m3 = String(msg).match(/Field or property\s+['"]([^'"]+)['"]/i);
-  if (m3) return m3[1];
-  const m4 = String(msg).match(/column\s+['"]([^'"]+)['"]/i);
-  if (m4) return m4[1];
+  const s = String(msg);
+  // Свойство "_x0414..." не существует
+  let m = s.match(/Свойство\s+['"“”`]?([^'"“”`\s]+)['"“”`]?\s+не существует/i);
+  if (m) return m[1].replace(/^[*"'“”`\s]+|[*"'“”`\s]+$/g, '').replace(/^\*|\*$/g,'');
+  m = s.match(/Поле или свойство\s+['"“”`]?([^'"“”`\s]+)['"“”`]?\s+не существует/i);
+  if (m) return m[1].replace(/^[*"'“”`\s]+|[*"'“”`\s]+$/g, '').replace(/^\*|\*$/g,'');
+  m = s.match(/Столбца\s+['"“”`]?([^'"“”`]+)['"“”`]?\s+не существует/i);
+  if (m) return m[1].replace(/^[*"'“”`]+|[*"'“”`]+$/g, '');
+  m = s.match(/Field or property\s+['"“”`]?([^'"“”`\s]+)['"“”`]?/i);
+  if (m) return m[1].replace(/^[*"'“”`]+|[*"'“”`]+$/g, '');
+  m = s.match(/column\s+['"“”`]?([^'"“”`\s]+)['"“”`]?/i);
+  if (m) return m[1].replace(/^[*"'“”`]+|[*"'“”`]+$/g, '');
+  // Fallback: любые кавычки после Свойство/Поле
+  m = s.match(/["'`“”]([^"'`“”]+)["'`“”]\s+не существует/);
+  if (m) return m[1].replace(/^[*]+|[*]+$/g,'');
+  // Fallback: _x.... pattern
+  m = s.match(/(_x[0-9A-Fa-f]{4}(?:__x[0-9A-Fa-f]{4})*_?)/);
+  if (m) return m[1];
   return null;
 }
 
@@ -159,7 +169,7 @@ export async function updateDobItem(id, payload) {
       const msg = String(rawMsg);
       const lower = msg.toLowerCase();
       const bad = extractBadField(msg);
-      console.warn(`[dobApi] update failed attempt ${attempt} badField=${bad}`, msg.slice(0,800));
+      console.warn(`[dobApi] update failed attempt ${attempt} badField=${bad}`, msg.slice(0,800), 'cleanBad', bad?.replace?.(/^[*]+|[*]+$/g,''));
       // Если поле не существует — убираем и ретраем
       if (bad && (lower.includes('не существует') || lower.includes('does not exist') || lower.includes('not exist'))) {
         // Найдём точный ключ в currentPayload (учёт регистра и OData-префиксов)
