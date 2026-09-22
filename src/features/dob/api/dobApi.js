@@ -138,18 +138,68 @@ export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = 
   return all;
 }
 
-// Update single item — payload is flat { InternalName: value }
+// Update single item — payload is flat { InternalName: value } — resilient to bad fields
 export async function updateDobItem(id, payload) {
-  const entity = await getDobEntityType();
-  const body = { __metadata: { type: entity }, ...payload };
-  const url = `${dobListApi()}/items(${id})`;
-  const { data } = await dobAxios.post(url, body, {
-    headers: {
-      'X-HTTP-Method': 'MERGE',
-      'IF-MATCH': '*',
-    },
-  });
-  return data;
+  let currentPayload = { ...payload };
+  let attempt = 0;
+  while (attempt < 6) {
+    const entity = await getDobEntityType();
+    const body = { __metadata: { type: entity }, ...currentPayload };
+    const url = `${dobListApi()}/items(${id})`;
+    try {
+      const { data } = await dobAxios.post(url, body, {
+        headers: {
+          'X-HTTP-Method': 'MERGE',
+          'IF-MATCH': '*',
+        },
+      });
+      return data;
+    } catch (e) {
+      const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
+      const msg = String(rawMsg);
+      const lower = msg.toLowerCase();
+      const bad = extractBadField(msg);
+      console.warn(`[dobApi] update failed attempt ${attempt} badField=${bad}`, msg.slice(0,800));
+      // Если поле не существует — убираем и ретраем
+      if (bad && (lower.includes('не существует') || lower.includes('does not exist') || lower.includes('not exist'))) {
+        // Найдём точный ключ в currentPayload (учёт регистра и OData-префиксов)
+        const keys = Object.keys(currentPayload);
+        let keyToRemove = keys.find(k => k === bad);
+        if (!keyToRemove) keyToRemove = keys.find(k => k.toLowerCase() === bad.toLowerCase());
+        if (!keyToRemove) keyToRemove = keys.find(k => k.toLowerCase().endsWith(bad.toLowerCase()) || bad.toLowerCase().endsWith(k.toLowerCase()));
+        if (!keyToRemove) {
+          // также пробуем без звёздочек и кавычек
+          const cleanBad = bad.replace(/^[*"'\s]+|[*"'\s]+$/g, '');
+          keyToRemove = keys.find(k => k === cleanBad || k.toLowerCase() === cleanBad.toLowerCase());
+        }
+        if (keyToRemove) {
+          console.warn(`[dobApi] removing bad field "${keyToRemove}" (reported as "${bad}") and retry`);
+          delete currentPayload[keyToRemove];
+          // также чистим варианты с OData__
+          delete currentPayload[`OData__${keyToRemove}`];
+          delete currentPayload[`OData_${keyToRemove}`];
+          // и без ведущего _
+          if (keyToRemove.startsWith('_')) delete currentPayload[keyToRemove.slice(1)];
+          attempt++;
+          continue;
+        }
+        // если не нашли точный ключ, попробуем удалить любой ключ который содержит bad как подстроку
+        const fuzzy = keys.find(k => k.includes(bad) || bad.includes(k));
+        if (fuzzy) {
+          console.warn(`[dobApi] fuzzy remove "${fuzzy}" for bad "${bad}"`);
+          delete currentPayload[fuzzy];
+          attempt++;
+          continue;
+        }
+      }
+      // Если ошибка всё ещё о несуществующем свойстве но bad не извлекся — пробуем лог и ретрай удалением всех подозреваемых (Calculated с Formula)
+      if ((lower.includes('не существует') || lower.includes('does not exist')) && attempt === 0) {
+        console.warn('[dobApi] could not extract bad field, payload keys', Object.keys(currentPayload));
+      }
+      throw e;
+    }
+  }
+  throw new Error('updateDobItem failed after retries');
 }
 
 export async function bulkUpdateDobItems(updates) {

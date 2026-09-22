@@ -16,6 +16,9 @@ function isEditableField(f) {
   if (!f) return false;
   if (f.ReadOnlyField) return false;
   if (f.Hidden) return false;
+  // Поля с формулой — только чтение (Calculated даже если TypeAsString = Text/DateTime)
+  if (f.Formula) return false;
+  if (f.SchemaXml && /Formula\s*=/.test(f.SchemaXml)) return false;
   const t = (f.TypeAsString || '').toLowerCase();
   if (['calculated','computed','counter','contenttypeid','lookup','attachments','file','guid','modstat'].includes(t)) return false;
   return true;
