@@ -146,33 +146,6 @@ export default function DobTaskEditView({ id }) {
     }
   }, [id, notify]);
 
-  const handleDeleteAttachment = useCallback(async (fileName) => {
-    if (!id || !fileName) return;
-    try {
-      await deleteDobAttachment(id, fileName);
-      notify(`Вложение ${fileName} удалено`, { severity: 'success' });
-      // Remove from attachments state
-      setAttachments(prev => prev.filter(a => a.FileName !== fileName && a.ServerRelativeUrl !== fileName));
-      // Also remove image from ChekResult HTML if present
-      setForm(prev => {
-        const cur = prev[chekInternal] || '';
-        if (typeof cur === 'string' && cur.includes(fileName)) {
-          // remove img tags that contain fileName
-          const cleaned = cur.replace(new RegExp(`<img[^>]*${fileName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}[^>]*>`, 'gi'), '');
-          if (cleaned !== cur) {
-            // also save to server? keep local until Save
-            return { ...prev, [chekInternal]: cleaned };
-          }
-        }
-        return prev;
-      });
-      // Refresh from server
-      getDobAttachments(id).then(setAttachments).catch(()=>{});
-    } catch (e) {
-      const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка удаления';
-      notify(`Не удалось удалить: ${String(msg).slice(0,200)}`, { severity: 'error' });
-    }
-  }, [id, notify, chekInternal]);
 
   const handleBack = () => {
     window.location.hash = '#dob_tasks';
@@ -201,6 +174,35 @@ export default function DobTaskEditView({ id }) {
 
   const chekInternal = chekField?.InternalName || 'ChekResult';
   const chekValue = form[chekInternal] ?? getODataValue(item, chekInternal) ?? '';
+
+  const handleDeleteAttachment = useCallback(async (fileName) => {
+    if (!id || !fileName) return;
+    try {
+      await deleteDobAttachment(id, fileName);
+      notify(`Вложение ${fileName} удалено`, { severity: 'success' });
+      // Remove from attachments state
+      setAttachments(prev => prev.filter(a => a.FileName !== fileName && a.ServerRelativeUrl !== fileName));
+      // Also remove image from ChekResult HTML if present
+      setForm(prev => {
+        const cur = prev[chekInternal] || '';
+        if (typeof cur === 'string' && cur.includes(fileName)) {
+          // remove img tags that contain fileName
+          const cleaned = cur.replace(new RegExp(`<img[^>]*${fileName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}[^>]*>`, 'gi'), '');
+          if (cleaned !== cur) {
+            // also save to server? keep local until Save
+            return { ...prev, [chekInternal]: cleaned };
+          }
+        }
+        return prev;
+      });
+      // Refresh from server
+      getDobAttachments(id).then(setAttachments).catch(()=>{});
+    } catch (e) {
+      const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка удаления';
+      notify(`Не удалось удалить: ${String(msg).slice(0,200)}`, { severity: 'error' });
+    }
+  }, [id, notify, chekInternal]);
+
 
   if (loading) {
     return (
