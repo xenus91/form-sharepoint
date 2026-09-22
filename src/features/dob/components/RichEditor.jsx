@@ -95,6 +95,7 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
   const [tablePopoverAnchor, setTablePopoverAnchor] = useState(null);
   const fileInputRef = useRef(null);
   const base64MapRef = useRef(new Map());
+  const lastEmittedRef = useRef(value || '');
   const [internalUploading, setInternalUploading] = useState(false);
   const uploading = isUploading || internalUploading;
 
@@ -139,21 +140,16 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
     editable: !readOnly,
     onUpdate: ({ editor }) => {
       let html = editor.getHTML();
-      // Чистим карту для удалённых картинок (base64 больше нет в html)
+      // Чистим карту для удалённых картинок (base64 больше нет в html) — без логов на каждый ввод
       if (base64MapRef.current.size > 0) {
         for (const [b64, url] of Array.from(base64MapRef.current.entries())) {
           const hasB64 = html.includes(b64);
           const hasUrl = url && html.includes(url);
-          // также проверяем короткий префикс для надёжности
           const hasB64Short = !hasB64 && html.includes(b64.slice(0,30));
           if (!hasB64 && !hasB64Short && !hasUrl) {
-            // Картинка удалена из редактора — чистим мапу и уведомляем родителя для удаления вложения
-            console.log('[RichEditor][onUpdate] image removed, cleaning map', url || b64.slice(0,30));
             base64MapRef.current.delete(b64);
             if (url && onDeleteImage) {
               try { onDeleteImage(url); } catch {}
-            } else if (url && !onDeleteImage) {
-              // fallback: если onDeleteImage не передан, родитель всё равно детектит через form diff
             }
           }
         }
@@ -165,6 +161,7 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
           if (url && htmlForSave.includes(b64)) htmlForSave = htmlForSave.split(b64).join(url);
         }
       }
+      lastEmittedRef.current = htmlForSave;
       if (onChange) onChange(htmlForSave);
     },
     editorProps: {
@@ -288,42 +285,35 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
 
   useEffect(() => {
     if (!editor || value === undefined) return;
+    // Если value — это то что мы только что эмитили из onUpdate, скипаем (иначе лаг на каждый ввод)
+    if (value === lastEmittedRef.current) return;
     const currentHtml = editor.getHTML();
     if (currentHtml === value) return;
     // Не перезаписываем base64 превью финальным URL в dev — иначе картинка ломается (прокси)
-    // Если value содержит finalUrl из base64Map, а в редакторе уже есть base64 — оставляем base64 для отображения
     let shouldSkip = false;
-    try {
-      console.log('[RichEditor][sync] check skip: map size', base64MapRef.current.size, 'value has url?', Array.from(base64MapRef.current.values()).some(u=>u && value.includes(u)), 'current has b64?', Array.from(base64MapRef.current.keys()).some(k=> currentHtml.includes(k.slice(0,30))));
+    if (base64MapRef.current.size > 0) {
       for (const [b64, url] of base64MapRef.current.entries()) {
         const hasUrl = url && value.includes(url);
         const hasB64 = currentHtml.includes(b64);
-        // также проверяем по короткому префиксу (на случай нормализации html)
         const hasB64Short = !hasB64 && currentHtml.includes(b64.slice(0,30));
         if (url && hasUrl && (hasB64 || hasB64Short)) {
           shouldSkip = true;
-          console.log('[RichEditor][sync] skip setContent: keep base64 display, value has finalUrl', url.slice(0,60), 'hasB64', hasB64, 'hasB64Short', hasB64Short);
           break;
         }
       }
-      if (!shouldSkip) {
-        console.log('[RichEditor][sync] no skip: map', Array.from(base64MapRef.current.entries()).map(([k,v])=> ({ len:k.length, url:v?.slice(0,40), hasUrl: v&&value.includes(v), hasB64: currentHtml.includes(k), hasB64Short: currentHtml.includes(k.slice(0,30)) })));
-      }
-    } catch(e){ console.log('[RichEditor][sync] check error', e); }
+    }
     if (shouldSkip) return;
     // Чистим карту если вложение удалено через чип (value без url, редактор ещё с base64)
-    try {
+    if (base64MapRef.current.size > 0) {
       for (const [b64, url] of Array.from(base64MapRef.current.entries())) {
         if (url && !value.includes(url) && !value.includes(b64.slice(0,30)) && currentHtml.includes(b64.slice(0,30))) {
-          console.log('[RichEditor][sync] cleaning map for deleted via chip', url.slice(0,60));
           base64MapRef.current.delete(b64);
         }
       }
-    } catch {}
-    const isSame = currentHtml === value;
-    if (!isSame) {
-      console.log('[RichEditor][sync] setContent from value, len', value?.length);
+    }
+    if (currentHtml !== value) {
       editor.commands.setContent(value || '', false);
+      lastEmittedRef.current = value;
     }
   }, [value, editor]);
 

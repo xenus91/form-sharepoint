@@ -42,6 +42,8 @@ export default function DobTaskEditView({ id }) {
   const [attachments, setAttachments] = useState([]);
   const prevChekHtmlRef = useRef(null);
   const pendingDeleteRef = useRef(new Set());
+  const initialFormRef = useRef(null);
+  const dirtySetRef = useRef(new Set());
 
   // helper: extract img srcs from html
   const extractImgSrcs = useCallback((html) => {
@@ -93,9 +95,15 @@ export default function DobTaskEditView({ id }) {
     // ChekResult may be HTML — keep as is
     // For User fields, store Id: e.g., UserFailId
     setForm(next);
+    initialFormRef.current = { ...next };
+    dirtySetRef.current.clear();
+    // сбрасываем prevChek для детекта удалений после загрузки
+    // prevChekHtmlRef будет инициализирован в useEffect sync-delete
+    prevChekHtmlRef.current = null;
   }, [item, fields]);
 
   const handleChange = useCallback((internal, value) => {
+    dirtySetRef.current.add(internal);
     setForm(prev => ({ ...prev, [internal]: value }));
   }, []);
 
@@ -114,16 +122,33 @@ export default function DobTaskEditView({ id }) {
         if (internal.startsWith('_') || internal.includes('_x')) return `OData_${internal}`;
         return internal;
       };
+      const isDirtySet = (k) => dirtySetRef.current.has(k);
+      // Fallback для ChekResult — сравниваем с initial если dirtySet не сработал (например RichEditor onChange)
+      const isDirty = (k, curVal) => {
+        if (isDirtySet(k)) return true;
+        // Для ChekResult дополнительно сравниваем с initial (на случай если dirtySet не отметился)
+        if (k === chekInternal) {
+          const initVal = (initialFormRef.current || {})[k] ?? '';
+          return (curVal ?? '') !== (initVal ?? '');
+        }
+        return false;
+      };
       // Always allow ChekResult even if metadata says readOnly? Ensure it saves. If ChekResult is note, it is editable.
       // Add all form keys that are in fields and editable, or ChekResult
       for (const [k, v] of Object.entries(form)) {
         if (k === 'ID' || k === 'Id') continue;
-        const odataK = toODataKey(k);
         if (k === 'ChekResult' || k === '_x041a__x043e__x043c__x043c__x04' || k === chekInternal) {
-          payload[odataK] = v ?? '';
+          if (!isDirty(k, v)) { console.log('[DobEdit][save] skip unchanged ChekResult'); continue; }
+          const ck = toODataKey(k);
+          payload[ck] = v ?? '';
           continue;
         }
+        const odataK = toODataKey(k);
         if (editableSet.has(k)) {
+          if (!isDirty(k, v)) {
+            // console.log('[DobEdit][save] skip unchanged', k);
+            continue;
+          }
           const meta = (fields || []).find(f => f.InternalName === k);
           const t = (meta?.TypeAsString || '').toLowerCase();
           // User/Lookup — нужен Id суффикс, иначе 400 "value without type"
@@ -194,7 +219,7 @@ export default function DobTaskEditView({ id }) {
       } catch (e) {
         const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
         const lower = String(rawMsg).toLowerCase();
-        if (lower.includes('без имени типа') || lower.includes('without type') || lower.includes('expected type')) {
+        if (lower.includes('без имени типа') || lower.includes('without type') || lower.includes('expected type') || lower.includes('primitivevalue') || lower.includes('startobject') || lower.includes('непредвиденный узел')) {
           console.warn('[DobEdit][save] fallback to minimal payload (ChekResult only) due to type error', rawMsg.slice(0,300));
           const chekKey = toODataKey(chekInternal);
           const minimal = { [chekKey]: payload[chekKey] ?? form[chekInternal] ?? '' };
@@ -203,7 +228,10 @@ export default function DobTaskEditView({ id }) {
           if (payload['OData_Title']) minimal['OData_Title'] = payload['OData_Title'];
           console.log('[DobEdit][save] minimal keys', Object.keys(minimal));
           await updateDobItem(id, minimal);
-          // успех — не кидаем дальше
+          // успех — не кидаем дальше, обновляем baseline для ChekResult и чистим dirty
+          if (initialFormRef.current) initialFormRef.current[chekInternal] = form[chekInternal];
+          else initialFormRef.current = { [chekInternal]: form[chekInternal] };
+          dirtySetRef.current.delete(chekInternal);
           notify(`Заявка ${id} сохранена (только ${chekKey})`, { severity: 'success' });
           qc.invalidateQueries({ queryKey: ['dob-items'] });
           qc.invalidateQueries({ queryKey: ['dob-item', id] });
@@ -213,6 +241,9 @@ export default function DobTaskEditView({ id }) {
         throw e;
       }
       notify(`Заявка ${id} сохранена`, { severity: 'success' });
+      // Обновляем baseline для dirty-check и чистим dirty
+      initialFormRef.current = { ...form };
+      dirtySetRef.current.clear();
       // Invalidate list and item
       qc.invalidateQueries({ queryKey: ['dob-items'] });
       qc.invalidateQueries({ queryKey: ['dob-item', id] });
