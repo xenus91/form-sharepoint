@@ -657,27 +657,26 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   </>
                 );
               }
-              // Determine found / notFound choices — FIX Phase 17.8: уважать ShowAdditionalActions, не переопределять legacy строкой
+              // Determine found / notFound choices — через конфиг + fallback на legacy строки, без хардкода конкретных значений
+              // Для открытой задачи используем displayedChoices (свежие по ContentType)
               const choicesForButtons = displayedChoices || choices;
               const foundChoice = (() => {
-                // 1) по плану §14: TaskResultDefinitions.ShowAdditionalActions — авторитетно
-                // Если есть defs (список существует), не делаем legacy строковый fallback для уже определённых def show=false
-                const hasDefs = !!taskConfig?.taskResultDefinitions;
+                // 1) по плану §14: TaskResultDefinitions.ShowAdditionalActions
                 let c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
-                  if (def) return def.showAdditionalActions; // Show=true → found, Show=false → не found (уважаем)
-                  if (hasDefs) return false; // список есть, но записи нет для этого choice → не считаем found без дефа (fallback только если списка нет)
+                  if (def) return def.showAdditionalActions;
                   const cfg = getUiConfig(ch);
                   return cfg.requiresLocation || cfg.requiresAdditionalActions;
                 });
                 if (c) return c;
-                if (hasDefs) return null; // авторитетно: список есть → legacy строковый матч не применяем
-                // 2) legacy: ищем "найден/найдена" только когда списка нет (fallback)
+                // 2) legacy: ищем "найден/найдена"
                 c = choicesForButtons.find((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n === "найден" || n === "найдена";
                 });
                 if (c) return c;
+                // 3) fallback: только если среди choices есть legacy-паттерн, иначе не считаем none как found
+                // Для новых типов задач без legacy — foundChoice = null, чтобы не навязывать спец-экран
                 const hasLegacy = choicesForButtons.some((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n.includes("найден") || n.includes("не найден");
@@ -686,15 +685,13 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 return null;
               })();
               const notFoundChoice = (() => {
-                const hasDefs = !!taskConfig?.taskResultDefinitions;
+                // План §14: ShowAdditionalActions=false для confirm-типа (Не найдена) не требует AA
                 let c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
-                  if (def) return !def.showAdditionalActions && !!def.cfg; // Show=false → confirm типа (красный)
-                  if (hasDefs) return false; // список есть, но записи нет → не считаем confirm без дефа
+                  if (def) return !def.showAdditionalActions && def.cfg; // Show=false → confirm типа
                   return getUiConfig(ch).confirm;
                 });
                 if (c) return c;
-                if (hasDefs) return null;
                 c = choicesForButtons.find((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n === "не найдена" || n === "не найден" || n === "не найдено";
@@ -798,10 +795,15 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 );
               }
 
-              // Input mode для Найдена — максимально лаконично, без лишних букв
+              // Input mode для Найдена — inline в карточке (вернули обратно, Phase 17.11)
+              // ShowAdditionalActions из TaskResultDefinitions управляет видимостью AdditionalActionsField
               if (foundInputMode) {
-                // toggleAdditionalAction / handleAddCustomAction removed — Autocomplete handles it
+                const defForFound = getResultDef(foundChoice);
+                const showAAInline = defForFound ? !!defForFound.showAdditionalActions : !!getUiConfig(foundChoice).requiresAdditionalActions;
+                // debug
+                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, defForFound, showAAInline});
                 const validateAdditional = () => {
+                  if (!showAAInline) { setAdditionalError(""); return true; }
                   setAdditionalError("");
                   return true;
                 };
@@ -826,15 +828,17 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                             e.preventDefault();
                             const loc = foundLocation.trim() ? foundLocation.trim() : undefined;
                             if (!validateAdditional()) return;
-                            const acts = additionalActions;
+                            const acts = showAAInline ? additionalActions : [];
+                            const req = showAAInline ? additionalRequired : "Нет";
                             setShowCelebrate(true);
                             setTimeout(() => {
-                              if (onComplete) onComplete(task, foundChoice, loc, additionalRequired, acts);
+                              if (onComplete) onComplete(task, foundChoice, loc, req, acts);
                               else onResultClick(task, foundChoice);
                             }, 1600);
                           }
                         }}
                       />
+                      {showAAInline && (
                       <Box sx={{ width: '100%', mb: 1.5 }}>
                           <Box
                             sx={{
@@ -865,6 +869,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                             <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.75 }}>Выбрано: {additionalActions.length} — {additionalActions.join(", ")}</Typography>
                           )}
                         </Box>
+                      )}
                       {additionalError && additionalActions.length === 0 && (
                         <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 600, display: "block", mb: 1 }}>{additionalError}</Typography>
                       )}
@@ -875,8 +880,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         onClick={() => {
                           const loc = foundLocation.trim() ? foundLocation.trim() : undefined;
                           if (!validateAdditional()) return;
-                          const acts = additionalActions;
-                          const req = additionalActions.length > 0 ? "Да" : "Нет";
+                          const acts = showAAInline ? additionalActions : [];
+                          const req = showAAInline ? (additionalActions.length > 0 ? "Да" : "Нет") : "Нет";
                           setShowCelebrate(true);
                           setTimeout(() => {
                             if (onComplete) onComplete(task, foundChoice, loc, req, acts);

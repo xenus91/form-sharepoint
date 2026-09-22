@@ -22,6 +22,7 @@ import {
   getTasksListFieldsOverview,
 } from "./tasks/distribution";
 import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
+import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
@@ -1291,13 +1292,17 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     if (!pendingTask) return;
     setPendingAdditionalError("");
     const comment = locationComment.trim();
-    const actsToSave = pendingAdditionalActions;
-    const reqToSave = pendingAdditionalActions.length > 0 ? "Да" : "Нет";
+    // Уважать ShowAdditionalActions из TaskResultDefinitions (Show=Нет → доп скрыты)
+    const ctForSubmit = String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim();
+    const defForSubmit = taskConfiguration.data?.taskResultDefinitions ? resolveTaskResultDefinition(pendingResult, ctForSubmit, taskConfiguration.data.taskResultDefinitions) : null;
+    const showForSubmit = defForSubmit ? !!defForSubmit.showAdditionalActions : true;
+    const actsToSaveRaw = showForSubmit ? pendingAdditionalActions : [];
+    const reqToSave = showForSubmit ? (pendingAdditionalActions.length > 0 ? "Да" : "Нет") : "Нет";
     if (skip) {
-      // даже при пропуске локации сохраняем выбранные доп. действия
-      completeTask(pendingTask, pendingResult, undefined, reqToSave, actsToSave);
+      // даже при пропуске локации сохраняем выбранные доп. действия (если Show=Да)
+      completeTask(pendingTask, pendingResult, undefined, reqToSave, actsToSaveRaw);
     } else {
-      completeTask(pendingTask, pendingResult, comment || undefined, reqToSave, actsToSave);
+      completeTask(pendingTask, pendingResult, comment || undefined, reqToSave, actsToSaveRaw);
     }
   };
 
@@ -1656,6 +1661,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               "& .MuiOutlinedInput-root": { borderRadius: 2 },
             }}
           />
+          {(() => {
+            const ctForDialog = String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim();
+            const defForDialog = taskConfiguration.data?.taskResultDefinitions ? resolveTaskResultDefinition(pendingResult, ctForDialog, taskConfiguration.data.taskResultDefinitions) : null;
+            const showForDialog = defForDialog ? !!defForDialog.showAdditionalActions : true;
+            if (!showForDialog) return null;
+            return (
           <Box sx={{ width: '100%', mt: 2 }}>
               <Box
                 sx={{
@@ -1686,6 +1697,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.75 }}>Выбрано: {pendingAdditionalActions.length}</Typography>
               )}
             </Box>
+            );
+          })()}
           {pendingAdditionalError && pendingAdditionalActions.length === 0 && (
             <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 600, display: "block", mt: 1 }}>{pendingAdditionalError}</Typography>
           )}
