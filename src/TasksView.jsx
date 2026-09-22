@@ -31,7 +31,12 @@ import { useTasksMetadata } from "./features/tasks/hooks/useTasksMetadata";
 import TasksHeader from "./features/tasks/components/TasksHeader";
 import TasksTabs from "./features/tasks/components/TasksTabs";
 import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle";
-import { useHashElement } from "./features/tasks/hooks/useHashElement"; // PR1 следующий шаг
+import TasksHashContent from "./features/tasks/components/TasksHashContent";
+import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
+import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
+import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
+import { useHashElement } from "./features/tasks/hooks/useHashElement";
+import { useTaskMutations } from "./features/tasks/hooks/useTaskMutations"; // PR1 следующий шаг
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
 import TaskList from "./features/tasks/components/TaskList";
@@ -195,10 +200,29 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // useEffect для дефолта удалён
   const [pendingCustomAction, setPendingCustomAction] = useState("");
   const [pendingAdditionalError, setPendingAdditionalError] = useState("");
-  const [updatingId, setUpdatingId] = useState(null);
-  const [updatingAction, setUpdatingAction] = useState(null); // take | found | notFound
-
-  // PR2: hash-роут вынесен в useHashElement (RelatedItems 1→1, CAML+OData, guards)
+  const { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask } = useTaskMutations({
+    entityType,
+    completedStatusValue,
+    inProgressStatusValue,
+    additionalRequiredIsBoolean,
+    resultFieldsMeta,
+    ctResultMap,
+    taskConfiguration,
+    fieldDefaultActions,
+    currentUserId,
+    currentUserTitle,
+    distribution,
+    taskFieldNames,
+    recipientField,
+    scNumberField,
+    resultFieldInternalNames,
+    queryClient,
+    loadTasks,
+    notify,
+    setElementTaskMatch,
+    pendingResult,
+  });
+  // PR2: hash-роут вынесен  // PR2: hash-роут вынесен в useHashElement (RelatedItems 1→1, CAML+OData, guards)
   const {
     elementIdParam, setElementIdParam,
     elementActionParam, setElementActionParam,
@@ -285,626 +309,7 @@ const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Statu
 
 
 
-  const handleTakeInWork = useCallback(async (task) => {
-    setUpdatingId(task.Id);
-    setUpdatingAction("take");
-    try {
-      // 1. fresh fetch with ETag
-      let etag = "*";
-      let freshStatus = "";
-      let freshEditor = "";
-      let freshEditorId = null;
-      let freshModified = "";
-      try {
-        const resp = await apiClient.get(
-          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,Modified,Editor/Id,Editor/Title&$expand=Editor`,
-          { headers: { Accept: "application/json;odata=verbose" } }
-        );
-        const d = resp?.data?.d;
-        freshStatus = d?.Status || "";
-        freshEditor = d?.Editor?.Title || "";
-        freshEditorId = d?.Editor?.Id || null;
-        freshModified = d?.Modified || "";
-        etag = d?.__metadata?.etag || resp?.headers?.etag || resp?.headers?.ETag || resp?.headers?.["etag"] || "*";
-        // if already not "Не начата" -> show warning
-        if (!isNotStartedStatus(freshStatus)) {
-          if (isCompletedStatus(freshStatus, d?.PercentComplete)) {
-            notify(`Задача #${task.Id} уже завершена пользователем ${freshEditor || "—"} (${freshStatus}). Возьмите другую задачу.`, { severity: "warning" });
-          } else if (isInProgressStatus(freshStatus)) {
-            notify(`Задача #${task.Id} уже в работе у ${freshEditor || "другого пользователя"} (${freshStatus}). Возьмите другую задачу.`, { severity: "warning" });
-          } else {
-            notify(`Задача #${task.Id} уже обрабатывается: ${freshStatus} у ${freshEditor || "—"}. Возьмите другую задачу.`, { severity: "warning" });
-          }
-          const _freshOpt = { Status: freshStatus, Modified: freshModified, EditorTitle: freshEditor, Editor: freshEditor, EditorId: freshEditorId };
-          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._freshOpt } : t) : prev);
-          setElementTaskMatch((prev) => prev && prev.Id === task.Id ? { ...prev, ..._freshOpt } : prev);
-          await loadTasks();
-          return;
-        }
-      } catch (e) {
-        // if fetch fails, continue - MERGE with * will try
-        console.warn("take check fetch failed", e?.response?.status);
-      }
-
-      // 2. try to take: set to InProgress
-      let et = entityType;
-      if (!et) {
-        try {
-          const { data } = await apiClient.get(`${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`, { headers: { Accept: "application/json;odata=verbose" } });
-          et = data?.d?.ListItemEntityTypeFullName;
-        } catch {}
-      }
-      if (!et) et = "SP.Data.ListListItem";
-      const targetInProgress = inProgressStatusValue || "В процессе выполнения";
-      const payload = {
-        __metadata: { type: et },
-        Status: targetInProgress,
-      };
-      const headers = {
-        Accept: "application/json;odata=verbose",
-        "Content-Type": "application/json;odata=verbose",
-        "IF-MATCH": etag,
-        "X-HTTP-Method": "MERGE",
-      };
-      try {
-        await apiClient.post(`${TASKS_LIST_API}/items(${task.Id})`, payload, { headers });
-      } catch (e) {
-        const code = e?.response?.status;
-        if (code === 412) {
-          // race lost
-          try {
-            const check = await apiClient.get(`${TASKS_LIST_API}/items(${task.Id})?$select=Status,Editor/Id,Editor/Title&$expand=Editor`, { headers: { Accept: "application/json;odata=verbose" } });
-            const s = check?.data?.d?.Status || "";
-            const ed = check?.data?.d?.Editor?.Title || "другим пользователем";
-            notify(`Задача #${task.Id} уже взята пользователем ${ed} (${s}). Возьмите другую задачу.`, { severity: "warning" });
-            const edId = check?.data?.d?.Editor?.Id || null;
-            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, Status: s, EditorTitle: ed, Editor: ed, EditorId: edId } : t) : prev);
-          } catch {}
-          await loadTasks();
-          return;
-        }
-        // other error: try with * as fallback for missing etag
-        if (etag !== "*") {
-          try {
-            await apiClient.post(`${TASKS_LIST_API}/items(${task.Id})`, payload, { headers: { ...headers, "IF-MATCH": "*" } });
-          } catch (e2) {
-            throw e2;
-          }
-        } else {
-          throw e;
-        }
-      }
-      notify(`Задача #${task.Id} взята в работу`, { severity: "success" });
-      // optimistic local update + hash card — через TanStack setQueryData
-      const _takeOpt = { Status: targetInProgress, Modified: new Date().toISOString(), EditorTitle: currentUserTitle || "Вы", Editor: currentUserTitle || "Вы", EditorId: currentUserId };
-      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, ..._takeOpt } : t) : prev);
-      setElementTaskMatch((prev) => prev && prev.Id === task.Id ? { ...prev, ..._takeOpt } : prev);
-      // Инвалидируем кэш списка и самой задачи — TanStack + sp/cache
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      invalidate("/items");
-      await loadTasks({ silent: true });
-    } catch (err) {
-      const msg = err?.response?.data?.error?.message?.value || err?.message || "Ошибка";
-      notify(`Не удалось взять задачу #${task.Id}: ${msg}`, { severity: "error" });
-    } finally {
-      setUpdatingId(null);
-      setUpdatingAction(null);
-    }
-  }, [entityType, inProgressStatusValue, currentUserId, currentUserTitle, notify, loadTasks]);
-
-  const completeTask = useCallback(async (task, resultValue, locationValue, additionalRequired, additionalActions) => {
-    const prevTaskSnapshot = { ...task };
-    setUpdatingId(task.Id);
-    const _norm = String(resultValue || "").trim().toLowerCase();
-    const _isNotFound = _norm === "не найдена" || _norm === "не найден" || _norm === "не найдено";
-    const _isFound = _norm === "найден" || _norm === "найдена";
-    setUpdatingAction(_isNotFound ? "notFound" : _isFound ? "found" : null);
-    // Валидация доп. действий по ТЗ: Найдена+Да требует хотя бы одно действие
-    if (_isFound) {
-      const reqNorm = String(additionalRequired || "Нет").trim();
-      const acts = Array.isArray(additionalActions) ? additionalActions.filter(Boolean).map((v)=> String(v).trim()).filter(Boolean) : [];
-      if (reqNorm === "Да" && acts.length === 0) {
-        notify("Выберите хотя бы одно дополнительное действие или выберите \"Нет\"", { severity: "warning" });
-        setUpdatingId(null);
-        setUpdatingAction(null);
-        return;
-      }
-      // Нормализуем аргументы для дальнейшего использования
-      additionalRequired = reqNorm;
-      additionalActions = reqNorm === "Да" ? acts : [];
-    } else if (_isNotFound) {
-      // ЕО не найдена → доп. действия не применяются: пусто / []
-      additionalRequired = "";
-      additionalActions = [];
-    } else {
-      // Другой результат (на будущее) — сохраняем как есть или очищаем
-      additionalRequired = additionalRequired ? String(additionalRequired).trim() : (task.AdditionalsActionsRequired || "");
-      additionalActions = Array.isArray(additionalActions) ? additionalActions : (task.AdditionalActions || []);
-    }
-    // optimistic: сразу показываем карточку как завершённую, без ожидания сервера
-    let _targetStatusOpt = completedStatusValue || "Завершена";
-    if (_targetStatusOpt && String(_targetStatusOpt).toLowerCase().includes("в процессе")) _targetStatusOpt = "Завершена";
-    // Динамическое поле результата по ContentType
-    const _fieldMetaForTask = getResultFieldForTask(task, ctResultMap, resultFieldsMeta) || { internalName: "ResultSearchTHU" };
-    const _resultFieldName = _fieldMetaForTask.internalName || "ResultSearchTHU";
-    const _optimistic = {
-      [_resultFieldName]: resultValue,
-      ResultSearchTHU: resultValue,
-      Location1: locationValue !== undefined && locationValue !== null ? locationValue : task.Location1,
-      AdditionalsActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalsActionsRequired || "")),
-      AdditionalActions: _isNotFound ? [] : (_isFound ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
-      Status: _targetStatusOpt,
-      PercentComplete: 1,
-      Modified: new Date().toISOString(),
-    };
-    queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._optimistic } : t)) : prev);
-    setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._optimistic } : prev));
-    try {
-      // === Concurrency guard: re-fetch current state from server ===
-      let serverEtag = "*";
-      try {
-        const resp = await apiClient.get(
-          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,${_resultFieldName},ResultSearchTHU,Location1,AdditionalsActionsRequired,AdditionalActions,Modified,ContentTypeId`,
-          { headers: { Accept: "application/json;odata=verbose" } }
-        );
-        const server = resp?.data?.d;
-        // Extract ETag from __metadata or response headers (axios lowercases headers)
-        serverEtag = server?.__metadata?.etag || resp?.headers?.etag || resp?.headers?.ETag || resp?.headers?.["etag"] || "*";
-        if (server && isCompletedStatus(server.Status, server.PercentComplete)) {
-          notify(`Задача #${task.Id} уже выполнена другим пользователем: ${server.ResultSearchTHU || server.Status}`, { severity: "warning" });
-          // Sync local state to server truth — через TanStack
-          // Синхронизация с сервером — учитываем динамическое поле
-          const _srvFieldName = _resultFieldName;
-          const _srvVal = server[_srvFieldName] ?? server.ResultSearchTHU ?? "";
-          queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) =>
-            Array.isArray(prev) ? prev.map((t) =>
-              t.Id === task.Id
-                ? { ...t, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: _srvVal, [_srvFieldName]: _srvVal, Modified: server.Modified }
-                : t
-            ) : prev
-          );
-          await loadTasks();
-          return;
-        }
-      } catch (checkErr) {
-        // If check fails (item deleted or no access), continue - MERGE will handle error
-        console.warn("concurrency check failed", checkErr?.response?.status, checkErr?.message);
-      }
-
-      // ensure we have entity type via GUID
-      let et = entityType;
-      if (!et) {
-        try {
-          const { data } = await apiClient.get(
-            `${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`,
-            { headers: { Accept: "application/json;odata=verbose" } }
-          );
-          et = data?.d?.ListItemEntityTypeFullName;
-        } catch {}
-      }
-      if (!et) et = "SP.Data.ListListItem";
-
-      const payload = {
-        __metadata: { type: et },
-        [_resultFieldName]: resultValue,
-      };
-      if (locationValue !== undefined && locationValue !== null) {
-        payload.Location1 = locationValue;
-      } else if (pendingResult && String(pendingResult).toLowerCase().includes("найден") && locationValue === undefined) {
-        // if skipped, not sending Location1 (leave as is)
-      }
-      // Дополнительные действия (AdditionalsActionsRequired + AdditionalActions Multi-Choice)
-      // AdditionalsActionsRequired может быть Choice (Нет/Да) или Boolean (у пользователя булевое)
-      const toSPRequired = (reqStr) => {
-        if (additionalRequiredIsBoolean === true) {
-          if (reqStr === "Да") return true;
-          if (reqStr === "Нет") return false;
-          if (reqStr === "") return false;
-          return false;
-        } else if (additionalRequiredIsBoolean === false) {
-          return reqStr;
-        } else {
-          // неизвестно — пробуем Boolean (фактический деплой булевое), fallback ниже обработает mismatch
-          if (reqStr === "Да") return true;
-          if (reqStr === "Нет") return false;
-          if (reqStr === "") return false;
-          return reqStr;
-        }
-      };
-      if (_isNotFound) {
-        // ЕО не найдена → пусто / [] (для Boolean — false)
-        const val = additionalRequiredIsBoolean === true ? false : (additionalRequiredIsBoolean === false ? null : false);
-        payload.AdditionalsActionsRequired = val;
-        payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: [] };
-      } else if (_isFound) {
-        const reqToSave = additionalRequired || "Нет";
-        const actsToSave = reqToSave === "Да" ? (additionalActions || []) : [];
-        payload.AdditionalsActionsRequired = toSPRequired(reqToSave);
-        payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: actsToSave };
-      } else {
-        // Для прочих результатов не трогаем доп. поля (обратная совместимость)
-      }
-
-      // Determine if result is "Не найдена" - workflow for this outcome may expect no Status change (it sets status itself)
-      const normalizedResult = String(resultValue).trim().toLowerCase();
-      const isNotFoundResult = normalizedResult === "не найдена" || normalizedResult === "не найден" || normalizedResult === "не найдено";
-      // try to set status to completed - but for "Не найдена" try without Status first to avoid workflow validation error on list e2c2953a...
-      let payloadWithStatus = { ...payload };
-      let targetStatus = completedStatusValue || "Завершена";
-      // If discovery mistakenly still gives "В процессе выполнения", force to "Завершена"
-      if (targetStatus && String(targetStatus).toLowerCase().includes("в процессе")) {
-        targetStatus = "Завершена";
-      }
-      // For "Не найдена", prefer payload without Status/PercentComplete first - workflow may handle status transition
-      // We will try two strategies and let fallback logic handle
-      let tryWithoutStatusFirst = isNotFoundResult;
-      if (!tryWithoutStatusFirst) {
-        payloadWithStatus.Status = targetStatus;
-        payloadWithStatus.PercentComplete = 1;
-      }
-
-      const headers = {
-        Accept: "application/json;odata=verbose",
-        "Content-Type": "application/json;odata=verbose",
-        "IF-MATCH": serverEtag,
-        "X-HTTP-Method": "MERGE",
-      };
-
-      const postUpdate = async (body, etagOverride) => {
-        const h = etagOverride ? { ...headers, "IF-MATCH": etagOverride } : headers;
-        return apiClient.post(`${TASKS_LIST_API}/items(${task.Id})`, body, { headers: h });
-      };
-
-      // For NotFound, first try without Status to see if workflow succeeds, then fall back to with Status
-      if (tryWithoutStatusFirst) {
-        try {
-          await postUpdate(payload);
-          // if success without Status, still try to set Status afterwards if needed - but don't fail workflow
-          // Optionally update Status in second call if task still not completed
-          try {
-            const check = await apiClient.get(`${TASKS_LIST_API}/items(${task.Id})?$select=Status,PercentComplete`, { headers: { Accept: "application/json;odata=verbose" } });
-            const curStatus = check?.data?.d?.Status;
-            const curPc = check?.data?.d?.PercentComplete;
-            if (!isCompletedStatus(curStatus, curPc)) {
-              // Task still not marked completed, try to set Status now with "*"
-              await postUpdate({ __metadata: { type: et }, Status: targetStatus, PercentComplete: 1 }, "*");
-            }
-          } catch {}
-          // success path for NotFound without Status
-        } catch (eNoStatus) {
-          // If payload without Status fails (e.g., 412 or field error), fall back to with Status
-          console.warn("NotFound without Status failed, trying with Status", eNoStatus?.response?.data);
-          payloadWithStatus.Status = targetStatus;
-          payloadWithStatus.PercentComplete = 1;
-          try {
-            await postUpdate(payloadWithStatus);
-          } catch (e) {
-            const statusCode = e?.response?.status;
-            if (statusCode === 412) {
-              notify(`Задача #${task.Id} уже изменена другим пользователем. Обновите список.`, { severity: "warning" });
-              await loadTasks();
-              throw e;
-            }
-            const msg = String(e?.response?.data?.error?.message?.value || e?.response?.data || e?.message || "").toLowerCase();
-            // Type mismatch: пользовательское поле AdditionalsActionsRequired булевое, а мы отправили строку (или наоборот)
-            if (msg.includes("edm.boolean") || (msg.includes("boolean") && msg.includes("additional"))) {
-              console.warn("AdditionalsActionsRequired type mismatch (expected Boolean, got String), retry with Boolean", msg);
-              try {
-                const flip = { ...payload };
-                // Конвертируем в Boolean
-                if (_isFound) {
-                  flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false;
-                } else if (_isNotFound) {
-                  flip.AdditionalsActionsRequired = false;
-                }
-                const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
-                // Пробуем с Boolean
-                await postUpdate(_isNotFound ? flip : flipWithStatus, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              } catch (eFlip) {
-                const m2 = String(eFlip?.response?.data?.error?.message?.value || eFlip?.message || "").toLowerCase();
-                console.warn("Flip to Boolean also failed", m2);
-              }
-            }
-            if (msg.includes("edm.string") || (msg.includes("choice") && msg.includes("additional")) || msg.includes("edm.choice")) {
-              console.warn("AdditionalsActionsRequired type mismatch (expected String, got Boolean), retry with String", msg);
-              try {
-                const flip = { ...payload };
-                if (_isFound) {
-                  flip.AdditionalsActionsRequired = additionalRequired || "Нет";
-                } else if (_isNotFound) {
-                  flip.AdditionalsActionsRequired = null;
-                }
-                const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
-                await postUpdate(_isFound ? flipWithStatus : flip, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              } catch (eFlip2) {
-                console.warn("Flip to String also failed", String(eFlip2?.message||"").toLowerCase());
-              }
-            }
-            // Type mismatch: пользовательское поле AdditionalsActionsRequired булевое, а мы отправили строку (или наоборот)
-            if (msg.includes("edm.boolean") || (msg.includes("boolean") && msg.includes("additional"))) {
-              console.warn("AdditionalsActionsRequired type mismatch (expected Boolean, got String), retry with Boolean", msg);
-              try {
-                const flip = { ...payload };
-                // Конвертируем в Boolean
-                if (_isFound) {
-                  flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false;
-                } else if (_isNotFound) {
-                  flip.AdditionalsActionsRequired = false;
-                }
-                const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
-                // Пробуем с Boolean
-                await postUpdate(_isNotFound ? flip : flipWithStatus, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              } catch (eFlip) {
-                const m2 = String(eFlip?.response?.data?.error?.message?.value || eFlip?.message || "").toLowerCase();
-                console.warn("Flip to Boolean also failed", m2);
-              }
-            }
-            if (msg.includes("edm.string") || (msg.includes("choice") && msg.includes("additional")) || msg.includes("edm.choice")) {
-              console.warn("AdditionalsActionsRequired type mismatch (expected String, got Boolean), retry with String", msg);
-              try {
-                const flip = { ...payload };
-                if (_isFound) {
-                  flip.AdditionalsActionsRequired = additionalRequired || "Нет";
-                } else if (_isNotFound) {
-                  flip.AdditionalsActionsRequired = null;
-                }
-                const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
-                await postUpdate(_isFound ? flipWithStatus : flip, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              } catch (eFlip2) {
-                console.warn("Flip to String also failed", String(eFlip2?.message||"").toLowerCase());
-              }
-            }
-            // Fallback для опечатки: если поле Additionals... не существует, пробуем Additional... и наоборот
-            const isAdditionalsMissing = msg.includes("additionalsactionsrequired") && msg.includes("не существует");
-            const isAdditionalMissing = msg.includes("additionalactionsrequired") && !msg.includes("additionalsactionsrequired") && msg.includes("не существует");
-            if (isAdditionalsMissing || isAdditionalMissing) {
-              console.warn("Additionals/Additional field not exists, try alternative spelling", msg);
-              try {
-                const alt = { ...payload };
-                // flip spelling
-                if (alt.AdditionalsActionsRequired !== undefined) {
-                  alt.AdditionalActionsRequired = alt.AdditionalsActionsRequired;
-                  delete alt.AdditionalsActionsRequired;
-                } else if (alt.AdditionalActionsRequired !== undefined) {
-                  alt.AdditionalsActionsRequired = alt.AdditionalActionsRequired;
-                  delete alt.AdditionalActionsRequired;
-                }
-                const altWithStatus = { ...alt, Status: targetStatus, PercentComplete: 1 };
-                // try both variants with and without status
-                try {
-                  await postUpdate(alt, "*");
-                  notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                  queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                  invalidate("/items");
-                  setTimeout(() => loadTasks({ silent: true }), 600);
-                  return;
-                } catch (eAlt1) {
-                  await postUpdate(altWithStatus, "*");
-                  notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                  queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                  invalidate("/items");
-                  setTimeout(() => loadTasks({ silent: true }), 600);
-                  return;
-                }
-              } catch (eAlt) {
-                console.warn("Alternative spelling also failed", String(eAlt?.response?.data?.error?.message?.value||""), eAlt?.response?.status);
-              }
-            }
-            if (msg.includes("additionalactions")) {
-              console.warn("AdditionalActions field missing, retry without it", msg);
-              try {
-                const clean = { ...payload };
-                delete clean.AdditionalsActionsRequired;
-                delete clean.AdditionalActions;
-                const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
-                await postUpdate(cleanWithStatus, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              } catch (_eClean) { void _eClean;
-                try {
-                  const clean2 = { ...payload };
-                  delete clean2.AdditionalsActionsRequired;
-                  delete clean2.AdditionalActions;
-                  await postUpdate(clean2, "*");
-                  notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                  invalidate("/items");
-                  setTimeout(() => loadTasks({ silent: true }), 600);
-                  return;
-                } catch {}
-              }
-            }
-            const isFieldError = msg.includes("status") || msg.includes("состояние") || msg.includes("percent") || msg.includes("percentcomplete");
-            if (isFieldError) {
-              try {
-                const onlyStatus = { ...payload, Status: targetStatus };
-                await postUpdate(onlyStatus, "*");
-              } catch (e2) {
-                if (e2?.response?.status === 412) {
-                  notify(`Конфликт изменения задачи #${task.Id} — уже выполнена другим пользователем.`, { severity: "warning" });
-                  await loadTasks();
-                  throw e2;
-                }
-                try {
-                  const onlyPercent = { ...payload, PercentComplete: 1 };
-                  await postUpdate(onlyPercent, "*");
-                } catch (e3) {
-                  if (e3?.response?.status === 412) {
-                    notify(`Конфликт изменения задачи #${task.Id}.`, { severity: "warning" });
-                    await loadTasks();
-                    throw e3;
-                  }
-                  await postUpdate(payload, "*");
-                }
-              }
-            } else {
-              const altStatus = targetStatus === "Завершена" ? "Completed" : "Завершена";
-              try {
-                const altPayload = { ...payload, Status: altStatus, PercentComplete: 1 };
-                await postUpdate(altPayload, "*");
-              } catch (altErr) {
-                if (altErr?.response?.status === 412) {
-                  notify(`Задача #${task.Id} уже изменена другим пользователем.`, { severity: "warning" });
-                  await loadTasks();
-                  throw altErr;
-                }
-                await postUpdate(payload, "*");
-              }
-            }
-          }
-        }
-      } else {
-        try {
-          await postUpdate(payloadWithStatus);
-        } catch (e) {
-          const statusCode = e?.response?.status;
-          if (statusCode === 412) {
-            notify(`Задача #${task.Id} уже изменена другим пользователем. Обновите список.`, { severity: "warning" });
-            await loadTasks();
-            throw e;
-          }
-          const msg = String(e?.response?.data?.error?.message?.value || e?.response?.data || e?.message || "").toLowerCase();
-          // Fallback для опечатки: пробуем альтернативное написание поля
-          const isAdditionalsMissing2 = msg.includes("additionalsactionsrequired") && msg.includes("не существует");
-          const isAdditionalMissing2 = msg.includes("additionalactionsrequired") && !msg.includes("additionalsactionsrequired") && msg.includes("не существует");
-          if (isAdditionalsMissing2 || isAdditionalMissing2) {
-            console.warn("Additionals/Additional field not exists (second branch), try alternative spelling", msg);
-            try {
-              const alt = { ...payload };
-              if (alt.AdditionalsActionsRequired !== undefined) {
-                alt.AdditionalActionsRequired = alt.AdditionalsActionsRequired;
-                delete alt.AdditionalsActionsRequired;
-              } else if (alt.AdditionalActionsRequired !== undefined) {
-                alt.AdditionalsActionsRequired = alt.AdditionalActionsRequired;
-                delete alt.AdditionalActionsRequired;
-              }
-              const altWithStatus = { ...alt, Status: targetStatus, PercentComplete: 1 };
-              try {
-                await postUpdate(altWithStatus, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              } catch (eAlt2) {
-                await postUpdate(alt, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              }
-            } catch (eAlt) {
-              console.warn("Alternative spelling also failed (second branch)", String(eAlt?.response?.data?.error?.message?.value||""), eAlt?.response?.status);
-            }
-          }
-          if (msg.includes("additionalactions")) {
-            console.warn("AdditionalActions field missing, retry without it", msg);
-            try {
-              const clean = { ...payload };
-              delete clean.AdditionalsActionsRequired;
-              delete clean.AdditionalActions;
-              const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
-              await postUpdate(cleanWithStatus, "*");
-              notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-              invalidate("/items");
-              setTimeout(() => loadTasks({ silent: true }), 600);
-              return;
-            } catch (_eClean) { void _eClean;
-              try {
-                const clean2 = { ...payload };
-                delete clean2.AdditionalsActionsRequired;
-                delete clean2.AdditionalActions;
-                await postUpdate(clean2, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-                queryClient.invalidateQueries({ queryKey: ['tasks'] });
-                invalidate("/items");
-                setTimeout(() => loadTasks({ silent: true }), 600);
-                return;
-              } catch {}
-            }
-          }
-          const isFieldError = msg.includes("status") || msg.includes("состояние") || msg.includes("percent") || msg.includes("percentcomplete");
-          if (isFieldError) {
-            try {
-              const onlyStatus = { ...payload, Status: targetStatus };
-              await postUpdate(onlyStatus, "*");
-            } catch (e2) {
-              if (e2?.response?.status === 412) {
-                notify(`Конфликт изменения задачи #${task.Id} — уже выполнена другим пользователем.`, { severity: "warning" });
-                await loadTasks();
-                throw e2;
-              }
-              try {
-                const onlyPercent = { ...payload, PercentComplete: 1 };
-                await postUpdate(onlyPercent, "*");
-              } catch (e3) {
-                if (e3?.response?.status === 412) {
-                  notify(`Конфликт изменения задачи #${task.Id}.`, { severity: "warning" });
-                  await loadTasks();
-                  throw e3;
-                }
-                await postUpdate(payload, "*");
-              }
-            }
-          } else {
-            const altStatus = targetStatus === "Завершена" ? "Completed" : "Завершена";
-            try {
-              const altPayload = { ...payload, Status: altStatus, PercentComplete: 1 };
-              await postUpdate(altPayload, "*");
-            } catch (altErr) {
-              if (altErr?.response?.status === 412) {
-                notify(`Задача #${task.Id} уже изменена другим пользователем.`, { severity: "warning" });
-                await loadTasks();
-                throw altErr;
-              }
-              await postUpdate(payload, "*");
-            }
-          }
-        }
-      }
-
-      notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
-      // already optimistically updated — invalidate TanStack + sp/cache
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-      invalidate("/items");
-      setTimeout(() => loadTasks({ silent: true }), 600);
-    } catch (e) {
-      console.error("complete task error", e);
-      const msg = e?.response?.data?.error?.message?.value || e?.message || "Ошибка обновления задачи";
-      notify(msg, { severity: "error" });
-      // rollback optimistic (включая доп. действия) — через TanStack
-      queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalsActionsRequired: prevTaskSnapshot.AdditionalsActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
-      setElementTaskMatch((prev) => (prev && prev.Id === task.Id ? { ...prev, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalsActionsRequired: prevTaskSnapshot.AdditionalsActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : prev));
-    } finally {
-      setUpdatingId(null);
-      setUpdatingAction(null);
-      setLocationDialogOpen(false);
-      setConfirmNotFoundOpen(false);
-      setPendingTask(null);
-    }
-  }, [entityType, completedStatusValue, additionalRequiredIsBoolean, currentUserId, currentUserTitle, notify, loadTasks, pendingResult]);
+  // handleTakeInWork / completeTask теперь в useTaskMutations (PR2)
 
   const handleResultClick = useCallback((task, resultValue) => {
     const normalized = String(resultValue).trim().toLowerCase();
@@ -1099,61 +504,32 @@ const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Statu
       </Box>
       {isHashMode ? (
         <Box sx={{ minHeight: 320, display: "block" }}>
-          {(elementLoading || elementTaskSearching) ? (
-            <Box sx={{ display: "grid", placeItems: "center", py: 6, gap: 1.5 }}>
-              <CircularProgress />
-              <Typography variant="body2" color="text.secondary">Загружаю элемент #{elementIdParam}...</Typography>
-              <Typography variant="caption" color="text.secondary">Ищу связанную задачу...</Typography>
-            </Box>
-          ) : elementTaskMatch ? (
-            <Box sx={{ position: "relative" }}>
-              <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
-                task={elementTaskMatch}
-                isCompleted={isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete)}
-                isOverdue={elementTaskMatch.DueDate ? new Date(elementTaskMatch.DueDate).getTime() < Date.now() : false}
-                choices={choices}
-                              resultFieldsMeta={resultFieldsMeta}
-                              ctResultMap={ctResultMap}
-                updatingId={updatingId}
-                updatingAction={updatingAction}
-                onResultClick={handleResultClick}
-                onTakeInWork={handleTakeInWork}
-                onComplete={completeTask}
-                currentUserId={currentUserId}
-                currentUserTitle={currentUserTitle}
-                initialAction={elementActionParam}
-              />
-              {isHashTaskRefreshing && (
-                <Box sx={{ position: "absolute", top: 8, right: 8, bgcolor: "rgba(255,255,255,0.9)", borderRadius: "50%", p: 0.5, boxShadow: "0 1px 4px rgba(0,0,0,0.15)", display: "grid", placeItems: "center" }}>
-                  <CircularProgress size={18} thickness={4} sx={{ color: "#171c8f" }} />
-                </Box>
-              )}
-            </Box>
-          ) : (
-            <Paper sx={{ p: 3, borderRadius: 2, textAlign: "center", border: "1px solid rgba(255,193,7,0.25)", bgcolor: "rgba(255,193,7,0.06)" }}>
-              <Typography sx={{ fontWeight: 700, color: "#8d6e00" }}>
-                {elementError ? elementError : `Элемент #${elementIdParam} не найден`}
-              </Typography>
-              {elementData && (
-                <Box sx={{ mt: 1.5, p: 1.5, bgcolor: "#fff", borderRadius: 1, border: "1px solid rgba(23,28,143,0.12)", textAlign: "left" }}>
-                  <Typography variant="body2"><b>Id:</b> {elementData.Id} • THU: {elementData.THU || "—"}</Typography>
-                  {elementData.Title && <Typography variant="body2"><b>Title:</b> {elementData.Title}</Typography>}
-                  {elementData.Problems?.results && <Typography variant="body2"><b>Проблемы:</b> {elementData.Problems.results.join(", ")}</Typography>}
-                </Box>
-              )}
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Задача для элемента #{elementIdParam} не найдена. Если она уже выполнена другим сотрудником — откройте вкладку «Завершённые» или найдите её в диалоге элемента.
-              </Typography>
-              <Button size="small" variant="outlined" sx={{ mt: 1.5, borderRadius: 1.5 }} onClick={() => onClearElementHash?.()}>
-                К списку задач
-              </Button>
-            </Paper>
-          )}
+          <TasksHashContent
+            elementLoading={elementLoading}
+            elementTaskSearching={elementTaskSearching}
+            elementTaskMatch={elementTaskMatch}
+            elementData={elementData}
+            elementError={elementError}
+            elementIdParam={elementIdParam}
+            elementActionParam={elementActionParam}
+            isHashTaskRefreshing={isHashTaskRefreshing}
+            taskConfiguration={taskConfiguration}
+            fieldDefaultActions={fieldDefaultActions}
+            choices={choices}
+            resultFieldsMeta={resultFieldsMeta}
+            ctResultMap={ctResultMap}
+            updatingId={updatingId}
+            updatingAction={updatingAction}
+            onResultClick={handleResultClick}
+            onTakeInWork={handleTakeInWork}
+            onComplete={completeTask}
+            currentUserId={currentUserId}
+            currentUserTitle={currentUserTitle}
+            onClearElementHash={onClearElementHash}
+          />
         </Box>
       ) : (
       <>
-
-
       <Box ref={virtualParentRef} sx={{ 
         flex: 1,
         minHeight: 0,
@@ -1203,278 +579,59 @@ const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Statu
 
       </>
       )}
-      {/* Диалог ввода комментария для "Найден" */}
-      <Dialog
+            <TaskLocationDialog
         open={locationDialogOpen}
         onClose={() => setLocationDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 2 } }}
-      >
-        <DialogTitle sx={{ fontWeight: 800 }}>Где найдена ЕО?</DialogTitle>
-        <DialogContent>
-          <DialogContentText sx={{ mb: 2 }}>
-            Укажите местоположение, где была найдена ЕО для задачи #{pendingTask?.Id}. Вы можете пропустить этот шаг.
-          </DialogContentText>
-          <TextField
-            autoFocus
-            label="Местоположение (Location1)"
-            placeholder="Например: Зона отгрузки, ряд 5, ячейка 12"
-            fullWidth
-            multiline
-            minRows={2}
-            maxRows={4}
-            value={locationComment}
-            onChange={(e) => setLocationComment(e.target.value)}
-            sx={{
-              "& .MuiOutlinedInput-root": { borderRadius: 2 },
-            }}
-          />
-          {(() => {
-            const ctForDialog = String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim();
-            const defForDialog = taskConfiguration.data?.taskResultDefinitions ? resolveTaskResultDefinition(pendingResult, ctForDialog, taskConfiguration.data.taskResultDefinitions) : null;
-            const showForDialog = defForDialog ? !!defForDialog.showAdditionalActions : true;
-            if (!showForDialog) return null;
-            return (
-          <Box sx={{ width: '100%', mt: 2 }}>
-              <Box
-                sx={{
-                  position: 'relative',
-                  width: '100%',
-                  borderRadius: '28px',
-                  backgroundColor: '#F1F3F4',
-                  overflow: 'visible',
-                  p: '3px',
-                  '&:has(.Mui-expanded)': { borderRadius: '28px 28px 0 0' },
-                }}
-              >
-                <AdditionalActionsField
-                  fieldInternalName={taskConfiguration.data?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.internalName || "AdditionalActions"}
-                  required={pendingAdditionalActions.length > 0}
-                  choices={(taskConfiguration.data?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.choices || ADDITIONAL_ACTIONS_STANDARD).map(v=>typeof v==='string'?{value:v,label:v}:v)}
-                  allowFillIn={taskConfiguration.data?.ctConfigMap?.get(String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim())?.additionalActionsField?.allowFillIn ?? true}
-                  value={pendingAdditionalActions}
-                  onChange={(next)=>{ setPendingAdditionalActions(next); if (pendingAdditionalError) setPendingAdditionalError(""); if (pendingCustomAction) setPendingCustomAction(""); }}
-                  error={pendingAdditionalError}
-                  disabled={updatingId === pendingTask?.Id}
-                />
-              </Box>
-              {pendingAdditionalError && (
-                <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 600, display: "block", mt: 0.75 }}>{pendingAdditionalError}</Typography>
-              )}
-              {pendingAdditionalActions.length > 0 && !pendingAdditionalError && (
-                <Typography variant="caption" sx={{ color: "text.secondary", display: "block", mt: 0.75 }}>Выбрано: {pendingAdditionalActions.length}</Typography>
-              )}
-            </Box>
-            );
-          })()}
-          {pendingAdditionalError && pendingAdditionalActions.length === 0 && (
-            <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 600, display: "block", mt: 1 }}>{pendingAdditionalError}</Typography>
-          )}
-          {pendingTask?.Body && (
-            <Box sx={{ mt: 2, p: 1.5, bgcolor: "rgba(23,28,143,0.06)", borderRadius: 2 }}>
-              <Typography variant="caption" sx={{ fontWeight: 700, color: "#171c8f" }}>
-                Текст задачи:
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", mt: 0.5 }}>
-                {pendingTask.Body}
-              </Typography>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => handleLocationSubmit(true)} color="inherit" sx={{ borderRadius: 2, fontWeight: 700 }} disabled={updatingId === pendingTask?.Id}>
-            Пропустить
-          </Button>
-          <Button
-            onClick={() => handleLocationSubmit(false)}
-            variant="contained"
-            sx={{
-              borderRadius: 2,
-              fontWeight: 700,
-              backgroundImage: "linear-gradient(180deg, #7B84FF 0%, #5A67D8 100%)",
-            }}
-            disabled={updatingId === pendingTask?.Id}
-          >
-            {updatingId === pendingTask?.Id ? <CircularProgress size={20} sx={{ color: "white" }} /> : "Отправить"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        pendingTask={pendingTask}
+        pendingResult={pendingResult}
+        locationComment={locationComment}
+        setLocationComment={setLocationComment}
+        pendingAdditionalActions={pendingAdditionalActions}
+        setPendingAdditionalActions={setPendingAdditionalActions}
+        pendingAdditionalError={pendingAdditionalError}
+        setPendingAdditionalError={setPendingAdditionalError}
+        pendingCustomAction={pendingCustomAction}
+        setPendingCustomAction={setPendingCustomAction}
+        updatingId={updatingId}
+        taskConfiguration={taskConfiguration}
+        onSubmit={handleLocationSubmit}
+      />
 
-      {/* Диалог для хеш-роута элемента ProblemsPallet (#tasks/id=10) */}
-      <Dialog
+            <TaskElementDialog
         open={elementDialogOpen}
-        onClose={() => {
-          setElementDialogOpen(false);
-        }}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 2, maxHeight: "85vh" } }}
-      >
-        <DialogTitle sx={{ fontWeight: 800, pr: 6, display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-          <AssignmentIcon sx={{ color: "#171c8f" }} />
-          {elementData ? `ЕО ${elementData.THU || elementData.Title || ""} • #${elementData.Id}` : elementIdParam ? ( /^\d{17,18}$/.test(String(elementIdParam)) ? `ЕО ${elementIdParam}` : `Элемент #${elementIdParam}`) : "Элемент"}
-          <Box sx={{ flex: 1 }} />
-          <IconButton size="small" onClick={() => setElementDialogOpen(false)} sx={{ ml: 1 }}><Typography sx={{ fontSize: 18, lineHeight: 1 }}>✕</Typography></IconButton>
-        </DialogTitle>
-        <DialogContent dividers sx={{ p: 2, bgcolor: "#fafaff" }}>
-          {(elementLoading || elementTaskSearching) ? (
-            <Box sx={{ display: "grid", placeItems: "center", py: 4, gap: 1.5 }}>
-              <CircularProgress />
-              <Typography variant="body2" color="text.secondary">Загружаю элемент ProblemsPallet #{elementIdParam}...</Typography>
-            </Box>
-          ) : elementError && !elementTaskMatch && !elementData ? (
-            <Box sx={{ p: 2, borderRadius: 1.5, bgcolor: "rgba(229,57,53,0.06)", border: "1px solid rgba(229,57,53,0.18)", textAlign: "center" }}>
-              <Typography sx={{ fontWeight: 700, color: "#b71c1c" }}>{elementError}</Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>Проверьте Id в ссылке (например, .../#tasks/id=10). Id берётся из ProblemsPallet, не из задач.</Typography>
-              <Button variant="outlined" size="small" sx={{ mt: 1.5, borderRadius: 1.5 }} onClick={() => setElementDialogOpen(false)}>Закрыть</Button>
-            </Box>
-          ) : (
-            <>
-              {elementData && (
-                <Paper elevation={0} sx={{ p: 1.5, borderRadius: 1.5, border: "1px solid rgba(23,28,143,0.12)", mb: 1.5, bgcolor: "#fff" }}>
-                  <Typography variant="caption" sx={{ fontWeight: 800, color: "#171c8f", display: "block", mb: 0.5 }}>Элемент ProblemsPallet</Typography>
-                  <Stack spacing={0.5}>
-                    <Typography variant="body2" sx={{ wordBreak: "break-word" }}><b>Id:</b> {elementData.Id} <span style={{ color: "rgba(0,0,0,0.35)", fontSize: "0.8em" }}>• THU: {elementData.THU || "—"} • DC_THU: {elementData.DC_THU || "—"}</span></Typography>
-                    {elementData.Title && <Typography variant="body2" sx={{ wordBreak: "break-word" }}><b>Title:</b> {elementData.Title}</Typography>}
-                    {elementData.Location1 && <Typography variant="body2"><b>Локация:</b> {elementData.Location1}</Typography>}
-                    {elementData.Problems?.results && elementData.Problems.results.length > 0 && <Typography variant="body2"><b>Проблемы:</b> {elementData.Problems.results.join(", ")}</Typography>}
-                    {elementData.Status && <Typography variant="body2"><b>Статус элемента:</b> {elementData.Status}</Typography>}
-                    <Typography variant="caption" color="text.secondary">Создан: {elementData.Created ? new Date(elementData.Created).toLocaleString("ru-RU") : "—"} • Изменён: {elementData.Modified ? new Date(elementData.Modified).toLocaleString("ru-RU") : "—"}</Typography>
-                    {elementData.Author?.Title && <Typography variant="caption" color="text.secondary">Автор: {elementData.Author.Title}</Typography>}
-                  </Stack>
-                  <Typography variant="caption" sx={{ mt: 1, display: "block", color: "text.secondary" }}>
-                    Ссылка: <span style={{ wordBreak: "break-all" }}>{window.location.href}</span>
-                  </Typography>
-                </Paper>
-              )}
-              {elementError && elementData && (
-                <Typography variant="caption" color="error" sx={{ display: "block", mb: 1 }}>{elementError}</Typography>
-              )}
-              {elementTaskMatch ? (
-                <>
-                  {isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete) ? (
-                    <Box sx={{ mb: 1.5, p: 1.5, borderRadius: 1.5, bgcolor: "rgba(46,125,50,0.08)", border: "1px solid rgba(46,125,50,0.18)", display: "flex", gap: 1.25, alignItems: "center" }}>
-                      <Box sx={{ width: 36, height: 36, borderRadius: "50%", bgcolor: "rgba(46,125,50,0.14)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                        <CheckCircleIcon sx={{ color: "#2e7d32", fontSize: 22 }} />
-                      </Box>
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography sx={{ fontWeight: 800, color: "#1b5e20", fontSize: "0.95rem", lineHeight: 1.2 }}>Задача выполнена</Typography>
-                        <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>
-                          Исполнитель: {elementTaskMatch.EditorTitle || elementTaskMatch.Editor || elementTaskMatch.AssignedTo || "—"} • {elementTaskMatch.Modified ? new Date(elementTaskMatch.Modified).toLocaleString("ru-RU") : "—"}{elementTaskMatch.ResultSearchTHU ? ` • ${elementTaskMatch.ResultSearchTHU}` : ""}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  ) : (
-                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#171c8f", mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
-                      <CheckCircleIcon sx={{ color: "#2e7d32", fontSize: 18 }} /> Связанная задача найдена
-                    </Typography>
-                  )}
-                  <TaskCard taskConfig={taskConfiguration.data} fieldDefaultActions={fieldDefaultActions}
-                    task={elementTaskMatch}
-                    isCompleted={isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete)}
-                    isOverdue={elementTaskMatch.DueDate ? new Date(elementTaskMatch.DueDate).getTime() < Date.now() : false}
-                    choices={choices}
-                              resultFieldsMeta={resultFieldsMeta}
-                              ctResultMap={ctResultMap}
-                    updatingId={updatingId}
-                    updatingAction={updatingAction}
-                    onResultClick={handleResultClick}
-                    onTakeInWork={handleTakeInWork}
-                    onComplete={completeTask}
-                    currentUserId={currentUserId}
-                    currentUserTitle={currentUserTitle}
-                    initialAction={elementActionParam}
-                  />
-                  {elementActionParam && (
-                    <Box sx={{ mt: 1, p: 1, borderRadius: 1, bgcolor: elementActionParam === "found" ? "rgba(46,125,50,0.08)" : "rgba(229,57,53,0.08)", border: elementActionParam === "found" ? "1px solid rgba(46,125,50,0.18)" : "1px solid rgba(229,57,53,0.18)" }}>
-                      <Typography variant="caption" sx={{ fontWeight: 700, color: elementActionParam === "found" ? "#2e7d32" : "#c62828" }}>
-                        URL action={elementActionParam} — следующий этап: подтверждение {elementActionParam === "found" ? "«Найдена»" : "«Не найдена»"} (пока нажмите кнопку в карточке).
-                      </Typography>
-                    </Box>
-                  )}
-                </>
-              ) : (
-                <Box sx={{ p: 2, borderRadius: 1.5, bgcolor: "rgba(255,193,7,0.08)", border: "1px solid rgba(255,193,7,0.25)", textAlign: "center" }}>
-                  <Typography sx={{ fontWeight: 700, color: "#8d6e00" }}>Задача для элемента #{elementIdParam} не найдена</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                    {elementData ? "Для этого элемента пока нет активной задачи. Возможно, она ещё не создана или уже выполнена другим сотрудником — проверьте вкладку «Завершённые»." : "Не удалось загрузить элемент. Проверьте ссылку и попробуйте ещё раз."}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-                    {elementData ? "Если вы открываете задачу по ссылке, а её уже закрыл другой пользователь — вы увидите карточку «Задача выполнена» выше. Иначе — задача появится после запуска workflow." : "Id берётся из ProblemsPallet. Для ЕО по THU (17-18 цифр) поиск идёт по THU."}
-                  </Typography>
-                  {elementError && <Typography variant="caption" color="error" sx={{ mt: 0.5, display: "block" }}>{elementError}</Typography>}
-                  {elementActionParam && (
-                    <Typography variant="caption" sx={{ mt: 1, display: "block", color: "text.secondary" }}>action={elementActionParam} — второй этап (утверждение без задачи) пока требует наличия задачи.</Typography>
-                  )}
-                  <Button size="small" variant="outlined" sx={{ mt: 1.5, borderRadius: 1.5 }} onClick={() => { loadTasks({ silent: true });}}>Повторить поиск</Button>
-                </Box>
-              )}
-              <Box sx={{ display: "flex", gap: 1, mt: 1.5, flexWrap: "wrap" }}>
-                <Button size="small" variant="outlined" sx={{ borderRadius: 1.5, fontWeight: 700 }} onClick={() => { setElementDialogOpen(false); }}>
-                  Закрыть
-                </Button>
-                {onClearElementHash && (
-                  <Button size="small" variant="text" sx={{ borderRadius: 1.5, fontWeight: 700 }} onClick={() => { setElementDialogOpen(false); onClearElementHash?.(); }}>
-                    Сбросить hash
-                  </Button>
-                )}
-                {elementTaskMatch && (
-                  <Button size="small" variant="contained" sx={{ borderRadius: 1.5, fontWeight: 800, ml: "auto", backgroundImage: "linear-gradient(180deg, #7B84FF 0%, #5A67D8 100%)" }} onClick={() => { setElementDialogOpen(false); try { const el = document.getElementById('task-' + elementTaskMatch.Id); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} }}>
-                    Показать в списке
-                  </Button>
-                )}
-              </Box>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+        onClose={() => setElementDialogOpen(false)}
+        elementData={elementData}
+        elementIdParam={elementIdParam}
+        elementTaskMatch={elementTaskMatch}
+        elementLoading={elementLoading}
+        elementTaskSearching={elementTaskSearching}
+        elementError={elementError}
+        elementActionParam={elementActionParam}
+        taskConfiguration={taskConfiguration}
+        fieldDefaultActions={fieldDefaultActions}
+        choices={choices}
+        resultFieldsMeta={resultFieldsMeta}
+        ctResultMap={ctResultMap}
+        updatingId={updatingId}
+        updatingAction={updatingAction}
+        onResultClick={handleResultClick}
+        onTakeInWork={handleTakeInWork}
+        onComplete={completeTask}
+        currentUserId={currentUserId}
+        currentUserTitle={currentUserTitle}
+        onClearElementHash={onClearElementHash}
+        onShowInList={() => { setElementDialogOpen(false); try { const el = document.getElementById('task-' + elementTaskMatch.Id); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} }}
+        loadTasks={loadTasks}
+      />
 
-      {/* Подтверждение для "Не найдена" */}
-      <Dialog
+            <TaskConfirmNotFoundDialog
         open={confirmNotFoundOpen}
         onClose={() => setConfirmNotFoundOpen(false)}
-        maxWidth="xs"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 2 } }}
-      >
-        <DialogTitle sx={{ fontWeight: 800 }}>Подтверждение</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            Вы уверены, что хотите завершить задачу #{pendingTask?.Id} как «{pendingResult}»?
-            Это действие нельзя отменить.
-          </DialogContentText>
-          {pendingTask?.Body && (
-            <Box sx={{ mt: 2, p: 1.5, bgcolor: "rgba(229,57,53,0.06)", borderRadius: 2, border: "1px solid rgba(229,57,53,0.15)" }}>
-              <Typography variant="caption" sx={{ fontWeight: 700, color: "#b71c1c" }}>
-                Текст задачи:
-              </Typography>
-              <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", mt: 0.5 }}>
-                {pendingTask.Body}
-              </Typography>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setConfirmNotFoundOpen(false)} color="inherit" sx={{ borderRadius: 2, fontWeight: 700 }} disabled={updatingId === pendingTask?.Id}>
-            Отмена
-          </Button>
-          <Button
-            onClick={() => {
-              const task = pendingTask;
-              const result = pendingResult;
-              setConfirmNotFoundOpen(false);
-              if (task) completeTask(task, result, undefined, "", []);
-            }}
-            variant="contained"
-            color="error"
-            sx={{ borderRadius: 2, fontWeight: 800, backgroundImage: "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)" }}
-            disabled={updatingId === pendingTask?.Id}
-          >
-            {updatingId === pendingTask?.Id ? <CircularProgress size={20} sx={{ color: "white" }} /> : "Подтвердить"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        pendingTask={pendingTask}
+        pendingResult={pendingResult}
+        updatingId={updatingId}
+        onConfirm={(task, result) => completeTask(task, result, undefined, "", [])}
+      />
     </Box>
   );
 }
