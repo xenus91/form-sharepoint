@@ -60,7 +60,7 @@ function buildColumnDefs(fields) {
   if (!fields || fields.length === 0) return [];
   // Динамический whitelist — берём все поля, которые реально вернулись из /fields (полные InternalName, без усечений)
   // Хардкод truncated _x... удалён — иначе не найдётся _x0414__x0430__x0442__x0430__x0020__x... (Дата запроса)
-  const systemSkip = new Set(['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo','FileRef','FileDirRef','FileLeafRef','ContentTypeId','_UIVersionString','DocIcon','LinkTitleNoMenu','ItemChildCount','FolderChildCount']);
+  const systemSkip = new Set(['File_x0020_Type','ComplianceAssetId','LinkTitle','LinkTitleNoMenu','PermMask','MetaInfo','FileRef','FileDirRef','FileLeafRef','ContentType','ContentTypeId','_UIVersionString','DocIcon','ItemChildCount','FolderChildCount','ContentTypeId','OData__ContentTypeId']);
   // Приоритетный порядок — ID/Title первые, затем остальные в порядке как пришли из SharePoint, но Calculated/ReadOnly тоже показываем
   const ordered = [];
   const priority = ['ID','Title'];
@@ -73,6 +73,7 @@ function buildColumnDefs(fields) {
     if (ordered.includes(f)) continue;
     if (f.Hidden) continue;
     if (systemSkip.has(f.InternalName)) continue;
+    if (f.InternalName === 'ContentType' || f.Title === 'Тип контента' || (f.Title||'').toLowerCase().includes('тип контента')) continue;
     // Пропускаем только явные системные, остальные показываем (включая Calculated, но они будут readOnly ниже)
     // Для Calculated/Computed/ReadOnlyField — показываем, но editable=false
     // Для остальных — показываем если тип известный
@@ -106,10 +107,8 @@ function buildColumnDefs(fields) {
           // fallback to expanded
           return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
         },
-        cellRenderer: (p) => {
-          const v = p.value;
-          return v ? `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">${v}</span>` : '';
-        }
+        cellStyle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+        filter: 'agTextColumnFilter',
       });
       continue;
     }
@@ -128,6 +127,17 @@ function buildColumnDefs(fields) {
       continue;
     }
     if ((f.TypeAsString||'').toLowerCase()==='user') {
+      // dedup: if this is duplicate of Author/Editor by title (кем создано/кем изменено), skip
+      const lowTitle = (title||'').toLowerCase();
+      const isDupAuthor = lowTitle.includes('кем создано') || lowTitle.includes('создал') || lowTitle === 'автор';
+      const isDupEditor = lowTitle.includes('кем измен') || lowTitle.includes('изменил') || lowTitle.includes('изменено');
+      if ((isDupAuthor && cols.some(c=> c.field==='Author')) || (isDupEditor && cols.some(c=> c.field==='Editor'))) {
+        continue;
+      }
+      // also dedup by internal already having same title
+      if (cols.some(c=> (c.headerName||'').toLowerCase() === lowTitle && c.field !== internal)) {
+        continue;
+      }
       cols.push({
         field: internal,
         headerName: title + (f.Required ? ' *' : ''),
@@ -138,6 +148,8 @@ function buildColumnDefs(fields) {
           if (v && typeof v === 'object') return v.Title || v.Name || '';
           return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
         },
+        cellStyle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+        filter: 'agTextColumnFilter',
       });
       continue;
     }
