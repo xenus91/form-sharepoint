@@ -261,29 +261,59 @@ export async function getDobAttachments(id) {
 
 export async function uploadDobAttachment(id, file) {
   if (!id || !file) throw new Error('uploadDobAttachment: id and file required');
-  const fileName = file.name || `image_${Date.now()}.png`;
-  const buffer = await file.arrayBuffer();
-  const url = `${dobListApi()}/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
-  const { data } = await dobAxios.post(url, buffer, {
-    headers: { 'Content-Type': 'application/octet-stream' },
-    transformRequest: (d) => d,
-  });
-  const result = data?.d || data;
-  let src = result?.ServerRelativeUrl || result?.ServerRelativePath?.DecodedUrl || null;
-  if (!src) src = `/sites/dob/doblogistic/Lists/DobLogistic/Attachments/${id}/${fileName}`;
-  // В dev /sites/... не проксируется напрямую — нужно через /dob-api, в prod — абсолютный origin
-  let finalUrl = src;
-  try {
-    const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
-    if (isDev) {
-      // /dob-api/sites/dob/... проксирует на https://portal.len.com
-      finalUrl = `/dob-api${src}`;
-    } else {
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      if (src.startsWith('/')) finalUrl = `${origin}${src}`;
+  let fileName = file.name || `image_${Date.now()}.png`;
+  // Для clipboard image.png / image.jpg делаем сразу уникальным, иначе параллельные вставки падают "имя уже используется"
+  if (/^image\.png$/i.test(fileName) || /^image\.jpe?g$/i.test(fileName) || /^pasted-image/i.test(fileName)) {
+    const dot = fileName.lastIndexOf('.');
+    const ext = dot >= 0 ? fileName.slice(dot) : '.png';
+    fileName = `image_${Date.now()}_${Math.random().toString(36).slice(2,6)}${ext}`;
+  }
+  let attempt = 0;
+  let lastError = null;
+  while (attempt < 4) {
+    try {
+      const buffer = await file.arrayBuffer();
+      const url = `${dobListApi()}/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
+      const { data } = await dobAxios.post(url, buffer, {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        transformRequest: (d) => d,
+      });
+      const result = data?.d || data;
+      let src = result?.ServerRelativeUrl || result?.ServerRelativePath?.DecodedUrl || null;
+      if (!src) src = `/sites/dob/doblogistic/Lists/DobLogistic/Attachments/${id}/${fileName}`;
+      // В dev /sites/... не проксируется напрямую — нужно через /dob-api, в prod — абсолютный origin
+      let finalUrl = src;
+      try {
+        const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+        if (isDev) {
+          finalUrl = `/dob-api${src}`;
+        } else {
+          const origin = typeof window !== 'undefined' ? window.location.origin : '';
+          if (src.startsWith('/')) finalUrl = `${origin}${src}`;
+        }
+      } catch { finalUrl = src; }
+      return { ...result, ServerRelativeUrl: src, fileName, url: finalUrl, src: finalUrl };
+    } catch (e) {
+      lastError = e;
+      const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
+      const lower = String(rawMsg).toLowerCase();
+      const isDuplicate = lower.includes('имя уже используется') || lower.includes('already exists') || lower.includes('already in use') || lower.includes('exists') && lower.includes('name');
+      if (isDuplicate && attempt < 3) {
+        const dot = fileName.lastIndexOf('.');
+        const name = dot >= 0 ? fileName.slice(0, dot) : fileName;
+        const ext = dot >= 0 ? fileName.slice(dot) : '.png';
+        const base = name.replace(/_\d{10,}.*$/, '').replace(/_[a-z0-9]{2,6}$/, '');
+        fileName = `${base}_${Date.now()}_${Math.random().toString(36).slice(2,6)}${ext}`;
+        console.warn(`[dobApi] upload duplicate "${rawMsg.slice(0,120)}" -> retry as "${fileName}" attempt ${attempt+1}`);
+        attempt++;
+        // небольшая задержка чтобы избежать гонки
+        await new Promise(r => setTimeout(r, 120 * (attempt)));
+        continue;
+      }
+      throw e;
     }
-  } catch { finalUrl = src; }
-  return { ...result, ServerRelativeUrl: src, fileName, url: finalUrl, src: finalUrl };
+  }
+  throw lastError;
 }
 
 export async function deleteDobAttachment(id, fileName) {
