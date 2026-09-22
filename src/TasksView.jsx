@@ -24,6 +24,10 @@ import {
 import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
 import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
+import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
+import { useDistribution } from "./features/tasks/hooks/useDistribution";
+import { useTasksMetadata } from "./features/tasks/hooks/useTasksMetadata";
+// import { useTasksFiltering } from "./features/tasks/hooks/useTasksFiltering"; // PR1 следующий шаг
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
 import TaskList from "./features/tasks/components/TaskList";
@@ -100,32 +104,37 @@ function stripHtml(html) {
 // eslint-disable-next-line no-unused-vars
 export default function TasksView({ userProfile: propUserProfile, currentUserId: propCurrentUserId, onBack: _onBack, onCountChange, initialElementId, initialElementAction, onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
   const { notify } = useNotifications();
-  const [fieldsLoading, setFieldsLoading] = useState(true);
-  // Phase 7: isolated configuration cache (30m stale, 4h gc) — не триггерит Tasks polling
-  const taskConfiguration = useTaskConfiguration({ enabled: !fieldsLoading });
+  // fieldsLoading + taskConfiguration теперь внутри useTasksMetadata (PR1)
   const [isTabPending, startTabTransition] = useTransition();
   const [_isDataPending, _startDataTransition] = useTransition(); // eslint-disable-line no-unused-vars
   const lastFocusLoadRef = React.useRef(Date.now());
   const lastHashFocusRef = React.useRef(Date.now());
   const [expandedGroups, setExpandedGroups] = useState(() => new Set()); // SCNumber -> expanded
   const virtualParentRef = React.useRef(null); // для виртуализации списка
-  const [currentUserId, setCurrentUserId] = useState(() => propCurrentUserId ?? null);
-  const [userOfficeDept, setUserOfficeDept] = useState({ office: "", department: "" });
-  const [distribution, setDistribution] = useState(null); // DcEmail item
-  const [taskFieldNames, setTaskFieldNames] = useState([]);
-  const [recipientField, setRecipientField] = useState(null);
-  const [scNumberField, setScNumberField] = useState(null);
+  // PR1: hooks extraction — currentUser + distribution + metadata (fieldsLoading etc.)
+  const {
+    currentUserId, setCurrentUserId,
+    currentUserTitle, setCurrentUserTitle,
+    userOfficeDept, setUserOfficeDept,
+    taskFieldNames, setTaskFieldNames,
+    recipientField, setRecipientField,
+    scNumberField, setScNumberField,
+  } = useCurrentUser({ propUserProfile, propCurrentUserId });
+  const { distribution, setDistribution } = useDistribution(userOfficeDept);
+  const {
+    fieldsLoading, setFieldsLoading,
+    taskConfiguration,
+    choices, setChoices,
+    statusChoices, setStatusChoices,
+    completedStatusValue, setCompletedStatusValue,
+    inProgressStatusValue, setInProgressStatusValue,
+    entityType, setEntityType,
+    resultFieldsMeta, setResultFieldsMeta,
+    ctResultMap, setCtResultMap,
+    additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean,
+    fieldDefaultActions, setFieldDefaultActions,
+  } = useTasksMetadata();
   const [groupingEnabled, setGroupingEnabled] = useState(false);
-  const [choices, setChoices] = useState([]);
-  const [statusChoices, setStatusChoices] = useState([]); // eslint-disable-line no-unused-vars
-  const [completedStatusValue, setCompletedStatusValue] = useState(null);
-  const [inProgressStatusValue, setInProgressStatusValue] = useState(null);
-  const [entityType, setEntityType] = useState(null);
-  const [currentUserTitle, setCurrentUserTitle] = useState("");
-  // Динамическое поле результата: по TypeDisplayName "Результирующий выбор" + ContentType, с кэшем
-  const [resultFieldsMeta, setResultFieldsMeta] = useState([]);
-  const [ctResultMap, setCtResultMap] = useState(() => new Map());
-  const [additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean] = useState(null); // null=unknown, true=Boolean, false=Choice
   const queryClient = useQueryClient();
   const tasksQueryEnabled = !!currentUserId && !fieldsLoading;
   // Динамические поля результата — собираем InternalName для выборки
@@ -178,16 +187,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // Доп. действия для диалога Найдена (legacy путь через handleResultClick) — теперь Default из TaskActionDefinitions
   const [pendingAdditionalActions, setPendingAdditionalActions] = useState([]);
   // const pendingAdditionalRequired = pendingAdditionalActions.length > 0 ? "Да" : "Нет"; // eslint unused
-  const [fieldDefaultActions, setFieldDefaultActions] = useState(() => {
-    const sync = getCachedAdditionalActionsDefaultSync();
-    return sync !== null ? sync : null;
-  });
-
-  useEffect(() => {
-    if (fieldDefaultActions && fieldDefaultActions.length && pendingAdditionalActions.length === 0) {
-      // если диалог ещё не открывался и дефолт пришёл позже — подставим (не перезатираем уже выбранное)
-    }
-  }, [fieldDefaultActions]);
+  // fieldDefaultActions теперь внутри useTasksMetadata (PR1) — эффект перенесён в хук
+  // useEffect для дефолта удалён
   const [pendingCustomAction, setPendingCustomAction] = useState("");
   const [pendingAdditionalError, setPendingAdditionalError] = useState("");
   const [updatingId, setUpdatingId] = useState(null);
@@ -221,50 +222,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   // fields loading flag - no discovery, use GUID directly
 
-  // get current user + Office/Department — дедуплицировано: если App уже передал currentUserId/userProfile, не дёргаем /web/currentuser и GetMyProperties снова
-  useEffect(() => {
-    if (propCurrentUserId) {
-      setCurrentUserId(propCurrentUserId);
-      // Title попробуем взять из пропов, иначе оставим как есть
-      if (propUserProfile?.userTitle) setCurrentUserTitle(propUserProfile.userTitle);
-      else if (propUserProfile?.userDisplayName) setCurrentUserTitle(propUserProfile.userDisplayName);
-    } else {
-      apiClient
-        .get("/web/currentuser", { headers: { Accept: "application/json;odata=verbose" } })
-        .then((r) => {
-          setCurrentUserId(r?.data?.d?.Id || null);
-          if (r?.data?.d?.Title) setCurrentUserTitle(r.data.d.Title);
-        })
-        .catch(() => setCurrentUserId(null));
-    }
-    // Fetch Office/Department for distribution filtering (group assignment)
-    (async () => {
-      try {
-        if (propUserProfile && (propUserProfile.userOffice || propUserProfile.userDepartment)) {
-          const office = propUserProfile.userOffice || "";
-          const dept = propUserProfile.userDepartment || "";
-          if (office || dept) {
-            setUserOfficeDept({ office, department: dept });
-          }
-        } else {
-          const resp = await apiClient.get("/SP.UserProfiles.PeopleManager/GetMyProperties", { headers: { Accept: "application/json;odata=verbose" } });
-          const props = resp?.data?.d?.UserProfileProperties?.results || [];
-          const find = (k) => props.find((p) => p.Key === k)?.Value || "";
-          const office = find("Office") || "";
-          const dept = find("Department") || "";
-          if (office || dept) setUserOfficeDept({ office, department: dept });
-        }
-      } catch {}
-    })();
-    // Один запрос вместо 3 параллельных на один и тот же /fields (критично для трафика)
-    getTasksListFieldsOverview().then(({ fieldNames, recipientField: rf, scNumberField: scf }) => {
-      setTaskFieldNames(fieldNames);
-      // rf может быть null если поле Recipient удалено — не ставим дефолт "Recipient", данные берём из связанного элемента
-      if (rf) setRecipientField(rf);
-      else setRecipientField(null);
-      if (scf) setScNumberField(scf);
-    }).catch(() => {});
-  }, [propUserProfile, propCurrentUserId]);
+  // currentUser + Office/Department теперь в useCurrentUser (PR1)
 
   // Синхронизация hash elementId/action из App.jsx
   useEffect(() => {
@@ -275,131 +233,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     setElementActionParam(initialElementAction || null);
   }, [initialElementAction]);
 
-  // Resolve DcEmail distribution when Office/Department known
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!userOfficeDept.office && !userOfficeDept.department) return;
-      const dist = await resolveDistributionViaDcEmail(userOfficeDept.office, userOfficeDept.department);
-      if (!cancelled) setDistribution(dist);
-    })();
-    return () => { cancelled = true; };
-  }, [userOfficeDept.office, userOfficeDept.department]);
+  // distribution теперь в useDistribution (PR1)
 
   // DBG: track fieldsLoading lifecycle
   React.useEffect(()=>{ if(!__DBG_ENABLED__) return; __dlog("[DBG:TasksView] fieldsLoading", fieldsLoading, "resultFieldsMeta", resultFieldsMeta.length, resultFieldInternalNames); }, [fieldsLoading, resultFieldsMeta.length]);
-  // Смерженные mount-эффекты: entityType, ResultSearchTHU/Status choices, AdditionalsActionsRequired тип, resultFieldsMeta — всё параллельно, один эффект
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setFieldsLoading(true);
-      // Параллелим независимые запросы
-      const promises = [];
-      // 1) entityType
-      promises.push(
-        apiClient.get(`${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`, { headers: { Accept: "application/json;odata=verbose" } })
-          .then(({ data }) => { if (!cancelled) setEntityType(data?.d?.ListItemEntityTypeFullName || null); })
-          .catch(() => { if (!cancelled) setEntityType(null); })
-      );
-      // 2) ResultSearchTHU choices
-      promises.push(
-        apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'ResultSearchTHU'`, { headers: { Accept: "application/json;odata=verbose" } })
-          .then(({ data }) => {
-            const field = data?.d?.results?.[0];
-            if (!cancelled) {
-              if (field?.Choices?.results) setChoices(field.Choices.results);
-              else if (Array.isArray(field?.Choices)) setChoices(field.Choices);
-              else setChoices([]);
-            }
-          }).catch(() => { if (!cancelled) setChoices([]); })
-      );
-      // 3) Status choices
-      promises.push(
-        apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'Status'`, { headers: { Accept: "application/json;odata=verbose" } })
-          .then(({ data }) => {
-            const field = data?.d?.results?.[0];
-            let arr = [];
-            if (field?.Choices?.results) arr = field.Choices.results;
-            else if (Array.isArray(field?.Choices)) arr = field.Choices;
-            if (!cancelled) {
-              setStatusChoices(arr);
-              let found = arr.find((v) => String(v).toLowerCase().includes("заверш"));
-              if (!found) found = arr.find((v) => String(v).toLowerCase().includes("completed"));
-              if (!found) {
-                found = arr.find((v) => {
-                  const s = String(v).toLowerCase();
-                  return s.includes("выполн") && !s.includes("в процессе");
-                });
-              }
-              if (found) setCompletedStatusValue(found);
-              else if (arr.length > 0) setCompletedStatusValue(arr[arr.length - 1]);
-              else setCompletedStatusValue("Завершена");
-              let inProg = arr.find((v) => String(v).toLowerCase().includes("в процессе"));
-              if (!inProg) inProg = arr.find((v) => String(v).toLowerCase().includes("in progress"));
-              if (!inProg) inProg = arr.find((v) => String(v).toLowerCase().includes("в работе"));
-              if (inProg) setInProgressStatusValue(inProg);
-              else setInProgressStatusValue("В процессе выполнения");
-            }
-          }).catch(() => {
-            if (!cancelled) {
-              setStatusChoices([]);
-              setCompletedStatusValue("Завершена");
-              setInProgressStatusValue("В процессе выполнения");
-            }
-          })
-      );
-      // 4) AdditionalsActionsRequired тип
-      promises.push(
-        apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'AdditionalsActionsRequired'`, { headers: { Accept: "application/json;odata=verbose" } })
-          .catch((err)=>{
-            const msg=String(err?.response?.data?.error?.message?.value||"").toLowerCase();
-            const notFound = err?.response?.status===404 || msg.includes("не существует");
-            if(notFound){
-              return apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'AdditionalActionsRequired'`, { headers: { Accept: "application/json;odata=verbose" } });
-            }
-            throw err;
-          })
-          .then(({ data }) => {
-            const field = data?.d?.results?.[0];
-            if (!cancelled && field) {
-              const typeStr = String(field.TypeAsString || field.TypeDisplayName || "").toLowerCase();
-              const isBool = typeStr.includes("boolean") || typeStr.includes("yes/no") || typeStr === "boolean" || typeStr === "yesno";
-              setAdditionalRequiredIsBoolean(isBool);
-            } else if (!cancelled) {
-              setAdditionalRequiredIsBoolean(false);
-            }
-          }).catch(() => { if (!cancelled) setAdditionalRequiredIsBoolean(false); })
-      );
-      // 5) resultFieldsMeta + ctMap (динамическое поле результата)
-      promises.push(
-        (async () => {
-          try {
-            const metas = await fetchResultFieldsMeta(apiClient);
-            if (cancelled) return;
-            setResultFieldsMeta(metas);
-            try {
-              const map = await fetchContentTypeResultMap(apiClient);
-              if (!cancelled) setCtResultMap(map);
-            } catch {}
-            if (metas.length > 0 && metas[0].choices && metas[0].choices.length > 0) {
-              setChoices((prev) => (prev && prev.length > 0 ? prev : metas[0].choices));
-            }
-          } catch (e) {
-            console.warn("[resultField] fetch failed", e?.message);
-          }
-        })()
-      );
-      // 6) default AdditionalActions (кэшируется в sessionStorage)
-      promises.push(
-        fetchAdditionalActionsDefault(apiClient).then((vals) => {
-          if (!cancelled) setFieldDefaultActions(vals);
-        }).catch(() => { if (!cancelled) setFieldDefaultActions([]); })
-      );
-      await Promise.allSettled(promises);
-      if (!cancelled) setFieldsLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  // fieldsLoading + metadata теперь в useTasksMetadata (PR1)
 
   // Для открытой задачи — свежие choices по ContentType, но не на каждый polling tasks (60с)
   // Сравниваем dataUpdatedAt и троттлим 5 мин, чтобы не дёргать 2 тяжёлых запроса каждые 60с
