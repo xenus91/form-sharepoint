@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Box, Button, Stack, Tooltip, Divider, Popover, IconButton, Typography, TextField, Paper, LinearProgress, CircularProgress } from '@mui/material';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import { Table } from '@tiptap/extension-table';
@@ -114,7 +115,16 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
         linkOnPaste: true,
         HTMLAttributes: { target: '_blank', rel: 'noopener noreferrer' },
       }),
-      Image.configure({
+      Image.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            width: { default: null, parseHTML: el => el.getAttribute('width'), renderHTML: attrs => attrs.width ? { width: attrs.width } : {} },
+            height: { default: null, parseHTML: el => el.getAttribute('height'), renderHTML: attrs => attrs.height ? { height: attrs.height } : {} },
+            style: { default: null, parseHTML: el => el.getAttribute('style'), renderHTML: attrs => attrs.style ? { style: attrs.style } : {} },
+          };
+        },
+      }).configure({
         inline: false,
         allowBase64: false,
         HTMLAttributes: { class: 'dob-editor-image' },
@@ -199,6 +209,11 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
   useEffect(() => {
     if (editor) editor.setEditable(!readOnly);
   }, [readOnly, editor]);
+
+  const setImageSize = useCallback((pct) => {
+    if (!editor) return;
+    editor.chain().focus().updateAttributes('image', { width: `${pct}%`, style: `width: ${pct}%` }).run();
+  }, [editor]);
 
   const handleImage = useCallback(async () => {
     if (!editor) return;
@@ -353,6 +368,26 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
         </Box>
       </Popover>
 
+      {/* Bubble menu for image — resize + delete */}
+      {editor && (
+        <BubbleMenu editor={editor} tippyOptions={{ duration: 100 }} shouldShow={({ editor, state, from, to }) => {
+          const node = state.doc.nodeAt(from);
+          const isImg = node?.type?.name === 'image' || state.selection.node?.type?.name === 'image' || editor.isActive('image');
+          // also check if parent is image
+          try { return isImg; } catch { return false; }
+        }}>
+          <Paper sx={{ p: 0.5, display: 'flex', gap: 0.5, alignItems: 'center', borderRadius: 1.5, boxShadow: 3, border: '1px solid rgba(23,28,143,0.12)' }}>
+            <Typography variant="caption" sx={{ px: 0.5, fontWeight: 700 }}>Картинка:</Typography>
+            <Button size="small" onClick={()=> setImageSize(25)} sx={{ minWidth: 36, p: 0.3 }}>25%</Button>
+            <Button size="small" onClick={()=> setImageSize(50)} sx={{ minWidth: 36, p: 0.3 }}>50%</Button>
+            <Button size="small" onClick={()=> setImageSize(75)} sx={{ minWidth: 36, p: 0.3 }}>75%</Button>
+            <Button size="small" onClick={()=> setImageSize(100)} sx={{ minWidth: 36, p: 0.3 }}>100%</Button>
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.3 }} />
+            <Tooltip title="Удалить картинку (Delete)"><IconButton size="small" onClick={()=> editor.chain().focus().deleteSelection().run()} sx={{ color: '#e53935' }}><DeleteIcon fontSize="small"/></IconButton></Tooltip>
+          </Paper>
+        </BubbleMenu>
+      )}
+
       {/* Editor area with scroll */}
       <Box
         sx={{
@@ -401,7 +436,8 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
             '& .tiptap table:hover .column-resize-handle': { opacity: 1 },
             '& .tiptap table th': { background: '#f4f5f7', fontWeight: 700, textAlign: 'left' },
             '& .tiptap table .selectedCell': { background: 'rgba(23,28,143,0.08)' },
-            '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 8, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block' },
+            '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 8, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block', cursor: 'pointer' },
+            '& .tiptap img[width]': { width: 'attr(width %)', maxWidth: '100%' },
             '& .tiptap img.ProseMirror-selectednode': { outline: '2px solid #171c8f', outlineOffset: 2 },
             // Placeholder
             '& .tiptap p.is-editor-empty:first-of-type::before': { content: 'attr(data-placeholder)', float: 'left', color: 'rgba(0,0,0,0.35)', pointerEvents: 'none', height: 0 },
