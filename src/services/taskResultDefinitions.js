@@ -1,7 +1,7 @@
 // src/services/taskResultDefinitions.js
 // Phase 17 — строго по плану §14: TaskResultDefinitions
 // Поля списка (план):
-// Title (Text), CType (Text) — was ContentTypeId/ContentTypeId0 (system collision), ResultValue (Text), ShowAdditionalActions (Yes/No), AdditionalActionsRequired (Yes/No), SortOrder (Number), Enabled (Yes/No)
+// Title (Text), CType (Text), ResultValue (Text), ShowAdditionalActions (Yes/No), AdditionalActionsRequired (Yes/No), SortOrder (Number), Enabled (Yes/No)
 // НЕ заменяет реальное Result field (FieldLinks), описывает UI поведение для уже существующих Result values.
 // Graceful 404 → fallback к hardcoded resultConfig.js. Кэш 30м.
 
@@ -60,33 +60,7 @@ function parseBool(v, fallback=false){
 }
 
 function getCtypeFromItem(item){
-  const v = item.CType ?? item.ContentTypeId0 ?? item.ContentTypeId;
-  return String(v||"").trim();
-}
-async function fetchWithCtypeFallback(apiClient, forceRefresh){
-  const selCType = `Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled`;
-  const selFallback = `Id,Title,ContentTypeId0,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled`;
-  const selLegacy = `Id,Title,ContentTypeId,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled`;
-  const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
-  const tries = [
-    `${base}?$select=${selCType}&$top=200&$orderby=SortOrder asc`,
-    `${base}?$select=${selFallback}&$top=200&$orderby=SortOrder asc`,
-    `${base}?$select=${selLegacy}&$top=200&$orderby=SortOrder asc`,
-  ];
-  let lastErr=null;
-  for(const url of tries){
-    try{
-      const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
-      return {data, url};
-    }catch(e){
-      const status=e?.response?.status;
-      const msg=String(e?.message||"")+String(e?.response?.data?.error?.message?.value||"");
-      const isMissingField = status===400 && /CType|ContentTypeId0|ContentTypeId|does not exist|не существует/i.test(msg);
-      if(isMissingField){ lastErr=e; continue; }
-      throw e;
-    }
-  }
-  throw lastErr;
+  return String(item.CType||"").trim();
 }
 
 export async function fetchTaskResultDefinitions(apiClient, opts={}){
@@ -94,10 +68,10 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
 
-  // План §14: Title, CType (was ContentTypeId), ResultValue, ShowAdditionalActions, AdditionalActionsRequired, SortOrder, Enabled
-  // Для совместимости также читаем legacy поля (Label/Color/Variant/RequiresLocation/RequiresConfirm/Gradient) — игнорируем, но не падаем если они есть
+  // План §14: Title, CType, ResultValue, ShowAdditionalActions, AdditionalActionsRequired, SortOrder, Enabled — только CType, без fallback на ContentTypeId0/ContentTypeId
+  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
   try{
-    const {data}= (await fetchWithCtypeFallback(apiClient, forceRefresh)).data;
+    const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
     const results=data?.d?.results||[];
     const global=new Map();
     const byCt=new Map();
@@ -157,12 +131,12 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
       const isDbg = (()=>{ try{ return new URLSearchParams(location.search).get('dbg')==='1' || localStorage.getItem('dbg')==='1' || localStorage.getItem('dbg_tasks')==='1'; }catch{return false}})();
       if (isDbg || true) { // forced for this ticket
         console.log("[DBG:taskResultDefinitions:fetch] parsed", {
-          urlTried: "CType fallback",
+          url,
           resultsCount: results.length,
           raw: raw.map(r=>({Id:r.id, ResultValue:r.resultValue, CType:r.contentTypeId, Show:r.showAdditionalActions, Required:r.additionalActionsRequired, Title:r.title})),
           byCtKeys: Array.from(byCt.keys()),
           globalKeys: Array.from(global.keys()),
-          rawItems: results.map(it=>({Id:it.Id, Title:it.Title, ResultValue:it.ResultValue, CType:it.CType, ContentTypeId0:it.ContentTypeId0, ShowAdditionalActions:it.ShowAdditionalActions, AdditionalActionsRequired:it.AdditionalActionsRequired}))
+          rawItems: results.map(it=>({Id:it.Id, Title:it.Title, ResultValue:it.ResultValue, CType:it.CType, ShowAdditionalActions:it.ShowAdditionalActions, AdditionalActionsRequired:it.AdditionalActionsRequired}))
         });
       }
     }catch(e){ console.warn("[DBG:taskResultDefinitions:fetch log error]", e); }
