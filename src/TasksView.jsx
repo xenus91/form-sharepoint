@@ -1108,6 +1108,42 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 console.warn("Flip to String also failed", String(eFlip2?.message||"").toLowerCase());
               }
             }
+            // Fallback для опечатки: если поле Additionals... не существует, пробуем Additional... и наоборот
+            const isAdditionalsMissing = msg.includes("additionalsactionsrequired") && msg.includes("не существует");
+            const isAdditionalMissing = msg.includes("additionalactionsrequired") && !msg.includes("additionalsactionsrequired") && msg.includes("не существует");
+            if (isAdditionalsMissing || isAdditionalMissing) {
+              console.warn("Additionals/Additional field not exists, try alternative spelling", msg);
+              try {
+                const alt = { ...payload };
+                // flip spelling
+                if (alt.AdditionalsActionsRequired !== undefined) {
+                  alt.AdditionalActionsRequired = alt.AdditionalsActionsRequired;
+                  delete alt.AdditionalsActionsRequired;
+                } else if (alt.AdditionalActionsRequired !== undefined) {
+                  alt.AdditionalsActionsRequired = alt.AdditionalActionsRequired;
+                  delete alt.AdditionalActionsRequired;
+                }
+                const altWithStatus = { ...alt, Status: targetStatus, PercentComplete: 1 };
+                // try both variants with and without status
+                try {
+                  await postUpdate(alt, "*");
+                  notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                  queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                  invalidate("/items");
+                  setTimeout(() => loadTasks({ silent: true }), 600);
+                  return;
+                } catch (eAlt1) {
+                  await postUpdate(altWithStatus, "*");
+                  notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                  queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                  invalidate("/items");
+                  setTimeout(() => loadTasks({ silent: true }), 600);
+                  return;
+                }
+              } catch (eAlt) {
+                console.warn("Alternative spelling also failed", String(eAlt?.response?.data?.error?.message?.value||""), eAlt?.response?.status);
+              }
+            }
             if (msg.includes("additionalactions")) {
               console.warn("AdditionalActions field missing, retry without it", msg);
               try {
@@ -1184,6 +1220,39 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             throw e;
           }
           const msg = String(e?.response?.data?.error?.message?.value || e?.response?.data || e?.message || "").toLowerCase();
+          // Fallback для опечатки: пробуем альтернативное написание поля
+          const isAdditionalsMissing2 = msg.includes("additionalsactionsrequired") && msg.includes("не существует");
+          const isAdditionalMissing2 = msg.includes("additionalactionsrequired") && !msg.includes("additionalsactionsrequired") && msg.includes("не существует");
+          if (isAdditionalsMissing2 || isAdditionalMissing2) {
+            console.warn("Additionals/Additional field not exists (second branch), try alternative spelling", msg);
+            try {
+              const alt = { ...payload };
+              if (alt.AdditionalsActionsRequired !== undefined) {
+                alt.AdditionalActionsRequired = alt.AdditionalsActionsRequired;
+                delete alt.AdditionalsActionsRequired;
+              } else if (alt.AdditionalActionsRequired !== undefined) {
+                alt.AdditionalsActionsRequired = alt.AdditionalActionsRequired;
+                delete alt.AdditionalActionsRequired;
+              }
+              const altWithStatus = { ...alt, Status: targetStatus, PercentComplete: 1 };
+              try {
+                await postUpdate(altWithStatus, "*");
+                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                invalidate("/items");
+                setTimeout(() => loadTasks({ silent: true }), 600);
+                return;
+              } catch (eAlt2) {
+                await postUpdate(alt, "*");
+                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+                queryClient.invalidateQueries({ queryKey: ['tasks'] });
+                invalidate("/items");
+                setTimeout(() => loadTasks({ silent: true }), 600);
+                return;
+              }
+            } catch (eAlt) {
+              console.warn("Alternative spelling also failed (second branch)", String(eAlt?.response?.data?.error?.message?.value||""), eAlt?.response?.status);
+            }
+          }
           if (msg.includes("additionalactions")) {
             console.warn("AdditionalActions field missing, retry without it", msg);
             try {
