@@ -12,10 +12,10 @@ export function useDobItems({ enabled = true, top = 100, filter = '', fields = n
   });
 }
 
-export function useDobItemsPaged({ enabled = true, pageSize = 100, fields = null } = {}) {
+export function useDobItemsPaged({ enabled = true, pageSize = 100, fields = null, filter = '' } = {}) {
   return useQuery({
-    queryKey: ['dob', 'itemsPaged', pageSize, fields ? fields.length : 0, fields ? fields.map(f=>f.InternalName).join(',').slice(0,60) : ''],
-    queryFn: () => getDobItemsPaged({ pageSize, fields }),
+    queryKey: ['dob', 'itemsPaged', pageSize, filter, fields ? fields.length : 0, fields ? fields.map(f=>f.InternalName).join(',').slice(0,60) : ''],
+    queryFn: () => getDobItemsPaged({ pageSize, fields, filter }),
     enabled,
     staleTime: 30 * 1000,
     retry: 1,

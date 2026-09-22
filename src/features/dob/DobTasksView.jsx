@@ -10,7 +10,16 @@ import { useQueryClient } from '@tanstack/react-query';
 export default function DobTasksView() {
   const fieldsQ = useDobFields(true);
   const fieldsData = fieldsQ.data || null;
-  const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData });
+  // Фильтр только Открытые — вычисляемое поле Статус (Title 'Статус', InternalName типа _x0421__x0442__x0430__x0442__x04...)
+  const statusFilter = React.useMemo(() => {
+    if (!fieldsData || !fieldsData.length) return '';
+    const f = fieldsData.find(x => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус' || x.InternalName?.toLowerCase().includes('_x0421__x0442__x0430__x0442__x04'));
+    const internal = f?.InternalName;
+    if (!internal) return '';
+    // OData eq 'Открыт' — для Calculated поля с типом Text
+    return `${internal} eq 'Открыт'`;
+  }, [fieldsData]);
+  const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: statusFilter });
   const qc = useQueryClient();
 
   const handleRefresh = React.useCallback(() => {

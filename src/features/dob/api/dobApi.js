@@ -106,14 +106,14 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
 }
 
 // Paginated fetch helper — respects SharePoint __next
-export async function getDobItemsPaged({ pageSize = 50, fields = null } = {}) {
+export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = '' } = {}) {
   const all = [];
   let nextUrl = null;
   let first = true;
   while (first || nextUrl) {
     let url;
     if (first) {
-      const { results, next } = await getDobItems({ top: pageSize, fields });
+      const { results, next } = await getDobItems({ top: pageSize, fields, filter });
       all.push(...results);
       nextUrl = next;
       first = false;
@@ -123,10 +123,9 @@ export async function getDobItemsPaged({ pageSize = 50, fields = null } = {}) {
       if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
         try {
           const u = new URL(nextUrl);
-          // next like https://portal.len.com/sites/dob/doblogistic/_api/web/lists...$skiptoken=...
-          // must go через /dob-api, а не /api (иначе дубль /sites/obrazceo/sites/dob)
-          const idx = u.pathname.toLowerCase().indexOf('/_api');
-          const apiPath = u.pathname.substring(idx) + u.search;
+          // next like https://portal.lenta.com/sites/dob/doblogistic/_api/web/lists...?$skiptoken=...
+          // важно сохранить /sites/dob/doblogistic prefix, иначе /dob-api/_api/... -> List does not exist на root сайте
+          const apiPath = u.pathname + u.search; // full path + query
           const isDob = u.pathname.toLowerCase().includes('/sites/dob/');
           fetchUrl = `${isDob ? '/dob-api' : '/api'}${apiPath}`;
         } catch {}
