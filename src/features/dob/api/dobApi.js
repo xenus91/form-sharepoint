@@ -20,42 +20,39 @@ export async function getDobFields() {
   return raw;
 }
 
+function extractBadField(msg = '') {
+  const m1 = String(msg).match(/Поле или свойство\s+['"]?([^'"\s]+)['"]?\s+не существует/i);
+  if (m1) return m1[1].replace(/^['"]|['"]$/g, '');
+  const m2 = String(msg).match(/Столбца\s+['"]([^'"]+)['"]\s+не существует/i);
+  if (m2) return m2[1];
+  const m3 = String(msg).match(/Field or property\s+['"]([^'"]+)['"]/i);
+  if (m3) return m3[1];
+  const m4 = String(msg).match(/column\s+['"]([^'"]+)['"]/i);
+  if (m4) return m4[1];
+  return null;
+}
+
 // Items with OData — supports pagination via $top &$skiptoken or flat fetch
 export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = true, filter = '', fields = null } = {}) {
-  // fields: опционально массив метаданных из getDobFields — если передан, строим $select динамически (без усечённых хардкодов)
   const expands = ['Author','Editor','AttachmentFiles'].join(',');
-  // Базовый safe select — только гарантированные (GUID/ContentTypeId/Attachments часто отсутствуют или требуют другой casing)
   const baseSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
   let selects;
+  let dynamicExpands = expands;
+  const badFields = new Set(['Guid','GUID']);
   if (Array.isArray(fields) && fields.length) {
     const sys = new Set(['ID','Title','Created','Modified','Author','Editor','Attachments','AttachmentFiles','Guid','GUID','ContentTypeId','ContentType','FileSystemObjectType','Id']);
-    // проблемные поля, которые падают с does not exist (проверено 400/500) — выпиливаем совсем
-    const badFields = new Set(['Guid','GUID','_x0414__x0430__x0442__x0430_','_x0421__x0442__x0430__x0442__x04','_x0414__x0430__x0442__x0430_']);
     const dyn = fields
       .filter(f => !f.Hidden && f.InternalName && !sys.has(f.InternalName) && !badFields.has(f.InternalName))
       .filter(f => !['File_x0020_Type','ComplianceAssetId','LinkTitle','PermMask','MetaInfo','AppAuthor','AppEditor','LinkTitleNoMenu','_UIVersionString','DocIcon','ItemChildCount','FolderChildCount'].includes(f.InternalName))
       .map(f => f.InternalName);
-    // Author/Editor уже в baseSelects как expand, исключаем дубликаты InternalName Author/Editor
     selects = [...baseSelects, ...dyn.filter(n => !baseSelects.join(',').includes(n))];
-    // Для lookup полей типа Author/Editor — уже в expands, оставляем как есть
-    // Для User полей (если есть Логин виновного — lookup) — добавим expand динамически на основе TypeAsString
-    const lookupFields = fields.filter(f => (f.TypeAsString||'').toLowerCase()==='user' && dyn.includes(f.InternalName)).map(f=>f.InternalName);
-    if (lookupFields.length) {
-      const extraExpands = lookupFields.filter(n=>!['Author','Editor'].includes(n));
-      if (extraExpands.length) {
-        // расширим expands локально
-      }
-    }
   } else {
-    selects = baseSelects;
+    selects = [...baseSelects];
   }
-  // dynamic expands for User fields (кроме Author/Editor)
-  let dynamicExpands = expands;
   if (Array.isArray(fields) && fields.length) {
     const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && selects.includes(f.InternalName)).map(f=>f.InternalName);
     const extra = userFields.filter(n=> !['Author','Editor'].includes(n));
     if (extra.length) {
-      // для User полей нужно выбирать Title/Id, а не просто InternalName
       selects = selects.filter(s=> !extra.includes(s));
       for (const u of extra) {
         selects.push(`${u}/Title`, `${u}/Id`);
@@ -63,74 +60,113 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
       dynamicExpands = [...new Set([...expands.split(','), ...extra])].join(',');
     }
   }
-  // Для совместимости: если fields не переданы, делаем минимальный запрос (без кириллических _x...), чтобы не падать на усечённых именах
-  let url = `${dobListApi()}/items?$select=${selects.join(',')}&$expand=${dynamicExpands}&$top=${top}`;
-  if (orderBy) url += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
-  if (filter) url += `&$filter=${encodeURIComponent(filter)}`;
-  try {
-    const { data } = await dobAxios.get(url);
-    const results = data?.d?.results || data?.value || [];
-    const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-    return { results, next };
-  } catch (e) {
-    const msg = String(e?.response?.data?.error?.message?.value || e?.message || '').toLowerCase();
-    if (msg.includes('does not exist') || msg.includes('field') || msg.includes('not found') || msg.includes('column') || msg.includes('author') || msg.includes('guid') || e?.response?.status === 400 || e?.response?.status === 500) {
-      // eslint-disable-next-line no-console
-      console.warn('[dobApi] select/filter failed, fallback to minimal+safe select', msg.slice(0,400));
-      // если фильтр на calculated поле (_x0421__...) не существует — пробуем без фильтра (клиентский фильтр позже)
-      const hasFilter = !!filter;
-      // fallback: минимальный select с корректным expand (Author/Title нужен в select если expand Author)
-      const fbSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
-      let fbUrl = `${dobListApi()}/items?$select=${fbSelects.join(',')}&$expand=${expands}&$top=${top}`;
-      if (orderBy) fbUrl += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
-      if (filter) fbUrl += `&$filter=${encodeURIComponent(filter)}`;
-      try {
-        const { data } = await dobAxios.get(fbUrl);
-        const results = data?.d?.results || data?.value || [];
-        const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-        // если фильтр был и успешно — вернём; если фильтр падал из-за столбца — на следущем catch попробуем без фильтра
-        return { results, next };
-      } catch (e2) {
-        const msg2 = String(e2?.response?.data?.error?.message?.value || e2?.message || '').toLowerCase();
-        // если ошибка из-за фильтра (столбца) — ретрай без фильтра
-        if (hasFilter && (msg2.includes('does not exist') || msg2.includes('column') || msg2.includes('_x0421__') || msg2.includes('field'))) {
-          console.warn('[dobApi] filter column not exists, retry without filter (client-side filter will be applied)', msg2.slice(0,300));
-          let fbNoFilter = `${dobListApi()}/items?$select=${fbSelects.join(',')}&$expand=${expands}&$top=${top}`;
-          if (orderBy) fbNoFilter += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
-          const { data } = await dobAxios.get(fbNoFilter);
-          const results = data?.d?.results || data?.value || [];
-          const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-          return { results, next };
+
+  let attempt = 0;
+  let currentSelects = [...selects];
+  let currentFilter = filter;
+  let currentExpands = dynamicExpands;
+
+  while (attempt < 15) {
+    let url = `${dobListApi()}/items?$select=${currentSelects.join(',')}&$expand=${currentExpands}&$top=${top}`;
+    if (orderBy) url += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
+    if (currentFilter) url += `&$filter=${encodeURIComponent(currentFilter)}`;
+    try {
+      const { data } = await dobAxios.get(url);
+      const results = data?.d?.results || data?.value || [];
+      const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+      if (attempt > 0) console.warn(`[dobApi] auto-retry success after ${attempt} bad fields removed, final selects ${currentSelects.length}`);
+      return { results, next };
+    } catch (e) {
+      const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
+      const msg = String(rawMsg);
+      const lower = msg.toLowerCase();
+      console.warn(`[dobApi] select/filter failed attempt ${attempt}:`, msg.slice(0,600));
+
+      // filter on calculated/unknown column -> drop filter
+      if (currentFilter && (lower.includes('does not exist') || lower.includes('не существует')) && (lower.includes('_x0') || lower.includes('column') || lower.includes('field') || lower.includes('guid'))) {
+        const bad = extractBadField(msg);
+        if (bad && currentFilter.includes(bad)) {
+          console.warn(`[dobApi] filter bad field "${bad}" -> drop filter`);
+          currentFilter = '';
+          attempt++;
+          continue;
         }
-        // последний fallback — без expand (если Author вообще не поддерживается на этом списке)
-        if (msg2.includes('author')) {
-          console.warn('[dobApi] fallback without Author expand', msg2.slice(0,200));
-          let fb2 = `${dobListApi()}/items?$select=ID,Title,Created,Modified&$top=${top}`;
-          if (orderBy) fb2 += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
-          if (filter) fb2 += `&$filter=${encodeURIComponent(filter)}`;
-          try {
-            const { data } = await dobAxios.get(fb2);
-            const results = data?.d?.results || data?.value || [];
-            const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-            return { results, next };
-          } catch (e3) {
-            const msg3 = String(e3?.response?.data?.error?.message?.value || e3?.message || '').toLowerCase();
-            if (hasFilter && (msg3.includes('does not exist') || msg3.includes('column'))) {
-              let fb3 = `${dobListApi()}/items?$select=ID,Title,Created,Modified&$top=${top}`;
-              if (orderBy) fb3 += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
-              const { data } = await dobAxios.get(fb3);
-              const results = data?.d?.results || data?.value || [];
-              const next = data?.d?.__next || data?.['odata.nextLink'] || null;
-              return { results, next };
+        if (lower.includes('column') || lower.includes('field')) {
+          console.warn('[dobApi] drop filter due to column error');
+          currentFilter = '';
+          attempt++;
+          continue;
+        }
+      }
+
+      if (lower.includes('does not exist') || lower.includes('не существует') || lower.includes('field') || lower.includes('column') || lower.includes('guid') || e?.response?.status === 400 || e?.response?.status === 500) {
+        const bad = extractBadField(msg);
+        if (bad) {
+          const normalized = bad.replace(/^\*+/, '_');
+          let toRemove = null;
+          if (currentSelects.includes(bad)) toRemove = bad;
+          else if (currentSelects.includes(normalized)) toRemove = normalized;
+          else {
+            const candidates = currentSelects.filter(s => s === bad || s === normalized || s.includes(bad) || bad.includes(s));
+            if (candidates.length === 1) toRemove = candidates[0];
+            else if (candidates.length > 1) toRemove = candidates.sort((a,b)=>a.length-b.length)[0];
+            else {
+              const badLower = bad.toLowerCase().replace(/^_/, '');
+              const cand2 = currentSelects.find(s => s.toLowerCase().replace(/^_/, '') === badLower || s.toLowerCase().includes(badLower));
+              if (cand2) toRemove = cand2;
             }
-            throw e3;
+          }
+          if (toRemove) {
+            console.warn(`[dobApi] remove bad field "${toRemove}" (reported "${bad}") and retry`);
+            currentSelects = currentSelects.filter(s => s !== toRemove && !s.startsWith(toRemove + '/'));
+            if (currentExpands.split(',').includes(toRemove)) {
+              currentExpands = currentExpands.split(',').filter(x=>x!==toRemove).join(',') || expands;
+            }
+            badFields.add(toRemove);
+            attempt++;
+            continue;
+          } else {
+            console.warn(`[dobApi] bad field "${bad}" not in selects, blacklist and retry`);
+            badFields.add(bad);
+            if (bad.toLowerCase().includes('guid')) {
+              currentSelects = currentSelects.filter(s => !s.toLowerCase().includes('guid'));
+              currentExpands = currentExpands.split(',').filter(x=>!x.toLowerCase().includes('guid')).join(',') || expands;
+              attempt++;
+              continue;
+            }
+            if (attempt === 0) {
+              currentSelects = [...baseSelects];
+              currentExpands = expands;
+              if (currentFilter) currentFilter = '';
+              attempt++;
+              continue;
+            }
           }
         }
-        throw e2;
+        if (attempt === 0) {
+          console.warn('[dobApi] unknown bad field, fallback to minimal');
+          currentSelects = [...baseSelects];
+          currentExpands = expands;
+          if (currentFilter) currentFilter = '';
+          attempt++;
+          continue;
+        }
       }
+      // not recoverable -> throw to fallback
+      break;
     }
-    throw e;
   }
+
+  // fallback minimal
+  console.warn('[dobApi] fallback to minimal select after auto-retry');
+  const fbSelects = ['ID','Title','Created','Modified','Author/Title','Author/Id','Editor/Title','Editor/Id'];
+  let fbUrl = `${dobListApi()}/items?$select=${fbSelects.join(',')}&$expand=${expands}&$top=${top}`;
+  if (orderBy) fbUrl += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
+  // filter already dropped
+  const { data } = await dobAxios.get(fbUrl);
+  const results = data?.d?.results || data?.value || [];
+  const next = data?.d?.__next || data?.['odata.nextLink'] || null;
+  return { results, next };
 }
 
 // Paginated fetch helper — respects SharePoint __next
@@ -146,14 +182,11 @@ export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = 
       nextUrl = next;
       first = false;
     } else {
-      // nextUrl is absolute sharepoint url — need to map to proxy-aware if dev
       let fetchUrl = nextUrl;
       if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
         try {
           const u = new URL(nextUrl);
-          // next like https://portal.lenta.com/sites/dob/doblogistic/_api/web/lists...?$skiptoken=...
-          // важно сохранить /sites/dob/doblogistic prefix, иначе /dob-api/_api/... -> List does not exist на root сайте
-          const apiPath = u.pathname + u.search; // full path + query
+          const apiPath = u.pathname + u.search;
           const isDob = u.pathname.toLowerCase().includes('/sites/dob/');
           fetchUrl = `${isDob ? '/dob-api' : '/api'}${apiPath}`;
         } catch {}
@@ -163,13 +196,12 @@ export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = 
       all.push(...chunk);
       nextUrl = data?.d?.__next || data?.['odata.nextLink'] || null;
     }
-    if (all.length >= 2000) break; // safety cap
+    if (all.length >= 2000) break;
   }
   return all;
 }
 
 // Update single item — payload is flat { InternalName: value }
-// Handles special: Text/Choice/Currency/Number/DateTime/Boolean
 export async function updateDobItem(id, payload) {
   const entity = await getDobEntityType();
   const body = { __metadata: { type: entity }, ...payload };
@@ -183,19 +215,15 @@ export async function updateDobItem(id, payload) {
   return data;
 }
 
-// Bulk update helper
 export async function bulkUpdateDobItems(updates) {
-  // updates: [{id, payload}]
   const results = [];
   for (const u of updates) {
-    // sequential to respect digest throttle
     const r = await updateDobItem(u.id, u.payload);
     results.push(r);
   }
   return results;
 }
 
-// Create item (if needed later)
 export async function createDobItem(payload) {
   const entity = await getDobEntityType();
   const body = { __metadata: { type: entity }, ...payload };
