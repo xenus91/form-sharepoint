@@ -64,6 +64,8 @@ import MenuIcon from "@mui/icons-material/Menu";
 import HomeIcon from "@mui/icons-material/Home";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import AssignmentIcon from "@mui/icons-material/Assignment";
+import TableChartIcon from "@mui/icons-material/TableChart";
+const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
 import TasksView from "./TasksView";
 import { useNotifications } from './NotificationsProvider';
 
@@ -1457,7 +1459,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const raw = window.location.hash || "";
     const low = raw.toLowerCase();
     let view = "form";
-    if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
+    if (low.includes("dob") || low.includes("dob_tasks") || low.includes("doblogistic")) view = "dob";
+    else if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
     else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
     // elementId: поддерживает id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10
     let elementId = null;
@@ -1518,7 +1521,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useEffect(() => {
-    const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
+    const desired = currentView === "dob" ? "#dob_tasks" : currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
     const parsed = parseHash();
     if (currentView === "form") {
       if (window.location.hash && window.location.hash.toLowerCase() !== "#form") window.history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -1546,6 +1549,10 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   };
   const handleOpenTasks = () => {
     setCurrentView("tasks");
+    setDrawerOpen(false);
+  };
+  const handleOpenDob = () => {
+    setCurrentView("dob");
     setDrawerOpen(false);
   };
 
@@ -1755,6 +1762,36 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     );
   }
 
+  if (currentView === "dob") {
+    return (
+      <ThemeProvider theme={figmaTheme}>
+        <Box sx={{ position: "fixed", top: 12, left: 12, zIndex: 1302, display: drawerOpen ? "none" : "block" }}>
+          <IconButton onClick={() => setDrawerOpen(true)} sx={{ bgcolor: "rgba(255,255,255,0.85)", backdropFilter: "blur(8px)", border: "1px solid rgba(23,28,143,0.15)", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", width: 44, height: 44, "&:hover": { bgcolor: "rgba(255,255,255,0.95)" } }}>
+            <MenuIcon sx={{ color: "#171c8f" }} />
+          </IconButton>
+        </Box>
+        <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)} PaperProps={{ sx: { width: 280, bgcolor: "rgba(255,255,255,0.92)", backdropFilter: "blur(16px)", borderRight: "1px solid rgba(23,28,143,0.1)" } }}>
+          <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
+            <Box sx={{ flex: 1 }} />
+            <IconButton onClick={() => setDrawerOpen(false)} size="small"><CloseIcon /></IconButton>
+          </Box>
+          <Divider />
+          <List>
+            <ListItem disablePadding><ListItemButton onClick={handleOpenForm}><ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
+            <ListItem disablePadding><ListItemButton onClick={handleOpenTasks}><ListItemIcon><AssignmentIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
+            <ListItem disablePadding><ListItemButton onClick={handleOpenDob} selected><ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
+            {canOpenManagerPreview && (<ListItem disablePadding><ListItemButton onClick={handleOpenManagerPreview}><ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>)}
+          </List>
+          <Box sx={{ flex: 1 }} /><Divider /><Box sx={{ p: 2 }}><Typography variant="caption" color="text.secondary">{userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}</Typography></Box>
+        </Drawer>
+        <Box sx={{ pt: 0, width: "100%", minWidth: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+          <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}><DobTasksView /></React.Suspense>
+        </Box>
+      </ThemeProvider>
+    );
+  }
+
   if (currentView === "tasks") {
     return (
       <ThemeProvider theme={figmaTheme}>
@@ -1842,6 +1879,12 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                   </Badge>
                 </ListItemIcon>
                 <ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} />
+              </ListItemButton>
+            </ListItem>
+            <ListItem disablePadding>
+              <ListItemButton onClick={handleOpenDob}>
+                <ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
+                <ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} />
               </ListItemButton>
             </ListItem>
           </List>
@@ -1948,6 +1991,12 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                 </Badge>
               </ListItemIcon>
               <ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} />
+            </ListItemButton>
+          </ListItem>
+          <ListItem disablePadding>
+            <ListItemButton onClick={handleOpenDob}>
+              <ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
+              <ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} />
             </ListItemButton>
           </ListItem>
         </List>
