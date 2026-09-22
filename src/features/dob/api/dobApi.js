@@ -168,3 +168,54 @@ export async function createDobItem(payload) {
   const { data } = await dobAxios.post(url, body);
   return data?.d || data;
 }
+
+export async function getDobItem(id) {
+  if (!id) throw new Error('getDobItem: id required');
+  const fields = await getDobFields().catch(()=>[]);
+  let expands = ['Author','Editor','AttachmentFiles'].join(',');
+  if (Array.isArray(fields) && fields.length) {
+    const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && !['Author','Editor'].includes(f.InternalName) && !f.Hidden).map(f=>f.InternalName);
+    if (userFields.length) expands = [...new Set([...expands.split(','), ...userFields])].join(',');
+  }
+  function buildSelectForExpands(exp) {
+    const parts = ['*'];
+    for (const e of exp.split(',').filter(Boolean)) {
+      if (e === 'AttachmentFiles') continue;
+      parts.push(`${e}/Title`, `${e}/Id`);
+    }
+    return parts.join(',');
+  }
+  const selectForExpand = buildSelectForExpands(expands);
+  const url = `${dobListApi()}/items(${id})?$select=${selectForExpand}&$expand=${expands}`;
+  const { data } = await dobAxios.get(url);
+  const item = data?.d || data;
+  return item;
+}
+
+export async function getDobAttachments(id) {
+  const url = `${dobListApi()}/items(${id})/AttachmentFiles`;
+  const { data } = await dobAxios.get(url);
+  const results = data?.d?.results || data?.value || [];
+  return results;
+}
+
+export async function uploadDobAttachment(id, file) {
+  if (!id || !file) throw new Error('uploadDobAttachment: id and file required');
+  const fileName = file.name || `image_${Date.now()}.png`;
+  const buffer = await file.arrayBuffer();
+  const url = `${dobListApi()}/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
+  const { data } = await dobAxios.post(url, buffer, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+    transformRequest: (d) => d,
+  });
+  const result = data?.d || data;
+  let src = result?.ServerRelativeUrl || result?.ServerRelativePath?.DecodedUrl || null;
+  if (!src) src = `/sites/dob/doblogistic/Lists/DobLogistic/Attachments/${id}/${fileName}`;
+  return { ...result, ServerRelativeUrl: src, fileName, url: src };
+}
+
+export async function deleteDobAttachment(id, fileName) {
+  const url = `${dobListApi()}/items(${id})/AttachmentFiles/getByFileName('${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
+  const { data } = await dobAxios.post(url, null, { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
+  return data;
+}

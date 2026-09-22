@@ -66,6 +66,7 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import TableChartIcon from "@mui/icons-material/TableChart";
 const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
+const DobTaskEditView = React.lazy(() => import("./features/dob/DobTaskEditView"));
 import TasksView from "./TasksView";
 import { useNotifications } from './NotificationsProvider';
 
@@ -1462,22 +1463,27 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     if (low.includes("dob") || low.includes("dob_tasks") || low.includes("doblogistic")) view = "dob";
     else if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
     else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
-    // elementId: поддерживает id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10
+    // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10, #dob_tasks/10)
     let elementId = null;
     let elementAction = null;
     // 1) id=число (любой вариант: id=10, elementid=10, ?id=10 &id=10 /id=10)
     const mId = low.match(/(?:elementid|\bid)\s*=\s*(\d{1,19})/);
     if (mId) elementId = mId[1];
     else {
-      // 2) путь /tasks/10
-      const mPath = raw.match(/#\/?tasks\/(\d{1,19})/i);
-      if (mPath) elementId = mPath[1];
+      // Dob: #dob_tasks/9723 or #dob/10
+      const mDob = raw.match(/#\/?(?:dob_tasks|dob)\/(\d{1,19})/i);
+      if (mDob) elementId = mDob[1];
       else {
-        // 3) чистый ?10 после #tasks (редко) - пробуем последний числовой сегмент
-        const after = low.replace(/^#\/?tasks\/?/, "");
-        if (/^\d{1,19}([\/?&#].*)?$/.test(after.trim())) {
-          const mNum = after.trim().match(/^(\d{1,19})/);
-          if (mNum) elementId = mNum[1];
+        // 2) путь /tasks/10
+        const mPath = raw.match(/#\/?tasks\/(\d{1,19})/i);
+        if (mPath) elementId = mPath[1];
+        else {
+          // 3) чистый ?10 после #tasks (редко) - пробуем последний числовой сегмент
+          const after = low.replace(/^#\/?tasks\/?/, "");
+          if (/^\d{1,19}([\/?&#].*)?$/.test(after.trim())) {
+            const mNum = after.trim().match(/^(\d{1,19})/);
+            if (mNum) elementId = mNum[1];
+          }
         }
       }
     }
@@ -1525,6 +1531,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const parsed = parseHash();
     if (currentView === "form") {
       if (window.location.hash && window.location.hash.toLowerCase() !== "#form") window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return;
+    }
+    if (currentView === "dob" && parsed.elementId) {
+      const want = `${desired}/${parsed.elementId}`;
+      if (!window.location.hash.toLowerCase().startsWith(want.toLowerCase())) {
+        window.location.hash = want;
+      }
       return;
     }
     // если уже на нужном view и hash содержит ожидаемый префикс — не трогаем (сохраняем id=... в url)
@@ -1763,6 +1776,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   }
 
   if (currentView === "dob") {
+    const isDobEdit = !!hashElementId && /^\d+$/.test(String(hashElementId));
     return (
       <ThemeProvider theme={figmaTheme}>
         <Box sx={{ position: "fixed", top: 12, left: 12, zIndex: 1302, display: drawerOpen ? "none" : "block" }}>
@@ -1780,13 +1794,15 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           <List>
             <ListItem disablePadding><ListItemButton onClick={handleOpenForm}><ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
             <ListItem disablePadding><ListItemButton onClick={handleOpenTasks}><ListItemIcon><AssignmentIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
-            <ListItem disablePadding><ListItemButton onClick={handleOpenDob} selected><ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
+            <ListItem disablePadding><ListItemButton onClick={()=> { window.location.hash = '#dob_tasks'; setHashElementId(null); }} selected={!isDobEdit}><ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
             {canOpenManagerPreview && (<ListItem disablePadding><ListItemButton onClick={handleOpenManagerPreview}><ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>)}
           </List>
           <Box sx={{ flex: 1 }} /><Divider /><Box sx={{ p: 2 }}><Typography variant="caption" color="text.secondary">{userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}</Typography></Box>
         </Drawer>
         <Box sx={{ pt: 0, width: "100%", minWidth: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
-          <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}><DobTasksView /></React.Suspense>
+          <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
+            {isDobEdit ? <DobTaskEditView id={String(hashElementId)} /> : <DobTasksView />}
+          </React.Suspense>
         </Box>
       </ThemeProvider>
     );

@@ -391,10 +391,23 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
     if (onRefresh) onRefresh();
   }, [onRefresh]);
 
+  const [selectedId, setSelectedId] = useState(null);
+  const onSelectionChanged = useCallback(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    const sel = api.getSelectedNodes();
+    if (sel && sel.length > 0) {
+      const data = sel[0].data;
+      const id = data?.ID ?? data?.Id ?? data?.OData__ID ?? data?.ID;
+      setSelectedId(id ? String(id) : null);
+    } else {
+      setSelectedId(null);
+    }
+  }, []);
+
   const gridOptions = useMemo(() => ({
-    enableCellChangeFlash: true,
     animateRows: true,
-    rowSelection: 'multiple',
+    rowSelection: { mode: 'singleRow', enableClickSelection: true },
     suppressRowHoverHighlight: false,
   }), []);
 
@@ -410,10 +423,17 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
   return (
     <Box sx={{ width: '100%', height: '100%', display:'flex', flexDirection:'column', minHeight: 520 }}>
       <Box sx={{ display:'flex', gap:1, alignItems:'center', flexWrap:'wrap', mb:1.5, p:1, border:'1px solid rgba(23,28,143,0.12)', borderRadius:'12px', bgcolor:'rgba(255,255,255,0.9)', backdropFilter:'blur(6px)' }}>
-        <Typography variant="subtitle1" sx={{ fontWeight:800, color:'#171c8f', mr:1 }}>Заявки ДОБ</Typography>
         <Chip label={`${rows?.length ?? 0} записей`} size="small" sx={{ fontWeight:700 }} />
         {dirty.size>0 && <Chip label={`Изменено: ${dirty.size}`} color="warning" size="small" sx={{ fontWeight:800 }} />}
+        {selectedId && <Chip label={`Выбран: ${selectedId}`} color="primary" size="small" sx={{ fontWeight:700 }} />}
         <Box sx={{ flex:1 }} />
+        <Tooltip title="Открыть форму редактирования">
+          <span>
+            <Button size="small" variant="contained" color="secondary" disabled={!selectedId} onClick={()=> { if(selectedId) window.location.hash = `#dob_tasks/${selectedId}`; }} sx={{ borderRadius:2, minWidth: 120, backgroundImage: selectedId ? 'linear-gradient(180deg,#2e7d32 0%,#1b5e20 100%)' : undefined }}>
+              Изменить
+            </Button>
+          </span>
+        </Tooltip>
         <Tooltip title="Перезагрузить">
           <Button size="small" variant="outlined" onClick={onRefresh} disabled={loading||isFetching} startIcon={isFetching ? <CircularProgress size={14}/> : <RefreshIcon/>} sx={{ borderRadius:2, minWidth: 110 }}>
             Обновить
@@ -447,8 +467,9 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
             paginationPageSizeSelector={[20,50,100,200]}
             enableCellTextSelection={true}
             onCellValueChanged={onCellValueChanged}
+            onSelectionChanged={onSelectionChanged}
             stopEditingWhenCellsLoseFocus={true}
-            getRowId={(p)=> String(p.data?.ID ?? p.data?.Id ?? p.data?.GUID ?? Math.random())}
+            getRowId={(p)=> String(p.data?.ID ?? p.data?.Id ?? p.data?.ID ?? Math.random())}
             overlayNoRowsTemplate={'<span style="padding:12px;color:#666">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'}
             rowHeight={36}
             headerHeight={36}

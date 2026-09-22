@@ -10,16 +10,8 @@ import { useQueryClient } from '@tanstack/react-query';
 export default function DobTasksView() {
   const fieldsQ = useDobFields(true);
   const fieldsData = fieldsQ.data || null;
-  // Фильтр только Открытые — по OData__x0421... (SP отдаёт OData__x..., а не _x...), ГрОт не фильтруем
-  const statusFilter = React.useMemo(() => {
-    if (!fieldsData || !fieldsData.length) return '';
-    const f = fieldsData.find(x => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус');
-    const internal = f?.InternalName; // _x0421__x0442__x0430__x0442__x04
-    if (!internal) return '';
-    // SP REST для _x полей требует OData__x... (без ведущего _)
-    const odataName = internal.startsWith('_') ? 'OData__' + internal.slice(1) : 'OData__' + internal;
-    return `${odataName} eq 'Открыт'`;
-  }, [fieldsData]);
+  // Calculated поле Статус нельзя фильтровать на сервере (SPException) — только клиентский
+  const statusFilter = React.useMemo(() => '', [fieldsData]);
   const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: statusFilter });
   const qc = useQueryClient();
 
@@ -78,14 +70,8 @@ export default function DobTasksView() {
 
   return (
     <Box sx={{ p:{xs:1, sm:2}, maxWidth: 1600, mx:'auto', width:'100%', boxSizing:'border-box', display:'flex', flexDirection:'column', height:'calc(100vh - 8px)', minHeight:'calc(100vh - 8px)' }}>
-      <Paper sx={{ p:1.5, mb:1.5, borderRadius:'16px', border:'1px solid rgba(23,28,143,0.12)', background:'rgba(255,255,255,0.9)' }}>
-        <Typography variant="h6" sx={{ fontWeight:800, color:'#171c8f' }}>Заявки ДОБ</Typography>
-        <Typography variant="caption" color="text.secondary">
-          Источник: <code>/sites/dob/doblogistic</code> — список <code>64DB263C-2ED6-4FD5-8760-AE5E3E4A331C</code> · редактирование inline (AG Grid) · сохранение MERGE по кнопке · вычисляемые поля только для чтения
-        </Typography>
-        {(fieldsQ.isFetching || itemsQ.isFetching) && <Typography variant="caption" color="text.secondary" sx={{ ml:1 }}>· обновление…</Typography>}
-        {itemsQ.isError && <Alert severity="warning" sx={{ mt:1, borderRadius:2 }}>{String(itemsQ.error?.message||'Ошибка загрузки данных').slice(0,300)} <Button size="small" onClick={handleRefresh}>Повторить</Button></Alert>}
-      </Paper>
+      {(fieldsQ.isFetching || itemsQ.isFetching) && <Typography variant="caption" color="text.secondary" sx={{ mb:1 }}>обновление…</Typography>}
+      {itemsQ.isError && <Alert severity="warning" sx={{ mb:1, borderRadius:2 }}>{String(itemsQ.error?.message||'Ошибка загрузки данных').slice(0,300)} <Button size="small" onClick={handleRefresh}>Повторить</Button></Alert>}
       <Box sx={{ flex:1, minHeight: 520, display:'flex' }}>
         <DobGrid fields={fields} rows={rows} loading={itemsQ.isLoading} isFetching={itemsQ.isFetching} onRefresh={handleRefresh} />
       </Box>
