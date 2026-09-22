@@ -210,25 +210,19 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
                   console.log('[RichEditor][paste] finalUrl', finalUrl, 'base64 len', base64?.length);
                   try { if (finalUrl && base64) base64MapRef.current.set(base64, finalUrl); console.log('[RichEditor][paste] map set finalUrl, size', base64MapRef.current.size); } catch {}
                   if (finalUrl && base64 && editor) {
-                    // заменить base64 на finalUrl в HTML (надёжно для TipTap)
                     try {
-                      const html = editor.getHTML();
-                      const has = html.includes(base64);
-                      console.log('[RichEditor][paste] html includes base64?', has, 'html len', html.length);
-                      if (has) {
-                        const newHtml = html.split(base64).join(finalUrl);
-                        console.log('[RichEditor][paste] replacing base64 with finalUrl, newHtml has finalUrl?', newHtml.includes(finalUrl));
-                        if (onChange) onChange(newHtml); // keep base64 in editor, finalUrl for save
-                        console.log('[RichEditor][paste] after setContent html has finalUrl?', editor.getHTML().includes(finalUrl));
-                        // also log image element src after
-                        setTimeout(()=> {
-                          const imgs = document.querySelectorAll('.tiptap img');
-                          console.log('[RichEditor][paste] imgs after replace', Array.from(imgs).map(i=> i.src.slice(0,120)));
-                        }, 100);
-                      } else {
-                        console.warn('[RichEditor][paste] base64 not found in html, fallback updateAttributes');
-                        editor.chain().focus().updateAttributes('image', { src: finalUrl }).run();
+                      let htmlForSave = editor.getHTML();
+                      // Применяем все маппинги base64->finalUrl, иначе второй скрин затрёт первый (баг)
+                      for (const [b64, url] of base64MapRef.current.entries()) {
+                        if (url && htmlForSave.includes(b64)) htmlForSave = htmlForSave.split(b64).join(url);
                       }
+                      console.log('[RichEditor][paste] htmlForSave has finalUrl?', htmlForSave.includes(finalUrl), 'len', htmlForSave.length);
+                      if (onChange) onChange(htmlForSave);
+                      // keep base64 in editor for display — не делаем setContent
+                      setTimeout(()=> {
+                        const imgs = document.querySelectorAll('.tiptap img');
+                        console.log('[RichEditor][paste] imgs after (display keeps base64)', Array.from(imgs).map(i=> i.src.slice(0,80)));
+                      }, 100);
                     } catch(e){ console.error('[RichEditor][paste] replace error', e); }
                   }
                 }
@@ -271,14 +265,12 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
                   console.log('[RichEditor][drop] finalUrl', finalUrl);
                   try { if (finalUrl && base64) base64MapRef.current.set(base64, finalUrl); console.log('[RichEditor][drop] map set finalUrl size', base64MapRef.current.size); } catch {}
                   if (finalUrl && base64 && editor) {
-                    const html = editor.getHTML();
-                    const has = html.includes(base64);
-                    console.log('[RichEditor][drop] html includes base64?', has);
-                    if (has) {
-                      const newHtml = html.split(base64).join(finalUrl);
-                      console.log('[RichEditor][drop] newHtml has finalUrl?', newHtml.includes(finalUrl));
-                      if (onChange) onChange(newHtml); // keep base64 in editor, finalUrl for save
-                    } else console.warn('[RichEditor][drop] base64 not found');
+                    let htmlForSave = editor.getHTML();
+                    for (const [b64, url] of base64MapRef.current.entries()) {
+                      if (url && htmlForSave.includes(b64)) htmlForSave = htmlForSave.split(b64).join(url);
+                    }
+                    console.log('[RichEditor][drop] htmlForSave has finalUrl?', htmlForSave.includes(finalUrl));
+                    if (onChange) onChange(htmlForSave);
                   }
                 } else if (base64 && editor) {
                   // if no upload, keep base64 (already inserted)
@@ -397,15 +389,12 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
               console.log('[RichEditor][button] finalUrl', finalUrl);
               try { if (finalUrl && base64) base64MapRef.current.set(base64, finalUrl); console.log('[RichEditor][button] map set finalUrl size', base64MapRef.current.size); } catch {}
               if (finalUrl && base64) {
-                const html = editor.getHTML();
-                const has = html.includes(base64);
-                console.log('[RichEditor][button] html includes base64?', has);
-                if (has) {
-                  const newHtml = html.split(base64).join(finalUrl);
-                  console.log('[RichEditor][button] newHtml has finalUrl?', newHtml.includes(finalUrl));
-                  if (onChange) onChange(newHtml); // keep base64 in editor, finalUrl for save
-                  console.log('[RichEditor][button] after html has finalUrl?', editor.getHTML().includes(finalUrl));
-                } else console.warn('[RichEditor][button] base64 not in html');
+                let htmlForSave = editor.getHTML();
+                for (const [b64, url] of base64MapRef.current.entries()) {
+                  if (url && htmlForSave.includes(b64)) htmlForSave = htmlForSave.split(b64).join(url);
+                }
+                console.log('[RichEditor][button] htmlForSave has finalUrl?', htmlForSave.includes(finalUrl));
+                if (onChange) onChange(htmlForSave);
               }
             }
           } catch (e) { console.error('image upload failed', e); }
@@ -447,7 +436,7 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
   const isActive = (name, opts) => editor.isActive(name, opts);
 
   return (
-    <Box sx={{ border: '1px solid rgba(23,28,143,0.18)', borderRadius: '8px', overflow: 'hidden', bgcolor: '#fff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+    <Box sx={{ border: '1px solid rgba(23,28,143,0.18)', borderRadius: '8px', overflow: 'hidden', bgcolor: '#fff', display: 'flex', flexDirection: 'column', position: 'relative', maxWidth: '100%', width: '100%' }}>
       {(uploading) && <LinearProgress sx={{ height: 3, borderRadius: 0 }} />}
       {!readOnly && (
         <Paper elevation={0} sx={{ p: 0.5, bgcolor: '#f8f9ff', borderBottom: '1px solid rgba(23,28,143,0.12)', borderRadius: 0, display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center', opacity: uploading ? 0.6 : 1, pointerEvents: uploading ? 'none' : 'auto' }}>
@@ -592,16 +581,23 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
           sx={{
             flex: 1,
             overflow: 'auto',
+            maxWidth: '100%',
+            width: '100%',
             p: 0,
             position: 'relative',
             bgcolor: '#fff',
+            // чтобы скролл был только внутри редактора, не растягивая окно
+            minWidth: 0,
           }}
         >
           <Box
             sx={{
               p: 1.5,
+              display: 'inline-block',
               minWidth: '100%',
               width: 'max-content',
+              maxWidth: 'none',
+              boxSizing: 'border-box',
               zoom: zoom,
               // для Firefox где zoom не поддерживается — fallback через transform
               '@supports not (zoom: 1)': {
@@ -613,6 +609,8 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
           >
             <Box
               sx={{
+                maxWidth: '100%',
+                overflow: 'hidden',
                 '& .tiptap': {
                   outline: 'none',
                   fontSize: 14,
@@ -621,6 +619,7 @@ export default function RichEditor({ value, onChange, onUploadImage, onDeleteIma
                   minWidth: '100%',
                   width: 'max-content',
                   maxWidth: 'none',
+                  display: 'block',
                 },
             '& .tiptap p': { margin: '0.5em 0' },
             '& .tiptap h1': { fontSize: '1.6em', fontWeight: 800, margin: '0.6em 0 0.3em', color: '#171c8f' },

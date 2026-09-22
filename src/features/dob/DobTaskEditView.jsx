@@ -429,8 +429,8 @@ export default function DobTaskEditView({ id }) {
   }
 
   return (
-    <Box sx={{ width: '100%', maxWidth: '100%', mx: 0, display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 1, md: 2 }, boxSizing: 'border-box', overflowX: 'hidden' }}>
-      <Paper sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1, borderRadius: 1, border: '1px solid rgba(23,28,143,0.12)' }}>
+    <Box sx={{ width: '100%', maxWidth: 'none', mx: 0, display: 'flex', flexDirection: 'column', gap: 2, p: { xs: 1, md: 2 }, boxSizing: 'border-box', overflowX: 'hidden', minWidth: 0 }}>
+      <Paper sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1, borderRadius: 1, border: '1px solid rgba(23,28,143,0.12)', maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}>
         <Button startIcon={<ArrowBackIcon />} onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>К списку</Button>
         <Typography variant="h6" sx={{ fontWeight: 800, color: '#171c8f', ml: 1 }}>Заявка ДОБ — {form.Title ? `${form.Title} ` : ''}#{id}</Typography>
         <Chip label={getODataValue(item, '_x0421__x0442__x0430__x0442__x04') || item?.OData__x0421__x0442__x0430__x0442__x04 || '—'} size="small" sx={{ ml: 1, fontWeight: 700 }} />
@@ -445,7 +445,7 @@ export default function DobTaskEditView({ id }) {
       {saveError && <Alert severity="error" onClose={()=> setSaveError('')}>{saveError}</Alert>}
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
-      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)' }}>
+      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1, color: '#171c8f' }}>Результат проверки — главное поле</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Поддерживает таблицы, списки, форматирование и вставку изображений. Изображения автоматически загружаются как вложения заявки и вставляются как {'<img src="...">'}.
@@ -497,7 +497,7 @@ export default function DobTaskEditView({ id }) {
         )}
       </Paper>
 
-      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)' }}>
+      <Paper sx={{ p: 2, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5, color: '#171c8f' }}>Остальные поля</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
           {editableFields.filter(f=> f.InternalName !== chekInternal).map(f => {
