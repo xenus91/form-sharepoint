@@ -98,11 +98,12 @@ export async function getDobItemsPaged({ pageSize = 50 } = {}) {
       if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
         try {
           const u = new URL(nextUrl);
-          // SharePoint nextUrl like https://tenant.sharepoint.com/sites/dob/doblogistic/_api/web/lists...$skiptoken=...
-          // Map to /api + path+search
+          // next like https://portal.len.com/sites/dob/doblogistic/_api/web/lists...$skiptoken=...
+          // must go через /dob-api, а не /api (иначе дубль /sites/obrazceo/sites/dob)
           const idx = u.pathname.toLowerCase().indexOf('/_api');
           const apiPath = u.pathname.substring(idx) + u.search;
-          fetchUrl = `/api${apiPath}`;
+          const isDob = u.pathname.toLowerCase().includes('/sites/dob/');
+          fetchUrl = `${isDob ? '/dob-api' : '/api'}${apiPath}`;
         } catch {}
       }
       const { data } = await dobAxios.get(fetchUrl);

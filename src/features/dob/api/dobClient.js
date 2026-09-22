@@ -9,9 +9,10 @@ export const DOB_LIST_GUID = '64DB263C-2ED6-4FD5-8760-AE5E3E4A331C';
 // Build absolute or proxy-aware base for dob site
 export function dobApiBase() {
   if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) {
-    // vite proxy: /api -> VITE_PROXY_BASE_URL (sharepoint root)
-    // so /api/sites/dob/doblogistic/_api -> https://tenant.sharepoint.com/sites/dob/doblogistic/_api
-    return '/api/sites/dob/doblogistic/_api';
+    // В dev используем отдельный прокси /dob-api → origin (https://portal.len.com), чтоб не получить дубль /sites/obrazceo/sites/dob
+    // vite: /dob-api/sites/dob/doblogistic/_api → https://portal.len.com/sites/dob/doblogistic/_api
+    // mainTarget = VITE_PROXY_BASE_URL || VITE_SP_SITE и может уже содержать /sites/obrazceo — поэтому /api для dob не подходит
+    return '/dob-api/sites/dob/doblogistic/_api';
   }
   // prod: hosted inside SharePoint, use absolute origin + site
   try {
