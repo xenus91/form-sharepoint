@@ -54,9 +54,9 @@ function getCtypeFromItem(item){
   return String(v||"").trim();
 }
 async function fetchWithCtypeFallback(apiClient, forceRefresh){
-  const selCType = `Id,Title,CType,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled`;
-  const selFallback = `Id,Title,ContentTypeId0,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled`;
-  const selLegacy = `Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalActionsRequired,Enabled`;
+  const selCType = `Id,Title,CType,AdditionalActionsFieldInternalName,AdditionalsActionsRequired,Enabled`;
+  const selFallback = `Id,Title,ContentTypeId0,AdditionalActionsFieldInternalName,AdditionalsActionsRequired,Enabled`;
+  const selLegacy = `Id,Title,ContentTypeId,AdditionalActionsFieldInternalName,AdditionalsActionsRequired,Enabled`;
   const base = `/web/lists/getbytitle('${LIST_TITLE}')/items`;
   const tries = [
     `${base}?$select=${selCType}&$top=100`,
@@ -72,6 +72,25 @@ async function fetchWithCtypeFallback(apiClient, forceRefresh){
       const status=e?.response?.status;
       const msg=String(e?.message||"")+String(e?.response?.data?.error?.message?.value||"");
       const isMissingField = status===400 && /CType|ContentTypeId0|ContentTypeId|does not exist|не существует/i.test(msg);
+      const isAdditionalsMissing = status===400 && /AdditionalsActionsRequired/i.test(msg);
+      if(isAdditionalsMissing){
+        // try Alternative spelling Additional without s for old lists
+        const altUrl = url.replace(/AdditionalsActionsRequired/g, "AdditionalActionsRequired");
+        if(altUrl !== url){
+          try{
+            console.warn("[taskTypeConfiguration] AdditionalsActionsRequired not found, retry with AdditionalActionsRequired", msg);
+            const {data: altData}= await apiClient.get(altUrl, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+            return {data: altData, url: altUrl};
+          }catch(e2){
+            lastErr=e2;
+            // if alt also missing CType etc, continue to next try
+            const msg2=String(e2?.message||"")+String(e2?.response?.data?.error?.message?.value||"");
+            const isMissingField2 = e2?.response?.status===400 && /CType|ContentTypeId0|ContentTypeId|does not exist|не существует/i.test(msg2);
+            if(isMissingField2){ continue; }
+            throw e2;
+          }
+        }
+      }
       if(isMissingField){ lastErr=e; continue; }
       throw e;
     }

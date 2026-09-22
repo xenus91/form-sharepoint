@@ -58,7 +58,13 @@ if(typeof window!=='undefined'){
       console.log("[DBG:fields] TaskResultDefinitions fields", (data?.d?.results||[]).map(f=>({InternalName:f.InternalName, Title:f.Title, TypeAsString:f.TypeAsString, Hidden:f.Hidden})));
     }catch(e){ console.error(e); }
     try{
-      const {data}= await client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=5`, {headers:{Accept:"application/json;odata=verbose"}});
+      const {data}= await client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$top=5`, {headers:{Accept:"application/json;odata=verbose"}}).catch(e=>{
+        const msg=String(e?.response?.data?.error?.message?.value||"").toLowerCase();
+        if(e?.response?.status===400 && msg.includes("additionalactionsrequired")){
+          return client.get(`/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=5`, {headers:{Accept:"application/json;odata=verbose"}});
+        }
+        throw e;
+      });
       console.log("[DBG:items] sample", data?.d?.results);
     }catch(e){ console.error("items fetch failed", e?.response?.data); }
   };
@@ -83,10 +89,31 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
   loadFromStorage();
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
 
-  // План §14: Title, CType, ResultValue, ShowAdditionalActions, AdditionalActionsRequired, SortOrder, Enabled — только CType, без fallback на ContentTypeId0/ContentTypeId
-  const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
+  // План §14: Title, CType, ResultValue, ShowAdditionalActions, AdditionalsActionsRequired (typo prod с 's'), SortOrder, Enabled — только CType
+  const urlPrimary = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
+  const urlFallback = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$top=200&$orderby=SortOrder asc`;
+  let url = urlPrimary;
+  let data;
   try{
-    const {data}= await apiClient.get(url, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+    try{
+      const resp = await apiClient.get(urlPrimary, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+      data = resp.data;
+    }catch(ePrimary){
+      const msg=String(ePrimary?.response?.data?.error?.message?.value||"").toLowerCase();
+      const isFieldMissing = ePrimary?.response?.status===400 && msg.includes("additionalsactionsrequired");
+      if(isFieldMissing){
+        console.warn("[taskResultDefinitions] AdditionalsActionsRequired not found, retry with AdditionalActionsRequired", msg);
+        url = urlFallback;
+        const resp2 = await apiClient.get(urlFallback, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+        data = resp2.data;
+      }else if(ePrimary?.response?.status===400 && msg.includes("additionalactionsrequired") && !msg.includes("additionalsactionsrequired")){
+        // prod has Additionals but we tried Additionals? Actually this would be Additional missing -> try Additionals (already tried), but for safety try opposite
+        console.warn("[taskResultDefinitions] AdditionalActionsRequired not found, try Additionals", msg);
+        throw ePrimary; // already tried primary, so propagate to outer catch for 400 handling
+      }else{
+        throw ePrimary;
+      }
+    }
     const results=data?.d?.results||[];
     const global=new Map();
     const byCt=new Map();
