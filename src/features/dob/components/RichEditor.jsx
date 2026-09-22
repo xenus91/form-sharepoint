@@ -162,24 +162,37 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
               try {
                 // 1) сразу показываем base64 превью — не битая картинка
                 const base64 = await readAsBase64(file);
+                console.log('[RichEditor][paste] base64 inserted', file.name, 'len', base64?.length, 'editor exists', !!editor);
                 if (base64 && editor) {
                   editor.chain().focus().setImage({ src: base64, alt: file.name }).run();
+                  console.log('[RichEditor][paste] setImage base64 done, html has base64?', editor.getHTML().includes(base64.slice(0,30)));
                 }
                 // 2) грузим на сервер и подменяем src на готовый URL
                 if (onUploadImage) {
+                  console.log('[RichEditor][paste] uploading', file.name);
                   const finalUrl = await onUploadImage(file);
+                  console.log('[RichEditor][paste] finalUrl', finalUrl, 'base64 len', base64?.length);
                   if (finalUrl && base64 && editor) {
                     // заменить base64 на finalUrl в HTML (надёжно для TipTap)
                     try {
                       const html = editor.getHTML();
-                      if (html.includes(base64)) {
+                      const has = html.includes(base64);
+                      console.log('[RichEditor][paste] html includes base64?', has, 'html len', html.length);
+                      if (has) {
                         const newHtml = html.split(base64).join(finalUrl);
+                        console.log('[RichEditor][paste] replacing base64 with finalUrl, newHtml has finalUrl?', newHtml.includes(finalUrl));
                         editor.commands.setContent(newHtml, false);
+                        console.log('[RichEditor][paste] after setContent html has finalUrl?', editor.getHTML().includes(finalUrl));
+                        // also log image element src after
+                        setTimeout(()=> {
+                          const imgs = document.querySelectorAll('.tiptap img');
+                          console.log('[RichEditor][paste] imgs after replace', Array.from(imgs).map(i=> i.src.slice(0,120)));
+                        }, 100);
                       } else {
-                        // fallback: просто обновить последний image
+                        console.warn('[RichEditor][paste] base64 not found in html, fallback updateAttributes');
                         editor.chain().focus().updateAttributes('image', { src: finalUrl }).run();
                       }
-                    } catch {}
+                    } catch(e){ console.error('[RichEditor][paste] replace error', e); }
                   }
                 }
               } catch (e) { console.error('paste upload failed', e); }
@@ -207,19 +220,26 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
             files.forEach(async (file) => {
               try {
                 const base64 = await readAsBase64(file);
+                console.log('[RichEditor][drop] base64 inserted', file.name, 'len', base64?.length);
                 const posObj = view.posAtCoords({ left: event.clientX, top: event.clientY });
                 const pos = posObj ? posObj.pos : view.state.selection.from;
                 if (base64 && editor) {
                   editor.chain().focus().setTextSelection(pos).setImage({ src: base64, alt: file.name }).run();
+                  console.log('[RichEditor][drop] setImage base64 done');
                 }
                 if (onUploadImage) {
+                  console.log('[RichEditor][drop] uploading', file.name);
                   const finalUrl = await onUploadImage(file);
+                  console.log('[RichEditor][drop] finalUrl', finalUrl);
                   if (finalUrl && base64 && editor) {
                     const html = editor.getHTML();
-                    if (html.includes(base64)) {
+                    const has = html.includes(base64);
+                    console.log('[RichEditor][drop] html includes base64?', has);
+                    if (has) {
                       const newHtml = html.split(base64).join(finalUrl);
+                      console.log('[RichEditor][drop] newHtml has finalUrl?', newHtml.includes(finalUrl));
                       editor.commands.setContent(newHtml, false);
-                    }
+                    } else console.warn('[RichEditor][drop] base64 not found');
                   }
                 } else if (base64 && editor) {
                   // if no upload, keep base64 (already inserted)
@@ -272,16 +292,23 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
           try {
             // 1) base64 превью сразу
             const base64 = await readAsBase64(file);
+            console.log('[RichEditor][button] base64 inserted', file.name, 'len', base64?.length);
             if (base64) editor.chain().focus().setImage({ src: base64, alt: file.name }).run();
             // 2) upload и замена
             if (onUploadImage) {
+              console.log('[RichEditor][button] uploading', file.name);
               const finalUrl = await onUploadImage(file);
+              console.log('[RichEditor][button] finalUrl', finalUrl);
               if (finalUrl && base64) {
                 const html = editor.getHTML();
-                if (html.includes(base64)) {
+                const has = html.includes(base64);
+                console.log('[RichEditor][button] html includes base64?', has);
+                if (has) {
                   const newHtml = html.split(base64).join(finalUrl);
+                  console.log('[RichEditor][button] newHtml has finalUrl?', newHtml.includes(finalUrl));
                   editor.commands.setContent(newHtml, false);
-                }
+                  console.log('[RichEditor][button] after html has finalUrl?', editor.getHTML().includes(finalUrl));
+                } else console.warn('[RichEditor][button] base64 not in html');
               }
             }
           } catch (e) { console.error('image upload failed', e); }
@@ -488,7 +515,7 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
             '& .tiptap table:hover .column-resize-handle': { opacity: 1 },
             '& .tiptap table th': { background: '#f4f5f7', fontWeight: 700, textAlign: 'left' },
             '& .tiptap table .selectedCell': { background: 'rgba(23,28,143,0.08)' },
-            '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 8, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block', cursor: 'pointer' },
+            '& .tiptap img': { maxWidth: '100%', height: 'auto', borderRadius: 2, margin: '0.6em 0', border: '1px solid #e0e0e0', display: 'block', cursor: 'pointer' },
             '& .tiptap img[width]': { width: 'attr(width %)', maxWidth: '100%' },
             '& .tiptap img.ProseMirror-selectednode': { outline: '2px solid #171c8f', outlineOffset: 2 },
             // Placeholder

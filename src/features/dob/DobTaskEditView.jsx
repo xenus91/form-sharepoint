@@ -130,13 +130,23 @@ export default function DobTaskEditView({ id }) {
   const handleUploadImage = useCallback(async (file) => {
     if (!id) return null;
     setIsUploadingImage(true);
+    console.log('[DobEdit][upload] start', file.name, file.size, file.type);
     try {
       const res = await uploadDobAttachment(id, file);
+      console.log('[DobEdit][upload] res', res);
       // Refresh attachments
-      getDobAttachments(id).then(setAttachments).catch(()=>{});
+      getDobAttachments(id).then(a=> { console.log('[DobEdit][upload] attachments after', a); setAttachments(a); }).catch(()=>{});
       notify(`Изображение ${file.name} загружено`, { severity: 'success' });
-      // Prefer proxy-aware url/src
-      return res?.url || res?.src || res?.ServerRelativeUrl || null;
+      const finalUrl = res?.url || res?.src || res?.ServerRelativeUrl || null;
+      console.log('[DobEdit][upload] finalUrl', finalUrl);
+      // Test image load
+      if (finalUrl) {
+        const testImg = new Image();
+        testImg.onload = () => console.log('[DobEdit][upload] test load OK', finalUrl);
+        testImg.onerror = (e) => console.error('[DobEdit][upload] test load FAIL', finalUrl, e);
+        testImg.src = finalUrl;
+      }
+      return finalUrl;
     } catch (e) {
       const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка загрузки';
       notify(`Загрузка не удалась: ${String(msg).slice(0,200)}`, { severity: 'error' });
@@ -177,6 +187,7 @@ export default function DobTaskEditView({ id }) {
 
   const handleDeleteAttachment = useCallback(async (fileName) => {
     if (!id || !fileName) return;
+    console.log('[DobEdit][delete] fileName', fileName);
     try {
       await deleteDobAttachment(id, fileName);
       notify(`Вложение ${fileName} удалено`, { severity: 'success' });
