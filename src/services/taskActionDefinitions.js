@@ -7,8 +7,8 @@
 
 const LIST_TITLE = "TaskActionDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskActionDefs:map";
-const STORAGE_AT = "sp:taskActionDefs:at";
+const STORAGE_KEY = "sp:taskActionDefs:map:v2";
+const STORAGE_AT = "sp:taskActionDefs:at:v2";
 
 let _cache = null; // { global: Array<{value,label,sortOrder,actionId}>, byCt: Map<ctId,Array>, raw: Array }
 let _cacheAt = 0;

@@ -38,7 +38,7 @@ async function fetchAdditionalActionsMeta() {
 
 export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
-    queryKey: ["task-configuration"],
+    queryKey: ["task-configuration","v2"], // bumped v2 to force refetch after Enabled fix
     queryFn: async () => {
       // §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита content-types.md — нет 404 в Network
       // Оставлен только TaskResultDefinitions (§14) + TaskActionDefinitions (§21)
@@ -97,7 +97,7 @@ export function useTaskConfiguration({ enabled = true } = {}) {
           }
         }
         // Merge TaskActionDefinitions без ребилда: если список существует и есть записи — используем его,
-        // иначе fallback к полевым choices. Union с dedup чтобы не потерять FillIn кастомы.
+        // иначе fallback к полевым choices. Не делаем union с полевыми choices когда defChoices есть — иначе отключённые (Enabled=Нет) возвращаются через extra.
         let effectiveAdditionalField = additionalField;
         if (additionalField || actionDefs) {
           const baseChoices = additionalField?.choices || [];
@@ -105,13 +105,8 @@ export function useTaskConfiguration({ enabled = true } = {}) {
           let mergedChoices = baseChoices;
           let mergedSource = source;
           if (defChoices && defChoices.length > 0) {
-            // Если TaskActionDefinitions есть — приоритет списку, но сохраняем уникальные из поля
-            const seen = new Set(defChoices.map(c=> String(c.value).toLowerCase()));
-            const extra = baseChoices.filter(c=>{
-              const v = typeof c==='string'? c : c.value;
-              return !seen.has(String(v).toLowerCase());
-            }).map(v=> typeof v==='string'? {value:v,label:v}:{value:v,label:v.label||v});
-            mergedChoices = [...defChoices, ...extra];
+            // Если TaskActionDefinitions есть для этого CT — используем только его (Enabled=Да уже отфильтрованы в fetchTaskActionDefinitions). Не добавляем extra из поля, иначе отключённые действия (Enabled=Нет) вернутся.
+            mergedChoices = [...defChoices];
             mergedSource = source === "sharepoint-metadata" && actionDefs ? "task-action-definitions" : source + "+task-action-definitions";
           }
           if (additionalField) {
@@ -145,10 +140,8 @@ export function useTaskConfiguration({ enabled = true } = {}) {
         if (actionDefs) {
           const defChoices = resolveActionChoices("__default", actionDefs, additionalMeta?.choices || []);
           if (defChoices && defChoices.length) {
-            const base = additionalMeta?.choices || [];
-            const seen = new Set(defChoices.map(c=> String(c.value).toLowerCase()));
-            const extra = base.filter(c=> !seen.has(String(typeof c==='string'? c : c.value).toLowerCase()));
-            const merged = [...defChoices, ...extra.map(v=> typeof v==='string'? {value:v,label:v}:{value:v,label:v})];
+            // Только defChoices, без extra из поля — иначе Enabled=Нет вернётся
+            const merged = [...defChoices];
             defAdd = additionalMeta ? { ...additionalMeta, choices: merged.map(c=> typeof c==='string'? c : c.value) } : { internalName:"AdditionalActions", title:"Дополнительные действия", typeAsString:"MultiChoice", choices: merged.map(c=>c.value), allowFillIn:true, allowMultiple:true };
           }
         }
