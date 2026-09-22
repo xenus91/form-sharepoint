@@ -171,13 +171,15 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
                 console.log('[RichEditor][paste] base64 inserted', file.name, 'len', base64?.length, 'editor exists', !!editor);
                 if (base64 && editor) {
                   editor.chain().focus().setImage({ src: base64, alt: file.name }).run();
-                  console.log('[RichEditor][paste] setImage base64 done, html has base64?', editor.getHTML().includes(base64.slice(0,30)));
+                  try { base64MapRef.current.set(base64, null); } catch {}
+                  console.log('[RichEditor][paste] setImage base64 done, html has base64?', editor.getHTML().includes(base64.slice(0,30)), 'map size', base64MapRef.current.size);
                 }
                 // 2) грузим на сервер и подменяем src на готовый URL
                 if (onUploadImage) {
                   console.log('[RichEditor][paste] uploading', file.name);
                   const finalUrl = await onUploadImage(file);
                   console.log('[RichEditor][paste] finalUrl', finalUrl, 'base64 len', base64?.length);
+                  try { if (finalUrl && base64) base64MapRef.current.set(base64, finalUrl); console.log('[RichEditor][paste] map set finalUrl, size', base64MapRef.current.size); } catch {}
                   if (finalUrl && base64 && editor) {
                     // заменить base64 на finalUrl в HTML (надёжно для TipTap)
                     try {
@@ -231,12 +233,14 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
                 const pos = posObj ? posObj.pos : view.state.selection.from;
                 if (base64 && editor) {
                   editor.chain().focus().setTextSelection(pos).setImage({ src: base64, alt: file.name }).run();
-                  console.log('[RichEditor][drop] setImage base64 done');
+                  try { base64MapRef.current.set(base64, null); } catch {}
+                  console.log('[RichEditor][drop] setImage base64 done, map size', base64MapRef.current.size);
                 }
                 if (onUploadImage) {
                   console.log('[RichEditor][drop] uploading', file.name);
                   const finalUrl = await onUploadImage(file);
                   console.log('[RichEditor][drop] finalUrl', finalUrl);
+                  try { if (finalUrl && base64) base64MapRef.current.set(base64, finalUrl); console.log('[RichEditor][drop] map set finalUrl size', base64MapRef.current.size); } catch {}
                   if (finalUrl && base64 && editor) {
                     const html = editor.getHTML();
                     const has = html.includes(base64);
@@ -269,14 +273,22 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
     // Если value содержит finalUrl из base64Map, а в редакторе уже есть base64 — оставляем base64 для отображения
     let shouldSkip = false;
     try {
+      console.log('[RichEditor][sync] check skip: map size', base64MapRef.current.size, 'value has url?', Array.from(base64MapRef.current.values()).some(u=>u && value.includes(u)), 'current has b64?', Array.from(base64MapRef.current.keys()).some(k=> currentHtml.includes(k.slice(0,30))));
       for (const [b64, url] of base64MapRef.current.entries()) {
-        if (url && value.includes(url) && currentHtml.includes(b64)) {
+        const hasUrl = url && value.includes(url);
+        const hasB64 = currentHtml.includes(b64);
+        // также проверяем по короткому префиксу (на случай нормализации html)
+        const hasB64Short = !hasB64 && currentHtml.includes(b64.slice(0,30));
+        if (url && hasUrl && (hasB64 || hasB64Short)) {
           shouldSkip = true;
-          console.log('[RichEditor][sync] skip setContent: keep base64 display, value has finalUrl', url.slice(0,60));
+          console.log('[RichEditor][sync] skip setContent: keep base64 display, value has finalUrl', url.slice(0,60), 'hasB64', hasB64, 'hasB64Short', hasB64Short);
           break;
         }
       }
-    } catch {}
+      if (!shouldSkip) {
+        console.log('[RichEditor][sync] no skip: map', Array.from(base64MapRef.current.entries()).map(([k,v])=> ({ len:k.length, url:v?.slice(0,40), hasUrl: v&&value.includes(v), hasB64: currentHtml.includes(k), hasB64Short: currentHtml.includes(k.slice(0,30)) })));
+      }
+    } catch(e){ console.log('[RichEditor][sync] check error', e); }
     if (shouldSkip) return;
     const isSame = currentHtml === value;
     if (!isSame) {
@@ -316,12 +328,13 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
             // 1) base64 превью сразу
             const base64 = await readAsBase64(file);
             console.log('[RichEditor][button] base64 inserted', file.name, 'len', base64?.length);
-            if (base64) editor.chain().focus().setImage({ src: base64, alt: file.name }).run();
+            if (base64) { editor.chain().focus().setImage({ src: base64, alt: file.name }).run(); try { base64MapRef.current.set(base64, null); } catch {} }
             // 2) upload и замена
             if (onUploadImage) {
               console.log('[RichEditor][button] uploading', file.name);
               const finalUrl = await onUploadImage(file);
               console.log('[RichEditor][button] finalUrl', finalUrl);
+              try { if (finalUrl && base64) base64MapRef.current.set(base64, finalUrl); console.log('[RichEditor][button] map set finalUrl size', base64MapRef.current.size); } catch {}
               if (finalUrl && base64) {
                 const html = editor.getHTML();
                 const has = html.includes(base64);
