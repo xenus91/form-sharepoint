@@ -118,7 +118,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [_isDataPending, _startDataTransition] = useTransition(); // eslint-disable-line no-unused-vars
   const lastFocusLoadRef = React.useRef(Date.now());
   const lastHashFocusRef = React.useRef(Date.now());
-  const [expandedGroups, setExpandedGroups] = useState(() => new Set()); // SCNumber -> expanded
   const virtualParentRef = React.useRef(null); // для виртуализации списка
   // PR1: hooks extraction — currentUser + distribution + metadata (fieldsLoading etc.)
   const {
@@ -143,7 +142,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean,
     fieldDefaultActions, setFieldDefaultActions,
   } = useTasksMetadata();
-  const [groupingEnabled, setGroupingEnabled] = useState(false);
   const queryClient = useQueryClient();
   const tasksQueryEnabled = !!currentUserId && !fieldsLoading;
   // Динамические поля результата — собираем InternalName для выборки
@@ -200,6 +198,88 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // useEffect для дефолта удалён
   const [pendingCustomAction, setPendingCustomAction] = useState("");
   const [pendingAdditionalError, setPendingAdditionalError] = useState("");
+  // PR2: hash-роут вынесен  // PR2: hash-роут вынесен в useHashElement (RelatedItems 1→1, CAML+OData, guards)
+  const {
+    elementIdParam, setElementIdParam,
+    elementActionParam, setElementActionParam,
+    elementDialogOpen, setElementDialogOpen,
+    elementLoading, setElementLoading,
+    elementTaskSearching, setElementTaskSearching,
+    isHashTaskRefreshing, setIsHashTaskRefreshing,
+    elementData, setElementData,
+    elementTaskMatch, setElementTaskMatch,
+    elementError, setElementError,
+    elementNotFound, setElementNotFound,
+    autoTabAppliedForElement, setAutoTabAppliedForElement,
+    taskIndex, findTaskByElementId,
+    isHashMode,
+  } = useHashElement({ initialElementId, initialElementAction, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
+  // Для открытой задачи — свежие choices по ContentType, но не на каждый polling tasks (60с)
+  // Сравниваем dataUpdatedAt и троттлим 5 мин, чтобы не дёргать 2 тяжёлых запроса каждые 60с
+  const lastResultFieldsRefreshRef = React.useRef(0);
+  const prevTasksDataUpdatedAtRef = React.useRef(0);
+  useEffect(() => {
+    if (!tasks || tasks.length === 0) return;
+    if (tasksDataUpdatedAt === prevTasksDataUpdatedAtRef.current) return;
+    prevTasksDataUpdatedAtRef.current = tasksDataUpdatedAt;
+    const hasOpen = tasks.some((tk) => isInProgressStatus(tk.Status) && !isCompletedStatus(tk.Status, tk.PercentComplete));
+    if (!hasOpen) return;
+    const now = Date.now();
+    if (now - lastResultFieldsRefreshRef.current < 5 * 60 * 1000) return;
+    const hasNewCt = tasks.some((tk) => {
+      const ctId = tk.ContentTypeId || tk.raw?.ContentTypeId || tk.raw?.ContentTypeId?.StringId;
+      const strId = typeof ctId === "string" ? ctId : ctId?.StringId;
+      if (!strId) return false;
+      return !ctResultMap.has(strId) && !ctResultMap.has("__default") && ctResultMap.size > 0;
+    });
+    const needForce = hasNewCt;
+    lastResultFieldsRefreshRef.current = now;
+    let cancelled = false;
+    (async () => {
+      try {
+        const metas = await fetchResultFieldsMeta(apiClient, { forceRefresh: needForce });
+        if (cancelled) return;
+        setResultFieldsMeta(metas);
+        const map = await fetchContentTypeResultMap(apiClient, { forceRefresh: needForce });
+        if (cancelled) return;
+        setCtResultMap(map);
+        if (metas.length > 0 && metas[0].choices?.length) {
+          const fresh = metas[0].choices;
+          setChoices((prev) => {
+            if (fresh.length !== prev.length || fresh.some((v,i)=> v!==prev[i])) return fresh;
+            return prev;
+          });
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [tasks, tasksDataUpdatedAt, ctResultMap]);
+
+    // eslint-disable-next-line no-unused-vars
+  const loadTasks = useCallback(async (_opts={})=>{
+    await queryClient.invalidateQueries({ queryKey: ['tasks'] });
+    invalidate("/items");
+    const res = await refetchTasks();
+    return res.data;
+  }, [queryClient, refetchTasks]);
+
+  // onCountChange + expandedGroups — теперь через эффект от tasks (раньше было внутри loadTasks)
+  useEffect(() => {
+    if (!tasksData) return;
+    if (onCountChange) {
+      const activeCountTmp = tasks.filter((t)=> !isCompletedStatus(t.Status, t.PercentComplete)).length;
+      onCountChange(activeCountTmp);
+    }
+    const newGroups = new Set(tasks.map((m)=> extractTKNumberFromTask(m)));
+    setExpandedGroups((prev)=>{
+      if (prev.size===0) return newGroups;
+      let changed=false;
+      const next=new Set(prev);
+      newGroups.forEach((g)=>{ if(!prev.has(g)){ next.add(g); changed=true; }});
+      return changed? next: prev;
+    });
+  }, [tasksData, tasks]);
+
   const { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask } = useTaskMutations({
     entityType,
     completedStatusValue,
@@ -222,65 +302,23 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     setElementTaskMatch,
     pendingResult,
   });
-  // PR2: hash-роут вынесен  // PR2: hash-роут вынесен в useHashElement (RelatedItems 1→1, CAML+OData, guards)
+
+
+  // initial load — handled by TanStack Query (tasksQueryEnabled); loadTasks is now invalidate+refetch
+
+  // (poll перенесён ниже, после isHashMode — чтобы в hash-режиме не скрывать карточку)
+
+  // mapRawTask, fetchFullTask, searchTaskByRelatedItem импортированы из ./tasks/* —
+  // см. mapRawTask (./tasks/mapping), fetchFullTask + searchTaskByRelatedItem (./tasks/hashSearch).
+
+// PR2: фильтрация/группировка вынесены в useTasksFiltering (без смены логики)
   const {
-    elementIdParam, setElementIdParam,
-    elementActionParam, setElementActionParam,
-    elementDialogOpen, setElementDialogOpen,
-    elementLoading, setElementLoading,
-    elementTaskSearching, setElementTaskSearching,
-    isHashTaskRefreshing, setIsHashTaskRefreshing,
-    elementData, setElementData,
-    elementTaskMatch, setElementTaskMatch,
-    elementError, setElementError,
-    elementNotFound, setElementNotFound,
-    autoTabAppliedForElement, setAutoTabAppliedForElement,
-    taskIndex, findTaskByElementId,
-    isHashMode,
-  } = useHashElement({ initialElementId, initialElementAction, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
-const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete)).length, [tasks]);
-  const completedCount = useMemo(() => tasks.filter((t) => isCompletedStatus(t.Status, t.PercentComplete)).length, [tasks]);
-
-  const filteredTasks = useMemo(() => {
-    if (tab === 0) return tasks.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete));
-    return tasks.filter((t) => isCompletedStatus(t.Status, t.PercentComplete));
-  }, [tasks, tab]);
-
-  // Хелпер для получения свежих choices по ContentType для конкретной задачи
-  const _getTaskChoices = useCallback((taskObj) => { // eslint-disable-line no-unused-vars
-    const meta = getResultFieldForTask(taskObj, ctResultMap, resultFieldsMeta);
-    if (meta?.choices && meta.choices.length > 0) return meta.choices;
-    return choices;
-  }, [ctResultMap, resultFieldsMeta, choices]);
-  const _getTaskFieldMeta = useCallback((taskObj) => { // eslint-disable-line no-unused-vars
-    return getResultFieldForTask(taskObj, ctResultMap, resultFieldsMeta) || { internalName: "ResultSearchTHU", choices };
-  }, [ctResultMap, resultFieldsMeta, choices]);
-
-  const groupedTasks = useMemo(() => {
-    if (!groupingEnabled) {
-      // группировка выключена — один виртуальный группа "Все"
-      return filteredTasks.length ? [["Все", filteredTasks]] : [];
-    }
-    const map = new Map();
-    for (const task of filteredTasks) {
-      const sc = extractTKNumberFromTask(task);
-      if (!map.has(sc)) map.set(sc, []);
-      map.get(sc).push(task);
-    }
-    return Array.from(map.entries()).sort((a, b) => {
-      if (a[0] === "Без ТК") return 1;
-      if (b[0] === "Без ТК") return -1;
-      if (a[0] === "Все") return -1;
-      if (b[0] === "Все") return 1;
-      return a[0].localeCompare(b[0], "ru");
-    });
-  }, [filteredTasks, groupingEnabled]);
-
-  // Виртуализация для плоского списка (grouping off) — рендерим только видимые карточки
-  // Порог 50 — при меньшем списке виртуализация не нужна и только мешает (пустое место после удаления)
-  // Виртуализация временно отключена — давала пропуск на размер карточки между элементами
-  // (оценка 360/380 + absolute translateY + measureElement оставляли гэп на высоту карточки)
-  // Список теперь рендерится обычным Stack без виртуализации; при необходимости включим с корректной высотой
+    groupingEnabled, setGroupingEnabled,
+    expandedGroups, setExpandedGroups,
+    activeCount, completedCount,
+    filteredTasks, groupedTasks,
+    toggleGroup,
+  } = useTasksFiltering(tasks, tab);
   const useVirtual = false;
   const flatVirtualizer = useVirtualizer({
     count: 0,
@@ -289,23 +327,6 @@ const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Statu
     overscan: 6,
     measureElement: (el) => el?.getBoundingClientRect()?.height ?? 360,
   });
-
-  const toggleGroup = useCallback((sc) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(sc)) next.delete(sc);
-      else next.add(sc);
-      return next;
-    });
-  }, []);
-
-  const _expandAll = useCallback(() => { // eslint-disable-line no-unused-vars
-    setExpandedGroups(new Set(groupedTasks.map(([sc]) => sc)));
-  }, [groupedTasks]);
-
-  const _collapseAll = useCallback(() => { // eslint-disable-line no-unused-vars
-    setExpandedGroups(new Set());
-  }, []);
 
 
 
@@ -364,114 +385,9 @@ const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Statu
 
   // isHashMode from useHashElement
 
-  // в hash-режиме — фоновое обновление только найденной задачи (без скрытия карточки, маленький лоадер в углу)
-  // хуки до раннего return, иначе нарушение Rules of Hooks — с троттлингом focus 30с и диффом против мигания
-  useEffect(() => {
-    if (!isHashMode || !elementTaskMatch) return;
-    let cancelled = false;
-    const refreshHashTask = async () => {
-      if (cancelled) return;
-      setIsHashTaskRefreshing(true);
-      try {
-        // __noCache: polling в hash-режиме — всегда хотим свежие данные.
-        const _hashSelect = HASH_POLL_SELECT;
-        const _hashExpand = HASH_POLL_EXPAND ? `&$expand=${HASH_POLL_EXPAND}` : "";
-        // EndJob удалён — если вдруг в HASH_POLL_SELECT попадёт EndJob из кэша, фильтруем
-        const _cleanHashSelect = _hashSelect.split(",").filter((f) => f.trim().toLowerCase() !== "endjob").join(",");
-        // Доп. защита: если _cleanHashSelect пуст, используем минимум Id,Modified
-        const _finalHashSelect = _cleanHashSelect.trim() ? _cleanHashSelect : "Id,Modified";
-        let _hashData = null;
-        try {
-          const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${_finalHashSelect}${_hashExpand}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
-          _hashData = data;
-        } catch (eHash) {
-          const _m = String(eHash?.response?.data?.error?.message?.value || eHash?.message || "").toLowerCase();
-          if (_m.includes("endjob")) {
-            console.warn("[hashPoll] EndJob error, retry without EndJob", _m);
-            try {
-              const { data: _retry } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=Id,Modified,Status,PercentComplete`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
-              _hashData = _retry;
-            } catch {}
-          }
-          if (!_hashData) throw eHash;
-        }
-        const data = _hashData;
-        const raw = data?.d;
-        if (!raw || cancelled) return;
-        const mapped = mapRawTask(raw, { recipientField, scNumberField });
-        setElementTaskMatch((prev) => {
-          if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete) && prev.Location1 === mapped.Location1) return prev;
-          return mapped;
-        });
-        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => {
-          if (!Array.isArray(prev)) return prev;
-          const ex = prev.find((t) => t.Id === mapped.Id);
-          if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete) && ex.Location1 === mapped.Location1) return prev;
-          return prev.map((t) => t.Id === mapped.Id ? mapped : t);
-        });
-      } catch (e) {
-        const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
-        if (msg.includes("additionalactions")) {
-          try {
-            // fallback без AdditionalActions (короткий select)
-            const _fbSelect = "Id,Status,PercentComplete,Modified,ResultSearchTHU,Location1";
-            const _fbExpand = HASH_POLL_EXPAND ? `&$expand=${HASH_POLL_EXPAND}` : "";
-            const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${_fbSelect}${_fbExpand}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
-            const raw = data?.d;
-            if (!raw || cancelled) return;
-            const mapped = mapRawTask(raw, { recipientField, scNumberField });
-            setElementTaskMatch((prev) => {
-              if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete)) return prev;
-              return mapped;
-            });
-            queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => {
-              if (!Array.isArray(prev)) return prev;
-              const ex = prev.find((t) => t.Id === mapped.Id);
-              if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete)) return prev;
-              return prev.map((t) => t.Id === mapped.Id ? mapped : t);
-            });
-          } catch {}
-        }
-      } finally {
-        if (!cancelled) setIsHashTaskRefreshing(false);
-      }
-    };
-    // Адаптивный polling: пауза на скрытой вкладке + backoff при ошибках.
-    const stop = createAdaptivePolling({
-      fn: refreshHashTask,
-      intervalMs: 60_000,
-      maxBackoffMs: 5 * 60_000,
-      pauseWhenHidden: true,
-      onError: (e) => console.warn("[polling] refreshHashTask error, backing off:", e?.response?.status || e?.message),
-    });
-    const onFocus = () => {
-      const now = Date.now();
-      if (now - lastHashFocusRef.current < 30000) return;
-      lastHashFocusRef.current = now;
-      refreshHashTask();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => {
-      cancelled = true;
-      stop();
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [isHashMode, elementTaskMatch?.Id]);
-
-  // Poll удален — TanStack Query refetchInterval 60s уже в useQuery.
-  // Оставлен только focus-throttle 30s: инвалидация TanStack кэша при возврате в окно
-  useEffect(() => {
-    if (!currentUserId) return;
-    if (isHashMode) return;
-    const onFocus2 = () => {
-      const now = Date.now();
-      if (now - lastFocusLoadRef.current < 30000) return;
-      lastFocusLoadRef.current = now;
-      queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    };
-    window.addEventListener("focus", onFocus2);
-    return () => window.removeEventListener("focus", onFocus2);
-  }, [currentUserId, isHashMode, queryClient]);
+  // PR2: polling вынесен в useHashPolling (adaptivePolling 60s, focus throttle 30s)
+  useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMatch, setIsHashTaskRefreshing, recipientField, scNumberField, currentUserId, distribution, taskFieldNames, resultFieldInternalNames, queryClient, lastHashFocusRef });
+  useTasksFocusPolling({ currentUserId, isHashMode, queryClient, lastFocusLoadRef });
 
   if (fieldsLoading) {
     return (
@@ -485,13 +401,7 @@ const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Statu
   return (
     <Box sx={{ p: { xs: 1, sm: 2 }, pt: { xs: 0.5, sm: 0.5 }, pb: { xs: 1, sm: 2 }, maxWidth: 720, width: { xs: "100%", sm: "calc(100vw - 32px)" }, minWidth: { xs: 0, sm: 280 }, mx: "auto", boxSizing: "border-box", display: "flex", flexDirection: "column", height: "calc(100vh - 8px)", minHeight: "calc(100vh - 8px)", maxHeight: "calc(100vh - 8px)", "@supports (height:100dvh)": { height: "calc(100dvh - 8px)", minHeight: "calc(100dvh - 8px)", maxHeight: "calc(100dvh - 8px)" }, overflowX: 'hidden', overflowY: 'hidden' }}>
       {isLocalRcActive && localRcValue && (
-        <Box sx={{ mb: 1, p: 1.25, borderRadius: 2, bgcolor: "rgba(255,193,7,0.12)", border: "1px solid rgba(255,193,7,0.30)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, boxSizing: 'border-box', overflow: 'hidden', flexShrink: 0 }}>
-          <Typography variant="body2" sx={{ fontWeight: 700, color: "#8d6e00", display:"flex", alignItems:"center", gap:1, minWidth:0, overflow:"hidden" }}>
-            <Box component="span" sx={{ width:8, height:8, borderRadius:"50%", bgcolor:"#f9a825", flexShrink:0 }} />
-            <span style={{ whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>Локальный РЦ: {localRcValue} <span style={{ fontWeight:400, color:"rgba(0,0,0,0.55)" }}>(для {localRcOffice})</span></span>
-          </Typography>
-          <Button size="small" variant="text" onClick={onClearLocalRc} sx={{ fontWeight:700, textTransform:"none", color:"#8d6e00", flexShrink:0, whiteSpace:"nowrap" }}>Сбросить</Button>
-        </Box>
+        <LocalRcBanner isLocalRcActive={isLocalRcActive} localRcValue={localRcValue} localRcOffice={localRcOffice} onClearLocalRc={onClearLocalRc} />
       )}
       <Box sx={{ position: "relative", zIndex: 10, bgcolor: "#ffffff", backdropFilter: "none", transform: "translateZ(0)", willChange: "transform", mx: 0, px: { xs: 1, sm: 2 }, pt: 1, pb: 1, mb: 1, borderRadius: '28px', border: "1px solid rgba(23,28,143,0.12)", boxShadow: "0 2px 8px rgba(23,28,143,0.06)", overflow: 'visible', boxSizing: 'border-box', flexShrink: 0, contain: "layout paint" }}>
         <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={clearElementHashParam} onRefresh={loadTasks} loading={loading} />
