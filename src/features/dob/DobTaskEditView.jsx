@@ -107,23 +107,43 @@ export default function DobTaskEditView({ id }) {
       // Build payload — only editable fields, but include ChekResult always
       const payload = {};
       const editableSet = new Set((fields || []).filter(isEditableField).map(f=>f.InternalName));
+      // Helper: для полей с кодированным именем (_x....) SharePoint REST требует OData_ префикс
+      const toODataKey = (internal) => {
+        if (!internal) return internal;
+        // Поля с _x кодировкой или ведущим _ — в OData виде OData_<InternalName> (например _x0414 -> OData__x0414)
+        if (internal.startsWith('_') || internal.includes('_x')) return `OData_${internal}`;
+        return internal;
+      };
       // Always allow ChekResult even if metadata says readOnly? Ensure it saves. If ChekResult is note, it is editable.
       // Add all form keys that are in fields and editable, or ChekResult
       for (const [k, v] of Object.entries(form)) {
         if (k === 'ID' || k === 'Id') continue;
-        if (k === 'ChekResult' || k === '_x041a__x043e__x043c__x043c__x04') {
-          payload[k] = v ?? '';
+        const odataK = toODataKey(k);
+        if (k === 'ChekResult' || k === '_x041a__x043e__x043c__x043c__x04' || k === chekInternal) {
+          payload[odataK] = v ?? '';
           continue;
         }
         if (editableSet.has(k)) {
-          // For User fields, SharePoint expects <FieldName>Id with number; but form stores Id already? Handle
-          payload[k] = v;
+          // Для User полей SharePoint ждёт <Field>Id — но пока шлём как есть, retry выкинет если не существует
+          // Если значение — объект {Id, Title}, берём Id
+          let val = v;
+          if (val && typeof val === 'object' && 'Id' in val && Object.keys(val).length <= 3) {
+            // Попытка вытащить Id для User
+            val = val.Id;
+          }
+          payload[odataK] = val;
+          // Также для совместимости оставляем raw ключ если OData не сработает — updateDobItem попробует оба
+          // Но основной — odataK
         }
       }
-      // Remove system fields
+      // Remove system fields (оба варианта)
       delete payload.Attachments;
+      delete payload['OData_Attachments'];
       delete payload.Author;
+      delete payload['OData_Author'];
       delete payload.Editor;
+      delete payload['OData_Editor'];
+      console.log('[DobEdit][save] payload keys', Object.keys(payload), 'chekInternal', chekInternal, 'odataChek', toODataKey(chekInternal));
       // Ensure boolean/null handling
       await updateDobItem(id, payload);
       notify(`Заявка ${id} сохранена`, { severity: 'success' });
