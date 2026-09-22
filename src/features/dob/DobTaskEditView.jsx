@@ -172,57 +172,6 @@ export default function DobTaskEditView({ id }) {
   }, [id, notify]);
 
 
-  // Синхрон: если картинка удалена из ChekResult (в редакторе) — удалить вложение
-  useEffect(() => {
-    const curHtml = form[chekInternal];
-    if (curHtml === undefined) return;
-    // Инициализация
-    if (prevChekHtmlRef.current === null) {
-      prevChekHtmlRef.current = curHtml || '';
-      return;
-    }
-    const prevHtml = prevChekHtmlRef.current;
-    if (prevHtml === curHtml) return;
-    // Сравниваем src
-    const prevSrcs = extractImgSrcs(prevHtml);
-    const curSrcs = extractImgSrcs(curHtml);
-    // Находим удалённые src (были, теперь нет)
-    const removed = prevSrcs.filter(s => !curSrcs.includes(s));
-    if (removed.length === 0) {
-      prevChekHtmlRef.current = curHtml;
-      return;
-    }
-    console.log('[DobEdit][sync-delete] removed srcs', removed);
-    // Для каждого удалённого src, если это не base64, найти fileName и удалить вложение если оно есть
-    removed.forEach(src => {
-      if (!src || src.startsWith('data:')) {
-        console.log('[DobEdit][sync-delete] skip base64', src?.slice(0,30));
-        return;
-      }
-      // Извлекаем имя файла
-      let fileName = '';
-      try {
-        const withoutQuery = src.split('?')[0].split('#')[0];
-        fileName = decodeURIComponent(withoutQuery.split('/').pop() || '');
-      } catch {}
-      if (!fileName) return;
-      // Проверяем что вложение существует
-      const exists = attachments.some(a => a.FileName === fileName || a.ServerRelativeUrl?.endsWith('/' + fileName));
-      if (!exists) {
-        console.log('[DobEdit][sync-delete] attachment not found for', fileName);
-        return;
-      }
-      // Дедуп
-      if (pendingDeleteRef.current.has(fileName)) {
-        console.log('[DobEdit][sync-delete] already pending', fileName);
-        return;
-      }
-      console.log('[DobEdit][sync-delete] auto-delete attachment for removed image', fileName, src.slice(0,80));
-      handleDeleteAttachment(fileName);
-    });
-    prevChekHtmlRef.current = curHtml;
-  }, [form[chekInternal], extractImgSrcs, attachments, handleDeleteAttachment, chekInternal]);
-
   const handleBack = () => {
     window.location.hash = '#dob_tasks';
   };
@@ -286,6 +235,57 @@ export default function DobTaskEditView({ id }) {
       pendingDeleteRef.current.delete(fileName);
     }
   }, [id, notify, chekInternal]);
+
+  // Синхрон: если картинка удалена из ChekResult (в редакторе) — удалить вложение
+  useEffect(() => {
+    const curHtml = form[chekInternal];
+    if (curHtml === undefined) return;
+    // Инициализация
+    if (prevChekHtmlRef.current === null) {
+      prevChekHtmlRef.current = curHtml || '';
+      return;
+    }
+    const prevHtml = prevChekHtmlRef.current;
+    if (prevHtml === curHtml) return;
+    // Сравниваем src
+    const prevSrcs = extractImgSrcs(prevHtml);
+    const curSrcs = extractImgSrcs(curHtml);
+    // Находим удалённые src (были, теперь нет)
+    const removed = prevSrcs.filter(s => !curSrcs.includes(s));
+    if (removed.length === 0) {
+      prevChekHtmlRef.current = curHtml;
+      return;
+    }
+    console.log('[DobEdit][sync-delete] removed srcs', removed);
+    // Для каждого удалённого src, если это не base64, найти fileName и удалить вложение если оно есть
+    removed.forEach(src => {
+      if (!src || src.startsWith('data:')) {
+        console.log('[DobEdit][sync-delete] skip base64', src?.slice(0,30));
+        return;
+      }
+      // Извлекаем имя файла
+      let fileName = '';
+      try {
+        const withoutQuery = src.split('?')[0].split('#')[0];
+        fileName = decodeURIComponent(withoutQuery.split('/').pop() || '');
+      } catch {}
+      if (!fileName) return;
+      // Проверяем что вложение существует
+      const exists = attachments.some(a => a.FileName === fileName || a.ServerRelativeUrl?.endsWith('/' + fileName));
+      if (!exists) {
+        console.log('[DobEdit][sync-delete] attachment not found for', fileName);
+        return;
+      }
+      // Дедуп
+      if (pendingDeleteRef.current.has(fileName)) {
+        console.log('[DobEdit][sync-delete] already pending', fileName);
+        return;
+      }
+      console.log('[DobEdit][sync-delete] auto-delete attachment for removed image', fileName, src.slice(0,80));
+      handleDeleteAttachment(fileName);
+    });
+    prevChekHtmlRef.current = curHtml;
+  }, [form[chekInternal], extractImgSrcs, attachments, handleDeleteAttachment, chekInternal]);
 
 
   if (loading) {
