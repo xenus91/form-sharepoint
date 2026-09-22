@@ -89,7 +89,7 @@ function TablePicker({ onSelect }) {
   );
 }
 
-export default function RichEditor({ value, onChange, onUploadImage, readOnly = false, isUploading = false }) {
+export default function RichEditor({ value, onChange, onUploadImage, onDeleteImage, readOnly = false, isUploading = false }) {
   const [linkPopoverAnchor, setLinkPopoverAnchor] = useState(null);
   const [linkUrl, setLinkUrl] = useState('');
   const [tablePopoverAnchor, setTablePopoverAnchor] = useState(null);
@@ -139,12 +139,33 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
     editable: !readOnly,
     onUpdate: ({ editor }) => {
       let html = editor.getHTML();
+      // Чистим карту для удалённых картинок (base64 больше нет в html)
       if (base64MapRef.current.size > 0) {
-        for (const [b64, url] of base64MapRef.current.entries()) {
-          if (url && html.includes(b64)) html = html.split(b64).join(url);
+        for (const [b64, url] of Array.from(base64MapRef.current.entries())) {
+          const hasB64 = html.includes(b64);
+          const hasUrl = url && html.includes(url);
+          // также проверяем короткий префикс для надёжности
+          const hasB64Short = !hasB64 && html.includes(b64.slice(0,30));
+          if (!hasB64 && !hasB64Short && !hasUrl) {
+            // Картинка удалена из редактора — чистим мапу и уведомляем родителя для удаления вложения
+            console.log('[RichEditor][onUpdate] image removed, cleaning map', url || b64.slice(0,30));
+            base64MapRef.current.delete(b64);
+            if (url && onDeleteImage) {
+              try { onDeleteImage(url); } catch {}
+            } else if (url && !onDeleteImage) {
+              // fallback: если onDeleteImage не передан, родитель всё равно детектит через form diff
+            }
+          }
         }
       }
-      if (onChange) onChange(html);
+      // Заменяем оставшиеся base64 на finalUrl для сохранения
+      let htmlForSave = html;
+      if (base64MapRef.current.size > 0) {
+        for (const [b64, url] of base64MapRef.current.entries()) {
+          if (url && htmlForSave.includes(b64)) htmlForSave = htmlForSave.split(b64).join(url);
+        }
+      }
+      if (onChange) onChange(htmlForSave);
     },
     editorProps: {
       handlePaste: (view, event) => {
@@ -290,6 +311,15 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
       }
     } catch(e){ console.log('[RichEditor][sync] check error', e); }
     if (shouldSkip) return;
+    // Чистим карту если вложение удалено через чип (value без url, редактор ещё с base64)
+    try {
+      for (const [b64, url] of Array.from(base64MapRef.current.entries())) {
+        if (url && !value.includes(url) && !value.includes(b64.slice(0,30)) && currentHtml.includes(b64.slice(0,30))) {
+          console.log('[RichEditor][sync] cleaning map for deleted via chip', url.slice(0,60));
+          base64MapRef.current.delete(b64);
+        }
+      }
+    } catch {}
     const isSame = currentHtml === value;
     if (!isSame) {
       console.log('[RichEditor][sync] setContent from value, len', value?.length);

@@ -37,6 +37,18 @@ export default function DobTaskEditView({ id }) {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [attachments, setAttachments] = useState([]);
+  const prevChekHtmlRef = useRef(null);
+  const pendingDeleteRef = useRef(new Set());
+
+  // helper: extract img srcs from html
+  const extractImgSrcs = useCallback((html) => {
+    if (!html || typeof html !== 'string') return [];
+    const srcs = [];
+    const re = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+    let m;
+    while ((m = re.exec(html)) !== null) srcs.push(m[1]);
+    return srcs;
+  }, []);
 
   const { data: fields, isLoading: fieldsLoading, error: fieldsError } = useQuery({
     queryKey: ['dob-fields'],
@@ -157,6 +169,57 @@ export default function DobTaskEditView({ id }) {
   }, [id, notify]);
 
 
+  // Синхрон: если картинка удалена из ChekResult (в редакторе) — удалить вложение
+  useEffect(() => {
+    const curHtml = form[chekInternal];
+    if (curHtml === undefined) return;
+    // Инициализация
+    if (prevChekHtmlRef.current === null) {
+      prevChekHtmlRef.current = curHtml || '';
+      return;
+    }
+    const prevHtml = prevChekHtmlRef.current;
+    if (prevHtml === curHtml) return;
+    // Сравниваем src
+    const prevSrcs = extractImgSrcs(prevHtml);
+    const curSrcs = extractImgSrcs(curHtml);
+    // Находим удалённые src (были, теперь нет)
+    const removed = prevSrcs.filter(s => !curSrcs.includes(s));
+    if (removed.length === 0) {
+      prevChekHtmlRef.current = curHtml;
+      return;
+    }
+    console.log('[DobEdit][sync-delete] removed srcs', removed);
+    // Для каждого удалённого src, если это не base64, найти fileName и удалить вложение если оно есть
+    removed.forEach(src => {
+      if (!src || src.startsWith('data:')) {
+        console.log('[DobEdit][sync-delete] skip base64', src?.slice(0,30));
+        return;
+      }
+      // Извлекаем имя файла
+      let fileName = '';
+      try {
+        const withoutQuery = src.split('?')[0].split('#')[0];
+        fileName = decodeURIComponent(withoutQuery.split('/').pop() || '');
+      } catch {}
+      if (!fileName) return;
+      // Проверяем что вложение существует
+      const exists = attachments.some(a => a.FileName === fileName || a.ServerRelativeUrl?.endsWith('/' + fileName));
+      if (!exists) {
+        console.log('[DobEdit][sync-delete] attachment not found for', fileName);
+        return;
+      }
+      // Дедуп
+      if (pendingDeleteRef.current.has(fileName)) {
+        console.log('[DobEdit][sync-delete] already pending', fileName);
+        return;
+      }
+      console.log('[DobEdit][sync-delete] auto-delete attachment for removed image', fileName, src.slice(0,80));
+      handleDeleteAttachment(fileName);
+    });
+    prevChekHtmlRef.current = curHtml;
+  }, [form[chekInternal], extractImgSrcs, attachments, handleDeleteAttachment, chekInternal]);
+
   const handleBack = () => {
     window.location.hash = '#dob_tasks';
   };
@@ -187,20 +250,25 @@ export default function DobTaskEditView({ id }) {
 
   const handleDeleteAttachment = useCallback(async (fileName) => {
     if (!id || !fileName) return;
+    if (pendingDeleteRef.current.has(fileName)) {
+      console.log('[DobEdit][delete] skip pending', fileName);
+      return;
+    }
+    pendingDeleteRef.current.add(fileName);
     console.log('[DobEdit][delete] fileName', fileName);
     try {
       await deleteDobAttachment(id, fileName);
       notify(`Вложение ${fileName} удалено`, { severity: 'success' });
       // Remove from attachments state
       setAttachments(prev => prev.filter(a => a.FileName !== fileName && a.ServerRelativeUrl !== fileName));
-      // Also remove image from ChekResult HTML if present
+      // Also remove image from ChekResult HTML if present (only if not already removed by editor)
       setForm(prev => {
         const cur = prev[chekInternal] || '';
         if (typeof cur === 'string' && cur.includes(fileName)) {
           // remove img tags that contain fileName
           const cleaned = cur.replace(new RegExp(`<img[^>]*${fileName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}[^>]*>`, 'gi'), '');
           if (cleaned !== cur) {
-            // also save to server? keep local until Save
+            console.log('[DobEdit][delete] cleaned html from fileName', fileName);
             return { ...prev, [chekInternal]: cleaned };
           }
         }
@@ -211,6 +279,8 @@ export default function DobTaskEditView({ id }) {
     } catch (e) {
       const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка удаления';
       notify(`Не удалось удалить: ${String(msg).slice(0,200)}`, { severity: 'error' });
+    } finally {
+      pendingDeleteRef.current.delete(fileName);
     }
   }, [id, notify, chekInternal]);
 
@@ -262,6 +332,14 @@ export default function DobTaskEditView({ id }) {
           value={chekValue || ''}
           onChange={(html)=> handleChange(chekInternal, html)}
           onUploadImage={handleUploadImage}
+          onDeleteImage={(src)=> {
+            if (!src || src.startsWith('data:')) return;
+            let fileName = '';
+            try { fileName = decodeURIComponent(src.split('?')[0].split('#')[0].split('/').pop() || ''); } catch {}
+            if (!fileName) return;
+            console.log('[DobEdit][onDeleteImage] from editor', fileName, src.slice(0,80));
+            handleDeleteAttachment(fileName);
+          }}
           isUploading={isUploadingImage}
         />
         {attachments.length > 0 && (
