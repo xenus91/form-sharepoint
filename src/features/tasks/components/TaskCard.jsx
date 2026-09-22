@@ -661,22 +661,21 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // Для открытой задачи используем displayedChoices (свежие по ContentType)
               const choicesForButtons = displayedChoices || choices;
               const foundChoice = (() => {
-                // 1) по плану §14: TaskResultDefinitions.ShowAdditionalActions
+                // FIX дубль Найдена Phase 17.15: ShowAdditionalActions отвечает только за видимость AA, не за тип кнопки
+                // Сначала строгий строковый матч, потом уже конфиг — иначе Найдена с Show=false попадала и в found и в notFound
                 let c = choicesForButtons.find((ch) => {
+                  const n = String(ch).trim().toLowerCase();
+                  return n === "найден" || n === "найдена";
+                });
+                if (c) return c;
+                // fallback для кастомных типов без legacy строк: по конфигу
+                c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
                   if (def) return def.showAdditionalActions;
                   const cfg = getUiConfig(ch);
                   return cfg.requiresLocation || cfg.requiresAdditionalActions;
                 });
                 if (c) return c;
-                // 2) legacy: ищем "найден/найдена"
-                c = choicesForButtons.find((ch) => {
-                  const n = String(ch).trim().toLowerCase();
-                  return n === "найден" || n === "найдена";
-                });
-                if (c) return c;
-                // 3) fallback: только если среди choices есть legacy-паттерн, иначе не считаем none как found
-                // Для новых типов задач без legacy — foundChoice = null, чтобы не навязывать спец-экран
                 const hasLegacy = choicesForButtons.some((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n.includes("найден") || n.includes("не найден");
@@ -685,16 +684,17 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 return null;
               })();
               const notFoundChoice = (() => {
-                // План §14: ShowAdditionalActions=false для confirm-типа (Не найдена) не требует AA
+                // Строгий матч Не найдена первым — иначе Найдена с Show=false забиралась как confirm
                 let c = choicesForButtons.find((ch) => {
-                  const def = getResultDef(ch);
-                  if (def) return !def.showAdditionalActions && def.cfg; // Show=false → confirm типа
-                  return getUiConfig(ch).confirm;
-                });
-                if (c) return c;
-                c = choicesForButtons.find((ch) => {
                   const n = String(ch).trim().toLowerCase();
                   return n === "не найдена" || n === "не найден" || n === "не найдено";
+                });
+                if (c) return c;
+                // fallback для кастомных
+                c = choicesForButtons.find((ch) => {
+                  const def = getResultDef(ch);
+                  if (def) return !def.showAdditionalActions && def.cfg;
+                  return getUiConfig(ch).confirm;
                 });
                 if (c) return c;
                 const hasLegacy = choicesForButtons.some((ch) => {
