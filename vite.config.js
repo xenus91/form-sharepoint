@@ -17,6 +17,7 @@ export default defineConfig(({ command, mode }) => {
   console.log('🔹 Proxy dob origin:', dobOrigin || '(none)')
 
   return {
+    base: './',
     plugins: [react()], // <-- ВАЖНО
     server: command === 'serve'
       ? {
