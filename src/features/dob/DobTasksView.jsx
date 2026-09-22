@@ -19,15 +19,18 @@ export default function DobTasksView() {
   // Все хуки до условных return (Rules of Hooks)
   const fields = fieldsData || [];
   const rawRows = itemsQ.data || [];
-  // Клиентский фильтр Открыт — если серверный фильтр не сработал (из-за calculated), фильтруем тут
+  // Клиентский фильтр Открыт — OData__ prefix (SP возвращает OData__x...)
   const rows = React.useMemo(() => {
     if (!rawRows.length || !fields.length) return rawRows;
     const statusField = fields.find(x => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус');
     const internal = statusField?.InternalName;
     if (!internal) return rawRows;
-    const filtered = rawRows.filter(r => String(r[internal] || '').trim() === 'Открыт');
+    function getVal(r, f) {
+      return r[f] ?? r['OData__' + f] ?? r['OData_' + f] ?? '';
+    }
+    const filtered = rawRows.filter(r => String(getVal(r, internal) || '').trim() === 'Открыт');
     if (filtered.length === 0 && rawRows.length > 0) {
-      const hasOpen = rawRows.some(r => String(r[internal]||'').trim()==='Открыт');
+      const hasOpen = rawRows.some(r => String(getVal(r, internal)||'').trim()==='Открыт');
       return hasOpen ? filtered : rawRows;
     }
     return filtered;

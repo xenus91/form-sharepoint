@@ -15,6 +15,25 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import { updateDobItem } from '../api/dobApi';
 import { useNotifications } from '../../../NotificationsProvider';
 
+// SharePoint REST returns _x fields as OData__x... (with OData__ prefix), while fields metadata uses _x... without prefix
+function getODataValue(row, internal) {
+  if (!row || !internal) return undefined;
+  if (row[internal] !== undefined) return row[internal];
+  const odata = 'OData_' + internal; // some lists use OData_ (single _)
+  if (row[odata] !== undefined) return row[odata];
+  const odata2 = 'OData__' + internal; // most 2013 lists use OData__
+  if (row[odata2] !== undefined) return row[odata2];
+  // also try without leading _ (SP sometimes strips)
+  if (internal.startsWith('_') && row[internal.slice(1)] !== undefined) return row[internal.slice(1)];
+  return undefined;
+}
+function setODataValue(row, internal, value) {
+  // keep both for display consistency
+  row[internal] = value;
+  row['OData__' + internal] = value;
+  row['OData_' + internal] = value;
+}
+
 // Helpers
 function isEditableField(f) {
   if (!f) return false;
@@ -149,6 +168,7 @@ function buildColumnDefs(fields) {
       continue;
     }
 
+    const isODataField = internal.startsWith('_x');
     const col = {
       field: internal,
       headerName: title + (f.Required ? ' *' : ''),
@@ -156,7 +176,11 @@ function buildColumnDefs(fields) {
       editable: editable && !isCalculated,
       headerTooltip: `${internal} — ${f.TypeAsString}${f.Description ? ' | '+String(f.Description).slice(0,80) : ''}`,
       tooltipValueGetter: (p)=> p.value ? String(p.value).slice(0, 120) : '',
-      // type-specific
+      // type-specific — handle OData__ prefix for _x fields
+      ...(isODataField ? {
+        valueGetter: (p) => getODataValue(p.data, internal),
+        valueSetter: (p) => { setODataValue(p.data, internal, p.newValue); return true; },
+      } : {}),
     };
 
     // Width heuristics
@@ -306,7 +330,7 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
     const newVal = evt.newValue;
     const oldVal = evt.oldValue;
     if (newVal === oldVal) return;
-    const id = evt.data?.ID ?? evt.data?.Id;
+    const id = evt.data?.ID ?? evt.data?.Id ?? evt.data?.OData__ID ?? evt.data?.ID;
     if (!id) return;
     setDirty(prev => {
       const next = new Map(prev);
