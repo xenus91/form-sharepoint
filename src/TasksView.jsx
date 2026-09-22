@@ -30,7 +30,8 @@ import { useTasksMetadata } from "./features/tasks/hooks/useTasksMetadata";
 // import { useTasksFiltering } from "./features/tasks/hooks/useTasksFiltering";
 import TasksHeader from "./features/tasks/components/TasksHeader";
 import TasksTabs from "./features/tasks/components/TasksTabs";
-import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle"; // PR1 следующий шаг
+import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle";
+import { useHashElement } from "./features/tasks/hooks/useHashElement"; // PR1 следующий шаг
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
 import TaskList from "./features/tasks/components/TaskList";
@@ -197,299 +198,23 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [updatingId, setUpdatingId] = useState(null);
   const [updatingAction, setUpdatingAction] = useState(null); // take | found | notFound
 
-  // hash-роут элемента ProblemsPallet: #tasks/id=10
-  const [elementIdParam, setElementIdParam] = useState(() => initialElementId ? String(initialElementId) : null);
-  const [elementActionParam, setElementActionParam] = useState(() => initialElementAction || null);
-  const [elementDialogOpen, setElementDialogOpen] = useState(false);
-  const [elementLoading, setElementLoading] = useState(false);
-  const [elementTaskSearching, setElementTaskSearching] = useState(false);
-  const [isHashTaskRefreshing, setIsHashTaskRefreshing] = useState(false);
-  const [elementData, setElementData] = useState(null);
-  const [elementTaskMatch, setElementTaskMatch] = useState(null);
-  const [elementError, setElementError] = useState("");
-  const [elementNotFound, setElementNotFound] = useState(false);
-  const [autoTabAppliedForElement, setAutoTabAppliedForElement] = useState(false);
-
-  // PROBLEMS_LIST_TITLE и fetchProblemsPalletItem импортированы из "./tasks/problemsPallet".
-  // Map-индекс по задачам — O(1) lookup вместо O(n) JSON.stringify на каждом полле.
-  // Перестраивается только когда меняется tasks (useMemo ниже).
-  const taskIndex = useMemo(() => buildTaskIndex(tasks), [tasks]);
-  const findTaskByElementId = (allTasks, elementId) => {
-    // Сигнатура сохранена для обратной совместимости, но используем индекс
-    // (allTasks игнорируется — индекс берётся из текущего tasks).
-    return findInIndex(taskIndex, elementId);
-  };
-  // fetchProblemsPalletItem импортирован из "./tasks/problemsPallet".
-
-
-
-  // fields loading flag - no discovery, use GUID directly
-
-  // currentUser + Office/Department теперь в useCurrentUser (PR1)
-
-  // Синхронизация hash elementId/action из App.jsx
-  useEffect(() => {
-    if (initialElementId) setElementIdParam(String(initialElementId));
-    else setElementIdParam(null);
-  }, [initialElementId]);
-  useEffect(() => {
-    setElementActionParam(initialElementAction || null);
-  }, [initialElementAction]);
-
-  // distribution теперь в useDistribution (PR1)
-
-  // DBG: track fieldsLoading lifecycle
-  React.useEffect(()=>{ if(!__DBG_ENABLED__) return; __dlog("[DBG:TasksView] fieldsLoading", fieldsLoading, "resultFieldsMeta", resultFieldsMeta.length, resultFieldInternalNames); }, [fieldsLoading, resultFieldsMeta.length]);
-  // fieldsLoading + metadata теперь в useTasksMetadata (PR1)
-
-  // Для открытой задачи — свежие choices по ContentType, но не на каждый polling tasks (60с)
-  // Сравниваем dataUpdatedAt и троттлим 5 мин, чтобы не дёргать 2 тяжёлых запроса каждые 60с
-  const lastResultFieldsRefreshRef = React.useRef(0);
-  const prevTasksDataUpdatedAtRef = React.useRef(0);
-  useEffect(() => {
-    if (!tasks || tasks.length === 0) return;
-    if (tasksDataUpdatedAt === prevTasksDataUpdatedAtRef.current) return;
-    prevTasksDataUpdatedAtRef.current = tasksDataUpdatedAt;
-    const hasOpen = tasks.some((tk) => isInProgressStatus(tk.Status) && !isCompletedStatus(tk.Status, tk.PercentComplete));
-    if (!hasOpen) return;
-    const now = Date.now();
-    if (now - lastResultFieldsRefreshRef.current < 5 * 60 * 1000) return;
-    // Проверяем, есть ли новые ContentTypeId, которых нет в кэше — только тогда forceRefresh
-    const hasNewCt = tasks.some((tk) => {
-      const ctId = tk.ContentTypeId || tk.raw?.ContentTypeId || tk.raw?.ContentTypeId?.StringId;
-      const strId = typeof ctId === "string" ? ctId : ctId?.StringId;
-      if (!strId) return false;
-      return !ctResultMap.has(strId) && !ctResultMap.has("__default") && ctResultMap.size > 0;
-    });
-    const needForce = hasNewCt;
-    lastResultFieldsRefreshRef.current = now;
-    let cancelled = false;
-    (async () => {
-      try {
-        const metas = await fetchResultFieldsMeta(apiClient, { forceRefresh: needForce });
-        if (cancelled) return;
-        setResultFieldsMeta(metas);
-        const map = await fetchContentTypeResultMap(apiClient, { forceRefresh: needForce });
-        if (cancelled) return;
-        setCtResultMap(map);
-        if (metas.length > 0 && metas[0].choices?.length) {
-          const fresh = metas[0].choices;
-          setChoices((prev) => {
-            if (fresh.length !== prev.length || fresh.some((v,i)=> v!==prev[i])) return fresh;
-            return prev;
-          });
-        }
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [tasks, tasksDataUpdatedAt, ctResultMap]);
-
-    // eslint-disable-next-line no-unused-vars
-  const loadTasks = useCallback(async (_opts={})=>{
-    // совместимость: все старые вызовы loadTasks({silent:true}) теперь — invalidate + refetch через TanStack
-    await queryClient.invalidateQueries({ queryKey: ['tasks'] });
-    invalidate("/items");
-    const res = await refetchTasks();
-    return res.data;
-  }, [queryClient, refetchTasks]);
-
-  // onCountChange + expandedGroups — теперь через эффект от tasks (раньше было внутри loadTasks)
-  useEffect(() => {
-    if (!tasksData) return;
-    if (onCountChange) {
-      const activeCount = tasks.filter((t)=> !isCompletedStatus(t.Status, t.PercentComplete)).length;
-      onCountChange(activeCount);
-    }
-    const newGroups = new Set(tasks.map((m)=> extractTKNumberFromTask(m)));
-    setExpandedGroups((prev)=>{
-      if (prev.size===0) return newGroups;
-      let changed=false;
-      const next=new Set(prev);
-      newGroups.forEach((g)=>{ if(!prev.has(g)){ next.add(g); changed=true; }});
-      return changed? next: prev;
-    });
-  }, [tasksData, tasks]);
-
-  // initial load — handled by TanStack Query (tasksQueryEnabled); loadTasks is now invalidate+refetch
-
-  // (poll перенесён ниже, после isHashMode — чтобы в hash-режиме не скрывать карточку)
-
-  // mapRawTask, fetchFullTask, searchTaskByRelatedItem импортированы из ./tasks/* —
-  // см. mapRawTask (./tasks/mapping), fetchFullTask + searchTaskByRelatedItem (./tasks/hashSearch).
-
-  // Hash элемент: найти связанную задачу и показать диалог (улучшенный глобальный поиск)
-  useEffect(() => {
-    if (!elementIdParam) {
-      setElementDialogOpen(false);
-      setElementData(null);
-      setElementTaskMatch(null);
-      setElementError("");
-      setElementNotFound(false);
-      setAutoTabAppliedForElement(false);
-      setElementLoading(false);
-      setElementTaskSearching(false);
-      setIsHashTaskRefreshing(false);
-      return;
-    }
-    let cancelled = false;
-    const run = async () => {
-      HASH_LOG("hash run triggered", {elementIdParam, tasksLen: tasks.length, elementTaskMatch: elementTaskMatch?.Id, elementLoading, elementTaskSearching, distribution: distribution? getGroupIdsFromDistribution(distribution): null, currentUserId});
-      // avoid reload loop: if already have result, don't re-trigger on every tasks poll
-      if (elementTaskMatch && !elementLoading && !elementTaskSearching) {
-        if (tasks.length > 0) {
-          const stillMatched = findTaskByElementId(tasks, elementIdParam);
-          if (stillMatched && stillMatched.Id === elementTaskMatch.Id) { HASH_LOG("guard: same task still matched, skip"); return; }
-          // if still matched is null but we already have a global match, keep it (global search already done)
-          if (elementTaskMatch && !stillMatched) { HASH_LOG("guard: keep global match, skip"); return; }
-        } else {
-          HASH_LOG("guard: tasks empty but have match, skip");
-          return;
-        }
-      }
-      if (elementLoading || elementTaskSearching) { HASH_LOG("guard: already loading/searching, skip"); return; }
-      // dedup: if already searched and not found, don't spam
-      if (elementNotFound || elementError) {
-        // but check if tasks now contain it (maybe tasks loaded later)
-        if (tasks.length > 0) {
-          const localCheck = findTaskByElementId(tasks, elementIdParam);
-          if (!localCheck) { HASH_LOG("guard: already notFound/error, no local task, skip re-search"); return; }
-          HASH_LOG("guard: notFound but local now found, will retry");
-        } else {
-          HASH_LOG("guard: already notFound/error, skip");
-          return;
-        }
-      }
-      const isThu = /^\d{17,18}$/.test(String(elementIdParam).trim());
-      HASH_LOG("hash run params", {isThu, elementIdParam, tasksLen: tasks.length});
-      let matched = null;
-      if (tasks.length > 0) {
-        matched = findTaskByElementId(tasks, elementIdParam);
-        HASH_LOG("local findTaskByElementId", matched? `found #${matched.Id}` : "not found in local tasks");
-      } else {
-        HASH_LOG("local tasks empty, skip local search");
-      }
-      // если не нашли среди фильтрованных — пробуем глобальный поиск (без AssignedTo)
-      let elementDataLocal = null;
-      let _globalMatched = null; // eslint-disable-line no-unused-vars
-      // сначала грузим элемент (если не THU) чтобы получить THU для поиска по THU
-      if (!isThu) {
-        HASH_LOG("fetchProblemsPalletItem will start, set loading true");
-        setElementLoading(true);
-        setElementError("");
-        setElementNotFound(false);
-        try {
-          const d = await fetchProblemsPalletItem(elementIdParam);
-          if (!cancelled) {
-            elementDataLocal = d;
-            setElementData(d);
-          }
-        } catch (e) {
-          const st = e?.response?.status;
-          if (!cancelled) {
-            if (st === 404) {
-              setElementNotFound(true);
-              setElementError(`Элемент ProblemsPallet #${elementIdParam} не найден`);
-            } else {
-              setElementError(e?.response?.data?.error?.message?.value || e?.message || "Не удалось загрузить элемент ProblemsPallet");
-            }
-          }
-        } finally {
-          // всегда сбрасываем лоадер, даже если эффект отменён — иначе зависнет
-          if (matched) {
-            setElementLoading(false);
-          } else {
-            setElementTaskSearching(true);
-            setElementLoading(false);
-          }
-          HASH_LOG("finally after fetchProblemsPalletItem", {cancelled, matched: matched? matched.Id: null, loading: false, searching: true});
-        }
-        if (cancelled) { HASH_LOG("cancelled after fetch, abort"); setElementTaskSearching(false); return; }
-        HASH_LOG("after fetch elementDataLocal", elementDataLocal, "matched before search", matched? matched.Id: null);
-        // если локально не нашли — ищем заново по RelatedItems.ItemId (простой OData + CAML фолбэк)
-        if (!matched && !cancelled) {
-          HASH_LOG("local not found, will searchTaskByRelatedItem");
-          try {
-            const found = await searchTaskByRelatedItem(elementIdParam);
-            HASH_LOG("searchTaskByRelatedItem result", found? `found #${found.Id} Title:${found.Title}` : "null");
-            if (found && !cancelled) matched = found;
-          } catch (e) {
-            HASH_WARN("searchTaskByRelatedItem failed", e?.message, e);
-          } finally {
-            if (!cancelled) setElementTaskSearching(false);
-          }
-        } else {
-          HASH_LOG("skip searchTaskByRelatedItem, matched already", matched? matched.Id: "null");
-        }
-        if (!cancelled) {
-          HASH_LOG("final setElementTaskMatch", matched? `found #${matched.Id}`: "null", "elementData", elementDataLocal? elementDataLocal.Id: null);
-          setElementTaskMatch(matched || null);
-          if (!matched) {
-            HASH_WARN("final: no task found for", elementIdParam, "tasks len", tasks.length, "elementDataLocal", elementDataLocal);
-            setElementNotFound(true);
-            if (!elementError) setElementError(`Связанная задача для элемента #${elementIdParam} не найдена (RelatedItems.ItemId)`);
-          }
-          if (matched && !autoTabAppliedForElement) {
-            const isComp = isCompletedStatus(matched.Status, matched.PercentComplete);
-            const targetTab = isComp ? 1 : 0;
-            if (tab !== targetTab) {
-              startTabTransition(() => setTab(targetTab));
-            }
-            setAutoTabAppliedForElement(true);
-          }
-        }
-      } else {
-        HASH_LOG("THU branch", elementIdParam);
-        // THU — если локально не нашли, ищем по RelatedItems/THU
-        if (!matched && !cancelled) {
-          HASH_LOG("THU local not found, search");
-          if (!cancelled) setElementTaskSearching(true);
-          try {
-            const found = await searchTaskByRelatedItem(elementIdParam);
-            HASH_LOG("THU search result", found? found.Id: null);
-            if (found && !cancelled) matched = found;
-          } catch (e) { HASH_WARN("THU search failed", e); } finally {
-            if (!cancelled) setElementTaskSearching(false);
-          }
-        }
-        if (!cancelled) {
-          HASH_LOG("THU final", matched? matched.Id: null);
-          setElementData(null);
-          setElementLoading(false);
-          setElementTaskMatch(matched || null);
-          if (matched && !autoTabAppliedForElement) {
-            const isComp = isCompletedStatus(matched.Status, matched.PercentComplete);
-            const targetTab = isComp ? 1 : 0;
-            if (tab !== targetTab) startTabTransition(() => setTab(targetTab));
-            setAutoTabAppliedForElement(true);
-          }
-          if (!matched) {
-            setElementError(`Задача для ЕО ${elementIdParam} не найдена среди ваших задач`);
-          }
-        }
-      }
-    };
-    run();
-    return () => { cancelled = true; };
-  }, [elementIdParam, distribution, currentUserId]); // tasks убран намеренно — ищем via CAML/OData, иначе storm cancellations
-  // авто-таб отдельно
-  useEffect(() => {
-    if (elementTaskMatch && !autoTabAppliedForElement) {
-      const isComp = isCompletedStatus(elementTaskMatch.Status, elementTaskMatch.PercentComplete);
-      const targetTab = isComp ? 1 : 0;
-      if (tab !== targetTab) startTabTransition(() => setTab(targetTab));
-       
-    }
-  }, [elementTaskMatch, autoTabAppliedForElement, tab]);
-
-  // лог hash param change
-  useEffect(() => { HASH_LOG("hash params changed", {elementIdParam, elementActionParam, tasksLen: tasks.length, loading: elementLoading, searching: elementTaskSearching}); }, [elementIdParam, elementActionParam]);
-
-  useEffect(() => {
-    HASH_LOG("autoTab reset for", elementIdParam);
-    setAutoTabAppliedForElement(false);
-  }, [elementIdParam]);
-
-  const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete)).length, [tasks]);
+  // PR2: hash-роут вынесен в useHashElement (RelatedItems 1→1, CAML+OData, guards)
+  const {
+    elementIdParam, setElementIdParam,
+    elementActionParam, setElementActionParam,
+    elementDialogOpen, setElementDialogOpen,
+    elementLoading, setElementLoading,
+    elementTaskSearching, setElementTaskSearching,
+    isHashTaskRefreshing, setIsHashTaskRefreshing,
+    elementData, setElementData,
+    elementTaskMatch, setElementTaskMatch,
+    elementError, setElementError,
+    elementNotFound, setElementNotFound,
+    autoTabAppliedForElement, setAutoTabAppliedForElement,
+    taskIndex, findTaskByElementId,
+    isHashMode,
+  } = useHashElement({ initialElementId, initialElementAction, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
+const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete)).length, [tasks]);
   const completedCount = useMemo(() => tasks.filter((t) => isCompletedStatus(t.Status, t.PercentComplete)).length, [tasks]);
 
   const filteredTasks = useMemo(() => {
@@ -1232,7 +957,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     }
   };
 
-  const isHashMode = !!elementIdParam;
+  // isHashMode from useHashElement
 
   // в hash-режиме — фоновое обновление только найденной задачи (без скрытия карточки, маленький лоадер в углу)
   // хуки до раннего return, иначе нарушение Rules of Hooks — с троттлингом focus 30с и диффом против мигания
