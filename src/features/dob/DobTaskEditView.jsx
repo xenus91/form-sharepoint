@@ -271,11 +271,9 @@ export default function DobTaskEditView({ id }) {
                     key={a.FileName || a.ServerRelativeUrl}
                     label={a.FileName}
                     size="small"
-                    component="a"
-                    href={href}
-                    target="_blank"
                     clickable
-                    onDelete={()=> handleDeleteAttachment(a.FileName)}
+                    onClick={() => { if (href) window.open(href, '_blank'); }}
+                    onDelete={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteAttachment(a.FileName); }}
                     deleteIcon={<Tooltip title="Удалить вложение"><DeleteIcon fontSize="small" /></Tooltip>}
                     sx={{ maxWidth: 220 }}
                   />

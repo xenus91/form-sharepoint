@@ -149,25 +149,42 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
           setInternalUploading(true);
           let pending = images.length;
           const done = () => { pending--; if (pending<=0) setInternalUploading(false); };
+          const readAsBase64 = (file) => new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          });
           images.forEach(item => {
             const file = item.getAsFile();
-            if (file && onUploadImage) {
-              (async () => {
-                try {
-                  const url = await onUploadImage(file);
-                  if (url && editor) editor.chain().focus().setImage({ src: url, alt: file.name }).run();
-                } catch (e) { console.error('paste upload failed', e); }
-                finally { done(); }
-              })();
-            } else if (file && editor) {
-              const reader = new FileReader();
-              reader.onload = () => {
-                editor.chain().focus().setImage({ src: reader.result, alt: file.name }).run();
-                done();
-              };
-              reader.onerror = () => done();
-              reader.readAsDataURL(file);
-            } else { done(); }
+            if (!file) { done(); return; }
+            (async () => {
+              try {
+                // 1) сразу показываем base64 превью — не битая картинка
+                const base64 = await readAsBase64(file);
+                if (base64 && editor) {
+                  editor.chain().focus().setImage({ src: base64, alt: file.name }).run();
+                }
+                // 2) грузим на сервер и подменяем src на готовый URL
+                if (onUploadImage) {
+                  const finalUrl = await onUploadImage(file);
+                  if (finalUrl && base64 && editor) {
+                    // заменить base64 на finalUrl в HTML (надёжно для TipTap)
+                    try {
+                      const html = editor.getHTML();
+                      if (html.includes(base64)) {
+                        const newHtml = html.split(base64).join(finalUrl);
+                        editor.commands.setContent(newHtml, false);
+                      } else {
+                        // fallback: просто обновить последний image
+                        editor.chain().focus().updateAttributes('image', { src: finalUrl }).run();
+                      }
+                    } catch {}
+                  }
+                }
+              } catch (e) { console.error('paste upload failed', e); }
+              finally { done(); }
+            })();
           });
           return true;
         }
@@ -181,12 +198,31 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
             setInternalUploading(true);
             let pending = files.length;
             const done = () => { pending--; if (pending<=0) setInternalUploading(false); };
+            const readAsBase64 = (file) => new Promise((res, rej) => {
+              const r = new FileReader();
+              r.onload = () => res(r.result);
+              r.onerror = rej;
+              r.readAsDataURL(file);
+            });
             files.forEach(async (file) => {
               try {
-                const url = onUploadImage ? await onUploadImage(file) : URL.createObjectURL(file);
-                if (url && editor) {
-                  const { pos } = view.posAtCoords({ left: event.clientX, top: event.clientY }) || { pos: view.state.selection.from };
-                  editor.chain().focus().setTextSelection(pos).setImage({ src: url, alt: file.name }).run();
+                const base64 = await readAsBase64(file);
+                const posObj = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                const pos = posObj ? posObj.pos : view.state.selection.from;
+                if (base64 && editor) {
+                  editor.chain().focus().setTextSelection(pos).setImage({ src: base64, alt: file.name }).run();
+                }
+                if (onUploadImage) {
+                  const finalUrl = await onUploadImage(file);
+                  if (finalUrl && base64 && editor) {
+                    const html = editor.getHTML();
+                    if (html.includes(base64)) {
+                      const newHtml = html.split(base64).join(finalUrl);
+                      editor.commands.setContent(newHtml, false);
+                    }
+                  }
+                } else if (base64 && editor) {
+                  // if no upload, keep base64 (already inserted)
                 }
               } catch (e) { console.error('drop upload failed', e); }
               finally { done(); }
@@ -225,13 +261,29 @@ export default function RichEditor({ value, onChange, onUploadImage, readOnly = 
       const files = Array.from(input.files || []);
       if (files.length===0) return;
       setInternalUploading(true);
+      const readAsBase64 = (file) => new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
       try {
         for (const file of files) {
           try {
-            let url = null;
-            if (onUploadImage) url = await onUploadImage(file);
-            else url = URL.createObjectURL(file);
-            if (url) editor.chain().focus().setImage({ src: url, alt: file.name }).run();
+            // 1) base64 превью сразу
+            const base64 = await readAsBase64(file);
+            if (base64) editor.chain().focus().setImage({ src: base64, alt: file.name }).run();
+            // 2) upload и замена
+            if (onUploadImage) {
+              const finalUrl = await onUploadImage(file);
+              if (finalUrl && base64) {
+                const html = editor.getHTML();
+                if (html.includes(base64)) {
+                  const newHtml = html.split(base64).join(finalUrl);
+                  editor.commands.setContent(newHtml, false);
+                }
+              }
+            }
           } catch (e) { console.error('image upload failed', e); }
         }
       } finally { setInternalUploading(false); }
