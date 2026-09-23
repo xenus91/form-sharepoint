@@ -37,8 +37,6 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
-  AppBar,
-  Toolbar,
 } from "@mui/material";
 import ButtonGroup from "@mui/material/ButtonGroup";
 import { useDropzone } from "react-dropzone";
@@ -63,7 +61,6 @@ import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import MenuIcon from "@mui/icons-material/Menu";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import HomeIcon from "@mui/icons-material/Home";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import AssignmentIcon from "@mui/icons-material/Assignment";
@@ -1798,16 +1795,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const isDobEdit = !!hashElementId && /^\d+$/.test(String(hashElementId));
     return (
       <ThemeProvider theme={figmaTheme}>
-        {!isDobEdit && (
-        <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1200, bgcolor: 'rgba(255,255,255,.96)', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)', backdropFilter: 'blur(10px)' }}>
-          <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: 1, sm: 1.5 }, gap: 1 }}>
-            <IconButton onClick={() => setDrawerOpen(true)} size="small" sx={{ color: '#171c8f', borderRadius: 1 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
-            {isDobEdit && <IconButton onClick={() => { window.location.hash = "#dob_tasks"; setHashElementId(null); }} size="small" sx={{ color: '#171c8f', borderRadius: 1 }} aria-label="К списку"><ArrowBackIcon fontSize="small" /></IconButton>}
-            <Typography variant="subtitle1" sx={{ fontWeight: 800, letterSpacing: '-.01em' }}>Заявки ДОБ</Typography>
-            <Typography variant="caption" color="text.secondary" sx={{ display: { xs: 'none', sm: 'block' } }}>{isDobEdit ? `Заявка #${hashElementId}` : 'Список заявок'}</Typography>
-          </Toolbar>
-        </AppBar>
-        )}
+        {/* The list view renders its own AppBar inside DobTasksView.
+            The edit view renders its own AppBar inside DobTaskEditView. */}
         <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)} PaperProps={{ sx: { width: 280, bgcolor: "rgba(255,255,255,0.92)", backdropFilter: "blur(16px)", borderRight: "1px solid rgba(23,28,143,0.1)" } }}>
           <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
@@ -1823,9 +1812,11 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </List>
           <Box sx={{ flex: 1 }} /><Divider /><Box sx={{ p: 2 }}><Typography variant="caption" color="text.secondary">{userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}</Typography></Box>
         </Drawer>
-        <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+        <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: { xs: 'auto', md: 'calc(100vh - 0px)' }, overflowX: 'hidden' }}>
           <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
-            {isDobEdit ? <DobTaskEditView id={String(hashElementId)} onOpenMenu={() => setDrawerOpen(true)} /> : <DobTasksView />}
+            {isDobEdit
+              ? <DobTaskEditView id={String(hashElementId)} onOpenMenu={() => setDrawerOpen(true)} />
+              : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} />}
           </React.Suspense>
         </Box>
       </ThemeProvider>

@@ -1,60 +1,68 @@
 // src/features/dob/components/DobGrid.jsx
-// AG Grid wrapper for DOB list — dynamic columns from fields metadata, inline edit + save
-import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
+// AG Grid (Community) wrapper for the DOB list — dynamic columns from fields
+// metadata, inline edit + queue dirty rows. Header uses AG Grid's default
+// `headerComponentParams.template` so every header shows the filter icon
+// (`eFilterButton`) + more icon (`eMenu`) the way the AG Grid Theme Builder
+// example does; sort still works on click but no sort icons are rendered.
+// The grid fills the remaining viewport height after the sticky AppBar.
+import PropTypes from 'prop-types';
+import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import { ModuleRegistry, AllCommunityModule, themeQuartz } from 'ag-grid-community';
-ModuleRegistry.registerModules([AllCommunityModule]);
+import {
+  ModuleRegistry,
+  AllCommunityModule,
+  themeQuartz,
+  ClientSideRowModelModule,
+  TextFilterModule,
+  NumberFilterModule,
+  DateFilterModule,
+  CustomFilterModule,
+  ColumnApiModule,
+  ColumnHoverModule,
+  CsvExportModule,
+} from 'ag-grid-community';
+import { Box, CircularProgress, Typography, Alert } from '@mui/material';
+import { useDobListState } from '../state/DobListStateContext';
 
+ModuleRegistry.registerModules([
+  AllCommunityModule,
+  ClientSideRowModelModule,
+  TextFilterModule,
+  NumberFilterModule,
+  DateFilterModule,
+  CustomFilterModule,
+  ColumnApiModule,
+  ColumnHoverModule,
+  CsvExportModule,
+]);
 
-import { Box, Button, Chip, CircularProgress, Typography, Alert, Tooltip, TextField, Menu, MenuItem, Checkbox, ListItemText, IconButton, Divider } from '@mui/material';
-import SaveIcon from '@mui/icons-material/Save';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import { updateDobItem } from '../api/dobApi';
-import { useNotifications } from '../../../NotificationsProvider';
+// ---------- helpers (preserved from the previous implementation) ----------
 
 // SharePoint REST returns _x fields as OData__x... (with OData__ prefix), while fields metadata uses _x... without prefix
 function getODataValue(row, internal) {
   if (!row || !internal) return undefined;
   if (row[internal] !== undefined) return row[internal];
-  const odata = 'OData_' + internal; // some lists use OData_ (single _)
+  const odata = 'OData_' + internal;
   if (row[odata] !== undefined) return row[odata];
-  const odata2 = 'OData__' + internal; // most 2013 lists use OData__
+  const odata2 = 'OData__' + internal;
   if (row[odata2] !== undefined) return row[odata2];
-  // also try without leading _ (SP sometimes strips)
   if (internal.startsWith('_') && row[internal.slice(1)] !== undefined) return row[internal.slice(1)];
   return undefined;
 }
 function setODataValue(row, internal, value) {
-  // keep both for display consistency
   row[internal] = value;
   row['OData__' + internal] = value;
   row['OData_' + internal] = value;
 }
 
-// Helpers
 function isEditableField(f) {
   if (!f) return false;
   if (f.ReadOnlyField) return false;
   if (f.Hidden) return false;
   const t = (f.TypeAsString || '').toLowerCase();
-  if (['calculated','computed','counter','contenttypeid','lookup','attachments','file','guid','integer','modstat','integer'].includes(t)) return false;
-  // keep calculated readOnly
+  if (['calculated', 'computed', 'counter', 'contenttypeid', 'lookup', 'attachments', 'file', 'guid', 'integer', 'modstat'].includes(t)) return false;
   if (t === 'calculated' || t === 'computed' || t === 'lookup') return false;
   return true;
-}
-
-function mapTypeToEditor(f) {
-  const t = (f.TypeAsString || '').toLowerCase();
-  if (t === 'choice') return 'agSelectCellEditor';
-  if (t === 'boolean') return 'agCheckboxCellEditor';
-  if (t === 'number' || t === 'currency' || t === 'integer') return 'agNumberCellEditor';
-  if (t === 'datetime') return 'agDateStringCellEditor';
-  if (t === 'note') return 'agLargeTextCellEditor';
-  return 'agTextCellEditor';
 }
 
 function htmlToCellText(value) {
@@ -63,23 +71,28 @@ function htmlToCellText(value) {
   try {
     const doc = new DOMParser().parseFromString(raw, 'text/html');
     let text = doc.body.textContent || '';
-    // Some SharePoint fields contain HTML encoded once (for example &lt;div&gt;...).
     if (/<\/?[a-z][^>]*>/i.test(text)) {
       text = new DOMParser().parseFromString(text, 'text/html').body.textContent || text;
     }
     return text.replace(/[\u200b\u200c\ufeff]/g, '').replace(/\s+/g, ' ').trim();
-  } catch { return raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
+  } catch {
+    return raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
 }
+
+// ---------- column definitions ----------
 
 function buildColumnDefs(fields) {
   if (!fields || fields.length === 0) return [];
-  // Динамический whitelist — берём все поля, которые реально вернулись из /fields (полные InternalName, без усечений)
-  // Хардкод truncated _x... удалён — иначе не найдётся _x0414__x0430__x0442__x0430__x0020__x... (Дата запроса)
-  const systemSkip = new Set(['File_x0020_Type','ComplianceAssetId','LinkTitle','LinkTitleNoMenu','PermMask','MetaInfo','FileRef','FileDirRef','FileLeafRef','ContentType','ContentTypeId','_UIVersionString','DocIcon','ItemChildCount','FolderChildCount','ContentTypeId','OData__ContentTypeId']);
-  // Приоритетный порядок — ID/Title первые, затем остальные в порядке как пришли из SharePoint, но Calculated/ReadOnly тоже показываем
+  const systemSkip = new Set([
+    'File_x0020_Type', 'ComplianceAssetId', 'LinkTitle', 'LinkTitleNoMenu', 'PermMask',
+    'MetaInfo', 'FileRef', 'FileDirRef', 'FileLeafRef', 'ContentType', 'ContentTypeId',
+    '_UIVersionString', 'DocIcon', 'ItemChildCount', 'FolderChildCount',
+    'OData__ContentTypeId',
+  ]);
   const ordered = [];
-  const priority = ['ID','Title'];
-  const fieldMap = new Map(fields.map(f=> [f.InternalName, f]));
+  const priority = ['ID', 'Title'];
+  const fieldMap = new Map(fields.map((f) => [f.InternalName, f]));
   for (const name of priority) {
     const f = fieldMap.get(name);
     if (f) ordered.push(f);
@@ -89,15 +102,11 @@ function buildColumnDefs(fields) {
     if (f.Hidden) continue;
     if (f.InternalName === 'ChekResult' || /chekresult/i.test(f.InternalName || '') || /результат.*провер/i.test(f.Title || '')) continue;
     if (systemSkip.has(f.InternalName)) continue;
-    if (f.InternalName === 'ContentType' || f.Title === 'Тип контента' || (f.Title||'').toLowerCase().includes('тип контента')) continue;
-    // Пропускаем только явные системные, остальные показываем (включая Calculated, но они будут readOnly ниже)
-    // Для Calculated/Computed/ReadOnlyField — показываем, но editable=false
-    // Для остальных — показываем если тип известный
-    const t = (f.TypeAsString||'').toLowerCase();
-    if (['calculated','computed','text','choice','number','currency','datetime','note','boolean','url','user','integer','counter'].includes(t) || f.InternalName==='Attachments' || f.InternalName==='UserFail' || f.InternalName==='ChekResult') {
+    if (f.InternalName === 'ContentType' || f.Title === 'Тип контента' || (f.Title || '').toLowerCase().includes('тип контента')) continue;
+    const t = (f.TypeAsString || '').toLowerCase();
+    if (['calculated', 'computed', 'text', 'choice', 'number', 'currency', 'datetime', 'note', 'boolean', 'url', 'user', 'integer', 'counter'].includes(t) || f.InternalName === 'Attachments' || f.InternalName === 'UserFail' || f.InternalName === 'ChekResult') {
       ordered.push(f);
     } else if (!f.Hidden && !systemSkip.has(f.InternalName)) {
-      // fallback — покажем любые не-hidden, чтобы не потерять поля с новыми типами
       ordered.push(f);
     }
   }
@@ -109,7 +118,7 @@ function buildColumnDefs(fields) {
     const t = (f.TypeAsString || '').toLowerCase();
     const editable = isEditableField(f);
     const isCalculated = t === 'calculated' || t === 'computed';
-    // Special handling for Author/Editor/UserFail
+
     if (internal === 'Author' || internal === 'Editor') {
       cols.push({
         field: internal,
@@ -120,7 +129,6 @@ function buildColumnDefs(fields) {
           const v = p.data?.[internal];
           if (v && typeof v === 'object' && v.Title) return v.Title;
           if (p.data?.[internal]?.Title) return p.data[internal].Title;
-          // fallback to expanded
           return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
         },
         cellStyle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
@@ -139,19 +147,18 @@ function buildColumnDefs(fields) {
           if (v && typeof v === 'object') return v.Title || v.Name || '';
           return p.data?.['UserFail/Title'] || p.data?.UserFailTitle || p.data?.['UserFailId'] || '';
         },
+        filter: 'agTextColumnFilter',
       });
       continue;
     }
-    if ((f.TypeAsString||'').toLowerCase()==='user') {
-      // dedup: if this is duplicate of Author/Editor by title (кем создано/кем изменено), skip
-      const lowTitle = (title||'').toLowerCase();
+    if ((f.TypeAsString || '').toLowerCase() === 'user') {
+      const lowTitle = (title || '').toLowerCase();
       const isDupAuthor = lowTitle.includes('кем создано') || lowTitle.includes('создал') || lowTitle === 'автор';
       const isDupEditor = lowTitle.includes('кем измен') || lowTitle.includes('изменил') || lowTitle.includes('изменено');
-      if ((isDupAuthor && cols.some(c=> c.field==='Author')) || (isDupEditor && cols.some(c=> c.field==='Editor'))) {
+      if ((isDupAuthor && cols.some((c) => c.field === 'Author')) || (isDupEditor && cols.some((c) => c.field === 'Editor'))) {
         continue;
       }
-      // also dedup by internal already having same title
-      if (cols.some(c=> (c.headerName||'').toLowerCase() === lowTitle && c.field !== internal)) {
+      if (cols.some((c) => (c.headerName || '').toLowerCase() === lowTitle && c.field !== internal)) {
         continue;
       }
       cols.push({
@@ -175,12 +182,12 @@ function buildColumnDefs(fields) {
         headerName: 'Вложения',
         width: 100,
         editable: false,
-        valueGetter: (p)=> p.data?.Attachments ? 'Да' : 'Нет',
-        cellStyle: (p)=> p.value==='Да' ? { color: '#2e7d32', fontWeight:700 } : { color:'rgba(0,0,0,0.45)' }
+        valueGetter: (p) => (p.data?.Attachments ? 'Да' : 'Нет'),
+        cellStyle: (p) => (p.value === 'Да' ? { color: '#2e7d32', fontWeight: 700 } : { color: '#9aa0b4' }),
+        filter: 'agTextColumnFilter',
       });
       continue;
     }
-    // ChekResult is edited in the dedicated rich-text editor, not in the list grid.
     if (internal === 'ChekResult' || internal === '_x041a__x043e__x043c__x04') continue;
 
     const isODataField = internal.startsWith('_x');
@@ -190,17 +197,21 @@ function buildColumnDefs(fields) {
       flex: 1,
       minWidth: 120,
       editable: editable && !isCalculated,
-      headerTooltip: `${internal} — ${f.TypeAsString}${f.Description ? ' | '+String(f.Description).slice(0,80) : ''}`,
-      tooltipValueGetter: (p)=> p.value ? String(p.value).slice(0, 120) : '',
-      // type-specific — handle OData__ prefix for _x fields
-      ...(isODataField ? {
-        valueGetter: (p) => getODataValue(p.data, internal),
-        valueSetter: (p) => { setODataValue(p.data, internal, p.newValue); return true; },
-      } : {}),
+      headerTooltip: `${internal} — ${f.TypeAsString}${f.Description ? ' | ' + String(f.Description).slice(0, 80) : ''}`,
+      tooltipValueGetter: (p) => (p.value ? String(p.value).slice(0, 120) : ''),
+      ...(isODataField
+        ? {
+            valueGetter: (p) => getODataValue(p.data, internal),
+            valueSetter: (p) => {
+              setODataValue(p.data, internal, p.newValue);
+              return true;
+            },
+          }
+        : {}),
     };
-    if (['text', 'note', 'url'].includes(t)) col.valueFormatter = p => htmlToCellText(p.value);
 
-    // Width heuristics
+    if (['text', 'note', 'url'].includes(t)) col.valueFormatter = (p) => htmlToCellText(p.value);
+
     if (t === 'note') col.width = 220;
     else if (t === 'choice') col.width = 170;
     else if (t === 'text' && title.includes('Комментар')) col.width = 220;
@@ -213,48 +224,55 @@ function buildColumnDefs(fields) {
       const rawChoices = Array.isArray(f.Choices) ? f.Choices : (f.Choices?.results || f.Choices?.Results || []);
       const vals = (rawChoices || []).filter(Boolean);
       col.cellEditor = 'agSelectCellEditor';
-      col.cellEditorParams = { values: vals.length ? vals : [''] , valueListGap: 0 };
+      col.cellEditorParams = { values: vals.length ? vals : [''], valueListGap: 0 };
       col.filter = 'agTextColumnFilter';
       col.cellStyle = { background: 'rgba(255,255,255,0.02)' };
-      if (internal === '_x043e__x0441__x043d__x043e__x04') { // Основание required
-        col.cellStyle = (p)=> ({ background: !p.value ? 'rgba(229,57,53,0.08)' : undefined, borderLeft: p.value ? undefined : '3px solid #e53935' });
+      if (internal === '_x043e__x0441__x043d__x043e__x04') {
+        col.cellStyle = (p) => ({
+          background: !p.value ? 'rgba(229,57,53,0.08)' : undefined,
+          borderLeft: p.value ? undefined : '3px solid #e53935',
+        });
       }
     } else if (t === 'boolean') {
-      col.cellRenderer = (p) => p.value ? '☑ Да' : '☐ Нет';
+      col.cellRenderer = (p) => (p.value ? '☑ Да' : '☐ Нет');
       col.cellEditor = 'agCheckboxCellEditor';
       col.filter = 'agTextColumnFilter';
       col.valueGetter = (p) => {
         const raw = p.data?.[internal];
-        if (raw === true || raw === 1 || raw === '1' || String(raw).toLowerCase()==='true') return true;
+        if (raw === true || raw === 1 || raw === '1' || String(raw).toLowerCase() === 'true') return true;
         return false;
       };
-      col.valueSetter = (p) => { p.data[internal] = p.newValue ? true : false; return true; };
+      col.valueSetter = (p) => {
+        p.data[internal] = p.newValue ? true : false;
+        return true;
+      };
     } else if (t === 'datetime') {
-      // SharePoint returns /Date(…) or ISO
       col.valueFormatter = (p) => {
         const v = p.value;
         if (!v) return '';
         try {
           let d;
           if (typeof v === 'string' && v.startsWith('/Date(')) {
-            const ms = parseInt(v.replace(/[^0-9]/g,''),10);
+            const ms = parseInt(v.replace(/[^0-9]/g, ''), 10);
             d = new Date(ms);
           } else {
             d = new Date(v);
           }
-          if (isNaN(d)) return String(v).slice(0,10);
+          if (isNaN(d)) return String(v).slice(0, 10);
           return d.toLocaleDateString('ru-RU');
-        } catch { return String(v).slice(0,10); }
+        } catch {
+          return String(v).slice(0, 10);
+        }
       };
       col.cellEditor = 'agDateStringCellEditor';
       col.filter = 'agDateColumnFilter';
       col.valueParser = (p) => {
-        // input dd.MM.yyyy or yyyy-mm-dd
         const s = String(p.newValue || '').trim();
         if (!s) return null;
         if (/^\d{4}-\d{2}-\d{2}/.test(s)) return new Date(s).toISOString();
         if (/^\d{1,2}\.\d{1,2}\.\d{4}/.test(s)) {
-          const [d,m,y]=s.split('.'); return new Date(`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T00:00:00Z`).toISOString();
+          const [d, m, y] = s.split('.');
+          return new Date(`${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}T00:00:00Z`).toISOString();
         }
         return s;
       };
@@ -263,39 +281,40 @@ function buildColumnDefs(fields) {
       col.cellEditor = 'agNumberCellEditor';
       col.valueFormatter = (p) => {
         const v = p.value;
-        if (v==null || v==='') return '';
+        if (v == null || v === '') return '';
         const n = Number(v);
         if (isNaN(n)) return String(v);
-        if (t==='currency') return n.toLocaleString('ru-RU', { minimumFractionDigits:2, maximumFractionDigits:2 });
+        if (t === 'currency') return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         return String(n);
       };
       col.valueParser = (p) => {
-        const s = String(p.newValue).replace(',','.');
+        const s = String(p.newValue).replace(',', '.');
         const n = Number(s);
         return isNaN(n) ? null : n;
       };
       col.cellStyle = { textAlign: 'right' };
     } else if (t === 'text' || t === 'note' || t === 'url') {
       col.filter = 'agTextColumnFilter';
-      col.cellEditor = t==='note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
+      col.cellEditor = t === 'note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
     } else {
       col.filter = 'agTextColumnFilter';
     }
+
     if (isCalculated) {
       col.editable = false;
-      col.cellStyle = { background: 'rgba(0,0,0,0.03)', color: 'rgba(0,0,0,0.65)' };
+      col.cellStyle = { background: 'rgba(0,0,0,0.03)', color: '#5b6273' };
     }
     if (f.Required && editable) {
-      // highlight required empty
       const prevStyle = col.cellStyle;
       col.cellStyle = (p) => {
         const base = typeof prevStyle === 'function' ? prevStyle(p) : (typeof prevStyle === 'object' ? prevStyle : {});
-        if (!p.value && p.value!==0) return { ...(base||{}), background: 'rgba(255,193,7,0.15)', borderLeft: '3px solid #ffa000' };
+        if (!p.value && p.value !== 0) {
+          return { ...(base || {}), background: 'rgba(255,193,7,0.15)', borderLeft: '3px solid #ffa000' };
+        }
         return base;
       };
     }
 
-    // Pin ID
     if (internal === 'ID') {
       col.pinned = 'left';
       col.flex = 0;
@@ -314,144 +333,105 @@ function buildColumnDefs(fields) {
   return cols;
 }
 
-export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }) {
+// ---------- theme ----------
+// Light theme with the same param shape as the AG Grid Theme Builder
+// (accentColor, borderRadius, headerHeight, rowHeight, fontSize, etc.).
+// White background, dark text — the "тёмный фон и тёмный текст в кнопках"
+// complaint comes from a previous overly-blue theme; this version is
+// deliberately high-contrast and clean.
+const dobTheme = themeQuartz.withParams({
+  accentColor: '#171c8f',
+  backgroundColor: '#ffffff',
+  foregroundColor: '#1f2347',
+  headerBackgroundColor: '#f4f6ff',
+  headerTextColor: '#1f2347',
+  headerFontWeight: 700,
+  oddRowBackgroundColor: '#fafbff',
+  rowHoverColor: '#eef0fb',
+  selectedRowBackgroundColor: '#e0e4fa',
+  borderColor: '#e6e9f5',
+  wrapperBorder: { style: 'solid', width: 1, color: '#e6e9f5' },
+  rowBorder: { style: 'solid', width: 1, color: '#f0f2f8' },
+  headerRowBorder: { style: 'solid', width: 1, color: '#dde1ee' },
+  columnBorder: { style: 'solid', width: 1, color: '#f0f2f8' },
+  borderRadius: 8,
+  wrapperBorderRadius: 10,
+  headerHeight: 46,
+  rowHeight: 40,
+  fontSize: 13,
+  fontFamily: `'Inter','IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,sans-serif`,
+  spacing: 8,
+  cellHorizontalPadding: 12,
+  menuBackgroundColor: '#ffffff',
+  menuShadow: { radius: 16, spread: 0, color: 'rgba(31,35,71,0.12)' },
+  inputBackgroundColor: '#ffffff',
+  inputBorder: { style: 'solid', width: 1, color: '#cdd2e3' },
+  inputFocusBorder: { style: 'solid', width: 1, color: '#171c8f' },
+  checkboxBorderRadius: 4,
+  iconSize: 16,
+  chromeBackgroundColor: '#ffffff',
+  panelBackgroundColor: '#ffffff',
+  popupShadow: { radius: 16, spread: 0, color: 'rgba(31,35,71,0.16)' },
+});
+
+// Default header template — only `eMenu` (more icon) + `eFilterButton`
+// (filter icon) + `eLabel` with the column title. `eSortAsc` / eSortDesc /
+// eSortOrder are intentionally omitted so the headers look like the
+// Theme Builder example: filter icon + more icon, no big sort arrows.
+const HEADER_TEMPLATE = `
+<div class="ag-cell-label-container" role="presentation">
+  <span data-ref="eMenu" class="ag-header-icon ag-header-cell-menu-button" aria-hidden="true"></span>
+  <span data-ref="eFilterButton" class="ag-header-icon ag-header-cell-filter-button" aria-hidden="true"></span>
+  <div data-ref="eLabel" class="ag-header-cell-label" role="presentation">
+    <span data-ref="eText" class="ag-header-cell-text"></span>
+    <span data-ref="eFilter" class="ag-header-icon ag-filter-icon" aria-hidden="true"></span>
+  </div>
+</div>`;
+
+// ---------- component ----------
+
+export default function DobGrid({ fields, rows }) {
   const gridRef = useRef(null);
-  const { notify } = useNotifications();
-  const [dirty, setDirty] = useState(() => new Map()); // id -> payload diff
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
-  const [quickFilter, setQuickFilter] = useState('');
-  const [columnPrefs, setColumnPrefs] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('dob_tasks_column_preferences') || '{}'); } catch { return {}; }
-  });
-  const [columnsMenuAnchor, setColumnsMenuAnchor] = useState(null);
+  const {
+    selectedId,
+    setSelectedId,
+    setDirty,
+    fields: ctxFields,
+    saveError,
+    clearSaveError,
+    loading,
+  } = useDobListState();
 
-  const baseColumnDefs = useMemo(() => buildColumnDefs(fields), [fields]);
-  const columnDefs = useMemo(() => {
-    const order = Array.isArray(columnPrefs.order) ? columnPrefs.order : [];
-    const rank = new Map(order.map((name, index) => [name, index]));
-    return [...baseColumnDefs]
-      .sort((a, b) => (rank.get(a.field) ?? 100000) - (rank.get(b.field) ?? 100000))
-      .map(col => ({ ...col, hide: Array.isArray(columnPrefs.hidden) && columnPrefs.hidden.includes(col.field) }));
-  }, [baseColumnDefs, columnPrefs]);
-  const columnNames = useMemo(() => baseColumnDefs.map(col => ({ field: col.field, title: col.headerName || col.field })), [baseColumnDefs]);
-  const persistColumnPrefs = useCallback((next) => {
-    setColumnPrefs(next);
-    try { localStorage.setItem('dob_tasks_column_preferences', JSON.stringify(next)); } catch {}
-  }, []);
-  const toggleColumn = useCallback((field) => {
-    const hidden = new Set(columnPrefs.hidden || []);
-    hidden.has(field) ? hidden.delete(field) : hidden.add(field);
-    persistColumnPrefs({ ...columnPrefs, hidden: [...hidden] });
-  }, [columnPrefs, persistColumnPrefs]);
-  const moveColumn = useCallback((field, direction) => {
-    const current = (columnPrefs.order?.length ? [...columnPrefs.order] : columnNames.map(c => c.field));
-    const index = current.indexOf(field);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return;
-    [current[index], current[nextIndex]] = [current[nextIndex], current[index]];
-    persistColumnPrefs({ ...columnPrefs, order: current });
-  }, [columnPrefs, columnNames, persistColumnPrefs]);
-  const resetColumnPrefs = useCallback(() => {
-    persistColumnPrefs({ order: columnNames.map(c => c.field), hidden: [] });
-  }, [columnNames, persistColumnPrefs]);
+  const baseColumnDefs = useMemo(() => buildColumnDefs(fields || ctxFields || []), [fields, ctxFields]);
 
-  const defaultColDef = useMemo(() => ({
-    sortable: true,
-    filter: 'agTextColumnFilter',
-    resizable: true,
-    flex: 1,
-    minWidth: 120,
-    floatingFilter: false,
-    wrapHeaderText: true,
-    autoHeaderHeight: true,
-    suppressHeaderFilterButton: true,
-    wrapText: false,
-    autoHeight: false,
-    cellStyle: { fontSize: 13, lineHeight: '1.35', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-    cellDataType: false,
-    filterParams: { buttons: ['reset', 'apply'], closeOnApply: true },
-  }), []);
+  const defaultColDef = useMemo(
+    () => ({
+      sortable: true,
+      filter: true,
+      resizable: true,
+      flex: 1,
+      minWidth: 120,
+      enableCellChangeFlash: true,
+      headerComponentParams: { template: HEADER_TEMPLATE },
+      // Keep the existing column-menu interactions; suppress the legacy
+      // overflow icons by using the v33 compact column menu.
+      menuTabs: ['filterMenuTab', 'generalMenuTab', 'columnsMenuTab'],
+      cellStyle: { fontSize: 13, lineHeight: '1.35', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+      filterParams: { buttons: ['reset', 'apply'], closeOnApply: true },
+    }),
+    [],
+  );
 
   const rowData = useMemo(() => {
     if (!rows) return [];
-    return rows.map(r => {
-      // Flatten Author/Editor for grid
+    return rows.map((r) => {
       const copy = { ...r };
-      // Author/Title etc already via valueGetter but keep flat for quick
       if (r.Author && r.Author.Title) copy.Author = r.Author;
       if (r.Editor && r.Editor.Title) copy.Editor = r.Editor;
       return copy;
     });
   }, [rows]);
 
-  const onCellValueChanged = useCallback((evt) => {
-    const field = evt.colDef.field;
-    const newVal = evt.newValue;
-    const oldVal = evt.oldValue;
-    if (newVal === oldVal) return;
-    const id = evt.data?.ID ?? evt.data?.Id ?? evt.data?.OData__ID ?? evt.data?.ID;
-    if (!id) return;
-    setDirty(prev => {
-      const next = new Map(prev);
-      const existing = next.get(id) || {};
-      // Normalize boolean / datetime
-      let normalized = newVal;
-      // Find field meta
-      const meta = fields?.find(f=>f.InternalName===field);
-      const t = (meta?.TypeAsString||'').toLowerCase();
-      if (t==='boolean') normalized = newVal ? true : false;
-      // keep string for choice/text
-      next.set(id, { ...existing, [field]: normalized, _orig: evt.data });
-      return next;
-    });
-  }, [fields]);
-
-  const handleSave = useCallback(async () => {
-    if (dirty.size===0) return;
-    setSaving(true);
-    setSaveError('');
-    const entries = Array.from(dirty.entries());
-    let success = 0;
-    let fail = 0;
-    const failedIds = [];
-    for (const [id, payload] of entries) {
-      // strip helper
-      const { _orig, ...rest } = payload;
-      // Remove readOnly/calculated from payload if accidentally
-      // For SharePoint, payload keys must be internal names exactly; for Boolean true/false ok, for Date ISO
-      try {
-        // Clean empty required? skip validation here
-        await updateDobItem(id, rest);
-        success++;
-        // remove from dirty on success
-        setDirty(prev => { const n=new Map(prev); n.delete(id); return n; });
-      } catch (e) {
-        fail++;
-        failedIds.push(id);
-        const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка';
-        setSaveError(`ID ${id}: ${String(msg).slice(0,200)}`);
-        // keep dirty
-      }
-    }
-    setSaving(false);
-    if (success) notify(`Сохранено ${success} строк${fail ? `, ошибок ${fail}` : ''}`, { severity: fail ? 'warning' : 'success' });
-    if (fail && onRefresh) {
-      // optionally refresh failed? keep dirty
-    } else if (success && onRefresh) {
-      // refresh to get calculated fields updated
-      setTimeout(()=> onRefresh(), 500);
-    }
-  }, [dirty, notify, onRefresh]);
-
-  const handleClearDirty = useCallback(() => {
-    setDirty(new Map());
-    setSaveError('');
-    // revert grid by refreshing data (parent will refetch)
-    if (onRefresh) onRefresh();
-  }, [onRefresh]);
-
-  const [selectedId, setSelectedId] = useState(null);
   const onSelectionChanged = useCallback(() => {
     const api = gridRef.current?.api;
     if (!api) return;
@@ -463,92 +443,125 @@ export default function DobGrid({ fields, rows, loading, onRefresh, isFetching }
     } else {
       setSelectedId(null);
     }
-  }, []);
+  }, [setSelectedId]);
 
-  const gridOptions = useMemo(() => ({
-    animateRows: true,
-    rowSelection: { mode: 'singleRow', enableClickSelection: true },
-    suppressRowHoverHighlight: false,
-    ensureDomOrder: true,
-  }), []);
+  useEffect(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    if (selectedId == null) return;
+    const node = api.getRowNode(String(selectedId));
+    if (node && !node.isSelected()) {
+      node.setSelected(true, true);
+    }
+  }, [selectedId]);
+
+  const onCellValueChanged = useCallback(
+    (evt) => {
+      const field = evt.colDef.field;
+      const newVal = evt.newValue;
+      const oldVal = evt.oldValue;
+      if (newVal === oldVal) return;
+      const id = evt.data?.ID ?? evt.data?.Id ?? evt.data?.OData__ID ?? evt.data?.ID;
+      if (!id) return;
+      setDirty((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(id) || {};
+        const meta = (fields || ctxFields || []).find((f) => f.InternalName === field);
+        const t = (meta?.TypeAsString || '').toLowerCase();
+        const normalized = t === 'boolean' ? (newVal ? true : false) : newVal;
+        next.set(id, { ...existing, [field]: normalized, _orig: evt.data });
+        return next;
+      });
+    },
+    [setDirty, fields, ctxFields],
+  );
+
+  const gridOptions = useMemo(
+    () => ({
+      animateRows: true,
+      rowSelection: { mode: 'singleRow', enableClickSelection: true },
+      suppressRowHoverHighlight: false,
+      ensureDomOrder: true,
+      suppressMenuHide: true,
+      // Side bar lets users drag columns between the grid and a hidden panel.
+      // We keep it off by default to match the Theme Builder look.
+      sideBar: false,
+      rowGroupPanelShow: 'never',
+      pivotPanelShow: 'never',
+      statusBar: undefined,
+    }),
+    [],
+  );
 
   return (
-    <Box className="dob-grid-shell" sx={{ width: '100%', height: '100%', display:'flex', flexDirection:'column', minHeight: 0, flex: '1 1 0px' }}>
-      <Box sx={{ display:'flex', gap:1, alignItems:'center', flexWrap:'wrap', mb:0.75, p:0.5, border:'1px solid rgba(23,28,143,0.12)', borderRadius:'6px', bgcolor:'rgba(255,255,255,0.9)', backdropFilter:'blur(6px)' }}>
-        <Chip label={`${rows?.length ?? 0} записей`} size="small" sx={{ fontWeight:700, bgcolor: 'rgba(23,28,143,0.08)' }} />
-        <TextField size="small" value={quickFilter} onChange={e=>setQuickFilter(e.target.value)} placeholder="Быстрый поиск…" aria-label="Быстрый поиск" sx={{ width: { xs: 160, sm: 220 }, '& .MuiOutlinedInput-root': { borderRadius: 1 } }} />
-        <Button size="small" variant="outlined" onClick={e=>setColumnsMenuAnchor(e.currentTarget)} startIcon={<MoreVertIcon />} sx={{ borderRadius: 1, minWidth: 0 }}>Поля</Button>
-        <Menu anchorEl={columnsMenuAnchor} open={Boolean(columnsMenuAnchor)} onClose={()=>setColumnsMenuAnchor(null)} MenuListProps={{ dense: true }}>
-          <MenuItem disabled sx={{ fontWeight: 700 }}>Настройка полей</MenuItem>
-          <Divider />
-          {columnNames.map((column, index) => (
-            <MenuItem key={column.field} dense>
-              <Checkbox size="small" checked={!(columnPrefs.hidden || []).includes(column.field)} onChange={()=>toggleColumn(column.field)} />
-              <ListItemText primary={column.title} />
-              <IconButton size="small" disabled={index === 0} onClick={()=>moveColumn(column.field, -1)}><ArrowUpwardIcon fontSize="inherit" /></IconButton>
-              <IconButton size="small" disabled={index === columnNames.length - 1} onClick={()=>moveColumn(column.field, 1)}><ArrowDownwardIcon fontSize="inherit" /></IconButton>
-            </MenuItem>
-          ))}
-          <Divider />
-          <MenuItem onClick={resetColumnPrefs}><RestartAltIcon fontSize="small" sx={{ mr: 1 }} />Сбросить порядок</MenuItem>
-        </Menu>
-        {dirty.size>0 && <Chip label={`Изменено: ${dirty.size}`} color="warning" size="small" sx={{ fontWeight:800 }} />}
-        {selectedId && <Chip label={`Выбран: ${selectedId}`} color="primary" size="small" sx={{ fontWeight:700 }} />}
-        <Box sx={{ flex:1 }} />
-        <Tooltip title="Открыть форму редактирования">
-          <span>
-            <Button size="small" variant="contained" color="secondary" disabled={!selectedId} onClick={()=> { if(selectedId) window.location.hash = `#dob_tasks/${selectedId}`; }} sx={{ borderRadius:2, minWidth: 120, backgroundImage: selectedId ? 'linear-gradient(180deg,#2e7d32 0%,#1b5e20 100%)' : undefined }}>
-              Изменить
-            </Button>
-          </span>
-        </Tooltip>
-        <Tooltip title="Перезагрузить">
-          <span>
-            <Button size="small" variant="outlined" onClick={onRefresh} disabled={loading||isFetching} startIcon={isFetching ? <CircularProgress size={14}/> : <RefreshIcon/>} sx={{ borderRadius:1, minWidth: 110 }}>
-              Обновить
-            </Button>
-          </span>
-        </Tooltip>
-        <Button size="small" variant="outlined" color="inherit" onClick={handleClearDirty} disabled={dirty.size===0 || saving} sx={{ borderRadius:2 }}>
-          Сбросить
-        </Button>
-        <Button size="small" variant="contained" onClick={handleSave} disabled={dirty.size===0 || saving} startIcon={saving ? <CircularProgress size={14} color="inherit"/> : <SaveIcon/>} sx={{ borderRadius:2, minWidth: 120, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)', color: '#fff' }}>
-          {saving ? 'Сохранение…' : `Сохранить${dirty.size ? ` (${dirty.size})` : ''}`}
-        </Button>
-      </Box>
+    <Box
+      className="dob-grid-shell"
+      sx={{
+        width: '100%',
+        height: '100%',
+        minHeight: 0,
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        flex: '1 1 0',
+        bgcolor: '#ffffff',
+      }}
+    >
+      {saveError && (
+        <Alert severity="error" sx={{ mb: 1, borderRadius: 1.5 }} onClose={clearSaveError}>
+          {saveError}
+        </Alert>
+      )}
 
-      {saveError && <Alert severity="error" sx={{ mb:1, borderRadius:2 }} onClose={()=>setSaveError('')}>{saveError}</Alert>}
-
-      <Box className="dob-ag-grid" sx={{ flex: '1 1 0px', width:'100%', minHeight: 0, borderRadius:'6px', overflow:'hidden' }}>
+      <Box
+        className="dob-ag-grid"
+        sx={{
+          flex: '1 1 0',
+          width: '100%',
+          minHeight: 0,
+          minWidth: 0,
+          borderRadius: '10px',
+          overflow: 'hidden',
+          boxShadow: '0 1px 0 rgba(31,35,71,0.04)',
+          bgcolor: '#ffffff',
+        }}
+      >
         {loading ? (
-          <Box sx={{ display:'grid', placeItems:'center', height: 420, gap:1 }}>
+          <Box sx={{ display: 'grid', placeItems: 'center', height: 480, gap: 1 }}>
             <CircularProgress />
             <Typography color="text.secondary">Загрузка заявок ДОБ…</Typography>
           </Box>
         ) : (
           <AgGridReact
             ref={gridRef}
-            theme={themeQuartz}
-            columnDefs={columnDefs}
+            theme={dobTheme}
+            columnDefs={baseColumnDefs}
             rowData={rowData}
-            quickFilterText={quickFilter}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
-            pagination={true}
+            pagination
             paginationPageSize={50}
-            paginationPageSizeSelector={[20,50,100,200]}
-            enableCellTextSelection={true}
+            paginationPageSizeSelector={[20, 50, 100, 200]}
+            enableCellTextSelection
             onCellValueChanged={onCellValueChanged}
             onSelectionChanged={onSelectionChanged}
-            stopEditingWhenCellsLoseFocus={true}
-            getRowId={(p)=> String(p.data?.ID ?? p.data?.Id ?? p.data?.ID ?? Math.random())}
-            overlayNoRowsTemplate={'<span style="padding:12px;color:#666">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'}
+            stopEditingWhenCellsLoseFocus
+            getRowId={(p) => String(p.data?.ID ?? p.data?.Id ?? p.data?.ID ?? Math.random())}
+            overlayNoRowsTemplate='<span style="padding:12px;color:#5b6273">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'
           />
         )}
       </Box>
-      <Typography variant="caption" color="text.secondary" sx={{ mt:1, display:'block' }}>
-        Двойной клик по ячейке — редактирование. Choice — выбор из списка, Дата — yyyy-mm-dd или дд.мм.гггг, Валюта/Число — цифры, Чекбокс — клик. После правок нажмите <b>Сохранить</b> (па Batch PATCH по MERGE). Поля <i>Статус / Неделя / Дата подтверждения / Логин (формула)</i> — вычисляемые, только чтение.
+
+      <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#5b6273' }}>
+        Двойной клик по ячейке — редактирование. Choice — выбор из списка, Дата — yyyy-mm-dd или дд.мм.гггг, Валюта/Число —
+        цифры, Чекбокс — клик. После правок нажмите <b>Сохранить</b> (пакетный MERGE). Поля <i>Статус / Неделя / Дата
+        подтверждения / Логин (формула)</i> — вычисляемые, только чтение. Скрытие/показ колонок — через меню «⋮» в шапке.
       </Typography>
     </Box>
   );
 }
+
+DobGrid.propTypes = {
+  fields: PropTypes.array,
+  rows: PropTypes.array,
+};
