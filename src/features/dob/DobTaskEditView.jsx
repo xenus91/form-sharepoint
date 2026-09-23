@@ -338,12 +338,24 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
 
   const chekField = useMemo(() => {
     if (!fields) return null;
-    // Exact: ChekResult, but also check Title contains 'Результат проверки' or internal starts with
-    let f = fields.find(x => x.InternalName === 'ChekResult');
-    if (f) return f;
-    f = fields.find(x => (x.Title || '').includes('Результат проверки') || (x.Title || '').toLowerCase().includes('результат'));
-    return f || { InternalName: 'ChekResult', Title: 'Результат проверки (ChekResult)', TypeAsString: 'Note', Required: false };
+    // ChekResult is the dedicated result editor. Do not accidentally select another
+    // field whose title merely contains the word "результат".
+    const exactInternal = fields.find(x => x.InternalName === 'ChekResult');
+    if (exactInternal) return exactInternal;
+    const exactTitle = fields.find(x => {
+      const title = String(x.Title || '').trim().toLowerCase();
+      return title === 'результат проверки' || /^результат проверки\s*\(.*\)$/.test(title);
+    });
+    return exactTitle || { InternalName: 'ChekResult', Title: 'Результат проверки (ChekResult)', TypeAsString: 'Note', Required: false };
   }, [fields]);
+
+  useEffect(() => {
+    if (!fields || !item) return;
+    const richCandidates = fields
+      .filter(f => ['note', 'text'].includes(String(f.TypeAsString || '').toLowerCase()))
+      .map(f => ({ internal: f.InternalName, title: f.Title, valueLength: toEditorHtml(form[f.InternalName] ?? getODataValue(item, f.InternalName) ?? '').length }));
+    console.info('[DobEdit][field-mapping]', { chekInternal: chekField?.InternalName, chekTitle: chekField?.Title, chekValueLength: chekValue.length, richCandidates });
+  }, [fields, item, form, chekField, chekValue]);
 
   const chekInternal = chekField?.InternalName || 'ChekResult';
   const chekValue = form[chekInternal] ?? getODataValue(item, chekInternal) ?? '';
