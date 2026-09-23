@@ -493,7 +493,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
       {saveError && <Alert severity="error" onClose={()=> setSaveError('')}>{saveError}</Alert>}
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
-      <>
+      <Box className="dob-rich-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 1, flex: '0 0 auto' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1, color: '#171c8f' }}>Результат проверки — главное поле</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Поддерживает таблицы, списки, форматирование и вставку изображений. Изображения автоматически загружаются как вложения заявки и вставляются как {'<img src="...">'}.
@@ -543,9 +543,9 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Удаление вложения также уберёт картинку из текста (если она там есть) — не забудьте Сохранить.</Typography>
           </Box>
         )}
-      </>
+      </Box>
 
-      <>
+      <Box className="dob-fields-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 2, flex: '0 0 auto' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5, color: '#171c8f' }}>Остальные поля</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: { xs: .75, md: 1 } }}>
           {editableFields.filter(f => f.InternalName !== chekInternal && !/^(?:modified|откорректировано|изменено)$/i.test(String(f.InternalName || f.Title || '').trim()) && !/откорректировано|изменено/i.test(String(f.Title || ''))).map(f => {
@@ -699,7 +699,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
         <Typography variant="caption" color="text.secondary">
           Серые — только чтение (Calculated/Computed/ReadOnly). Остальные уйдут PATCH MERGE по InternalName. `ChekResult` — rich-HTML с таблицами и {'<img>'} из вложений (`/AttachmentFiles/add`).
         </Typography>
-      </>
+      </Box>
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
         <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>К списку</Button>
