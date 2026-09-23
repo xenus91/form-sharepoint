@@ -60,6 +60,13 @@ function normalizeHtmlValue(value) {
   return doc.body.textContent || value;
 }
 
+function toEditorHtml(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') return String(value.Html ?? value.Value ?? value.Description ?? '');
+  return String(value);
+}
+
 export default function DobTaskEditView({ id, onOpenMenu }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
