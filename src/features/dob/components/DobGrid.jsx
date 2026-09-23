@@ -6,7 +6,7 @@
 // example does; sort still works on click but no sort icons are rendered.
 // The grid fills the remaining viewport height after the sticky AppBar.
 import PropTypes from 'prop-types';
-import { useMemo, useRef, useCallback, useEffect, useState } from 'react';
+import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { AgGridReact } from 'ag-grid-react';
 import {
   ModuleRegistry,
@@ -21,7 +21,7 @@ import {
   ColumnHoverModule,
   CsvExportModule,
 } from 'ag-grid-community';
-import { Box, CircularProgress, Typography, Alert, Button, Chip, Menu, MenuItem, Divider } from '@mui/material';
+import { Box, CircularProgress, Typography, Alert } from '@mui/material';
 import { useDobListState } from '../state/DobListStateContext';
 
 ModuleRegistry.registerModules([
@@ -403,25 +403,6 @@ export default function DobGrid({ fields, rows }) {
   } = useDobListState();
 
   const baseColumnDefs = useMemo(() => buildColumnDefs(fields || ctxFields || []), [fields, ctxFields]);
-  const [groupBy, setGroupBy] = useState(() => {
-    try { return localStorage.getItem('dob_tasks_group_by') || ''; } catch { return ''; }
-  });
-  const [groupMenuAnchor, setGroupMenuAnchor] = useState(null);
-
-  const groupableColumns = useMemo(
-    () => baseColumnDefs.filter((column) => column.field && column.field !== 'ID').map((column) => ({ field: column.field, title: column.headerName || column.field })),
-    [baseColumnDefs],
-  );
-
-  const setGrouping = useCallback((field) => {
-    setGroupBy(field || '');
-    try {
-      if (field) localStorage.setItem('dob_tasks_group_by', field);
-      else localStorage.removeItem('dob_tasks_group_by');
-    } catch {}
-    setGroupMenuAnchor(null);
-  }, []);
-
   const defaultColDef = useMemo(
     () => ({
       sortable: true,
@@ -447,38 +428,6 @@ export default function DobGrid({ fields, rows }) {
       return copy;
     });
   }, [rows]);
-
-  // Community equivalent of rowGroupPanelShow: create lightweight group rows
-  // in the client model instead of using the Enterprise RowGrouping module.
-  const displayRowData = useMemo(() => {
-    if (!groupBy) return rowData;
-    const groups = new Map();
-    rowData.forEach((row) => {
-      const value = row[groupBy] ?? row['OData__' + groupBy] ?? row['OData_' + groupBy] ?? '—';
-      const key = String(value || '—').trim() || '—';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(row);
-    });
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, 'ru')).flatMap(([label, groupRows]) => [
-      { __dobGroup: true, __dobGroupKey: label, __dobGroupCount: groupRows.length, [groupBy]: label },
-      ...groupRows,
-    ]);
-  }, [rowData, groupBy]);
-
-  const displayColumnDefs = useMemo(() => {
-    if (!groupBy) return baseColumnDefs;
-    return baseColumnDefs.map((column) => ({
-      ...column,
-      editable: (params) => !params.data?.__dobGroup && (typeof column.editable === 'function' ? column.editable(params) : column.editable !== false),
-      cellRenderer: (params) => {
-        if (params.data?.__dobGroup) {
-          return params.colDef.field === groupBy ? `▾ ${params.data.__dobGroupKey} (${params.data.__dobGroupCount})` : '';
-        }
-        if (typeof column.cellRenderer === 'function') return column.cellRenderer(params);
-        return params.valueFormatted ?? params.value ?? '';
-      },
-    }));
-  }, [baseColumnDefs, groupBy]);
 
   const onSelectionChanged = useCallback(() => {
     const api = gridRef.current?.api;
@@ -559,19 +508,6 @@ export default function DobGrid({ fields, rows }) {
         </Alert>
       )}
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: .75, minHeight: 32, mb: .75, px: .5 }}>
-        <Typography variant="caption" sx={{ color: '#5b6273', fontWeight: 700 }}>Группировка:</Typography>
-        <Button size="small" variant="outlined" onClick={(event) => setGroupMenuAnchor(event.currentTarget)} sx={{ height: 30, borderRadius: .5, textTransform: 'none' }}>
-          {groupBy ? groupableColumns.find((column) => column.field === groupBy)?.title || groupBy : 'Нет'}
-        </Button>
-        {groupBy && <Chip size="small" label="Community" onDelete={() => setGrouping('')} sx={{ height: 26 }} />}
-        <Menu anchorEl={groupMenuAnchor} open={Boolean(groupMenuAnchor)} onClose={() => setGroupMenuAnchor(null)}>
-          <MenuItem dense onClick={() => setGrouping('')}>Без группировки</MenuItem>
-          <Divider />
-          {groupableColumns.map((column) => <MenuItem dense key={column.field} selected={groupBy === column.field} onClick={() => setGrouping(column.field)}>{column.title}</MenuItem>)}
-        </Menu>
-      </Box>
-
       <Box
         className="dob-ag-grid"
         sx={{
@@ -594,8 +530,8 @@ export default function DobGrid({ fields, rows }) {
           <AgGridReact
             ref={gridRef}
             theme={dobTheme}
-            columnDefs={displayColumnDefs}
-            rowData={displayRowData}
+            columnDefs={baseColumnDefs}
+            rowData={rowData}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
             pagination
@@ -604,7 +540,6 @@ export default function DobGrid({ fields, rows }) {
             enableCellTextSelection
             onCellValueChanged={onCellValueChanged}
             onSelectionChanged={onSelectionChanged}
-            isRowSelectable={(params) => !params.data?.__dobGroup}
             stopEditingWhenCellsLoseFocus
             getRowId={(p) => String(p.data?.ID ?? p.data?.Id ?? p.data?.ID ?? Math.random())}
             overlayNoRowsTemplate='<span style="padding:12px;color:#5b6273">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'
