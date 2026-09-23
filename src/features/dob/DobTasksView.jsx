@@ -52,18 +52,21 @@ export default function DobTasksView({ onOpenDrawer }) {
   // Клиентский фильтр «Открыт» — OData__ prefix (SP возвращает OData__x...)
   const rows = useMemo(() => {
     if (!rawRows.length || !fields.length) return rawRows;
-    const statusField = fields.find((x) => x.Title === 'Статус' || x.Title?.toLowerCase() === 'статус');
+    const statusField = fields.find((x) => {
+      const title = String(x.Title || '').trim().toLowerCase();
+      return title === 'статус' || title.includes('статус');
+    });
     const internal = statusField?.InternalName;
-    if (!internal) return rawRows;
+    if (!internal) {
+      console.warn('[DOB] поле статуса не найдено — фильтр «Открыт» не применён');
+      return rawRows;
+    }
     function getVal(r, f) {
-      return r[f] ?? r['OData__' + f] ?? r['OData_' + f] ?? '';
+      const value = r[f] ?? r['OData__' + f] ?? r['OData_' + f] ?? '';
+      return String(value).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
     }
-    const filtered = rawRows.filter((r) => String(getVal(r, internal) || '').trim() === 'Открыт');
-    if (filtered.length === 0 && rawRows.length > 0) {
-      const hasOpen = rawRows.some((r) => String(getVal(r, internal) || '').trim() === 'Открыт');
-      return hasOpen ? filtered : rawRows;
-    }
-    return filtered;
+    // The list view intentionally contains only open requests.
+    return rawRows.filter((r) => getVal(r, internal).toLowerCase() === 'открыт');
   }, [rawRows, fields]);
 
   const handleRefresh = useCallback(() => {
