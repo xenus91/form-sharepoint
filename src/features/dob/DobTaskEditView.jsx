@@ -457,7 +457,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
   }
 
   return (
-    <Box data-dob-edit-page="true" sx={{ width: '100%', maxWidth: 'none', mx: 0, display: 'flex', flexDirection: 'column', gap: .75, p: { xs: .5, md: .75 }, boxSizing: 'border-box', overflowX: 'hidden', minWidth: 0, '& .MuiOutlinedInput-root': { borderRadius: .5 }, '& .MuiButton-root': { borderRadius: .5 } }}>
+    <Box data-dob-edit-page="true" sx={{ width: '100%', maxWidth: 'none', mx: 0, display: 'flex', flexDirection: 'column', gap: .75, p: { xs: .5, md: .75 }, boxSizing: 'border-box', overflowX: 'hidden', minWidth: 0, '& .MuiOutlinedInput-root': { borderRadius: .5 }, '& .MuiInputBase-root:not(.MuiInputBase-multiline)': { height: 32, borderRadius: .5 }, '& .MuiInputBase-input': { py: .5, fontSize: 13 }, '& .MuiSelect-select': { py: .5, fontSize: 13 }, '& .MuiButton-root': { borderRadius: .5, minHeight: 32, height: 32 }, '& .MuiFormControlLabel-root': { minHeight: 32 } }}>
       <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1100, bgcolor: '#fff', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
         <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
           <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
@@ -474,7 +474,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
       {saveError && <Alert severity="error" onClose={()=> setSaveError('')}>{saveError}</Alert>}
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
-      <Paper sx={{ p: { xs: 1, md: 1.25 }, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
+      <>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1, color: '#171c8f' }}>Результат проверки — главное поле</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Поддерживает таблицы, списки, форматирование и вставку изображений. Изображения автоматически загружаются как вложения заявки и вставляются как {'<img src="...">'}.
@@ -524,9 +524,9 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Удаление вложения также уберёт картинку из текста (если она там есть) — не забудьте Сохранить.</Typography>
           </Box>
         )}
-      </Paper>
+      </>
 
-      <Paper sx={{ p: { xs: 1, md: 1.25 }, borderRadius: 1, border: '1px solid rgba(23,28,143,0.08)', maxWidth: '100%', width: '100%', boxSizing: 'border-box', minWidth: 0, overflow: 'hidden' }}>
+      <>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5, color: '#171c8f' }}>Остальные поля</Typography>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: { xs: .75, md: 1 } }}>
           {editableFields.filter(f => f.InternalName !== chekInternal && !/^(?:modified|откорректировано|изменено)$/i.test(String(f.InternalName || f.Title || '').trim()) && !/откорректировано|изменено/i.test(String(f.Title || ''))).map(f => {
@@ -680,7 +680,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
         <Typography variant="caption" color="text.secondary">
           Серые — только чтение (Calculated/Computed/ReadOnly). Остальные уйдут PATCH MERGE по InternalName. `ChekResult` — rich-HTML с таблицами и {'<img>'} из вложений (`/AttachmentFiles/add`).
         </Typography>
-      </Paper>
+      </>
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
         <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>К списку</Button>
