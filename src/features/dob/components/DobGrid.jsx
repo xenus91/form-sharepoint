@@ -413,9 +413,7 @@ export default function DobGrid({ fields, rows }) {
       minWidth: 120,
       enableCellChangeFlash: true,
       headerComponentParams: { template: HEADER_TEMPLATE },
-      // Keep the existing column-menu interactions; suppress the legacy
-      // overflow icons by using the v33 compact column menu.
-      menuTabs: ['filterMenuTab', 'generalMenuTab', 'columnsMenuTab'],
+      // Community build: do not configure enterprise-only column menu tabs.
       cellStyle: { fontSize: 13, lineHeight: '1.35', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
       filterParams: { buttons: ['reset', 'apply'], closeOnApply: true },
     }),
@@ -486,8 +484,6 @@ export default function DobGrid({ fields, rows }) {
       // Side bar lets users drag columns between the grid and a hidden panel.
       // We keep it off by default to match the Theme Builder look.
       sideBar: false,
-      rowGroupPanelShow: 'never',
-      pivotPanelShow: 'never',
       statusBar: undefined,
     }),
     [],
