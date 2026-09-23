@@ -349,16 +349,16 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
     return exactTitle || { InternalName: 'ChekResult', Title: 'Результат проверки (ChekResult)', TypeAsString: 'Note', Required: false };
   }, [fields]);
 
+  const chekInternal = chekField?.InternalName || 'ChekResult';
+  const chekValue = toEditorHtml(form[chekInternal] ?? getODataValue(item, chekInternal) ?? '');
+
   useEffect(() => {
     if (!fields || !item) return;
     const richCandidates = fields
       .filter(f => ['note', 'text'].includes(String(f.TypeAsString || '').toLowerCase()))
       .map(f => ({ internal: f.InternalName, title: f.Title, valueLength: toEditorHtml(form[f.InternalName] ?? getODataValue(item, f.InternalName) ?? '').length }));
-    console.info('[DobEdit][field-mapping]', { chekInternal: chekField?.InternalName, chekTitle: chekField?.Title, chekValueLength: chekValue.length, richCandidates });
-  }, [fields, item, form, chekField, chekValue]);
-
-  const chekInternal = chekField?.InternalName || 'ChekResult';
-  const chekValue = form[chekInternal] ?? getODataValue(item, chekInternal) ?? '';
+    console.info('[DobEdit][field-mapping]', { chekInternal, chekTitle: chekField?.Title, chekValueLength: chekValue.length, richCandidates });
+  }, [fields, item, form, chekField, chekInternal, chekValue]);
 
   const handleDeleteAttachment = useCallback(async (fileName) => {
     if (!id || !fileName) return;
