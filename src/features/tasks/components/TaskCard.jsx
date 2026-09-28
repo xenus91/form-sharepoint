@@ -42,6 +42,8 @@ function stripHtml(html) {
   if (!html) return "";
   const tmp = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
   let s = tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  s = s.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+  s = s.replace(/\*\*/g, "");
   s = s.replace(/\s*\)+\s*\}+\s*$/, "").replace(/\s+,/g, ",");
   return s;
 }
@@ -100,8 +102,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       else if (flowType === "notFound") anim = "none";
       // "extra" (или неизвестный flow) — anim остаётся null → без анимации
     }
-    if (anim === "celebrate") setShowCelebrate(true);
-    else if (anim === "sherlock") setShowSherlock(true);
+    if (anim === "celebrate") {
+      setCelebrateConfig(rule?.animationConfig || null);
+      setShowCelebrate(true);
+    } else if (anim === "sherlock") setShowSherlock(true);
     if (anim === "none" || !anim) {
       submitFn();
     } else {
@@ -266,6 +270,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const [customActionInput, setCustomActionInput] = React.useState("");
   const [additionalError, setAdditionalError] = React.useState("");
   const [showCelebrate, setShowCelebrate] = React.useState(false);
+  const [celebrateConfig, setCelebrateConfig] = React.useState(null);
   const [showSherlock, setShowSherlock] = React.useState(false);
   // Reset inline modes when task status changes (e.g., after take)
   React.useEffect(() => {
@@ -305,7 +310,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [task.Id, initialAction, isCompleted]);
   React.useEffect(() => {
     if (showCelebrate) {
-      const t = setTimeout(() => setShowCelebrate(false), 1600);
+      const t = setTimeout(() => { setShowCelebrate(false); setCelebrateConfig(null); }, 1600);
       return () => clearTimeout(t);
     }
   }, [showCelebrate]);
@@ -426,7 +431,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               animation: `${celebratePop} 1.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards`,
             }}
           >
-            🎉
+            {celebrateConfig?.emoji || "🎉"}
           </Box>
           <Typography
             sx={{
@@ -440,7 +445,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               animationDelay: "0.08s",
             }}
           >
-            Поздравляю! Отличная работа!
+            {celebrateConfig?.title || "Задача исправлена"}
           </Typography>
           <Typography
             sx={{
@@ -452,7 +457,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               opacity: 0.9,
             }}
           >
-            ЕО найдена — так держать!
+            {celebrateConfig?.text || "Результат сохранён"}
           </Typography>
           {/* floating mini emojis - centered cluster */}
           {["✨", "🌟", "✅", "🎈"].map((em, i) => (

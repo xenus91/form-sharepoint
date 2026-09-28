@@ -105,10 +105,23 @@ export function validateBehaviour(obj) {
       rule.additionalActionsRequired = rawVal.aar === true || rawVal.aar === 1 || String(rawVal.aar).toLowerCase() === "true";
     }
 
-    // anim → animation при submit (celebrate=зелёная 🎉, sherlock=красная 🕵️, none=без анимации)
+    // anim → animation при submit. Можно передать строку или объект с текстами:
+    // "anim":"celebrate"
+    // "anim":{"type":"celebrate","title":"Задача исправлена","text":"Отличная работа!"}
     if (rawVal.anim !== undefined) {
-      const a = String(rawVal.anim).trim().toLowerCase();
+      const animationValue = rawVal.anim;
+      const animationName = animationValue && typeof animationValue === "object"
+        ? (animationValue.type || animationValue.a || animationValue.name)
+        : animationValue;
+      const a = String(animationName || "").trim().toLowerCase();
       if (VALID_ANIMATIONS.has(a)) rule.animation = a;
+      if (animationValue && typeof animationValue === "object") {
+        rule.animationConfig = {
+          title: animationValue.title || animationValue.ti || "",
+          text: animationValue.text || animationValue.message || animationValue.subtitle || "",
+          emoji: animationValue.emoji || "",
+        };
+      }
       // unknown values ignored — не падаем, фронт использует flow default
     }
 
@@ -141,6 +154,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     showAdditionalActions: null,
     additionalActionsRequired: null,
     animation: null,
+    animationConfig: null,
     source: "empty",
   };
   if (!parsedBehaviour || typeof parsedBehaviour !== "object") return empty;
@@ -160,6 +174,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     showAdditionalActions: rule.showAdditionalActions === undefined ? null : !!rule.showAdditionalActions,
     additionalActionsRequired: rule.additionalActionsRequired === undefined ? null : !!rule.additionalActionsRequired,
     animation: rule.animation === undefined ? null : rule.animation,
+    animationConfig: rule.animationConfig || null,
     source: src,
   };
 }
