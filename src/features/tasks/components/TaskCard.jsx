@@ -92,6 +92,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const runSubmit = React.useCallback((choiceVal, flowType, submitFn) => {
     const rule = getBehaviourRuleForChoice(choiceVal);
     let anim = rule?.animation || null;
+    __dlogAlways("[TaskBehaviour:submit]", { taskId: task?.Id, choice: choiceVal, flowType, rule, animationFromConfig: anim });
     if (!anim) {
       if (flowType === "found") anim = "celebrate";
       // Для «Не исправлено» анимация по умолчанию отключена. Sherlock запускается
@@ -106,7 +107,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     } else {
       setTimeout(submitFn, 1600);
     }
-  }, [getBehaviourRuleForChoice]);
+  }, [getBehaviourRuleForChoice, task?.Id]);
 
   // ⭐ v8+: defaults-принцип — ТОЛЬКО Behaviour.styling.
   // TaskResultDefinitions.Color/Variant/Gradient и захардкоженный resultConfig.js «найдена»/«не найдена»
@@ -770,15 +771,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // Determine found / notFound choices — через конфиг + fallback на legacy строки, без хардкода конкретных значений
               // Для открытой задачи используем displayedChoices (свежие по ContentType)
               const choicesForButtons = displayedChoices || choices;
-              // ⭐ v8+: matches БЕЗ legacy-фолбэков. Defaults-принцип — только TaskBehaviour:
-              //   foundChoice    → Behaviour.promptFields.length > 0 || Behaviour.aa === true
-              //   notFoundChoice → Behaviour.c === true
-              //   всё остальное   → plain MUI Button в extras-ветке, прямой submit
+              // TaskBehaviour: confirm-result is identified by Behaviour.c=true.
+              // A direct result (including p=[] and c=false) is the found/completed choice.
               const foundChoice = (() => {
                 return choicesForButtons.find((ch) => {
                   const rule = getBehaviourRuleForChoice(ch);
-                  if (rule && (rule.promptFields.length > 0 || rule.showAdditionalActions === true)) return true;
-                  return false;
+                  return !!rule && rule.source !== "empty" && rule.requiresConfirmed !== true;
                 }) || null;
               })();
               const notFoundChoice = (() => {
@@ -936,7 +934,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           disabled={isUpdating}
                           autoFocus={idx === 0}
                           required={!!f.required}
-                          error={additionalError && f.required && !String(promptFieldValues[f.internalName] || "").trim()}
+                          error={Boolean(additionalError && f.required && !String(promptFieldValues[f.internalName] || "").trim())}
                           sx={{
                             mb: 1,
                             "& .MuiOutlinedInput-root": { borderRadius: 1.5, bgcolor: "#fff", fontSize: "0.95rem" },
