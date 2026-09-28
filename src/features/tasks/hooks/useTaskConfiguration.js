@@ -8,12 +8,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import apiClient from "../../../api";
-import { fetchResultFieldsMeta, fetchContentTypeResultMap } from "../../../tasks/resultField";
+import { fetchResultFieldsMeta, fetchContentTypeResultMap, fetchContentTypeMeta } from "../../../tasks/resultField";
 import { TASKS_LIST_API } from "../../../tasks/config";
 // import { fetchTaskTypeConfigurationMap } from "../../../services/taskTypeConfiguration"; // §17 ОТКЛЮЧЁН до аудита — чтобы не было 404 TaskTypeConfiguration
 import { fetchTaskResultDefinitions } from "../../../services/taskResultDefinitions";
 import { fetchTaskActionDefinitions, resolveActionChoices, resolveActionDefaults } from "../../../services/taskActionDefinitions";
 import { fetchTaskPromptFields } from "../../../services/taskPromptFields";
+import { fetchTaskBehaviour } from "../../../services/taskBehaviour";
 
 async function fetchAdditionalActionsMetaByName(internalName) {
   const name = String(internalName || "AdditionalActions").trim() || "AdditionalActions";
@@ -41,16 +42,19 @@ async function fetchAdditionalActionsMeta() {
 
 export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
-    queryKey: ["task-configuration","v6"], // bumped v6 for TaskPromptFields integration
+    queryKey: ["task-configuration","v8"], // v8: +fetchTaskBehaviour — единый источник Behaviour+StylingResultButton по CT (см. plan §1.1, §1.2)
     queryFn: async () => {
       // §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита content-types.md — нет 404 в Network
-      // Оставлен только TaskResultDefinitions (§14) + TaskActionDefinitions (§21) + TaskPromptFields (★ PR)
-      const [resultFields, ctMap, resultDefs, actionDefs, promptFields] = await Promise.all([
+      // Оставлены: TaskResultDefinitions (§14) + TaskActionDefinitions (§21) + TaskPromptFields (★ PR)
+      // + TaskBehaviour (★ v8: новый список с lookup BehaviourConfig на CT — приоритет над legacy)
+      const [resultFields, ctMap, ctMetaMap, resultDefs, actionDefs, promptFields, taskBehaviourMap] = await Promise.all([
         fetchResultFieldsMeta(apiClient),
         fetchContentTypeResultMap(apiClient),
+        fetchContentTypeMeta(apiClient),
         fetchTaskResultDefinitions(apiClient).catch(() => null),
         fetchTaskActionDefinitions(apiClient).catch(() => null),
         fetchTaskPromptFields(apiClient).catch(() => null),
+        fetchTaskBehaviour(apiClient).catch(() => null),
       ]);
       const taskTypeMap = null; // отключён до аудита
       const additionalMeta = await fetchAdditionalActionsMeta();
@@ -187,18 +191,20 @@ export function useTaskConfiguration({ enabled = true } = {}) {
       return {
         resultFields,
         ctMap,
+        ctMetaMap, // ⭐ v8+: Map<ctId, {name, stringId}> для маппинга CT.Name → TaskBehaviour.Title
         additionalMeta,
         additionalMetaByName,
         taskTypeMap,
         taskResultDefinitions: resultDefs,
         taskActionDefinitions: actionDefs,
         taskPromptFields: promptFields, // ⭐ NEW: {byKey, byCtWildcard, globalWildcard, globalByKey, raw} or null (404)
+        taskBehaviour: taskBehaviourMap, // ⭐ v8: Map<configId, rawRecord> или null (404 — список ещё не создан)
         ctConfigMap,
         fetchedAt: Date.now(),
       };
     },
     enabled,
-    staleTime: 30 * 60_000, // 30м — конфигурация меняется редко
+    staleTime: 5 * 60_000, // 5м — было 30м, уменьшено чтобы быстрее подхватывать изменения в TaskPromptFields/ResultDef/ActionDef
     gcTime: 4 * 60 * 60_000, // 4ч
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

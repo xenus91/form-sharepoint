@@ -11,6 +11,9 @@ import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask
 import { getResultUiConfig } from "../../../tasks/resultConfig";
 import { resolveResultUiConfig, resolveTaskResultDefinition } from "../../../services/taskResultDefinitions";
 import { resolvePromptFields } from "../../../services/taskPromptFields"; // ⭐ NEW
+import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title (без lookup-поля — SP не даёт default)
+import { resolveBehaviour, toRenderPromptFields } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
+import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
 import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import AdditionalActionsField from "./AdditionalActionsField";
@@ -65,6 +68,30 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     }
     return null;
   }, [task?.contentTypeId, task?.ContentTypeId, taskConfig?.taskResultDefinitions]);
+
+  // ⭐ v8: резолвер Behaviour rule (маппинг CT.Name → TaskBehaviour.Title) для конкретного choice.
+  // Возвращает {promptFields, requiresConfirmed, showAdditionalActions, additionalActionsRequired, source} или null.
+  const getBehaviourRuleForChoice = React.useCallback((choiceVal) => {
+    const ctId = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+    if (!ctId || !taskConfig?.taskBehaviour || !taskConfig?.ctMetaMap) return null;
+    const ctMeta = findContentTypeMeta(ctId, taskConfig.ctMetaMap);
+    if (!ctMeta || !ctMeta.name) return null;
+    const tb = resolveTaskBehaviourByName(ctMeta.name, taskConfig.taskBehaviour);
+    if (!tb || !tb.behaviour || !tb.behaviour.ok) return null;
+    return resolveBehaviour(choiceVal, tb.behaviour.value);
+  }, [task?.contentTypeId, task?.ContentTypeId, task?.raw, taskConfig?.taskBehaviour, taskConfig?.ctMetaMap]);
+
+  // ⭐ v8: резолвер sx-стилей для кнопки из TaskBehaviour.stylingResultButton (через CT.Name).
+  // Возвращает объект для MUI sx или null.
+  const getButtonSx = React.useCallback((choiceVal) => {
+    const ctId = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+    if (!ctId || !taskConfig?.taskBehaviour || !taskConfig?.ctMetaMap) return null;
+    const ctMeta = findContentTypeMeta(ctId, taskConfig.ctMetaMap);
+    if (!ctMeta || !ctMeta.name) return null;
+    const tb = resolveTaskBehaviourByName(ctMeta.name, taskConfig.taskBehaviour);
+    if (!tb || !tb.styling || !tb.styling.ok) return null;
+    return resolveStylingForChoice(choiceVal, tb.styling.value);
+  }, [task?.contentTypeId, task?.ContentTypeId, task?.raw, taskConfig?.taskBehaviour, taskConfig?.ctMetaMap]);
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
   const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
@@ -700,6 +727,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 if (c) return c;
                 // fallback для кастомных типов без legacy строк: по конфигу
                 c = choicesForButtons.find((ch) => {
+                  // ⭐ NEW v8: L0 — TaskBehaviour (наивысший приоритет). Если у CT есть config и для choice
+                  // задано `promptFields` или `showAdditionalActions=true` — это inline-mode кнопка.
+                  const rule = getBehaviourRuleForChoice(ch);
+                  if (rule && (rule.promptFields.length > 0 || rule.showAdditionalActions === true)) return true;
+
                   const def = getResultDef(ch);
                   if (def && def.showAdditionalActions) return true;
                   // ⭐ NEW: если для (CT, ch) есть promptable fields из TaskPromptFields — это inline-mode кнопка
@@ -734,6 +766,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 // fallback для кастомных
                 c = choicesForButtons.find((ch) => {
                   if (ch === foundChoice) return false;
+                  // ⭐ NEW v8: L0 — TaskBehaviour.requiresConfirmed=true → notFound-ветка (confirm-модалка перед submit).
+                  const rule = getBehaviourRuleForChoice(ch);
+                  if (rule && rule.requiresConfirmed === true) return true;
                   const def = getResultDef(ch);
                   // ⭐ NEW: RequiresConfirmed из SP авторитетен (включая явное false),
                   // чтобы админ мог отключить confirm-модалку через SP.
@@ -842,41 +877,51 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
 
               // Input mode для Найдена — inline в карточке (вернули обратно, Phase 17.11)
               // ShowAdditionalActions из TaskResultDefinitions управляет видимостью AdditionalActionsField
-              // ★ PR: promptable-поля рендерятся динамически из TaskPromptFields (per CT × ResultValue) или
-              //       legacy fallback на одно поле Location1 (если SP-список отсутствует + cfg.requiresLocation=true).
+              // ★ v8: promptable-поля рендерятся динамически — приоритет TaskBehaviour (lookup на CT),
+              //       затем TaskPromptFields (legacy), затем fallback на Location1 (hardcoded).
               if (foundInputMode) {
                 const defForFound = getResultDef(foundChoice);
-                const showAAInline = defForFound ? !!defForFound.showAdditionalActions : !!getUiConfig(foundChoice).requiresAdditionalActions;
-                // ⭐ NEW: resolve promptable-поля из TaskPromptFields (SP) — empty [] если ничего не задано
+                // ⭐ v8: showAAInline сначала из TaskBehaviour, потом из TaskResultDefinitions, потом из RESULT_UI_CONFIG
+                const behaviourRuleForFound = getBehaviourRuleForChoice(foundChoice);
+                const showAAInline = behaviourRuleForFound && behaviourRuleForFound.showAdditionalActions !== null
+                  ? !!behaviourRuleForFound.showAdditionalActions
+                  : (defForFound ? !!defForFound.showAdditionalActions : !!getUiConfig(foundChoice).requiresAdditionalActions);
+                // ⭐ v8: resolve promptable-поля — сначала TaskBehaviour, потом TaskPromptFields (legacy), потом Location1
                 const ctIdForPrompt = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
-                const fromSp = taskConfig?.taskPromptFields
+                let promptFields = null;
+                let fromTaskBehaviour = null;
+                if (behaviourRuleForFound && behaviourRuleForFound.promptFields.length > 0) {
+                  fromTaskBehaviour = behaviourRuleForFound.promptFields;
+                  promptFields = fromTaskBehaviour;
+                }
+                const fromSp = promptFields === null && taskConfig?.taskPromptFields
                   ? resolvePromptFields(ctIdForPrompt, foundChoice, taskConfig.taskPromptFields)
                   : null;
                 // ⭐ NEW: диагностический лог — почему поле НЕ показывается (или показывается).
-                if ((__forceTaskDbg || __DBG_ENABLED__) && (!fromSp || fromSp.length === 0)) {
+                if ((__forceTaskDbg || __DBG_ENABLED__) && (!fromSp || fromSp.length === 0) && !fromTaskBehaviour) {
                   __dlogAlways("[DBG:TaskCard:promptFields-empty]", {
                     ctIdForPrompt,
                     foundChoice,
+                    behaviourRule: behaviourRuleForFound,
                     taskConfig_taskPromptFields_null: taskConfig?.taskPromptFields === null,
-                    taskConfig_taskPromptFields_undefined: taskConfig?.taskPromptFields === undefined,
-                    taskConfig_taskPromptFields_typeof: typeof taskConfig?.taskPromptFields,
                     taskConfig_taskPromptFields_byKey_size: taskConfig?.taskPromptFields?.byKey?.size,
                     fromSp,
                   });
                 }
-                let promptFields;
-                if (fromSp !== null) {
-                  // SP-список есть (даже если пустой) — НЕ fallback на legacy Location1
-                  promptFields = fromSp;
-                } else {
-                  // SP 404 → legacy fallback на одно поле Location1 если cfg.requiresLocation=true
-                  const cfg = getUiConfig(foundChoice);
-                  promptFields = cfg.requiresLocation
-                    ? [{ internalName: "Location1", title: "Где найдена?", type: "multiline", required: false }]
-                    : [];
+                if (promptFields === null) {
+                  if (fromSp !== null) {
+                    // SP-список есть (даже если пустой) — НЕ fallback на legacy Location1
+                    promptFields = fromSp;
+                  } else {
+                    // SP 404 → legacy fallback на одно поле Location1 если cfg.requiresLocation=true
+                    const cfg = getUiConfig(foundChoice);
+                    promptFields = cfg.requiresLocation
+                      ? [{ internalName: "Location1", title: "Где найдена?", type: "multiline", required: false }]
+                      : [];
+                  }
                 }
                 // debug
-                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, defForFound, showAAInline, promptFields, fromSp: fromSp !== null});
+                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, defForFound, behaviourRule: behaviourRuleForFound, showAAInline, promptFields, fromTaskBehaviour: fromTaskBehaviour !== null, fromSp: fromSp !== null});
                 const validateAdditional = () => {
                   if (!showAAInline) { setAdditionalError(""); return true; }
                   setAdditionalError("");
@@ -1063,9 +1108,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   <Box sx={{ mt: 1.5, display: "flex", flexWrap: "wrap", gap: 1 }}>
                     {notFoundChoice && (() => {
                       const cfg = getUiConfig(notFoundChoice);
+                      const tbSx = getButtonSx(notFoundChoice); // ⭐ v8: StylingResultButton → sx
                       return (
                       <Button
-                        variant={cfg.variant}
+                        variant={tbSx?.variant || cfg.variant}
                         color={cfg.color}
                         size="large"
                         disabled={isUpdating}
@@ -1078,6 +1124,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           minWidth: "48%",
                           height: 48,
                           fontSize: "1rem",
+                          ...(tbSx || {}),
                           ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: cfg.color === "error" ? "#e53935" : "transparent" } : {}),
                         }}
                       >
@@ -1087,9 +1134,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     })()}
                     {foundChoice && (() => {
                       const cfg = getUiConfig(foundChoice);
+                      const tbSx = getButtonSx(foundChoice); // ⭐ v8: StylingResultButton → sx
                       return (
                       <Button
-                        variant={cfg.variant}
+                        variant={tbSx?.variant || cfg.variant}
                         color={cfg.color}
                         size="large"
                         disabled={isUpdating}
@@ -1113,6 +1161,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           minWidth: "48%",
                           height: 48,
                           fontSize: "1rem",
+                          ...(tbSx || {}),
                           ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: "transparent" } : { color: "#fff" }),
                         }}
                       >
@@ -1123,11 +1172,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     {/* Render any extra choices — через RESULT_UI_CONFIG, _default теперь зелёная */}
                     {(displayedChoices || choices).filter((c) => c !== foundChoice && c !== notFoundChoice).map((choice) => {
                       const cfg = getUiConfig(choice);
-                      const isContained = cfg.variant === "contained";
+                      const tbSx = getButtonSx(choice); // ⭐ v8: StylingResultButton → sx
+                      const isContained = (tbSx?.variant || cfg.variant) === "contained";
                       return (
                       <Button
                         key={choice}
-                        variant={cfg.variant}
+                        variant={tbSx?.variant || cfg.variant}
                         color={cfg.color}
                         size="large"
                         disabled={isUpdating}
@@ -1140,6 +1190,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           minWidth: "48%",
                           height: 48,
                           fontSize: "1rem",
+                          ...(tbSx || {}),
                           ...(isContained && cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: "transparent", "&:hover": { backgroundImage: cfg.gradient, filter: "brightness(0.92)" } } : {}),
                           ...(!isContained ? { borderWidth: 1.5 } : {}),
                         }}

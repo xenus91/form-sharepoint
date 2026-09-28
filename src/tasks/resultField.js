@@ -12,9 +12,12 @@ let _resultFieldsCache = null; // Array<{ internalName, title, choices, id, stri
 let _resultFieldsCacheAt = 0;
 let _ctMapCache = null; // Map<string CtStringId -> fieldMeta>
 let _ctMapCacheAt = 0;
+let _ctMetaCache = null; // Map<string CtStringId -> {name, stringId}> — для маппинга CT.Name → TaskBehaviour.Title
+let _ctMetaCacheAt = 0;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 часа — поле результата меняется редко
 const STORAGE_KEY_FIELDS = "sp:resultFields:meta";
 const STORAGE_KEY_CTMAP = "sp:resultFields:ctMap";
+const STORAGE_KEY_CTMETA = "sp:resultFields:ctMeta";
 
 // Универсальный сторадж: localStorage для долгого кэша, fallback на sessionStorage
 function getStorage() {
@@ -33,6 +36,7 @@ function loadFromStorage() {
     if (!storage) return;
     const rawF = storage.getItem(STORAGE_KEY_FIELDS);
     const rawC = storage.getItem(STORAGE_KEY_CTMAP);
+    const rawM = storage.getItem(STORAGE_KEY_CTMETA);
     if (rawF) {
       const parsed = JSON.parse(rawF);
       if (Array.isArray(parsed.fields) && parsed.at) {
@@ -53,6 +57,15 @@ function loadFromStorage() {
         }
       }
     }
+    if (rawM) {
+      const parsed = JSON.parse(rawM);
+      if (Array.isArray(parsed.map) && parsed.at) {
+        if (Date.now() - parsed.at < CACHE_TTL_MS) {
+          _ctMetaCache = new Map(parsed.map.map(([k, v]) => [k, v]));
+          _ctMetaCacheAt = parsed.at;
+        }
+      }
+    }
   } catch (_e) { void _e; }
 }
 
@@ -65,6 +78,9 @@ function saveToStorage() {
     }
     if (_ctMapCache) {
       storage.setItem(STORAGE_KEY_CTMAP, JSON.stringify({ map: Array.from(_ctMapCache.entries()), at: _ctMapCacheAt }));
+    }
+    if (_ctMetaCache) {
+      storage.setItem(STORAGE_KEY_CTMETA, JSON.stringify({ map: Array.from(_ctMetaCache.entries()), at: _ctMetaCacheAt }));
     }
   } catch (_e) { void _e; }
 }
@@ -195,6 +211,28 @@ export async function fetchContentTypeResultMap(apiClient, opts = {}) {
     return _ctMapCache;
   }
 
+  // ⭐ v8+: всегда подтягиваем CT метаданные (имя) рядом с ctMap — нужно для TaskBehaviour-by-Name
+  const fetchCtMeta = async () => {
+    try {
+      const ctUrl = `${TASKS_LIST_API}/contenttypes?$select=Id,StringId,Name&$top=50`;
+      const { data } = await apiClient.get(ctUrl, { headers: { Accept: "application/json;odata=verbose" }, __noCache: forceRefresh });
+      const cts = data?.d?.results || [];
+      const metaMap = new Map();
+      for (const ct of cts) {
+        const ctId = ct.StringId || ct.Id?.StringValue || "";
+        if (ctId) metaMap.set(ctId, { name: String(ct.Name || "").trim(), stringId: ctId });
+      }
+      _ctMetaCache = metaMap;
+      _ctMetaCacheAt = Date.now();
+      saveToStorage();
+    } catch (e) {
+      console.warn("[resultField] ct meta fetch failed", e?.message);
+      _ctMetaCache = new Map();
+      _ctMetaCacheAt = Date.now();
+      saveToStorage();
+    }
+  };
+
   // Если только одно поле — маппим все CT на него (упрощение, когда нет разбивки по CT)
   if (resultFields.length === 1) {
     // Попробуем всё равно получить список CT, чтобы закэшировать все Id -> одно поле
@@ -217,6 +255,8 @@ export async function fetchContentTypeResultMap(apiClient, opts = {}) {
       _ctMapCache = map;
       _ctMapCacheAt = Date.now();
       saveToStorage();
+      // ⭐ v8+: подтянуть CT-мета (имя) для TaskBehaviour-by-Name
+      await fetchCtMeta();
       return map;
     } catch (e) {
       console.warn("[resultField] contenttypes fetch failed, fallback single field", e?.message);
@@ -257,6 +297,8 @@ export async function fetchContentTypeResultMap(apiClient, opts = {}) {
     _ctMapCache = map;
     _ctMapCacheAt = Date.now();
     saveToStorage();
+    // ⭐ v8+: подтянуть CT-мета (имя) для TaskBehaviour-by-Name
+    await fetchCtMeta();
     return map;
   } catch (e) {
     console.warn("[resultField] ct map failed, fallback merge", e?.message);
@@ -268,6 +310,24 @@ export async function fetchContentTypeResultMap(apiClient, opts = {}) {
     saveToStorage();
     return map;
   }
+}
+
+/**
+ * ⭐ v8+: возвращает Map<ctId, {name, stringId}> — для маппинга CT.Name → TaskBehaviour.Title.
+ * Кэш делит с fetchContentTypeResultMap (одна SP-выборка). 24-часовой TTL, как у ctMap.
+ * @param {import('axios').AxiosInstance} apiClient
+ * @param {{ forceRefresh?: boolean }} [opts]
+ * @returns {Promise<Map<string, {name: string, stringId: string}>>}
+ */
+export async function fetchContentTypeMeta(apiClient, opts = {}) {
+  const { forceRefresh = false } = opts;
+  loadFromStorage();
+  if (!forceRefresh && _ctMetaCache && Date.now() - _ctMetaCacheAt < CACHE_TTL_MS) {
+    return _ctMetaCache;
+  }
+  // Если основной fetch ещё не дёрнул — триггерим его (он подтянет и meta)
+  await fetchContentTypeResultMap(apiClient, { forceRefresh });
+  return _ctMetaCache || new Map();
 }
 
 /**
