@@ -122,6 +122,35 @@ export function validateBehaviour(obj) {
       rule.additionalActionsRequired = rawVal.aar === true || rawVal.aar === 1 || String(rawVal.aar).toLowerCase() === "true";
     }
 
+    // rf → relatedFields: данные из связанного элемента (RelatedItems → ProblemsPallet).
+    //   "rf": [ { "f": "THU", "ti": "ЕО" }, { "f": "Recipient/SCNumberText", "ti": "Получатель" } ]
+    //   "rf": [ "THU", "DC_THU" ]                        — короткая запись (title = имя поля)
+    // Поддерживается выборка lookup-полей через "/": Поле/Подполе (например Recipient/SCNumberText).
+    if (rawVal.rf !== undefined || rawVal.relatedFields !== undefined) {
+      const rawRf = rawVal.rf !== undefined ? rawVal.rf : rawVal.relatedFields;
+      if (!Array.isArray(rawRf)) {
+        return { ok: false, value: {}, error: `Behaviour["${key}"].rf must be an array` };
+      }
+      rule.relatedFields = [];
+      for (const [idx, item] of rawRf.entries()) {
+        let internalName = "";
+        let title = "";
+        if (typeof item === "string") {
+          internalName = item.trim();
+          title = internalName;
+        } else if (item && typeof item === "object") {
+          internalName = String(item.f || item.field || item.name || "").trim();
+          title = String(item.ti || item.title || "").trim() || internalName;
+        } else {
+          return { ok: false, value: {}, error: `Behaviour["${key}"].rf[${idx}] must be a string or object` };
+        }
+        if (!internalName) {
+          return { ok: false, value: {}, error: `Behaviour["${key}"].rf[${idx}].f (field) required` };
+        }
+        rule.relatedFields.push({ internalName, title, sortOrder: 10 + idx });
+      }
+    }
+
     // ct/cm/ok/no → тексты диалога подтверждения (Behaviour.c=true открывает диалог).
     //   "ct": "Подтверждение результата"   — заголовок
     //   "cm": "Вы уверены...?"             — сообщение
@@ -191,6 +220,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     animation: null,
     animationConfig: null,
     confirmTexts: null,
+    relatedFields: [],
     source: "empty",
   };
   if (!parsedBehaviour || typeof parsedBehaviour !== "object") return empty;
@@ -212,8 +242,30 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     animation: rule.animation === undefined ? null : rule.animation,
     animationConfig: rule.animationConfig || null,
     confirmTexts: rule.confirmTexts || null,
+    relatedFields: Array.isArray(rule.relatedFields) ? rule.relatedFields : [],
     source: src,
   };
+}
+
+/**
+ * Карточные (не зависящие от choice) настройки из Behaviour.
+ * Сейчас это `rf` — поля связанного элемента, которые нужно показать в карточке задачи.
+ * Приоритет: "_card" → "*" → "_default".
+ *
+ * @param {object|null} parsedBehaviour — value из parseBehaviour
+ * @returns {{relatedFields: Array<{internalName:string,title:string,sortOrder:number}>, source: string}}
+ */
+export function resolveBehaviourCard(parsedBehaviour) {
+  const empty = { relatedFields: [], source: "empty" };
+  if (!parsedBehaviour || typeof parsedBehaviour !== "object") return empty;
+  const order = ["_card", "*", "_default"];
+  for (const key of order) {
+    const rule = parsedBehaviour[key];
+    if (rule && Array.isArray(rule.relatedFields) && rule.relatedFields.length > 0) {
+      return { relatedFields: rule.relatedFields, source: key };
+    }
+  }
+  return empty;
 }
 
 /**

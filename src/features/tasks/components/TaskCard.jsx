@@ -9,7 +9,8 @@ import apiClient from "../../../api";
 import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
 import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title
-import { resolveBehaviour } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
+import { resolveBehaviour, resolveBehaviourCard } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
+import { parseRelatedRef, fetchRelatedFields } from "../../../tasks/relatedFields"; // ⭐ поля из связанного элемента (Behaviour.rf)
 import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
 import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
@@ -87,6 +88,43 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (!tb?.stylingActions?.ok) return null;
     return resolveStylingForChoice(actionName, tb.stylingActions.value);
   }, [getTaskBehaviourConfig]);
+
+  // ⭐ Карточные поля из связанного элемента: Behaviour.rf (в "_default"/"*"/"_card").
+  // Формат: [{ internalName, title, sortOrder }], например [{ f: "THU" }, { f: "Recipient/SCNumberText" }].
+  const relatedFieldDefs = React.useMemo(() => {
+    const tb = getTaskBehaviourConfig();
+    if (!tb?.behaviour?.ok) return [];
+    const card = resolveBehaviourCard(tb.behaviour.value);
+    if (__forceTaskDbg || __DBG_ENABLED__) {
+      __dlogAlways("[DBG:TaskCard:relatedFields]", { taskId: task?.Id, source: card.source, fields: card.relatedFields });
+    }
+    return card.relatedFields;
+  }, [getTaskBehaviourConfig, task?.Id]);
+
+  const relatedRef = React.useMemo(
+    () => parseRelatedRef(task?.RelatedItems),
+    [task?.RelatedItems]
+  );
+
+  const [relatedValues, setRelatedValues] = React.useState(null);
+  React.useEffect(() => {
+    if (relatedFieldDefs.length === 0 || !relatedRef) {
+      setRelatedValues(null);
+      return;
+    }
+    let cancelled = false;
+    fetchRelatedFields(relatedRef, relatedFieldDefs).then((values) => {
+      if (!cancelled) setRelatedValues(values);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [relatedFieldDefs, relatedRef]);
+
+  const relatedRows = React.useMemo(
+    () => (Array.isArray(relatedValues) ? relatedValues.filter((r) => r && r.value) : []),
+    [relatedValues]
+  );
 
   // ⭐ v8: helper для submit — определяет тип анимации и вызывает callback.
   // Приоритет: Behaviour.anim (per choice) → flow default (celebrate для found, sherlock для notFound) → none (extras).
@@ -615,6 +653,32 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         </Typography>
         {/* Получатель скрыт — в заголовке уже ТК и ЕО, ниже только Body, как просил пользователь */}
       </Box>
+
+      {/* ⭐ Данные из связанного элемента (RelatedItems) — поля задаются в Behaviour.rf */}
+      {relatedRows.length > 0 && (
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.25 }}>
+          {relatedRows.map((row) => (
+            <Chip
+              key={row.internalName}
+              size="small"
+              variant="outlined"
+              label={`${row.title}: ${row.value}`}
+              title={`${row.title}: ${row.value} (${row.internalName})`}
+              sx={{
+                fontWeight: 700,
+                fontSize: "0.72rem",
+                height: 26,
+                borderRadius: "10px",
+                bgcolor: "rgba(23,28,143,0.04)",
+                borderColor: "rgba(23,28,143,0.18)",
+                color: "#0F123D",
+                maxWidth: "100%",
+                "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" },
+              }}
+            />
+          ))}
+        </Stack>
+      )}
 
       {isCompleted ? (
         <Box sx={{ mt: 1.5 }}>
