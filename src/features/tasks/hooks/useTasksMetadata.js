@@ -30,7 +30,17 @@ export function useTasksMetadata() {
       const promises = [];
       promises.push(
         apiClient.get(`${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`, { headers: { Accept: "application/json;odata=verbose" } })
-          .then(({ data }) => { if (!cancelled) setEntityType(data?.d?.ListItemEntityTypeFullName || null); })
+          .then(async ({ data }) => {
+            if (cancelled) return;
+            const name = data?.d?.ListItemEntityTypeFullName || null;
+            if (name) { setEntityType(name); return; }
+            // Фолбэк: тип элемента из любого item (иногда list-level GET не проходит через прокси)
+            try {
+              const res = await apiClient.get(`${TASKS_LIST_API}/items?$top=1&$select=Id`, { headers: { Accept: "application/json;odata=verbose" } });
+              const t = res?.data?.d?.results?.[0]?.__metadata?.type || null;
+              if (!cancelled && t) setEntityType(t);
+            } catch {}
+          })
           .catch(() => { if (!cancelled) setEntityType(null); })
       );
       promises.push(

@@ -26,6 +26,10 @@ function normalizePromptFieldValues(arg) {
   return {};
 }
 
+// Поля, которых нет в списке Tasks: если SharePoint вернул «свойство X не существует»,
+// запоминаем это и больше не отправляем X в следующих запросах.
+const missingFields = new Set();
+
 function applyPromptFieldsToPayload(payload, promptFieldValues) {
   for (const [fieldName, value] of Object.entries(promptFieldValues || {})) {
     if (value === undefined || value === null) continue;
@@ -33,8 +37,54 @@ function applyPromptFieldsToPayload(payload, promptFieldValues) {
       console.warn(`[completeTask] system field '${fieldName}' blocked in promptFieldValues`);
       continue;
     }
+    if (missingFields.has(fieldName)) {
+      console.warn(`[completeTask] поле '${fieldName}' отсутствует в списке Tasks — пропускаю`);
+      continue;
+    }
     payload[fieldName] = value;
   }
+}
+
+/**
+ * Достаёт имя «плохого» свойства из текста ошибки SharePoint.
+ * Примеры сообщений:
+ *   Свойство "AdditionalsActionsRequired" не существует в типе "SP.Data.ListListItem".
+ *   A property named 'Foo' does not exist on type ...
+ *   Column 'Foo' does not exist.
+ */
+function extractBadProperty(message) {
+  const m = String(message || "");
+  const patterns = [
+    /(?:свойство|поле|столбец)\s+["«']?([^"»']+)["»']?\s+не\s+существует/i,
+    /property\s+named\s+['"`]?([^'"`]+)['"`]?/i,
+    /property\s+['"`]?([^'"`\s]+)['"`]?\s+does\s+not\s+exist/i,
+    /column\s+['"`]?([^'"`]+)['"`]?\s+does\s+not\s+exist/i,
+  ];
+  for (const re of patterns) {
+    const r = m.match(re);
+    if (r && r[1]) return r[1].trim();
+  }
+  return "";
+}
+
+/**
+ * Тип элемента списка (__metadata.type). Нужен для MERGE/POST:
+ * с неверным типом SharePoint валидирует payload против «пустого» типа и
+ * отвергает любые кастомные поля.
+ */
+async function resolveEntityType(known) {
+  const accept = { headers: { Accept: "application/json;odata=verbose" } };
+  if (known) return known;
+  try {
+    const { data } = await apiClient.get(`${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`, accept);
+    if (data?.d?.ListItemEntityTypeFullName) return data.d.ListItemEntityTypeFullName;
+  } catch {}
+  try {
+    const { data } = await apiClient.get(`${TASKS_LIST_API}/items?$top=1&$select=Id`, accept);
+    const t = data?.d?.results?.[0]?.__metadata?.type;
+    if (t) return t;
+  } catch {}
+  return "SP.Data.ListListItem";
 }
 
 export function useTaskMutations({
@@ -105,14 +155,7 @@ export function useTaskMutations({
         console.warn("take check fetch failed", e?.response?.status);
       }
 
-      let et = entityType;
-      if (!et) {
-        try {
-          const { data } = await apiClient.get(`${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`, { headers: { Accept: "application/json;odata=verbose" } });
-          et = data?.d?.ListItemEntityTypeFullName;
-        } catch {}
-      }
-      if (!et) et = "SP.Data.ListListItem";
+      const et = await resolveEntityType(entityType);
       const targetInProgress = inProgressStatusValue || "В процессе выполнения";
       const payload = { __metadata: { type: et }, Status: targetInProgress };
       const headers = {
@@ -219,12 +262,14 @@ export function useTaskMutations({
     setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._optimistic } : prev));
     try {
       let serverEtag = "*";
+      let itemEntityType = null;
       try {
         const resp = await apiClient.get(
           `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,${_resultFieldName},ResultSearchTHU,Location1,Modified,ContentTypeId`,
           { headers: { Accept: "application/json;odata=verbose" } }
         );
         const server = resp?.data?.d;
+        itemEntityType = server?.__metadata?.type || null;
         serverEtag = server?.__metadata?.etag || resp?.headers?.etag || resp?.headers?.ETag || resp?.headers?.["etag"] || "*";
         if (server && isCompletedStatus(server.Status, server.PercentComplete)) {
           notify(`Задача #${task.Id} уже выполнена другим пользователем: ${server.ResultSearchTHU || server.Status}`, { severity: "warning" });
@@ -238,14 +283,9 @@ export function useTaskMutations({
         console.warn("concurrency check failed", checkErr?.response?.status, checkErr?.message);
       }
 
-      let et = entityType;
-      if (!et) {
-        try {
-          const { data } = await apiClient.get(`${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`, { headers: { Accept: "application/json;odata=verbose" } });
-          et = data?.d?.ListItemEntityTypeFullName;
-        } catch {}
-      }
-      if (!et) et = "SP.Data.ListListItem";
+      // Тип элемента: берём из ответа по самому элементу (самый надёжный источник),
+      // иначе — ListItemEntityTypeFullName списка.
+      const et = await resolveEntityType(entityType || itemEntityType);
 
       const payload = { __metadata: { type: et }, [_resultFieldName]: resultValue };
       if (locationValue !== undefined && locationValue !== null) payload.Location1 = locationValue;
@@ -273,8 +313,23 @@ export function useTaskMutations({
       } else if (_isFound) {
         const reqToSave = additionalRequired || "Нет";
         const actsToSave = reqToSave === "Да" ? (additionalActions || []) : [];
-        payload.AdditionalsActionsRequired = toSPRequired(reqToSave);
-        payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: actsToSave };
+        // Поля доп. действий есть не во всех списках Tasks. Отправляем только существующие:
+        // список полей известен (taskFieldNames) — проверяем, иначе доверяем авто-чистке payload.
+        const hasListField = (name) =>
+          missingFields.has(name)
+            ? false
+            : !Array.isArray(taskFieldNames) || taskFieldNames.length === 0
+            ? true
+            : taskFieldNames.some((f) => String(f).toLowerCase() === String(name).toLowerCase());
+        const reqField = hasListField("AdditionalsActionsRequired")
+          ? "AdditionalsActionsRequired"
+          : hasListField("AdditionalActionsRequired")
+            ? "AdditionalActionsRequired"
+            : null;
+        if (reqField) payload[reqField] = toSPRequired(reqToSave);
+        if (hasListField("AdditionalActions")) {
+          payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: actsToSave };
+        }
       }
 
       const normalizedResult = String(resultValue).trim().toLowerCase();
@@ -298,22 +353,47 @@ export function useTaskMutations({
         const h = etagOverride ? { ...headers, "IF-MATCH": etagOverride } : headers;
         return apiClient.post(`${TASKS_LIST_API}/items(${task.Id})`, body, { headers: h });
       };
+      // ⭐ Отправка с авто-очисткой: если SharePoint говорит «свойство X не существует» —
+      // убираем X из payload и повторяем (до 6 полей за раз). Раньше такие ошибки
+      // глушили весь request (например, удалённое поле AdditionalsActionsRequired).
+      const postUpdateSafe = async (body, etagOverride) => {
+        let current = { ...body };
+        let lastErr = null;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          try {
+            return await postUpdate(current, etagOverride);
+          } catch (e) {
+            lastErr = e;
+            if (e?.response?.status === 412) throw e; // concurrency — обрабатывается выше
+            const raw = String(e?.response?.data?.error?.message?.value || e?.message || "");
+            const bad = extractBadProperty(raw);
+            if (bad && Object.prototype.hasOwnProperty.call(current, bad)) {
+              console.warn(`[completeTask] поле «${bad}» отсутствует в списке Tasks — отправляю без него`);
+              missingFields.add(bad);
+              delete current[bad];
+              continue;
+            }
+            throw e;
+          }
+        }
+        throw lastErr;
+      };
 
       if (tryWithoutStatusFirst) {
         try {
-          await postUpdate(payload);
+          await postUpdateSafe(payload);
           try {
             const check = await apiClient.get(`${TASKS_LIST_API}/items(${task.Id})?$select=Status,PercentComplete`, { headers: { Accept: "application/json;odata=verbose" } });
             const curStatus = check?.data?.d?.Status;
             const curPc = check?.data?.d?.PercentComplete;
-            if (!isCompletedStatus(curStatus, curPc)) await postUpdate({ __metadata: { type: et }, Status: targetStatus, PercentComplete: 1 }, "*");
+            if (!isCompletedStatus(curStatus, curPc)) await postUpdateSafe({ __metadata: { type: et }, Status: targetStatus, PercentComplete: 1 }, "*");
           } catch {}
         } catch (eNoStatus) {
           console.warn("NotFound without Status failed, trying with Status", eNoStatus?.response?.data);
           payloadWithStatus.Status = targetStatus;
           payloadWithStatus.PercentComplete = 1;
           try {
-            await postUpdate(payloadWithStatus);
+            await postUpdateSafe(payloadWithStatus);
           } catch (e) {
             const statusCode = e?.response?.status;
             if (statusCode === 412) { notify(`Задача #${task.Id} уже изменена другим пользователем. Обновите список.`, { severity: "warning" }); await loadTasks(); throw e; }
@@ -324,7 +404,7 @@ export function useTaskMutations({
                 const flip = { ...payload };
                 if (_isFound) flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false; else if (_isNotFound) flip.AdditionalsActionsRequired = false;
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
-                await postUpdate(_isNotFound ? flip : flipWithStatus, "*");
+                await postUpdateSafe(_isNotFound ? flip : flipWithStatus, "*");
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" }); queryClient.invalidateQueries({ queryKey: ["tasks"] }); invalidate("/items"); setTimeout(() => loadTasks({ silent: true }), 600); return;
               } catch {}
             }
@@ -332,22 +412,22 @@ export function useTaskMutations({
               try {
                 const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
                 const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
-                try { await postUpdate(cleanWithStatus, "*"); } catch { await postUpdate(clean, "*"); }
+                try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
                 notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" }); queryClient.invalidateQueries({ queryKey: ["tasks"] }); invalidate("/items"); setTimeout(() => loadTasks({ silent: true }), 600); return;
               } catch {}
             }
             const isFieldError = msg.includes("status") || msg.includes("percent");
             if (isFieldError) {
-              try { await postUpdate({ ...payload, Status: targetStatus }, "*"); } catch { try { await postUpdate({ ...payload, PercentComplete: 1 }, "*"); } catch { await postUpdate(payload, "*"); } }
+              try { await postUpdateSafe({ ...payload, Status: targetStatus }, "*"); } catch { try { await postUpdateSafe({ ...payload, PercentComplete: 1 }, "*"); } catch { await postUpdateSafe(payload, "*"); } }
             } else {
               const altStatus = targetStatus === "Завершена" ? "Completed" : "Завершена";
-              try { await postUpdate({ ...payload, Status: altStatus, PercentComplete: 1 }, "*"); } catch { await postUpdate(payload, "*"); }
+              try { await postUpdateSafe({ ...payload, Status: altStatus, PercentComplete: 1 }, "*"); } catch { await postUpdateSafe(payload, "*"); }
             }
           }
         }
       } else {
         try {
-          await postUpdate(payloadWithStatus);
+          await postUpdateSafe(payloadWithStatus);
         } catch (e) {
           const statusCode = e?.response?.status;
           if (statusCode === 412) { notify(`Задача #${task.Id} уже изменена другим пользователем. Обновите список.`, { severity: "warning" }); await loadTasks(); throw e; }
@@ -356,16 +436,16 @@ export function useTaskMutations({
             try {
               const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
               const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
-              try { await postUpdate(cleanWithStatus, "*"); } catch { await postUpdate(clean, "*"); }
+              try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
               notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" }); queryClient.invalidateQueries({ queryKey: ["tasks"] }); invalidate("/items"); setTimeout(() => loadTasks({ silent: true }), 600); return;
             } catch {}
           }
           const isFieldError = msg.includes("status") || msg.includes("percent");
           if (isFieldError) {
-            try { await postUpdate({ ...payload, Status: targetStatus }, "*"); } catch { try { await postUpdate({ ...payload, PercentComplete: 1 }, "*"); } catch { await postUpdate(payload, "*"); } }
+            try { await postUpdateSafe({ ...payload, Status: targetStatus }, "*"); } catch { try { await postUpdateSafe({ ...payload, PercentComplete: 1 }, "*"); } catch { await postUpdateSafe(payload, "*"); } }
           } else {
             const altStatus = targetStatus === "Завершена" ? "Completed" : "Завершена";
-            try { await postUpdate({ ...payload, Status: altStatus, PercentComplete: 1 }, "*"); } catch { await postUpdate(payload, "*"); }
+            try { await postUpdateSafe({ ...payload, Status: altStatus, PercentComplete: 1 }, "*"); } catch { await postUpdateSafe(payload, "*"); }
           }
         }
       }
