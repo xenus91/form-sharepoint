@@ -8,6 +8,22 @@ import { HASH_LOG, HASH_WARN } from "./log";
 
 export const PROBLEMS_LIST_TITLE = "ProblemsPallet";
 
+/**
+ * Формирует Title элемента ProblemsPallet: "<DC_THU>_<THU>" без пробелов.
+ * Пример: DC_THU="1234", THU="12345678901234567" → "1234_12345678901234567".
+ * Если одной из частей нет — возвращается только вторая (без лишнего "_").
+ *
+ * @param {string|number} dcThu — значение поля DC_THU (РЦ/склад)
+ * @param {string|number} thu — значение поля THU (номер ЕО)
+ * @returns {string}
+ */
+export function buildProblemsPalletTitle(dcThu, thu) {
+  const dc = String(dcThu ?? "").replace(/\s+/g, "").trim();
+  const th = String(thu ?? "").replace(/\s+/g, "").trim();
+  if (dc && th) return `${dc}_${th}`;
+  return dc || th;
+}
+
 const PRIMARY_SELECT = [
   "Id", "Title", "THU", "DC_THU", "Location1", "Problems", "Status",
   "Created", "Modified",

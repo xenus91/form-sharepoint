@@ -69,6 +69,7 @@ const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
 const DobTaskEditView = React.lazy(() => import("./features/dob/DobTaskEditView"));
 import TasksView from "./TasksView";
 import { useNotifications } from './NotificationsProvider';
+import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -1202,6 +1203,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setLoading(true);
 
       const officeSuffix = getEffectiveDcThu();
+      // Title элемента ProblemsPallet: "<DC_THU>_<THU>", без пробелов.
+      const palletTitle = buildProblemsPalletTitle(officeSuffix, eoNumber);
       const digest = await getRequestDigest();
 
       if (editingItemId) {
@@ -1210,6 +1213,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})`,
           {
             __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            Title: palletTitle,
             THU: eoNumber,
             DC_THU: officeSuffix,
             RecipientId: selectedRecipient,
@@ -1263,6 +1267,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           `/web/lists/getbytitle('${LIST_TITLE}')/items`,
           {
             __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            Title: palletTitle,
             THU: eoNumber,
             DC_THU: officeSuffix,
             RecipientId: selectedRecipient,
