@@ -1,6 +1,8 @@
 // src/features/tasks/components/TaskCard.jsx
 // Extracted from TasksView.jsx — Phase 14 TasksView refactor (§31)
 // Pure presentation + inline result/AdditionalActions logic, orchestration stays in TasksView
+// ★ PR: promptable-поля теперь динамические — берутся из TaskPromptFields (SP) per (CType × ResultValue)
+//   с fallback на hardcoded resultConfig.js (legacy: одно поле Location1 для «найдена»).
 
 import React from "react";
 import apiClient from "../../../api";
@@ -8,6 +10,7 @@ import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
 import { getResultUiConfig } from "../../../tasks/resultConfig";
 import { resolveResultUiConfig, resolveTaskResultDefinition } from "../../../services/taskResultDefinitions";
+import { resolvePromptFields } from "../../../services/taskPromptFields"; // ⭐ NEW
 import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import AdditionalActionsField from "./AdditionalActionsField";
@@ -70,7 +73,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const isTaking = isUpdating && isNotStartedStatus(task.Status);
   const [confirmNotFoundMode, setConfirmNotFoundMode] = React.useState(() => initialAction === "notfound" && isInProgressStatus(task.Status) && !isCompleted);
   const [foundInputMode, setFoundInputMode] = React.useState(() => initialAction === "found" && isInProgressStatus(task.Status) && !isCompleted);
-  const [foundLocation, setFoundLocation] = React.useState("");
+  // ⭐ NEW: promptFieldValues — object map { fieldInternalName: userValue }
+  // Для backward compat: при submit legacy «Сохранить» ниже мы извлекаем .Location1.
+  const [promptFieldValues, setPromptFieldValues] = React.useState({});
   // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice Fill-in)
   const [additionalActions, setAdditionalActions] = React.useState(() => {
     // Initial may not have taskConfig yet — use field fallback, will sync via effect when taskConfig loads
@@ -182,7 +187,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (!isInProgressStatus(task.Status)) {
       setConfirmNotFoundMode(false);
       setFoundInputMode(false);
-      setFoundLocation("");
+      setPromptFieldValues({});
       const defReset = getDefaultsForThisTask() || [];
       setAdditionalActions([...defReset]);
       setCustomActionInput("");
@@ -201,7 +206,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       setConfirmNotFoundMode(false);
       setFoundInputMode(false);
     }
-    setFoundLocation("");
+    setPromptFieldValues({});
     if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
       setAdditionalActions([...task.AdditionalActions]);
     } else {
@@ -690,7 +695,13 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 // fallback для кастомных типов без legacy строк: по конфигу
                 c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
-                  if (def) return def.showAdditionalActions;
+                  if (def && def.showAdditionalActions) return true;
+                  // ⭐ NEW: если для (CT, ch) есть promptable fields из TaskPromptFields — это inline-mode кнопка
+                  const ctIdForPrompt = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+                  const promptFields = taskConfig?.taskPromptFields
+                    ? resolvePromptFields(ctIdForPrompt, ch, taskConfig.taskPromptFields)
+                    : [];
+                  if (promptFields.length > 0) return true;
                   const cfg = getUiConfig(ch);
                   return cfg.requiresLocation || cfg.requiresAdditionalActions;
                 });
@@ -712,6 +723,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 // fallback для кастомных
                 c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
+                  // ⭐ NEW: RequiresConfirm из SP авторитетен (включая явное false),
+                  // чтобы админ мог отключить confirm-модалку через SP.
+                  if (def && def.requiresConfirm !== null) return def.requiresConfirm === true;
                   if (def) return !def.showAdditionalActions && def.cfg;
                   return getUiConfig(ch).confirm;
                 });
@@ -774,7 +788,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setTimeout(() => {
                             setConfirmNotFoundMode(false);
                             // ЕО не найдена → доп. действия не применяются: пусто / []
-                            if (onComplete) onComplete(task, notFoundChoice, undefined, "", []);
+                            if (onComplete) onComplete(task, notFoundChoice, {}, "", []);
                             else onResultClick(task, notFoundChoice);
                           }, 1600);
                         }}
@@ -816,47 +830,85 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
 
               // Input mode для Найдена — inline в карточке (вернули обратно, Phase 17.11)
               // ShowAdditionalActions из TaskResultDefinitions управляет видимостью AdditionalActionsField
+              // ★ PR: promptable-поля рендерятся динамически из TaskPromptFields (per CT × ResultValue) или
+              //       legacy fallback на одно поле Location1 (если SP-список отсутствует + cfg.requiresLocation=true).
               if (foundInputMode) {
                 const defForFound = getResultDef(foundChoice);
                 const showAAInline = defForFound ? !!defForFound.showAdditionalActions : !!getUiConfig(foundChoice).requiresAdditionalActions;
+                // ⭐ NEW: resolve promptable-поля из TaskPromptFields (SP) — empty [] если ничего не задано
+                const ctIdForPrompt = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+                const fromSp = taskConfig?.taskPromptFields
+                  ? resolvePromptFields(ctIdForPrompt, foundChoice, taskConfig.taskPromptFields)
+                  : null;
+                let promptFields;
+                if (fromSp !== null) {
+                  // SP-список есть (даже если пустой) — НЕ fallback на legacy Location1
+                  promptFields = fromSp;
+                } else {
+                  // SP 404 → legacy fallback на одно поле Location1 если cfg.requiresLocation=true
+                  const cfg = getUiConfig(foundChoice);
+                  promptFields = cfg.requiresLocation
+                    ? [{ internalName: "Location1", title: "Где найдена?", type: "multiline", required: false }]
+                    : [];
+                }
                 // debug
-                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, defForFound, showAAInline});
+                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, defForFound, showAAInline, promptFields, fromSp: fromSp !== null});
                 const validateAdditional = () => {
                   if (!showAAInline) { setAdditionalError(""); return true; }
+                  setAdditionalError("");
+                  return true;
+                };
+                const validatePromptFields = () => {
+                  // Validate Required поля
+                  const missing = (promptFields || []).filter((f) => f.required && !String(promptFieldValues[f.internalName] || "").trim());
+                  if (missing.length) {
+                    setAdditionalError(`Заполните обязательные поля: ${missing.map(m => m.title).join(", ")}`);
+                    return false;
+                  }
                   setAdditionalError("");
                   return true;
                 };
                 return (
                   <>
                     <Box sx={{ mt: 1.25 }}>
-                      <TextField
-                        value={foundLocation}
-                        onChange={(e) => setFoundLocation(e.target.value)}
-                        placeholder="Где найдена? (необязательно)"
-                        size="small"
-                        fullWidth
-                        disabled={isUpdating}
-                        autoFocus
-                        sx={{
-                          mb: 1,
-                          "& .MuiOutlinedInput-root": { borderRadius: 1.5, bgcolor: "#fff", fontSize: "0.95rem" },
-                          "& .MuiInputBase-input::placeholder": { opacity: 0.7 },
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            const loc = foundLocation.trim() ? foundLocation.trim() : undefined;
-                            if (!validateAdditional()) return;
-                            const acts = showAAInline ? additionalActions : [];
-                            const req = showAAInline ? additionalRequired : "Нет";
-                            setShowCelebrate(true);
-                            setTimeout(() => {
-                              if (onComplete) onComplete(task, foundChoice, loc, req, acts);
-                              else onResultClick(task, foundChoice);
-                            }, 1600);
-                          }
-                        }}
-                      />
+                      {/* ⭐ NEW: динамический рендер promptable-полей из TaskPromptFields (или 1 legacy Location1) */}
+                      {(promptFields || []).map((f, idx) => (
+                        <TextField
+                          key={f.internalName}
+                          value={promptFieldValues[f.internalName] ?? ""}
+                          onChange={(e) => setPromptFieldValues({ ...promptFieldValues, [f.internalName]: e.target.value })}
+                          placeholder={f.internalName !== f.title ? f.internalName : undefined}
+                          label={f.title}
+                          size="small"
+                          fullWidth
+                          multiline={f.type === "multiline"}
+                          minRows={f.type === "multiline" ? 2 : undefined}
+                          maxRows={f.type === "multiline" ? 4 : undefined}
+                          disabled={isUpdating}
+                          autoFocus={idx === 0}
+                          required={!!f.required}
+                          error={additionalError && f.required && !String(promptFieldValues[f.internalName] || "").trim()}
+                          sx={{
+                            mb: 1,
+                            "& .MuiOutlinedInput-root": { borderRadius: 1.5, bgcolor: "#fff", fontSize: "0.95rem" },
+                            "& .MuiInputBase-input::placeholder": { opacity: 0.7 },
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey && f.type !== "multiline") {
+                              e.preventDefault();
+                              if (!validatePromptFields()) return;
+                              if (!validateAdditional()) return;
+                              const acts = showAAInline ? additionalActions : [];
+                              const req = showAAInline ? additionalRequired : "Нет";
+                              setShowCelebrate(true);
+                              setTimeout(() => {
+                                if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
+                                else onResultClick(task, foundChoice);
+                              }, 1600);
+                            }
+                          }}
+                        />
+                      ))}
                       {showAAInline && (
                       <Box sx={{ width: '100%', mb: 1.5 }}>
                           <Box
@@ -897,13 +949,13 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         color="success"
                         disabled={isUpdating}
                         onClick={() => {
-                          const loc = foundLocation.trim() ? foundLocation.trim() : undefined;
+                          if (!validatePromptFields()) return;
                           if (!validateAdditional()) return;
                           const acts = showAAInline ? additionalActions : [];
                           const req = showAAInline ? (additionalActions.length > 0 ? "Да" : "Нет") : "Нет";
                           setShowCelebrate(true);
                           setTimeout(() => {
-                            if (onComplete) onComplete(task, foundChoice, loc, req, acts);
+                            if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
                             else onResultClick(task, foundChoice);
                           }, 1600);
                         }}
@@ -926,7 +978,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         variant="text"
                         onClick={() => {
                           setFoundInputMode(false);
-                          setFoundLocation("");
+                          setPromptFieldValues({});
                           setAdditionalActions([]);
                           setCustomActionInput("");
                           setAdditionalError("");
@@ -992,7 +1044,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                             const def = getDefaultsForThisTask() || [];
                             setAdditionalActions([...def]);
                           }
-                          setFoundLocation("");
+                          setPromptFieldValues({});
                           setAdditionalError("");
                           setCustomActionInput("");
                           setFoundInputMode(true);

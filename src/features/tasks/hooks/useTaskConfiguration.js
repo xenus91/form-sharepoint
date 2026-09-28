@@ -1,8 +1,10 @@
 // src/features/tasks/hooks/useTaskConfiguration.js
 // Phase 7+17 — единый React Query кэш конфигурации (изолирован от polling Tasks)
-// queryKey: ['task-configuration'], stale 30м, gc несколько часов, no refetchOnWindowFocus
-// Включает: ResultField discovery, ContentType map, TaskResultDefinitions (§14), TaskActionDefinitions (§21) — TaskTypeConfiguration (§17) ОТКЛЮЧЁН до аудита
-// TaskResult/ActionDefinitions — graceful 404 → fallback. TaskTypeConfiguration не дергается до аудита (нет 404).
+// queryKey: ['task-configuration','v6'], stale 30м, gc несколько часов, no refetchOnWindowFocus
+// Включает: ResultField discovery, ContentType map, TaskResultDefinitions (§14), TaskActionDefinitions (§21),
+// TaskPromptFields (★ PR: гибкий список promptable-полей per (CType × ResultValue))
+// — TaskTypeConfiguration (§17) ОТКЛЮЧЁН до аудита
+// TaskResult/Action/PromptDefinitions — graceful 404 → fallback. TaskTypeConfiguration не дергается до аудита (нет 404).
 
 import { useQuery } from "@tanstack/react-query";
 import apiClient from "../../../api";
@@ -11,6 +13,7 @@ import { TASKS_LIST_API } from "../../../tasks/config";
 // import { fetchTaskTypeConfigurationMap } from "../../../services/taskTypeConfiguration"; // §17 ОТКЛЮЧЁН до аудита — чтобы не было 404 TaskTypeConfiguration
 import { fetchTaskResultDefinitions } from "../../../services/taskResultDefinitions";
 import { fetchTaskActionDefinitions, resolveActionChoices, resolveActionDefaults } from "../../../services/taskActionDefinitions";
+import { fetchTaskPromptFields } from "../../../services/taskPromptFields";
 
 async function fetchAdditionalActionsMetaByName(internalName) {
   const name = String(internalName || "AdditionalActions").trim() || "AdditionalActions";
@@ -38,15 +41,16 @@ async function fetchAdditionalActionsMeta() {
 
 export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
-    queryKey: ["task-configuration","v5"], // bumped v5 for Default field + normal names fix
+    queryKey: ["task-configuration","v6"], // bumped v6 for TaskPromptFields integration
     queryFn: async () => {
       // §17 TaskTypeConfiguration ОТКЛЮЧЁН до аудита content-types.md — нет 404 в Network
-      // Оставлен только TaskResultDefinitions (§14) + TaskActionDefinitions (§21)
-      const [resultFields, ctMap, resultDefs, actionDefs] = await Promise.all([
+      // Оставлен только TaskResultDefinitions (§14) + TaskActionDefinitions (§21) + TaskPromptFields (★ PR)
+      const [resultFields, ctMap, resultDefs, actionDefs, promptFields] = await Promise.all([
         fetchResultFieldsMeta(apiClient),
         fetchContentTypeResultMap(apiClient),
         fetchTaskResultDefinitions(apiClient).catch(() => null),
         fetchTaskActionDefinitions(apiClient).catch(() => null),
+        fetchTaskPromptFields(apiClient).catch(() => null),
       ]);
       const taskTypeMap = null; // отключён до аудита
       const additionalMeta = await fetchAdditionalActionsMeta();
@@ -188,6 +192,7 @@ export function useTaskConfiguration({ enabled = true } = {}) {
         taskTypeMap,
         taskResultDefinitions: resultDefs,
         taskActionDefinitions: actionDefs,
+        taskPromptFields: promptFields, // ⭐ NEW: {byKey, byCtWildcard, globalWildcard, globalByKey, raw} or null (404)
         ctConfigMap,
         fetchedAt: Date.now(),
       };

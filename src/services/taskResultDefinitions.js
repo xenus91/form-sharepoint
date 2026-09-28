@@ -1,7 +1,11 @@
 // src/services/taskResultDefinitions.js
 // Phase 17 — строго по плану §14: TaskResultDefinitions
-// Поля списка (план):
-// Title (Text), CType (Text), ResultValue (Text), ShowAdditionalActions (Yes/No), AdditionalActionsRequired (Yes/No), SortOrder (Number), Enabled (Yes/No)
+// Поля списка (план §14 + PR extension):
+//   Title (Text), CType (Text), ResultValue (Text),
+//   ShowAdditionalActions (Yes/No), AdditionalsActionsRequired (Yes/No, legacy AdditionalActionsRequired авто),
+//   RequiresConfirm (Yes/No) — НОВОЕ: показать confirm-модалку перед submit,
+//   Color (Text) / Variant (Text) / Gradient (Text multi-line) — стили result-кнопок,
+//   Label (Text), SortOrder (Number), Enabled (Yes/No)
 // НЕ заменяет реальное Result field (FieldLinks), описывает UI поведение для уже существующих Result values.
 // Graceful 404 → fallback к hardcoded resultConfig.js. Кэш 30м.
 
@@ -9,8 +13,8 @@ import { RESULT_UI_CONFIG } from "../tasks/resultConfig";
 
 const LIST_TITLE = "TaskResultDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskResultDefs:map:v4";
-const STORAGE_AT = "sp:taskResultDefs:at:v4";
+const STORAGE_KEY = "sp:taskResultDefs:map:v5";
+const STORAGE_AT = "sp:taskResultDefs:at:v5";
 
 let _cache = null; // { global: Map<norm, cfg>, byCt: Map<ctId, Map<norm,cfg>>, raw: Array }
 let _cacheAt = 0;
@@ -90,8 +94,10 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
   if(!forceRefresh && _cache && Date.now()-_cacheAt < CACHE_TTL_MS) return _cache;
 
   // План §14: Title, CType, ResultValue, ShowAdditionalActions, AdditionalsActionsRequired (typo prod с 's'), SortOrder, Enabled — только CType + серверный фильтр Enabled
-  const urlPrimary = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`;
-  const urlFallback = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,SortOrder,Enabled&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`;
+  // Расширение: RequiresConfirm (Yes/No), Color, Variant, Gradient — все optional с graceful fallback
+  const urlPrimary = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,RequiresConfirm,Color,Variant,Gradient,SortOrder,Enabled&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`;
+  const urlFallback = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalActionsRequired,RequiresConfirm,Color,Variant,Gradient,SortOrder,Enabled&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`;
+  const urlLegacyNoNewFields = `/web/lists/getbytitle('${LIST_TITLE}')/items?$select=Id,Title,CType,ResultValue,ShowAdditionalActions,AdditionalsActionsRequired,SortOrder,Enabled&$filter=Enabled eq 1&$top=200&$orderby=SortOrder asc`;
   let url = urlPrimary;
   let data;
   try{
@@ -100,11 +106,11 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
       data = resp.data;
     }catch(ePrimary){
       const msg=String(ePrimary?.response?.data?.error?.message?.value||"").toLowerCase();
-      const isFieldMissing = ePrimary?.response?.status===400 && msg.includes("additionalsactionsrequired");
+      const isFieldMissing = ePrimary?.response?.status===400 && (msg.includes("additionalsactionsrequired") || msg.includes("requiresconfirm") || msg.includes("color") || msg.includes("variant") || msg.includes("gradient"));
       if(isFieldMissing){
-        console.warn("[taskResultDefinitions] AdditionalsActionsRequired not found, retry with AdditionalActionsRequired", msg);
-        url = urlFallback;
-        const resp2 = await apiClient.get(urlFallback, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
+        console.warn("[taskResultDefinitions] New field(s) not found, retry without RequiresConfirm/Color/Variant/Gradient", msg);
+        url = urlLegacyNoNewFields;
+        const resp2 = await apiClient.get(urlLegacyNoNewFields, {headers:{Accept:"application/json;odata=verbose"}, __noCache:forceRefresh});
         data = resp2.data;
       }else if(ePrimary?.response?.status===400 && msg.includes("additionalactionsrequired") && !msg.includes("additionalsactionsrequired")){
         // prod has Additionals but we tried Additionals? Actually this would be Additional missing -> try Additionals (already tried), but for safety try opposite
@@ -143,6 +149,8 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
         contentTypeId: ctId||null,
         showAdditionalActions: !!show,
         additionalActionsRequired: !!required,
+        // ⭐ NEW: requiresConfirm — НЕ-null означает «пришло из SP», null — fallback на hardcoded
+        requiresConfirm: parseBool(item.RequiresConfirm, null),
         // Совместимость: сохраняем legacy UI поля, но план их не требует
         label: item.Label ? String(item.Label).trim() : title,
         color: item.Color ? String(item.Color).trim().toLowerCase() : undefined,
@@ -175,10 +183,10 @@ export async function fetchTaskResultDefinitions(apiClient, opts={}){
         console.log("[DBG:taskResultDefinitions:fetch] parsed", {
           url,
           resultsCount: results.length,
-          raw: raw.map(r=>({Id:r.id, ResultValue:r.resultValue, CType:r.contentTypeId, Show:r.showAdditionalActions, Required:r.additionalActionsRequired, Title:r.title})),
+          raw: raw.map(r=>({Id:r.id, ResultValue:r.resultValue, CType:r.contentTypeId, Show:r.showAdditionalActions, Required:r.additionalActionsRequired, RequiresConfirm:r.requiresConfirm, Title:r.title})),
           byCtKeys: Array.from(byCt.keys()),
           globalKeys: Array.from(global.keys()),
-          rawItems: results.map(it=>({Id:it.Id, Title:it.Title, ResultValue:it.ResultValue, CType:it.CType, ShowAdditionalActions:it.ShowAdditionalActions, AdditionalActionsRequired:it.AdditionalsActionsRequired ?? it.AdditionalActionsRequired}))
+          rawItems: results.map(it=>({Id:it.Id, Title:it.Title, ResultValue:it.ResultValue, CType:it.CType, ShowAdditionalActions:it.ShowAdditionalActions, AdditionalActionsRequired:it.AdditionalsActionsRequired ?? it.AdditionalActionsRequired, RequiresConfirm:it.RequiresConfirm, Color:it.Color, Gradient:it.Gradient}))
         });
       }
     }catch(e){ console.warn("[DBG:taskResultDefinitions:fetch log error]", e); }
@@ -247,21 +255,21 @@ export function resolveTaskResultDefinition(resultValue, contentTypeId, defs){
   if(ctId && defs.byCt.size){
     if(defs.byCt.has(ctId) && defs.byCt.get(ctId).has(n)){
       const cfg=defs.byCt.get(ctId).get(n);
-      return {showAdditionalActions: cfg.showAdditionalActions, additionalActionsRequired: cfg.additionalActionsRequired, source:"task-result-definitions-ct", cfg};
+      return {showAdditionalActions: cfg.showAdditionalActions, additionalActionsRequired: cfg.additionalActionsRequired, requiresConfirm: cfg.requiresConfirm, source:"task-result-definitions-ct", cfg};
     }
     let best=null, bestLen=-1;
     for(const [key, map] of defs.byCt.entries()){
       if(ctId.startsWith(key) && key.length>bestLen && map.has(n)){ best=map.get(n); bestLen=key.length; }
     }
-    if(best) return {showAdditionalActions: best.showAdditionalActions, additionalActionsRequired: best.additionalActionsRequired, source:"task-result-definitions-ct-prefix", cfg:best};
+    if(best) return {showAdditionalActions: best.showAdditionalActions, additionalActionsRequired: best.additionalActionsRequired, requiresConfirm: best.requiresConfirm, source:"task-result-definitions-ct-prefix", cfg:best};
   }
   if(defs.global.has(n)){
     const cfg=defs.global.get(n);
-    return {showAdditionalActions: cfg.showAdditionalActions, additionalActionsRequired: cfg.additionalActionsRequired, source:"task-result-definitions-global", cfg};
+    return {showAdditionalActions: cfg.showAdditionalActions, additionalActionsRequired: cfg.additionalActionsRequired, requiresConfirm: cfg.requiresConfirm, source:"task-result-definitions-global", cfg};
   }
   // substring fallback
-  for(const [k,v] of defs.global.entries()){ if(n.includes(k)) return {showAdditionalActions: v.showAdditionalActions, additionalActionsRequired: v.additionalActionsRequired, source:"task-result-definitions-global-substr", cfg:v}; }
-  for(const [,map] of defs.byCt.entries()){ for(const [k,v] of map.entries()){ if(n.includes(k)) return {showAdditionalActions: v.showAdditionalActions, additionalActionsRequired: v.additionalActionsRequired, source:"task-result-definitions-ct-substr", cfg:v}; } }
+  for(const [k,v] of defs.global.entries()){ if(n.includes(k)) return {showAdditionalActions: v.showAdditionalActions, additionalActionsRequired: v.additionalActionsRequired, requiresConfirm: v.requiresConfirm, source:"task-result-definitions-global-substr", cfg:v}; }
+  for(const [,map] of defs.byCt.entries()){ for(const [k,v] of map.entries()){ if(n.includes(k)) return {showAdditionalActions: v.showAdditionalActions, additionalActionsRequired: v.additionalActionsRequired, requiresConfirm: v.requiresConfirm, source:"task-result-definitions-ct-substr", cfg:v}; } }
   return null;
 }
 

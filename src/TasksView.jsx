@@ -338,6 +338,46 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     const normalized = String(resultValue).trim().toLowerCase();
     const isFoundExact = normalized === "найден" || normalized === "найдена";
     const isNotFoundExact = normalized === "не найдена" || normalized === "не найден" || normalized === "не найдено";
+    // ⭐ NEW: routing через defs из TaskResultDefinitions (per CT × ResultValue)
+    // Приоритет: SP def.requiresLocation/requiresConfirm (если явно заданы в SP) → fallback на hardcoded resultConfig.js + legacy string match.
+    const ctForRouting = String(task?.contentTypeId || task?.ContentTypeId || "").trim();
+    const defForRouting = taskConfiguration.data?.taskResultDefinitions
+      ? resolveTaskResultDefinition(resultValue, ctForRouting, taskConfiguration.data.taskResultDefinitions)
+      : null;
+
+    // ⭐ NEW: SP-driven routing takes priority. Если SP явно говорит «Location» или «Confirm», открываем соответствующую модалку,
+    // даже если строковое значение не «найдена»/«не найдена» (например, админ настроил custom CT с произвольным ResultValue).
+    // Авторитетный override: явное false в SP отключает соответствующее поведение.
+    const spExplicitLocation = defForRouting && defForRouting.requiresLocation !== null;
+    const spExplicitConfirm = defForRouting && defForRouting.requiresConfirm !== null;
+    if (spExplicitLocation && defForRouting.requiresLocation === true) {
+      setPendingTask(task);
+      setPendingResult(resultValue);
+      setLocationComment("");
+      {
+        const ctIdForPending = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+        const cfgForPending = taskConfiguration.data?.ctConfigMap?.get(ctIdForPending) || taskConfiguration.data?.ctConfigMap?.get("__default");
+        let defPending;
+        if (cfgForPending && cfgForPending.defaultActions !== null && cfgForPending.defaultActions !== undefined) {
+          defPending = [...cfgForPending.defaultActions];
+        } else {
+          defPending = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : []);
+        }
+        setPendingAdditionalActions(Array.isArray(task.AdditionalActions) && task.AdditionalActions.length ? [...task.AdditionalActions] : defPending);
+      }
+      setPendingCustomAction("");
+      setPendingAdditionalError("");
+      setLocationDialogOpen(true);
+      return;
+    }
+    if (spExplicitConfirm && defForRouting.requiresConfirm === true) {
+      setPendingTask(task);
+      setPendingResult(resultValue);
+      setConfirmNotFoundOpen(true);
+      return;
+    }
+    // Если SP явно отключил RequiresLocation/RequiresConfirm (false) — пропускаем соответствующие проверки,
+    // идём прямо к completeTask ниже (с isFoundExact / isNotFoundExact как раньше).
     if (isFoundExact) {
       setPendingTask(task);
       setPendingResult(resultValue);
@@ -363,7 +403,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       setConfirmNotFoundOpen(true);
     } else {
       // Прочие результаты — без доп. действий
-      completeTask(task, resultValue, undefined, "", []);
+      completeTask(task, resultValue, {}, "", []);
     }
   }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
@@ -377,12 +417,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     const showForSubmit = defForSubmit ? !!defForSubmit.showAdditionalActions : true;
     const actsToSaveRaw = showForSubmit ? pendingAdditionalActions : [];
     const reqToSave = showForSubmit ? (pendingAdditionalActions.length > 0 ? "Да" : "Нет") : "Нет";
-    if (skip) {
-      // даже при пропуске локации сохраняем выбранные доп. действия (если Show=Да)
-      completeTask(pendingTask, pendingResult, undefined, reqToSave, actsToSaveRaw);
-    } else {
-      completeTask(pendingTask, pendingResult, comment || undefined, reqToSave, actsToSaveRaw);
-    }
+    // ⭐ NEW: promptFieldValues — object map. В этой модалке legacy single-field = Location1.
+    const promptValues = skip ? {} : { Location1: comment || undefined };
+    completeTask(pendingTask, pendingResult, promptValues, reqToSave, actsToSaveRaw);
   };
 
   // isHashMode from useHashElement
@@ -406,7 +443,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         <LocalRcBanner isLocalRcActive={isLocalRcActive} localRcValue={localRcValue} localRcOffice={localRcOffice} onClearLocalRc={onClearLocalRc} />
       )}
       <Box sx={{ position: "relative", zIndex: 10, bgcolor: "#ffffff", backdropFilter: "none", transform: "translateZ(0)", willChange: "transform", mx: 0, px: { xs: 1, sm: 2 }, pt: 1, pb: 1, mb: 1, borderRadius: '28px', border: "1px solid rgba(23,28,143,0.12)", boxShadow: "0 2px 8px rgba(23,28,143,0.06)", overflow: 'visible', boxSizing: 'border-box', flexShrink: 0, contain: "layout paint" }}>
-        <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={onClearElementHash} onRefresh={loadTasks} loading={loading} />
+        <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={onClearElementHash} onRefresh={loadTasks} loading={loading} taskConfiguration={taskConfiguration} />
         {!isHashMode && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedCount} completedCount={completedCount} hashMode={isHashMode} isTabPending={isTabPending} />
@@ -542,7 +579,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         pendingTask={pendingTask}
         pendingResult={pendingResult}
         updatingId={updatingId}
-        onConfirm={(task, result) => completeTask(task, result, undefined, "", [])}
+        onConfirm={(task, result) => completeTask(task, result, {}, "", [])}
       />
     </Box>
   );

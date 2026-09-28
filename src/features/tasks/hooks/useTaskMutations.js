@@ -1,11 +1,41 @@
 // src/features/tasks/hooks/useTaskMutations.js
 // PR2 — вынос мутаций задач (handleTakeInWork / completeTask) из TasksView без смены бизнес-логики
+// ★ PR: completeTask теперь принимает promptFieldValues ({fieldName: value}) вместо одного locationValue (string).
+//   Все callers (TasksView, TaskCard) обновлены. Legacy string → { Location1: string } для backward compat.
 // Сохраняет: ETag, 412 race, optimistic update, AdditionalActions boolean/string фолбэки, статусы, SPD workflow
 import { useState, useCallback } from "react";
 import apiClient, { invalidate } from "../../../api";
 import { getResultFieldForTask } from "../../../tasks/resultField";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { TASKS_LIST_API } from "../../../tasks/config";
+
+// Системные поля, которые НЕ должны перезаписываться из promptFieldValues.
+// Защита от случайного damage при невалидной конфигурации TaskPromptFields.
+const SYSTEM_FIELDS = new Set([
+  "__metadata", "Id", "Status", "PercentComplete", "ContentTypeId",
+  "Modified", "Created", "Editor", "EditorId", "EditorTitle",
+  "AssignedTo", "Author", "RelatedItems", "Title", "Body",
+  "ResultSearchTHU", "ResultSearchComplete",
+]);
+
+// Нормализация входного параметра promptFieldValues: legacy string → { Location1: string }
+function normalizePromptFieldValues(arg) {
+  if (arg === undefined || arg === null) return {};
+  if (typeof arg === "string") return { Location1: arg };
+  if (typeof arg === "object") return { ...arg };
+  return {};
+}
+
+function applyPromptFieldsToPayload(payload, promptFieldValues) {
+  for (const [fieldName, value] of Object.entries(promptFieldValues || {})) {
+    if (value === undefined || value === null) continue;
+    if (SYSTEM_FIELDS.has(fieldName)) {
+      console.warn(`[completeTask] system field '${fieldName}' blocked in promptFieldValues`);
+      continue;
+    }
+    payload[fieldName] = value;
+  }
+}
 
 export function useTaskMutations({
   entityType,
@@ -139,7 +169,10 @@ export function useTaskMutations({
     }
   }, [entityType, inProgressStatusValue, currentUserId, currentUserTitle, notify, loadTasks, queryClient, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, setElementTaskMatch]);
 
-  const completeTask = useCallback(async (task, resultValue, locationValue, additionalRequired, additionalActions) => {
+  const completeTask = useCallback(async (task, resultValue, promptFieldValues, additionalRequired, additionalActions) => {
+    // Backward compat: legacy string → { Location1: string }
+    const normalizedPromptValues = normalizePromptFieldValues(promptFieldValues);
+    const locationValue = normalizedPromptValues.Location1; // legacy contract — извлекаем для Location1-specific логики
     const prevTaskSnapshot = { ...task };
     setUpdatingId(task.Id);
     const _norm = String(resultValue || "").trim().toLowerCase();
@@ -172,6 +205,8 @@ export function useTaskMutations({
       [_resultFieldName]: resultValue,
       ResultSearchTHU: resultValue,
       Location1: locationValue !== undefined && locationValue !== null ? locationValue : task.Location1,
+      // ⭐ NEW: spread остальных promptable-полей в optimistic state (не Location1)
+      ...Object.fromEntries(Object.entries(normalizedPromptValues).filter(([k]) => k !== "Location1").map(([k, v]) => [k, v])),
       AdditionalsActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalsActionsRequired || "")),
       AdditionalActions: _isNotFound ? [] : (_isFound ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
       Status: _targetStatusOpt,
@@ -215,6 +250,8 @@ export function useTaskMutations({
       const payload = { __metadata: { type: et }, [_resultFieldName]: resultValue };
       if (locationValue !== undefined && locationValue !== null) payload.Location1 = locationValue;
       else if (pendingResult && String(pendingResult).toLowerCase().includes("найден") && locationValue === undefined) { /* leave */ }
+      // ⭐ NEW: spread остальных promptable-полей из TaskPromptFields (с фильтром системных)
+      applyPromptFieldsToPayload(payload, Object.fromEntries(Object.entries(normalizedPromptValues).filter(([k]) => k !== "Location1")));
 
       const toSPRequired = (reqStr) => {
         if (additionalRequiredIsBoolean === true) {

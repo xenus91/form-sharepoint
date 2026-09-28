@@ -3,6 +3,10 @@
 // Позволяет без хардкода в TaskCard задавать цвет, вариант, требования к локации/доп.действиям.
 // Ключ — нормализованное (lowercase) значение choice.
 // Для нового типа задач достаточно добавить сюда запись, не меняя код TaskCard.
+//
+// ⚠ Fallback для TaskResultDefinitions (graceful 404): если SharePoint-список отсутствует,
+// getResultUiConfig() возвращает эту конфигурацию. При наличии списка данные берутся из SP.
+// Подробный контракт — в src/services/taskResultDefinitions.js.
 
 export const RESULT_UI_CONFIG = {
   // Legacy: "Найдена" — зелёная, требует Where + AdditionalActions

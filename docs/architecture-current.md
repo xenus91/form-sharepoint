@@ -119,7 +119,8 @@ return { ResultSearchTHU: dynamicResultVal, ResultValue: dynamicResultVal, Locat
   - Для `isInProgressStatus && !isCompleted` TaskCard рендерит choices (`displayedChoices` из свежих metadata, иначе `choices` глобальные). При `choices.length===0` показывается "Нет доступных результатов".
   - Completion валидация: `resultValue` обязателен; payload отправляет **два** ключа `{ [resultFieldName]: resultValue, ResultSearchTHU: resultValue }` для backward compat.
   - Legacy `ResultSearchTHU` choices загружаются и как глобальные `choices` в TasksView (поля `fields?$filter=InternalName eq 'ResultSearchTHU'`).
-- `TaskResultDefinitions` список (из плана) **ещё не создан** — сейчас поведение UI для Result-значений (showAdditionalActions etc.) захардкожено в `TasksView.jsx:673 requiresLocation/requiresAdditionalActions` через конфиг `resultConfig.js` (не исследовано здесь, но упоминается).
+- `TaskResultDefinitions` список (план §14) — primary для UI-поведения Result-значений: `ShowAdditionalActions`, `AdditionalsActionsRequired`, `RequiresConfirm`, `Color`, `Variant`, `Gradient`. Graceful 404 → fallback на hardcoded `resultConfig.js`. Кэш 30м, storage keys v5.
+- `TaskPromptFields` список (⭐ PR) — primary для произвольных promptable-полей per `(CType × ResultValue)`. Graceful 404 → fallback на `resultConfig.requiresLocation` (одно поле Location1). Резолвер с приоритетом: exact CT → prefix CT → CT wildcard `ResultValue='*'` → global wildcard → global exact. Не использует substring-match.
 - BUG/debug для завершения: `ResultSearchComplete` логируется в `[DBG:mapping] has result keys but THU empty`, fetchTasks логирует `completion-type tasks` где `rawComplete = raw.ResultSearchComplete`.
 
 ---
