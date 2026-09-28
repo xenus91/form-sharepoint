@@ -130,6 +130,58 @@ describe("behaviourParser", () => {
     });
   });
 
+  describe("anim (animation at submit)", () => {
+    it("парсит celebrate", () => {
+      const r = parseBehaviour('{"A":{"anim":"celebrate"}}');
+      expect(r.ok).toBe(true);
+      expect(r.value.a.animation).toBe("celebrate");
+    });
+
+    it("парсит sherlock", () => {
+      const r = parseBehaviour('{"A":{"anim":"sherlock"}}');
+      expect(r.value.a.animation).toBe("sherlock");
+    });
+
+    it("парсит none", () => {
+      const r = parseBehaviour('{"A":{"anim":"none"}}');
+      expect(r.value.a.animation).toBe("none");
+    });
+
+    it("нормализует case (CELEBRATE → celebrate)", () => {
+      const r = parseBehaviour('{"A":{"anim":"CELEBRATE"}}');
+      expect(r.value.a.animation).toBe("celebrate");
+    });
+
+    it("игнорирует неизвестное значение (не падаем)", () => {
+      const r = parseBehaviour('{"A":{"anim":"wtf"}}');
+      expect(r.ok).toBe(true);
+      expect(r.value.a.animation).toBeUndefined();
+    });
+
+    it("отсутствие anim → animation=undefined в rule, =null в resolveBehaviour", () => {
+      const r = parseBehaviour('{"A":{}}');
+      expect(r.value.a.animation).toBeUndefined();
+      const resolved = resolveBehaviour("A", r.value);
+      expect(resolved.animation).toBeNull();
+    });
+
+    it("resolveBehaviour возвращает animation для exact match", () => {
+      const parsed = parseBehaviour('{"Исправлено":{"anim":"sherlock"},"Не исправлено":{"anim":"celebrate"}}').value;
+      expect(resolveBehaviour("Исправлено", parsed).animation).toBe("sherlock");
+      expect(resolveBehaviour("Не исправлено", parsed).animation).toBe("celebrate");
+    });
+
+    it("resolveBehaviour для empty behaviour → animation=null (use flow default)", () => {
+      expect(resolveBehaviour("A", {}).animation).toBeNull();
+    });
+
+    it("anim в wildcard * применяется ко всем choice", () => {
+      const parsed = parseBehaviour('{"*":{"anim":"celebrate"}}').value;
+      expect(resolveBehaviour("A", parsed).animation).toBe("celebrate");
+      expect(resolveBehaviour("B", parsed).animation).toBe("celebrate");
+    });
+  });
+
   describe("toRenderPromptFields", () => {
     it("returns promptFields array from rule", () => {
       const parsed = parseBehaviour('{"A":{"p":[{"f":"X"}]}}').value;

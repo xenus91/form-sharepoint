@@ -66,6 +66,25 @@ Lookup-поле на CT **не нужно** — оно не работает с 
 | `c` | Показать confirm-модалку перед submit (`RequiresConfirmed`) | `false` |
 | `aa` | Показать `AdditionalActionsField` inline | `false` |
 | `aar` | Сделать `AdditionalActions` обязательным | `false` |
+| `anim` | Анимация при submit (см. ниже) | flow default |
+
+### Анимация при submit (`anim`)
+
+Если ключ `anim` не задан в Behaviour — фронт использует **flow default** (зелёная 🎉 для foundChoice, красная 🕵️ для notFoundChoice, без анимации для extras). Никаких кастомов сверх того, что было до введения `TaskBehaviour` — это сохраняет текущее поведение.
+
+| Значение | Поведение |
+|----------|-----------|
+| `"celebrate"` | Зелёная круговая анимация + 🎉 + «Поздравляю! Отличная работа!» (1.6с) |
+| `"sherlock"` | Красная круговая анимация + 🕵️ + «ЕО не найдена» (1.6с) |
+| `"none"` | submit без анимации и без задержки |
+
+Пример:
+```json
+{
+  "Исправлено":     { "anim": "celebrate" },
+  "Не исправлено":  { "anim": "sherlock" }
+}
+```
 
 ### Ключи внутри одного promptField
 

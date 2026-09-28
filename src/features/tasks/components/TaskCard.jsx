@@ -92,6 +92,26 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (!tb || !tb.styling || !tb.styling.ok) return null;
     return resolveStylingForChoice(choiceVal, tb.styling.value);
   }, [task?.contentTypeId, task?.ContentTypeId, task?.raw, taskConfig?.taskBehaviour, taskConfig?.ctMetaMap]);
+
+  // ⭐ v8: helper для submit — определяет тип анимации и вызывает callback.
+  // Приоритет: Behaviour.anim (per choice) → flow default (celebrate для found, sherlock для notFound) → none (extras).
+  // Если Behaviour.anim="none" — callback вызывается немедленно, без анимации и задержки.
+  const runSubmit = React.useCallback((choiceVal, flowType, submitFn) => {
+    const rule = getBehaviourRuleForChoice(choiceVal);
+    let anim = rule?.animation || null;
+    if (!anim) {
+      if (flowType === "found") anim = "celebrate";
+      else if (flowType === "notFound") anim = "sherlock";
+      // "extra" (или неизвестный flow) — anim остаётся null → без анимации
+    }
+    if (anim === "celebrate") setShowCelebrate(true);
+    else if (anim === "sherlock") setShowSherlock(true);
+    if (anim === "none" || !anim) {
+      submitFn();
+    } else {
+      setTimeout(submitFn, 1600);
+    }
+  }, [getBehaviourRuleForChoice]);
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
   const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
@@ -831,13 +851,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         color="error"
                         disabled={isUpdating}
                         onClick={() => {
-                          setShowSherlock(true);
-                          setTimeout(() => {
+                          runSubmit(notFoundChoice, "notFound", () => {
                             setConfirmNotFoundMode(false);
                             // ЕО не найдена → доп. действия не применяются: пусто / []
                             if (onComplete) onComplete(task, notFoundChoice, {}, "", []);
                             else onResultClick(task, notFoundChoice);
-                          }, 1600);
+                          });
                         }}
                         sx={{
                           borderRadius: 1.5,
@@ -975,11 +994,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                                 setInlineConfirmPending({ req, acts });
                                 return;
                               }
-                              setShowCelebrate(true);
-                              setTimeout(() => {
+                              runSubmit(foundChoice, "found", () => {
                                 if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
                                 else onResultClick(task, foundChoice);
-                              }, 1600);
+                              });
                             }
                           }}
                         />
@@ -1034,11 +1052,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                             setInlineConfirmPending({ req, acts });
                             return;
                           }
-                          setShowCelebrate(true);
-                          setTimeout(() => {
+                          runSubmit(foundChoice, "found", () => {
                             if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
                             else onResultClick(task, foundChoice);
-                          }, 1600);
+                          });
                         }}
                         sx={{
                           borderRadius: 1.5,
@@ -1091,11 +1108,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       onConfirm={(t, r) => {
                         const p = inlineConfirmPending;
                         setInlineConfirmPending(null);
-                        setShowCelebrate(true);
-                        setTimeout(() => {
+                        runSubmit(foundChoice, "found", () => {
                           if (onComplete) onComplete(t, r, promptFieldValues, p?.req || "Нет", p?.acts || []);
                           else onResultClick(t, r);
-                        }, 1600);
+                        });
                       }}
                     />
                   </>

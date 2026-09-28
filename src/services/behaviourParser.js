@@ -10,6 +10,7 @@
 // При ошибке парсинга фронт проваливается в legacy-слои (TaskPromptFields и т.д.).
 
 const VALID_TYPES = new Set(["text", "multiline", "number", "choice"]);
+const VALID_ANIMATIONS = new Set(["celebrate", "sherlock", "none"]);
 
 /**
  * @typedef {{ internalName:string, type:string, required:boolean, title:string,
@@ -97,6 +98,13 @@ export function validateBehaviour(obj) {
       rule.additionalActionsRequired = rawVal.aar === true || rawVal.aar === 1 || String(rawVal.aar).toLowerCase() === "true";
     }
 
+    // anim → animation при submit (celebrate=зелёная 🎉, sherlock=красная 🕵️, none=без анимации)
+    if (rawVal.anim !== undefined) {
+      const a = String(rawVal.anim).trim().toLowerCase();
+      if (VALID_ANIMATIONS.has(a)) rule.animation = a;
+      // unknown values ignored — не падаем, фронт использует flow default
+    }
+
     out[key] = rule;
   }
   return { ok: true, value: out };
@@ -125,6 +133,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     requiresConfirmed: null,
     showAdditionalActions: null,
     additionalActionsRequired: null,
+    animation: null,
     source: "empty",
   };
   if (!parsedBehaviour || typeof parsedBehaviour !== "object") return empty;
@@ -143,6 +152,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     requiresConfirmed: rule.requiresConfirmed === undefined ? null : !!rule.requiresConfirmed,
     showAdditionalActions: rule.showAdditionalActions === undefined ? null : !!rule.showAdditionalActions,
     additionalActionsRequired: rule.additionalActionsRequired === undefined ? null : !!rule.additionalActionsRequired,
+    animation: rule.animation === undefined ? null : rule.animation,
     source: src,
   };
 }
