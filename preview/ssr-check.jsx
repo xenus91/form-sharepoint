@@ -1,4 +1,4 @@
-// preview/ssr-check.jsx — серверный рендер сцены: ловим runtime-ошибки карточек без браузера.
+// preview/ssr-check.jsx — рендер сцены: и серверный (SSR), и клиентский (jsdom, чтобы отработали эффекты).
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { ThemeProvider, createTheme } from "@mui/material";
@@ -14,3 +14,6 @@ export function run() {
   );
   return { html, ids: tasks.map((t) => t.Id) };
 }
+
+export { default as CardsScene } from "./CardsScene";
+export { theme };

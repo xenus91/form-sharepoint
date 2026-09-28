@@ -124,13 +124,27 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // Формат: [{ internalName, title, sortOrder }], например [{ f: "THU" }, { f: "Recipient/SCNumberText" }].
   const relatedFieldDefs = React.useMemo(() => {
     const tb = getTaskBehaviourConfig();
-    if (!tb?.behaviour?.ok) return [];
+    if (!tb?.behaviour?.ok) {
+      if (__forceTaskDbg || __DBG_ENABLED__) {
+        __dlogAlways("[DBG:TaskCard:relatedFields] нет записи TaskBehaviour для этого типа контента", {
+          taskId: task?.Id,
+          contentTypeId: String(task?.contentTypeId || task?.ContentTypeId || "").slice(-12),
+        });
+      }
+      return [];
+    }
     const card = resolveBehaviourCard(tb.behaviour.value);
     if (__forceTaskDbg || __DBG_ENABLED__) {
-      __dlogAlways("[DBG:TaskCard:relatedFields]", { taskId: task?.Id, source: card.source, fields: card.relatedFields });
+      __dlogAlways("[DBG:TaskCard:relatedFields]", {
+        taskId: task?.Id,
+        matchedBy: tb.matchedBy,
+        source: card.source,
+        fields: card.relatedFields,
+        hasRelatedItems: !!task?.RelatedItems,
+      });
     }
     return card.relatedFields;
-  }, [getTaskBehaviourConfig, task?.Id]);
+  }, [getTaskBehaviourConfig, task?.Id, task?.contentTypeId, task?.ContentTypeId, task?.RelatedItems]);
 
   const relatedRef = React.useMemo(
     () => parseRelatedRef(task?.RelatedItems),
@@ -156,10 +170,16 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     };
   }, [relatedFieldDefs, relatedRef]);
 
-  const relatedRows = React.useMemo(
-    () => (Array.isArray(relatedValues) ? relatedValues.filter((r) => r && r.value) : []),
-    [relatedValues]
-  );
+  const relatedRows = React.useMemo(() => {
+    if (!Array.isArray(relatedValues)) return [];
+    const zoneByField = new Map(relatedFieldDefs.map((f) => [f.internalName, f.zone || "header"]));
+    return relatedValues
+      .filter((r) => r && r.value)
+      .map((r) => ({ ...r, zone: zoneByField.get(r.internalName) || "header" }));
+  }, [relatedValues, relatedFieldDefs]);
+  // Поля в шапке (по умолчанию) и поля перед описанием ("z": "body").
+  const headerRows = React.useMemo(() => relatedRows.filter((r) => r.zone !== "body"), [relatedRows]);
+  const bodyRows = React.useMemo(() => relatedRows.filter((r) => r.zone === "body"), [relatedRows]);
   // Поля настроены, но ещё грузятся — показываем скелетоны, чтобы карточки не «прыгали».
   const [relatedLoading, setRelatedLoading] = React.useState(false);
 
@@ -660,8 +680,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       {/* ── Шапка: поля из Behaviour.rf (ЕО, получатель, ...) + срок / время решения ── */}
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1.25 }}>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ flex: 1, minWidth: 0 }}>
-          {relatedRows.length > 0 ? (
-            relatedRows.map((row) => (
+          {headerRows.length > 0 ? (
+            headerRows.map((row) => (
               <Box
                 key={row.internalName}
                 title={`${row.title}: ${row.value} (${row.internalName})`}
@@ -741,6 +761,30 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         >
           {displayTitle}
         </Typography>
+        {bodyRows.length > 0 && (
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.6 }}>
+            {bodyRows.map((row) => (
+              <Chip
+                key={row.internalName}
+                size="small"
+                variant="outlined"
+                label={`${row.title}: ${row.value}`}
+                title={`${row.title}: ${row.value} (${row.internalName})`}
+                sx={{
+                  fontWeight: 700,
+                  fontSize: "0.74rem",
+                  height: 26,
+                  borderRadius: "10px",
+                  bgcolor: "rgba(23,28,143,0.04)",
+                  borderColor: "rgba(23,28,143,0.16)",
+                  color: "#0F123D",
+                  maxWidth: "100%",
+                  "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" },
+                }}
+              />
+            ))}
+          </Stack>
+        )}
         {displayBody && (
           <Typography
             variant="body2"
@@ -779,20 +823,29 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
           <Divider sx={{ mb: 1.5 }} />
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
             {(() => {
-              const r = String(task.ResultSearchTHU || "").trim().toLowerCase();
+              const resultValue = String(task.ResultSearchTHU || task.ResultValue || "").trim();
+              const r = resultValue.toLowerCase();
               const isFound = r === "найден" || r === "найдена";
               const isNotFound = r === "не найдена" || r === "не найден" || r === "не найдено";
-              const col = isFound ? "success" : isNotFound ? "error" : task.ResultSearchTHU ? "success" : "default";
+              const rSx = resultValue ? getButtonSx(resultValue) : null; // ⭐ StylingResultButton для этого результата
+              // Цвет чипа = настроенный в StylingResultButton (bg/c), иначе прежний смысловой fallback
+              const styled = rSx?.background || rSx?.color;
               return (
                 <Chip
-                  label={`Результат: ${task.ResultSearchTHU || "—"}`}
-                  color={col}
+                  label={`Результат: ${resultValue || "—"}`}
+                  color={styled ? undefined : isFound ? "success" : isNotFound ? "error" : resultValue ? "success" : "default"}
                   size="small"
-                  variant={isFound || isNotFound ? "filled" : "outlined"}
+                  variant={rSx?.variant === "outlined" ? "outlined" : isFound || isNotFound ? "filled" : "outlined"}
                   sx={{
-                    fontWeight: 700,
-                    ...(isFound ? { bgcolor: "#2e7d32", color: "#fff", "& .MuiChip-label": { color: "#fff" } } : {}),
-                    ...(isNotFound ? { bgcolor: "#c62828", color: "#fff", "& .MuiChip-label": { color: "#fff" } } : {}),
+                    fontWeight: 800,
+                    fontSize: "0.72rem",
+                    height: 26,
+                    borderRadius: "10px",
+                    ...(rSx?.background ? { background: rSx.background, color: rSx.color || "#fff", borderColor: "transparent" } : {}),
+                    ...(!rSx?.background && rSx?.color ? { color: rSx.color, borderColor: rSx.color } : {}),
+                    ...(styled ? { "& .MuiChip-label": { color: rSx?.color || "#fff" } } : {}),
+                    ...(!styled && isFound ? { bgcolor: "#2e7d32", color: "#fff", "& .MuiChip-label": { color: "#fff" } } : {}),
+                    ...(!styled && isNotFound ? { bgcolor: "#c62828", color: "#fff", "& .MuiChip-label": { color: "#fff" } } : {}),
                   }}
                 />
               );

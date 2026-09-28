@@ -135,19 +135,23 @@ export function validateBehaviour(obj) {
       for (const [idx, item] of rawRf.entries()) {
         let internalName = "";
         let title = "";
+        let zone = "header";
         if (typeof item === "string") {
           internalName = item.trim();
           title = internalName;
         } else if (item && typeof item === "object") {
           internalName = String(item.f || item.field || item.name || "").trim();
           title = String(item.ti || item.title || "").trim() || internalName;
+          // z/pos/zone — где показывать поле: "header" (шапка, по умолчанию) или "body" (перед описанием)
+          const zoneRaw = String(item.z || item.pos || item.zone || "").trim().toLowerCase();
+          zone = zoneRaw === "body" || zoneRaw === "b" || zoneRaw === "description" ? "body" : "header";
         } else {
           return { ok: false, value: {}, error: `Behaviour["${key}"].rf[${idx}] must be a string or object` };
         }
         if (!internalName) {
           return { ok: false, value: {}, error: `Behaviour["${key}"].rf[${idx}].f (field) required` };
         }
-        rule.relatedFields.push({ internalName, title, sortOrder: 10 + idx });
+        rule.relatedFields.push({ internalName, title, zone, sortOrder: 10 + idx });
       }
     }
 

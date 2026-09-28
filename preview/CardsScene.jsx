@@ -4,6 +4,8 @@ import { Box, Typography } from "@mui/material";
 import TaskCard from "../src/features/tasks/components/TaskCard";
 
 const CT_ID = "0x0100PALLET";
+// Тип контента завершённых задач: своей записи в TaskBehaviour нет — должна сработать общая («*»).
+const CT_ID_DONE = "0x0100DONE";
 
 const behaviour = {
   _default: {
@@ -11,6 +13,7 @@ const behaviour = {
       { f: "THU", ti: "ЕО" },
       { f: "Recipient/SCNumberText", ti: "Получатель" },
       { f: "DC_THU", ti: "РЦ" },
+      { f: "Location1", ti: "Местоположение", z: "body" },
     ],
   },
   "Исправлено": {
@@ -47,9 +50,27 @@ const behaviourRecord = {
   modified: "",
 };
 
+// Общая запись-фолбэк для типов контента без своей настройки (завершённые задачи).
+const fallbackRecord = {
+  id: 2,
+  title: "*",
+  description: "",
+  behaviour: JSON.stringify(behaviour),
+  styling: JSON.stringify({
+    "Исправлено": { bg: "linear-gradient(180deg,#2e7d32 0%,#1b5e20 100%)", c: "#ffffff" },
+    "Не исправлено": { bg: "linear-gradient(180deg,#e53935 0%,#b71c1c 100%)", c: "#ffffff" },
+  }),
+  stylingActions: "",
+  enabled: true,
+  modified: "",
+};
+
 export const taskConfig = {
-  taskBehaviour: new Map([[1, behaviourRecord]]),
-  ctMetaMap: new Map([[CT_ID, { id: CT_ID, name: "Паллет" }]]),
+  taskBehaviour: new Map([[1, behaviourRecord], [2, fallbackRecord]]),
+  ctMetaMap: new Map([
+    [CT_ID, { id: CT_ID, name: "Паллет" }],
+    [CT_ID_DONE, { id: CT_ID_DONE, name: "Завершение поиска ЕО" }],
+  ]),
   ctConfigMap: new Map(),
 };
 
@@ -57,7 +78,7 @@ const BODY_1 =
   "<div><b>Устранить проблемы&amp;#58;</b><br>Товар не примотан к поддону, доступ к ТМЦ затруднён.<br>Паллет стоит в проходе ряда B.</div>";
 const BODY_2 = "<div>Проверить комплектность отгрузки по накладной, сверить маркировку и пересчитать места.</div>";
 
-const mkTask = (id, itemId, { title, body, status, dueDate, overdue = false }) => ({
+const mkTask = (id, itemId, { title, body, status, dueDate, overdue = false, ctId = CT_ID, result = "" }) => ({
   Id: id,
   Title: title,
   Body: body,
@@ -65,8 +86,8 @@ const mkTask = (id, itemId, { title, body, status, dueDate, overdue = false }) =
   AssignedTo: "Иванов И.И.",
   EditorTitle: "Иванов И.И.",
   Status: status,
-  ResultSearchTHU: "",
-  ResultValue: "",
+  ResultSearchTHU: result,
+  ResultValue: result,
   Location1: "",
   AdditionalActions: [],
   Created: new Date().toISOString(),
@@ -76,9 +97,9 @@ const mkTask = (id, itemId, { title, body, status, dueDate, overdue = false }) =
   Recipient: "",
   SCNumber: "",
   RelatedItems: JSON.stringify([{ ListId: "LIST-A", ItemId: itemId }]),
-  ContentTypeId: CT_ID,
-  contentTypeId: CT_ID,
-  raw: { ContentTypeId: CT_ID },
+  ContentTypeId: ctId,
+  contentTypeId: ctId,
+  raw: { ContentTypeId: ctId },
   overdue,
 });
 
@@ -98,10 +119,12 @@ export const tasks = [
     overdue: true,
   }),
   mkTask(3, 103, {
-    title: "Пересорт по накладной",
-    body: BODY_2,
+    title: "Исправление проблемной ЕО",
+    body: BODY_1,
     status: "Завершена",
     dueDate: new Date(now - 26 * 3600 * 1000).toISOString(),
+    ctId: CT_ID_DONE,
+    result: "Исправлено",
   }),
 ];
 

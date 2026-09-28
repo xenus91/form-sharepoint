@@ -31,5 +31,9 @@ export default defineConfig({
     open: false,
     fs: { allow: [root, here], strict: false },
   },
-  ssr: { noExternal: true },
+  ssr: { noExternal: true, external: ["jsdom"], target: "node" },
+  build: {
+    target: "esnext",
+    rollupOptions: { output: { entryFileNames: "[name].mjs", chunkFileNames: "assets/[name]-[hash].mjs" } },
+  },
 });

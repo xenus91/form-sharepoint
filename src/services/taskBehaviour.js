@@ -96,15 +96,31 @@ export function clearTaskBehaviourCache() {
 export function getTaskBehaviourDebug() { return { size: cache?.size || 0, age_ms: cacheAt ? Date.now() - cacheAt : null, cached: !!cache }; }
 function norm(value) { return String(value || "").trim().toLowerCase(); }
 
+// Записи с таким Title считаются «общими»: они применяются к любому типу контента,
+// у которого нет собственной записи в TaskBehaviour.
+const FALLBACK_TITLES = new Set(["*", "_default", "default"]);
+
 export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
   if (!contentTypeName || !taskBehaviourMap?.size) return null;
-  const record = [...taskBehaviourMap.values()].find((item) => item.enabled && norm(item.title) === norm(contentTypeName));
-  if (!record) return null;
+  const records = [...taskBehaviourMap.values()].filter((item) => item.enabled);
+  // 1) точное совпадение ContentType.Name → TaskBehaviour.Title
+  let record = records.find((item) => norm(item.title) === norm(contentTypeName));
+  let matchedBy = "ContentType.Name → TaskBehaviour.Title";
+  // 2) общая запись («*» / «_default») — если своей у типа контента нет
+  if (!record) {
+    record = records.find((item) => FALLBACK_TITLES.has(norm(item.title)));
+    matchedBy = "TaskBehaviour fallback ('*' / '_default')";
+    if (record) tbDebug("fallback used", { contentTypeName, fallbackTitle: record.title, id: record.id });
+  }
+  if (!record) {
+    tbDebug("not resolved", { contentTypeName, available: records.map((r) => r.title) });
+    return null;
+  }
   const behaviour = parseBehaviour(record.behaviour);
   const styling = parseStyling(record.styling);
   const stylingActions = parseStyling(record.stylingActions);
-  tbDebug("resolved", { contentTypeName, title: record.title, id: record.id, behaviourOk: behaviour.ok, stylingOk: styling.ok, stylingActionsOk: stylingActions.ok });
-  return { configId: record.id, raw: record, behaviour, styling, stylingActions, matchedBy: "ContentType.Name → TaskBehaviour.Title" };
+  tbDebug("resolved", { contentTypeName, title: record.title, id: record.id, matchedBy, behaviourOk: behaviour.ok, stylingOk: styling.ok, stylingActionsOk: stylingActions.ok });
+  return { configId: record.id, raw: record, behaviour, styling, stylingActions, matchedBy };
 }
 
 export function findContentTypeMeta(contentTypeId, ctMetaMap) {
