@@ -1118,6 +1118,16 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         size="large"
                         disabled={isUpdating}
                         onClick={() => {
+                          const rule = getBehaviourRuleForChoice(foundChoice);
+                          // Для p=[] и c=false результат отправляется сразу; celebrate запускается
+                          // в runSubmit без промежуточного prompt-экрана.
+                          if ((rule && rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true) || (!rule && String(foundChoice).trim().toLowerCase() === "исправлено")) {
+                            runSubmit(foundChoice, "found", () => {
+                              if (onComplete) onComplete(task, foundChoice, {}, "Нет", []);
+                              else onResultClick(task, foundChoice);
+                            });
+                            return;
+                          }
                           if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
                             setAdditionalActions([...task.AdditionalActions]);
                           } else {

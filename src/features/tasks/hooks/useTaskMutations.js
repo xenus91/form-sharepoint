@@ -221,7 +221,7 @@ export function useTaskMutations({
       let serverEtag = "*";
       try {
         const resp = await apiClient.get(
-          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,${_resultFieldName},ResultSearchTHU,Location1,AdditionalsActionsRequired,AdditionalActions,Modified,ContentTypeId`,
+          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,${_resultFieldName},ResultSearchTHU,Location1,Modified,ContentTypeId`,
           { headers: { Accept: "application/json;odata=verbose" } }
         );
         const server = resp?.data?.d;
@@ -268,9 +268,8 @@ export function useTaskMutations({
         }
       };
       if (_isNotFound) {
-        const val = additionalRequiredIsBoolean === true ? false : (additionalRequiredIsBoolean === false ? null : false);
-        payload.AdditionalsActionsRequired = val;
-        payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: [] };
+        // Behaviour.aa=false: не отправляем legacy AdditionalActions-поля.
+        // Они могут отсутствовать в конкретном Tasks-листе и не нужны для результата «Не исправлено».
       } else if (_isFound) {
         const reqToSave = additionalRequired || "Нет";
         const actsToSave = reqToSave === "Да" ? (additionalActions || []) : [];
