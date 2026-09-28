@@ -1068,6 +1068,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       pendingTask={task}
                       pendingResult={foundChoice}
                       updatingId={updatingId}
+                      confirmTexts={behaviourRuleForFound?.confirmTexts || null}
                       onConfirm={(t, r) => {
                         const p = inlineConfirmPending;
                         setInlineConfirmPending(null);

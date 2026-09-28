@@ -23,6 +23,8 @@ import {
 } from "./tasks/distribution";
 import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
 import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
+import { resolveBehaviour } from "./services/behaviourParser";
+import { resolveTaskBehaviourByName, findContentTypeMeta } from "./services/taskBehaviour";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
 import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
 import { useDistribution } from "./features/tasks/hooks/useDistribution";
@@ -407,6 +409,20 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     }
   }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
+  // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
+  const confirmTextsForPending = useMemo(() => {
+    if (!pendingTask || !pendingResult) return null;
+    const data = taskConfiguration?.data;
+    if (!data?.taskBehaviour || !data?.ctMetaMap) return null;
+    const ctId = String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || pendingTask?.raw?.ContentTypeId?.StringValue || "").trim();
+    if (!ctId) return null;
+    const ctMeta = findContentTypeMeta(ctId, data.ctMetaMap);
+    if (!ctMeta?.name) return null;
+    const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
+    if (!tb || !tb.behaviour || !tb.behaviour.ok) return null;
+    return resolveBehaviour(pendingResult, tb.behaviour.value)?.confirmTexts || null;
+  }, [pendingTask, pendingResult, taskConfiguration?.data]);
+
   const handleLocationSubmit = (skip) => {
     if (!pendingTask) return;
     setPendingAdditionalError("");
@@ -579,6 +595,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         pendingTask={pendingTask}
         pendingResult={pendingResult}
         updatingId={updatingId}
+        confirmTexts={confirmTextsForPending}
         onConfirm={(task, result) => completeTask(task, result, {}, "", [])}
       />
     </Box>

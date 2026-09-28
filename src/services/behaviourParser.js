@@ -17,6 +17,23 @@ const VALID_ANIMATIONS = new Set(["celebrate", "sherlock", "none"]);
  *             sortOrder:number }} PromptFieldDef
  */
 
+/**
+ * Достаёт первую непустую строку из объекта по списку ключей.
+ * @param {object} obj
+ * @param {string[]} keys
+ * @param {string} _primary — основной ключ (для диагностики)
+ * @returns {string}
+ */
+function pickStr(obj, keys, _primary) {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v === undefined || v === null) continue;
+    const s = String(v).trim();
+    if (s) return s;
+  }
+  return "";
+}
+
 /** Нормализация строки-ключа choice. */
 function normKey(s) {
   return String(s || "").trim().toLowerCase();
@@ -105,6 +122,24 @@ export function validateBehaviour(obj) {
       rule.additionalActionsRequired = rawVal.aar === true || rawVal.aar === 1 || String(rawVal.aar).toLowerCase() === "true";
     }
 
+    // ct/cm/ok/no → тексты диалога подтверждения (Behaviour.c=true открывает диалог).
+    //   "ct": "Подтверждение результата"   — заголовок
+    //   "cm": "Вы уверены...?"             — сообщение
+    //   "ok": "Подтвердить «Не исправлено»" — кнопка подтверждения
+    //   "no": "Отмена"                      — кнопка отмены
+    const confirmTitle = pickStr(rawVal, ["ct", "confirmTitle", "confirmTitleText"], "ct");
+    const confirmMessage = pickStr(rawVal, ["cm", "confirmMessage", "confirmText"], "cm");
+    const confirmOk = pickStr(rawVal, ["ok", "confirmOk", "confirmOkText", "confirmButton"], "ok");
+    const confirmCancel = pickStr(rawVal, ["no", "confirmCancel", "confirmCancelText", "cancelText"], "no");
+    if (confirmTitle || confirmMessage || confirmOk || confirmCancel) {
+      rule.confirmTexts = {
+        title: confirmTitle || "",
+        message: confirmMessage || "",
+        okText: confirmOk || "",
+        cancelText: confirmCancel || "",
+      };
+    }
+
     // anim → animation при submit. Можно передать строку или объект с текстами:
     // "anim":"celebrate"
     // "anim":{"type":"celebrate","title":"Задача исправлена","text":"Отличная работа!"}
@@ -155,6 +190,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     additionalActionsRequired: null,
     animation: null,
     animationConfig: null,
+    confirmTexts: null,
     source: "empty",
   };
   if (!parsedBehaviour || typeof parsedBehaviour !== "object") return empty;
@@ -175,6 +211,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     additionalActionsRequired: rule.additionalActionsRequired === undefined ? null : !!rule.additionalActionsRequired,
     animation: rule.animation === undefined ? null : rule.animation,
     animationConfig: rule.animationConfig || null,
+    confirmTexts: rule.confirmTexts || null,
     source: src,
   };
 }
