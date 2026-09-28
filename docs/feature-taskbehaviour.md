@@ -1,20 +1,30 @@
 # `TaskBehaviour` — настройка поведения Result-кнопок через SharePoint
 
-> Версия: 2026-09-28. Шпаргалка для админа.
+> Версия: 2026-09-28 (v8+: defaults-политика ужесточена). Шпаргалка для админа.
 
 ## Что это такое
 
 `TaskBehaviour` — список SharePoint, в котором админ хранит **компактный JSON** для каждого типа задач. Резолвер в `TaskCard.jsx` маппит **`ContentType.Name` → `TaskBehaviour.Title`** (нормализованно: trim + lowercase), без участия lookup-полей — SharePoint не позволяет задать default-значение для lookup на ContentType, поэтому архитектура — по имени.
+
+## Принцип defaults (ужесточён в v8+)
+
+Если в `TaskBehaviour` для CT × choice ничего не настроено:
+- `foundChoice` matcher срабатывает **только** если `Behaviour.promptFields.length > 0` или `Behaviour.aa = true`, либо если в `TaskResultDefinitions.ShowAdditionalActions = true` для этого choice (legacy для `AdditionalActions`)
+- `notFoundChoice` matcher срабатывает **только** если `Behaviour.c = true`
+- Цвета кнопки — **plain MUI defaults** (`variant=contained`, `color=primary`, без gradient). Никаких цветов из `TaskResultDefinitions.Color/Variant/Gradient`, никаких хардкодов из `resultConfig.js`
+- Анимация при submit — **flow default** (для foundChoice — `celebrate`, для notFoundChoice — `sherlock`, для extras — none)
+
+Если настройки нет — отображается plain MUI Button с прямым submit, никаких кастомов сверх исходного legacy-поведения. Любая прошлая запись в `TaskResultDefinitions.Color/Variant/Gradient` или захардкоженная реакция "не найдена" → confirm=true **больше не применяется** без явной настройки в `TaskBehaviour`.
 
 ## Схема списка `TaskBehaviour`
 
 | Поле | Тип | Что хранит |
 |------|------|-----------|
 | `Title` | Single line of text | Имя конфига; **должно совпадать с `ContentType.Name`** (например «Исправление проблемной ЕО») |
-| `Behaviour` | Multiple lines of text (unlimited) | Компактный JSON с правилами по choice |
+| `Behaviour` | Multiple lines of text (unlimited) | Компактный JSON с правилами per choice |
 | `StylingResultButton` | Multiple lines of text (unlimited) | Компактный JSON со стилями MUI-кнопок |
 | `Description` | Single line of text (опц.) | Комментарий |
-| `Enabled` | Yes/No | Включён ли конфиг (если Нет — фолбэк на legacy) |
+| `Enabled` | Yes/No | Включён ли конфиг (если Нет — фолбэк на plain MUI) |
 
 Создать список + поля идемпотентно одной командой:
 ```
@@ -22,6 +32,17 @@ node scripts/grant-task-behaviour-list.cjs
 ```
 
 Lookup-поле на CT **не нужно** — оно не работает с default-значением. Маппинг через Name достаточно.
+
+## Что остаётся в legacy (источник для отдельных аспектов)
+
+| Аспект | Источник | Когда применяется |
+|--------|---------|-------------------|
+| Prompt-поля по choice | `TaskBehaviour.behaviour` (p) | ВСЕГДА через Behaviour |
+| Цвета кнопки | `TaskBehaviour.styling` | ВСЕГДА через Behaviour |
+| Confirm-модалка перед submit | `TaskBehaviour.behaviour.c` | ВСЕГДА через Behaviour |
+| Анимация при submit | `TaskBehaviour.behaviour.anim` | ВСЕГДА через Behaviour |
+| AdditionalActions (`showAdditionalActions` / `additionalActionsRequired`) | `TaskResultDefinitions` | Если Behaviour.aa не задан — legacy fallback (ваше решение) |
+| Поля результата задачи (ResultSearchTHU/ResultFixingProblems/etc.) | `resultField.js` | Определяются динамически по ContentType |
 
 ## Как заводится запись для CT
 
@@ -150,6 +171,6 @@ node scripts/migrate-ct-behaviour.cjs --apply      # создать записи
 
 ## Что остаётся в legacy
 
-- `TaskResultList` — управляет `AdditionalActions` (`ShowAdditionalActions` / `AdditionalsActionsRequired`). Новые правки AA остаются здесь.
-- `TaskPromptFields` — legacy-фолбэк для тех CT, у которых ещё нет записи в `TaskBehaviour`.
-- `RESULT_UI_CONFIG` в `src/tasks/resultConfig.js` — захардкоженный дефолт для legacy строк («найдена» / «не найдена»). Последний рубеж.
+- `TaskResultList` — управляет `AdditionalActions` (`ShowAdditionalActions` / `AdditionalsActionsRequired`). Это единственный legacy-источник, который **продолжает действовать** как fallback. Все остальные legacy-источники (`TaskResultDefinitions.Color/Variant/Gradient`, `RequiresConfirmed`, захардкоженный `RESULT_UI_CONFIG` для «найдена»/«не найдена») **больше не применяются** для кнопок — только `Behaviour`.
+- `TaskPromptFields` — больше не запрашивается фронтом (Behaviour — единственный источник prompt-полей).
+- `RESULT_UI_CONFIG` в `src/tasks/resultConfig.js` — больше не влияет на UI кнопок. Оставлен в коде на случай миграций.

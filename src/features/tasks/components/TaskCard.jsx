@@ -8,8 +8,7 @@ import React from "react";
 import apiClient from "../../../api";
 import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
-import { getResultUiConfig } from "../../../tasks/resultConfig";
-import { resolveResultUiConfig, resolveTaskResultDefinition } from "../../../services/taskResultDefinitions";
+import { resolveTaskResultDefinition } from "../../../services/taskResultDefinitions";
 import { resolvePromptFields } from "../../../services/taskPromptFields"; // ⭐ NEW
 import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title (без lookup-поля — SP не даёт default)
 import { resolveBehaviour, toRenderPromptFields } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
@@ -51,17 +50,43 @@ function stripHtml(html) {
 
 
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
-  // Динамический UI конфиг без ребилда: приоритет TaskResultDefinitions (SP list), fallback к hardcoded resultConfig.js
-  // План §14: TaskResultDefinitions.ShowAdditionalActions / AdditionalsActionsRequired — управляет видимостью AdditionalActions
+  // Динамический UI конфиг. ⭐ v8+: defaults-принцип — ТОЛЬКО Behaviour.styling.
+// TaskResultDefinitions.Color/Variant/Gradient и захардкоженный resultConfig.js «найдена»/«не найдена»
+// НЕ применяются для стилей кнопок. Если Behaviour не настроен — возвращаем MUI defaults (variant=contained,
+// color=primary, без gradient).
+// Note: TaskResultDefinitions всё ещё используется через getResultDef() для AdditionalActions (Show/Required).
   const getUiConfig = React.useCallback((choiceVal) => {
-    const ctId = task?.contentTypeId || task?.ContentTypeId || "";
-    if (taskConfig?.taskResultDefinitions) {
-      return resolveResultUiConfig(choiceVal, ctId, taskConfig.taskResultDefinitions);
+    // Только Behaviour.styling
+    const tbSx = getButtonSx(choiceVal);
+    if (tbSx) {
+      return {
+        label: undefined,
+        variant: tbSx.variant || "contained",
+        color: "primary",
+        requiresLocation: false,
+        requiresAdditionalActions: false,
+        confirm: false,
+        gradient: tbSx.bg || null,
+        _key: "_behaviour",
+        _source: "task-behaviour",
+      };
     }
-    return getResultUiConfig(choiceVal);
-  }, [task?.contentTypeId, task?.ContentTypeId, taskConfig?.taskResultDefinitions]);
+    // Дефолт: plain MUI
+    return {
+      label: undefined,
+      variant: "contained",
+      color: "primary",
+      requiresLocation: false,
+      requiresAdditionalActions: false,
+      confirm: false,
+      gradient: null,
+      _key: "_default",
+      _source: "mui-default",
+    };
+  }, [getButtonSx]);
 
   const getResultDef = React.useCallback((choiceVal) => {
+    // Только для AdditionalActions (Show/Required). НЕ для Color/Variant/Gradient/RequiresConfirmed.
     const ctId = task?.contentTypeId || task?.ContentTypeId || "";
     if (taskConfig?.taskResultDefinitions) {
       return resolveTaskResultDefinition(choiceVal, ctId, taskConfig.taskResultDefinitions);
@@ -737,72 +762,29 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // Determine found / notFound choices — через конфиг + fallback на legacy строки, без хардкода конкретных значений
               // Для открытой задачи используем displayedChoices (свежие по ContentType)
               const choicesForButtons = displayedChoices || choices;
+              // ⭐ v8+: matches БЕЗ legacy-фолбэков. Defaults-принцип:
+              //   foundChoice   → Behaviour.promptFields || Behaviour.aa (AA-flow) || TaskResultDefinitions.ShowAdditionalActions (AA-flow)
+              //   notFoundChoice → Behaviour.requiresConfirmed=true
+              //   всё остальное  → plain MUI Button в extras-ветке, прямой submit, никаких confirm/промптов/цветов
               const foundChoice = (() => {
-                // FIX дубль Найдена Phase 17.15: ShowAdditionalActions отвечает только за видимость AA, не за тип кнопки
-                // Сначала строгий строковый матч, потом уже конфиг — иначе Найдена с Show=false попадала и в found и в notFound
-                let c = choicesForButtons.find((ch) => {
-                  const n = String(ch).trim().toLowerCase();
-                  return n === "найден" || n === "найдена";
-                });
-                if (c) return c;
-                // fallback для кастомных типов без legacy строк: по конфигу
-                c = choicesForButtons.find((ch) => {
-                  // ⭐ NEW v8: L0 — TaskBehaviour (наивысший приоритет). Если у CT есть config и для choice
-                  // задано `promptFields` или `showAdditionalActions=true` — это inline-mode кнопка.
+                return choicesForButtons.find((ch) => {
+                  // ⭐ v8: L0 — TaskBehaviour (наивысший приоритет)
                   const rule = getBehaviourRuleForChoice(ch);
                   if (rule && (rule.promptFields.length > 0 || rule.showAdditionalActions === true)) return true;
-
+                  // Legacy AA из TaskResultDefinitions (по решению плана — AA остаётся здесь)
                   const def = getResultDef(ch);
                   if (def && def.showAdditionalActions) return true;
-                  // ⭐ NEW: если для (CT, ch) есть promptable fields из TaskPromptFields — это inline-mode кнопка
-                  const ctIdForPrompt = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
-                  const promptFields = taskConfig?.taskPromptFields
-                    ? resolvePromptFields(ctIdForPrompt, ch, taskConfig.taskPromptFields)
-                    : [];
-                  if (promptFields.length > 0) return true;
-                  const cfg = getUiConfig(ch);
-                  return cfg.requiresLocation || cfg.requiresAdditionalActions;
-                });
-                if (c) return c;
-                const hasLegacy = choicesForButtons.some((ch) => {
-                  const n = String(ch).trim().toLowerCase();
-                  return n.includes("найден") || n.includes("не найден");
-                });
-                if (hasLegacy && choicesForButtons.length > 0) return choicesForButtons[0];
-                return null;
+                  return false;
+                }) || null;
               })();
               const notFoundChoice = (() => {
-                // ⭐ FIX дубль: если этот choice уже matched as foundChoice (например из-за promptFields
-                // или ShowAdditionalActions), то не матчим его ещё раз как notFoundChoice — иначе будут
-                // 2 кнопки с одинаковым label. Один choice должен вести только в один flow.
-                let c;
-                // Строгий матч Не найдена первым — иначе Найдена с Show=false забиралась как confirm
-                c = choicesForButtons.find((ch) => {
+                return choicesForButtons.find((ch) => {
                   if (ch === foundChoice) return false;
-                  const n = String(ch).trim().toLowerCase();
-                  return n === "не найдена" || n === "не найден" || n === "не найдено";
-                });
-                if (c) return c;
-                // fallback для кастомных
-                c = choicesForButtons.find((ch) => {
-                  if (ch === foundChoice) return false;
-                  // ⭐ NEW v8: L0 — TaskBehaviour.requiresConfirmed=true → notFound-ветка (confirm-модалка перед submit).
+                  // ⭐ v8: L0 — TaskBehaviour.requiresConfirmed=true
                   const rule = getBehaviourRuleForChoice(ch);
                   if (rule && rule.requiresConfirmed === true) return true;
-                  const def = getResultDef(ch);
-                  // ⭐ NEW: RequiresConfirmed из SP авторитетен (включая явное false),
-                  // чтобы админ мог отключить confirm-модалку через SP.
-                  if (def && def.requiresConfirmed !== null) return def.requiresConfirmed === true;
-                  if (def) return !def.showAdditionalActions && def.cfg;
-                  return getUiConfig(ch).confirm;
-                });
-                if (c) return c;
-                const hasLegacy = choicesForButtons.some((ch) => {
-                  const n = String(ch).trim().toLowerCase();
-                  return n.includes("найден") || n.includes("не найден");
-                });
-                if (hasLegacy && choicesForButtons.length > 1) return choicesForButtons[1] || null;
-                return null;
+                  return false;
+                }) || null;
               })();
               // DEBUG Phase 17.8 — всегда логировать (пользователь просил отладку, сброс кеша не помог)
               if (__forceTaskDbg || __DBG_ENABLED__) {
