@@ -24,7 +24,10 @@ npm run preview:cards      # vite с preview/vite.config.js, порт 5180
 ```bash
 npm i jsdom --no-save
 npx vite build --config preview/vite.config.js --ssr client-check.mjs --outDir .ssrout
-node preview/.ssrout/client-check.mjs
+node preview/.ssrout/client-check.mjs   # содержимое карточек (шапка rf, заголовок, описание)
+
+npx vite build --config preview/vite.config.js --ssr flow-check.mjs --outDir .ssrout
+node preview/.ssrout/flow-check.mjs     # поток результата: роутинг + клики + диалоги
 ```
 
 Выводит содержимое каждой карточки так, как оно выглядит после загрузки данных
@@ -36,7 +39,9 @@ node preview/.ssrout/client-check.mjs
 |------|------------|
 | `vite.config.js` | root = `preview/`, подменяет `src/api.js` на мок (`resolveId`-плагин) |
 | `mockApi.js` | заглушка `apiClient`: отдаёт связанные элементы ProblemsPallet |
-| `CardsScene.jsx` | мок-задачи + конфиг `TaskBehaviour` (rf/anim/confirm/styling) |
+| `CardsScene.jsx` | задачи и конфиг `TaskBehaviour` из реального кэша пользователя |
 | `main.jsx` | точка входа для браузера |
-| `client-check.mjs` | jsdom-рендер для текстовой проверки |
+| `jsdom-setup.mjs` | окружение jsdom (глобали для React/MUI) |
+| `client-check.mjs` | jsdom-рендер: печатает содержимое карточек и кнопки |
+| `flow-check.mjs` | проверка потока: `resolveResultFlow` + реальные клики + confirm-диалог |
 | `ssr-check.jsx` | серверный рендер (ловит runtime-ошибки компонентов) |

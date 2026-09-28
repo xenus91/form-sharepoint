@@ -5,6 +5,21 @@
 import React from "react";
 import { Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, CircularProgress } from "@mui/material";
 
+// Текст задачи может прийти с HTML (например, из hash-режима) — показываем как простой текст.
+function plain(value) {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const RADIUS_OUTER = "14px";
 const RADIUS_INNER = "10px";
 
@@ -23,7 +38,7 @@ export default function TaskConfirmNotFoundDialog({ open, onClose, pendingTask, 
         {pendingTask?.Body && (
           <Box sx={{ mt: 2, p: 1.5, bgcolor: "rgba(229,57,53,0.06)", borderRadius: RADIUS_INNER, border: "1px solid rgba(229,57,53,0.15)" }}>
             <Typography variant="caption" sx={{ fontWeight: 700, color: "#b71c1c" }}>Текст задачи:</Typography>
-            <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", mt: 0.5 }}>{pendingTask.Body}</Typography>
+            <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word", mt: 0.5 }}>{plain(pendingTask.Body)}</Typography>
           </Box>
         )}
       </DialogContent>

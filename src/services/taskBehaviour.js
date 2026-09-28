@@ -1,5 +1,5 @@
 // TaskBehaviour: единственная загрузка конфигурации, sessionStorage-кэш и CT.Name → Title resolver.
-import { parseBehaviour } from "./behaviourParser";
+import { parseBehaviour, resolveBehaviour } from "./behaviourParser";
 import { parseStyling } from "./stylingConfig";
 
 const LIST_TITLE = "TaskBehaviour";
@@ -135,6 +135,25 @@ export function findContentTypeMeta(contentTypeId, ctMetaMap) {
     }
   }
   return best;
+}
+
+/**
+ * Правило Behaviour для конкретной задачи и выбранного результата.
+ * Единая точка входа, чтобы TasksView и TaskCard считали правила одинаково.
+ *
+ * @param {object} task — наша задача (нужен ContentTypeId/contentTypeId)
+ * @param {string} choiceValue — выбранное значение Result-поля
+ * @param {object|null} config — taskConfiguration.data ({ taskBehaviour, ctMetaMap })
+ * @returns {object|null} результат resolveBehaviour() или null, если записи/правила нет
+ */
+export function resolveTaskRule(task, choiceValue, config) {
+  const ctId = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
+  if (!ctId || !config?.taskBehaviour || !config?.ctMetaMap) return null;
+  const ctMeta = findContentTypeMeta(ctId, config.ctMetaMap);
+  if (!ctMeta?.name) return null;
+  const tb = resolveTaskBehaviourByName(ctMeta.name, config.taskBehaviour);
+  if (!tb || !tb.behaviour || !tb.behaviour.ok) return null;
+  return resolveBehaviour(choiceValue, tb.behaviour.value);
 }
 
 export function resolveTaskBehaviour(contentType, taskBehaviourMap) { return null; }

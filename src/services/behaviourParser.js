@@ -173,6 +173,13 @@ export function validateBehaviour(obj) {
       };
     }
 
+    // loc → requiresLocation: открыть диалог «Где найдена ЕО?» перед submit.
+    //   "loc": true  (синоним: "requiresLocation": true)
+    if (rawVal.loc !== undefined || rawVal.requiresLocation !== undefined) {
+      const rawLoc = rawVal.loc !== undefined ? rawVal.loc : rawVal.requiresLocation;
+      rule.requiresLocation = rawLoc === true || rawLoc === 1 || String(rawLoc).trim().toLowerCase() === "true";
+    }
+
     // anim → animation при submit. Можно передать строку или объект с текстами:
     // "anim":"celebrate"
     // "anim":{"type":"celebrate","title":"Задача исправлена","text":"Отличная работа!"}
@@ -223,6 +230,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     additionalActionsRequired: null,
     animation: null,
     animationConfig: null,
+    requiresLocation: null,
     confirmTexts: null,
     relatedFields: [],
     source: "empty",
@@ -245,6 +253,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     additionalActionsRequired: rule.additionalActionsRequired === undefined ? null : !!rule.additionalActionsRequired,
     animation: rule.animation === undefined ? null : rule.animation,
     animationConfig: rule.animationConfig || null,
+    requiresLocation: rule.requiresLocation === undefined ? null : !!rule.requiresLocation,
     confirmTexts: rule.confirmTexts || null,
     relatedFields: Array.isArray(rule.relatedFields) ? rule.relatedFields : [],
     source: src,

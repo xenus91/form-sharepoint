@@ -1,9 +1,9 @@
 // preview/mockApi.js — заглушка SharePoint-клиента для локального предпросмотра карточек.
 // НЕ используется в проде: подменяется только в preview/vite.config.js.
 const RELATED_ROWS = [
-  { Id: 101, THU: "12345678901234567", DC_THU: "1050", Location1: "Ряд B, стеллаж 4", Recipient: { Title: "ООО Ромашка", SCNumberText: "SC-10234" } },
-  { Id: 102, THU: "76543210987654321", DC_THU: "1050", Location1: "Ряд A, стеллаж 1", Recipient: { Title: "ИП Иванов", SCNumberText: "SC-20001" } },
-  { Id: 103, THU: "11122233344455566", DC_THU: "1050", Location1: "Ряд C, стеллаж 7", Recipient: { Title: "АО Весна", SCNumberText: "SC-30002" } },
+  { Id: 24922, THU: "12345678901234567", DC_THU: "1050", Location1: "Ряд B, стеллаж 4", Recipient: { Title: "ООО Ромашка", SCNumberText: "SC-10234" } },
+  { Id: 24923, THU: "76543210987654321", DC_THU: "1050", Location1: "Ряд A, стеллаж 1", Recipient: { Title: "ИП Иванов", SCNumberText: "SC-20001" } },
+  { Id: 24924, THU: "11122233344455566", DC_THU: "1050", Location1: "Ряд C, стеллаж 7", Recipient: { Title: "АО Весна", SCNumberText: "SC-30002" } },
 ];
 
 const apiClient = {

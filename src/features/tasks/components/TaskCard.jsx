@@ -190,13 +190,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     const rule = getBehaviourRuleForChoice(choiceVal);
     let anim = rule?.animation || null;
     __dlogAlways("[TaskBehaviour:submit]", { taskId: task?.Id, choice: choiceVal, flowType, rule, animationFromConfig: anim });
-    if (!anim) {
-      if (flowType === "found") anim = "celebrate";
-      // Для «Не исправлено» анимация по умолчанию отключена. Sherlock запускается
-      // только при явном Behaviour.anim="sherlock".
-      else if (flowType === "notFound") anim = "none";
-      // "extra" (или неизвестный flow) — anim остаётся null → без анимации
-    }
+    // ⭐ Анимация — ТОЛЬКО из Behaviour.anim. Если ключ не задан — обычный submit
+    // без анимации и без задержки (никаких flow default: ни celebrate, ни sherlock).
     if (anim === "celebrate") {
       setCelebrateConfig(rule?.animationConfig || null);
       setShowCelebrate(true);
@@ -252,8 +247,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const { title: displayTitle, body: displayBody } = splitTitleBody(task);
   const isUpdating = updatingId === task.Id;
   const isTaking = isUpdating && isNotStartedStatus(task.Status);
-  const [confirmNotFoundMode, setConfirmNotFoundMode] = React.useState(() => initialAction === "notfound" && isInProgressStatus(task.Status) && !isCompleted);
-  const [foundInputMode, setFoundInputMode] = React.useState(() => initialAction === "found" && isInProgressStatus(task.Status) && !isCompleted);
+  // ⭐ Единый inline-режим: сюда попадает ЛЮБОЙ результат, у которого в Behaviour
+  // заданы prompt-поля / доп. действия / подтверждение. Храним сам choice, а не флаг,
+  // чтобы форма и подтверждение работали одинаково для «Исправлено» и «Не исправлено».
+  const [inlineChoice, setInlineChoice] = React.useState(null);
   // ⭐ NEW: promptFieldValues — object map { fieldInternalName: userValue }
   // Для backward compat: при submit legacy «Сохранить» ниже мы извлекаем .Location1.
   const [promptFieldValues, setPromptFieldValues] = React.useState({});
@@ -325,6 +322,21 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [task.Id, task.ContentTypeId, task.Status, isCompleted]);
   const displayedChoices = freshChoices || effectiveChoices;
   const displayedFieldMeta = freshField || dynamicFieldMeta;
+  // Deep-link (#tasks/id=…&action=found|notfound): открываем inline-форму соответствующего
+  // результата. Никаких захардкоженных текстов — форма строится из Behaviour.
+  React.useEffect(() => {
+    if (!initialAction || isCompleted || !isInProgressStatus(task.Status)) return;
+    const list = displayedChoices || choices || [];
+    if (!Array.isArray(list) || list.length === 0) return;
+    const pick = initialAction === "notfound"
+      ? (list.find((ch) => getBehaviourRuleForChoice(ch)?.requiresConfirmed === true) || list[list.length - 1])
+      : (list.find((ch) => {
+          const r = getBehaviourRuleForChoice(ch);
+          return !!r && r.source !== "empty" && r.requiresConfirmed !== true && r.requiresLocation !== true;
+        }) || list[0]);
+    setInlineChoice(pick || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.Id, initialAction, isCompleted, displayedChoices, choices]);
   const _displayedInternalName = displayedFieldMeta?.internalName || dynamicInternalName; // eslint-disable-line no-unused-vars
   // DEBUG: log taskConfig при изменении (moved after displayedChoices to avoid TDZ)
   React.useEffect(()=>{
@@ -371,8 +383,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // Reset inline modes when task status changes (e.g., after take)
   React.useEffect(() => {
     if (!isInProgressStatus(task.Status)) {
-      setConfirmNotFoundMode(false);
-      setFoundInputMode(false);
+      setInlineChoice(null);
       setInlineConfirmPending(null);
       setPromptFieldValues({});
       const defReset = getDefaultsForThisTask() || [];
@@ -383,16 +394,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [task.Status, task.Id, fieldDefaultActions, taskConfig]);
   // Also reset when task changes id
   React.useEffect(() => {
-    if (initialAction === "notfound" && isInProgressStatus(task.Status) && !isCompleted) {
-      setConfirmNotFoundMode(true);
-      setFoundInputMode(false);
-    } else if (initialAction === "found" && isInProgressStatus(task.Status) && !isCompleted) {
-      setFoundInputMode(true);
-      setConfirmNotFoundMode(false);
-    } else {
-      setConfirmNotFoundMode(false);
-      setFoundInputMode(false);
-    }
+    setInlineChoice(null);
     setPromptFieldValues({});
     if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
       setAdditionalActions([...task.AdditionalActions]);
@@ -981,15 +983,18 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               const foundChoice = (() => {
                 return choicesForButtons.find((ch) => {
                   const rule = getBehaviourRuleForChoice(ch);
-                  return !!rule && rule.source !== "empty" && rule.requiresConfirmed !== true;
+                  if (!rule || rule.source === "empty") return false;
+                  if (rule.requiresLocation === true) return false; // ведёт TasksView (диалог местоположения)
+                  return rule.requiresConfirmed !== true;
                 }) || null;
               })();
               const notFoundChoice = (() => {
                 return choicesForButtons.find((ch) => {
                   if (ch === foundChoice) return false;
                   const rule = getBehaviourRuleForChoice(ch);
-                  if (rule && rule.requiresConfirmed === true) return true;
-                  return false;
+                  if (!rule || rule.source === "empty") return false;
+                  if (rule.requiresLocation === true) return false;
+                  return rule.requiresConfirmed === true;
                 }) || null;
               })();
               // DEBUG Phase 17.8 — всегда логировать (пользователь просил отладку, сброс кеша не помог)
@@ -1026,85 +1031,19 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               }
 
               // Confirm mode for Не найдена — как Взять в работу, но в красной гамме
-              if (confirmNotFoundMode) {
-                return (
-                  <>
-                    <Box sx={{ mt: 1.5, p: 1.5, borderRadius: "10px", bgcolor: "rgba(255, 243, 224, 0.7)", border: "1px solid rgba(229,57,53,0.18)", display: "flex", gap: 1.25, alignItems: "flex-start" }}>
-                      <Box sx={{ width: 36, height: 36, borderRadius: "10px", bgcolor: "rgba(229,57,53,0.12)", display: "grid", placeItems: "center", flexShrink: 0, mt: 0.25 }}>
-                        <SearchOffIcon sx={{ color: "#c62828", fontSize: 20 }} />
-                      </Box>
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography sx={{ fontWeight: 800, color: "#b71c1c", fontSize: "0.95rem", lineHeight: 1.2 }}>
-                          ЕО не найдена
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.25 }}>
-                          Подтвердите. Задача закроется, отменить нельзя.
-                        </Typography>
-                      </Box>
-                    </Box>
-                    <Box sx={{ mt: 1.25 }}>
-                      <Button
-                        variant="contained"
-                        color="error"
-                        disabled={isUpdating}
-                        onClick={() => {
-                          runSubmit(notFoundChoice, "notFound", () => {
-                            setConfirmNotFoundMode(false);
-                            // ЕО не найдена → доп. действия не применяются: пусто / []
-                            if (onComplete) onComplete(task, notFoundChoice, {}, "", []);
-                            else onResultClick(task, notFoundChoice);
-                          });
-                        }}
-                        sx={{
-                          borderRadius: "12px",
-                          fontWeight: 800,
-                          textTransform: "none",
-                          width: "100%",
-                          height: 48,
-                          fontSize: "1rem",
-                          backgroundImage: "linear-gradient(180deg, #ef5350 0%, #c62828 100%)",
-                          color: "#fff",
-                          "&:hover": { backgroundImage: "linear-gradient(180deg, #e57373 0%, #b71c1c 100%)" },
-                          "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #ef9a9a 0%, #ef5350 100%)", color: "#fff", opacity: 1 },
-                          ...(getActionSx("promptSubmit") || {}),
-                        }}
-                      >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "ЕО не найдена"}
-                      </Button>
-                      <Button
-                        variant="text"
-                        onClick={() => setConfirmNotFoundMode(false)}
-                        disabled={isUpdating}
-                        sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 36, ...(getActionSx("promptCancel") || getActionSx("cancel") || {}) }}
-                      >
-                        Отмена
-                      </Button>
-                    </Box>
-                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
-                      <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                        Исполнитель: {task.AssignedTo || "—"} • Статус: {task.Status || "—"}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
-                        #{task.Id}
-                      </Typography>
-                    </Box>
-                  </>
-                );
-              }
-
               // Input mode для Найдена — inline в карточке (вернули обратно, Phase 17.11)
               // ShowAdditionalActions из TaskResultDefinitions управляет видимостью AdditionalActionsField
               // ★ v8+: promptable-поля берутся ТОЛЬКО из TaskBehaviour. НЕТ legacy fallback на Location1 или иные источники.
               //   Если Behaviour.p пустой или Behaviour не настроен — никаких дополнительных полей не показываем.
               //   ShowAdditionalActions → Behaviour.aa, requiresConfirmed → Behaviour.c — обе только из Behaviour.
-              if (foundInputMode) {
-                const behaviourRuleForFound = getBehaviourRuleForChoice(foundChoice);
+              if (inlineChoice) {
+                const behaviourRuleForFound = getBehaviourRuleForChoice(inlineChoice);
                 // ⭐ v8+: showAAInline строго из Behaviour.aa. null/true → без UI (defaults), true → показать AA inline.
                 const showAAInline = behaviourRuleForFound?.showAdditionalActions === true;
                 // ⭐ v8+: promptFields строго из Behaviour. Без Behaviour — пусто (никаких legacy Location1).
                 const promptFields = behaviourRuleForFound?.promptFields || [];
                 // debug
-                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, behaviourRule: behaviourRuleForFound, showAAInline, promptFields});
+                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {inlineChoice, behaviourRule: behaviourRuleForFound, showAAInline, promptFields});
                 const validateAdditional = () => {
                   if (!showAAInline) { setAdditionalError(""); return true; }
                   setAdditionalError("");
@@ -1157,9 +1096,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                                 setInlineConfirmPending({ req, acts });
                                 return;
                               }
-                              runSubmit(foundChoice, "found", () => {
-                                if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
-                                else onResultClick(task, foundChoice);
+                              runSubmit(inlineChoice, "inline", () => {
+                                if (onComplete) onComplete(task, inlineChoice, promptFieldValues, req, acts);
+                                else onResultClick(task, inlineChoice);
                               });
                             }
                           }}
@@ -1214,9 +1153,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                             setInlineConfirmPending({ req, acts });
                             return;
                           }
-                          runSubmit(foundChoice, "found", () => {
-                            if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
-                            else onResultClick(task, foundChoice);
+                          runSubmit(inlineChoice, "inline", () => {
+                            if (onComplete) onComplete(task, inlineChoice, promptFieldValues, req, acts);
+                            else onResultClick(task, inlineChoice);
                           });
                         }}
                         sx={{
@@ -1233,12 +1172,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           ...(getActionSx("promptSubmit") || {}),
                         }}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : `Сохранить — ${foundChoice}`}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : `Сохранить — ${inlineChoice}`}
                       </Button>
                       <Button
                         variant="text"
                         onClick={() => {
-                          setFoundInputMode(false);
+                          setInlineChoice(null);
                           setInlineConfirmPending(null);
                           setPromptFieldValues({});
                           setAdditionalActions([]);
@@ -1266,13 +1205,13 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       open={!!inlineConfirmPending}
                       onClose={() => setInlineConfirmPending(null)}
                       pendingTask={task}
-                      pendingResult={foundChoice}
+                      pendingResult={inlineChoice}
                       updatingId={updatingId}
                       confirmTexts={behaviourRuleForFound?.confirmTexts || null}
                       onConfirm={(t, r) => {
                         const p = inlineConfirmPending;
                         setInlineConfirmPending(null);
-                        runSubmit(foundChoice, "found", () => {
+                        runSubmit(inlineChoice, "inline", () => {
                           if (onComplete) onComplete(t, r, promptFieldValues, p?.req || "Нет", p?.acts || []);
                           else onResultClick(t, r);
                         });
@@ -1295,7 +1234,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         color={cfg.color}
                         size="large"
                         disabled={isUpdating}
-                        onClick={() => setConfirmNotFoundMode(true)}
+                        onClick={() => setInlineChoice(notFoundChoice)}
                         sx={{
                           borderRadius: "12px",
                           fontWeight: 800,
@@ -1325,7 +1264,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           const rule = getBehaviourRuleForChoice(foundChoice);
                           // Для p=[] и c=false результат отправляется сразу; celebrate запускается
                           // в runSubmit без промежуточного prompt-экрана.
-                          if ((rule && rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true) || (!rule && String(foundChoice).trim().toLowerCase() === "исправлено")) {
+                          // Правил нет или они «прямые» (без prompt/AA/confirm) — завершаем сразу.
+                          // Никаких строковых спец-случаев: поток задаётся только Behaviour.
+                          if (!rule || (rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true)) {
                             runSubmit(foundChoice, "found", () => {
                               if (onComplete) onComplete(task, foundChoice, {}, "Нет", []);
                               else onResultClick(task, foundChoice);
@@ -1341,7 +1282,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setPromptFieldValues({});
                           setAdditionalError("");
                           setCustomActionInput("");
-                          setFoundInputMode(true);
+                          setInlineChoice(foundChoice);
                         }}
                         sx={{
                           borderRadius: "12px",

@@ -23,6 +23,8 @@ import {
 } from "./tasks/distribution";
 import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
 import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
+import { resolveTaskRule } from "./services/taskBehaviour";
+import { resolveResultFlow } from "./features/tasks/resultFlow";
 import { resolveBehaviour } from "./services/behaviourParser";
 import { resolveTaskBehaviourByName, findContentTypeMeta } from "./services/taskBehaviour";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
@@ -379,23 +381,23 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   // handleTakeInWork / completeTask теперь в useTaskMutations (PR2)
 
+  // ⭐ Поток результата определяется ТОЛЬКО Behaviour (см. docs/feature-taskbehaviour.md).
+  // Нет правил для задачи/результата — задача завершается сразу по нажатию кнопки:
+  // никаких диалогов «Где найдена ЕО?» и подтверждений, никаких строковых хардкодов.
   const handleResultClick = useCallback((task, resultValue) => {
-    const normalized = String(resultValue).trim().toLowerCase();
-    const isFoundExact = normalized === "найден" || normalized === "найдена";
-    const isNotFoundExact = normalized === "не найдена" || normalized === "не найден" || normalized === "не найдено";
-    // ⭐ NEW: routing через defs из TaskResultDefinitions (per CT × ResultValue)
-    // Приоритет: SP def.requiresLocation/requiresConfirmed (если явно заданы в SP) → fallback на hardcoded resultConfig.js + legacy string match.
-    const ctForRouting = String(task?.contentTypeId || task?.ContentTypeId || "").trim();
-    const defForRouting = taskConfiguration.data?.taskResultDefinitions
-      ? resolveTaskResultDefinition(resultValue, ctForRouting, taskConfiguration.data.taskResultDefinitions)
-      : null;
+    const rule = resolveTaskRule(task, resultValue, taskConfiguration.data);
+    const flow = resolveResultFlow(resultValue, rule);
+    if (__DBG_ENABLED__) {
+      __dlog("[TasksView:resultClick]", {
+        taskId: task?.Id,
+        result: resultValue,
+        ct: String(task?.contentTypeId || task?.ContentTypeId || "").slice(-12),
+        rule: rule ? { source: rule.source, c: rule.requiresConfirmed, loc: rule.requiresLocation, p: rule.promptFields?.length || 0 } : null,
+        flow,
+      });
+    }
 
-    // ⭐ NEW: SP-driven routing takes priority. Если SP явно говорит «Location» или «Confirm», открываем соответствующую модалку,
-    // даже если строковое значение не «найдена»/«не найдена» (например, админ настроил custom CT с произвольным ResultValue).
-    // Авторитетный override: явное false в SP отключает соответствующее поведение.
-    const spExplicitLocation = defForRouting && defForRouting.requiresLocation !== null;
-    const spExplicitConfirm = defForRouting && defForRouting.requiresConfirmed !== null;
-    if (spExplicitLocation && defForRouting.requiresLocation === true) {
+    if (flow.action === "location") {
       setPendingTask(task);
       setPendingResult(resultValue);
       setLocationComment("");
@@ -415,41 +417,16 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       setLocationDialogOpen(true);
       return;
     }
-    if (spExplicitConfirm && defForRouting.requiresConfirmed === true) {
+
+    if (flow.action === "confirm") {
       setPendingTask(task);
       setPendingResult(resultValue);
       setConfirmNotFoundOpen(true);
       return;
     }
-    // Если SP явно отключил RequiresLocation/RequiresConfirmed (false) — пропускаем соответствующие проверки,
-    // идём прямо к completeTask ниже (с isFoundExact / isNotFoundExact как раньше).
-    if (isFoundExact) {
-      setPendingTask(task);
-      setPendingResult(resultValue);
-      setLocationComment("");
-      {
-        // Приоритет: TaskActionDefinitions Default (per CT) → поле DefaultValue
-        const ctIdForPending = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
-        const cfgForPending = taskConfiguration.data?.ctConfigMap?.get(ctIdForPending) || taskConfiguration.data?.ctConfigMap?.get("__default");
-        let defPending;
-        if (cfgForPending && cfgForPending.defaultActions !== null && cfgForPending.defaultActions !== undefined) {
-          defPending = [...cfgForPending.defaultActions];
-        } else {
-          defPending = fieldDefaultActions !== null ? [...fieldDefaultActions] : (getCachedAdditionalActionsDefaultSync() !== null ? [...getCachedAdditionalActionsDefaultSync()] : []);
-        }
-        setPendingAdditionalActions(Array.isArray(task.AdditionalActions) && task.AdditionalActions.length ? [...task.AdditionalActions] : defPending);
-      }
-      setPendingCustomAction("");
-      setPendingAdditionalError("");
-      setLocationDialogOpen(true);
-    } else if (isNotFoundExact) {
-      setPendingTask(task);
-      setPendingResult(resultValue);
-      setConfirmNotFoundOpen(true);
-    } else {
-      // Прочие результаты — без доп. действий
-      completeTask(task, resultValue, {}, "", []);
-    }
+
+    // complete: без доп. действий
+    completeTask(task, resultValue, {}, "", []);
   }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
