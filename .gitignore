@@ -31,3 +31,6 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+
+# Локальный предпросмотр карточек (preview/)
+preview/.ssrout

@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preview:cards": "vite --config preview/vite.config.js"
   },
   "dependencies": {
     "@ckeditor/ckeditor5-build-classic": "^42.0.2",

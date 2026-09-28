@@ -49,6 +49,37 @@ function stripHtml(html) {
   return s;
 }
 
+/**
+ * Единообразное тело карточки: заголовок (Title) + описание (Body).
+ * Если Body начинается с Title — дубль убираем, чтобы не печатать одно и то же дважды.
+ * Если Title пуст — заголовком становится первая строка Body.
+ *
+ * @param {{Title?:string, Body?:string}} task
+ * @returns {{title:string, body:string}}
+ */
+function splitTitleBody(task) {
+  const titleText = stripHtml(task?.Title);
+  const bodyText = stripHtml(task?.Body);
+  const firstLine = (bodyText || "").split("\n")[0].trim();
+  const title = titleText || (firstLine ? firstLine.slice(0, 140) : "") || "Без текста";
+  if (!bodyText) return { title, body: "" };
+  if (titleText) {
+    if (bodyText === titleText) return { title, body: "" };
+    if (bodyText.startsWith(titleText)) {
+      const rest = bodyText.slice(titleText.length).trim();
+      if (!rest) return { title, body: "" };
+      // Остаток считаем отдельным описанием, только если он начинается как новая фраза
+      // (заглавная буква, цифра, кавычка/скобка/тире). Иначе печатаем Body целиком.
+      return /^[А-ЯЁA-Z0-9«"'(—–-]/.test(rest) ? { title, body: rest } : { title, body: bodyText };
+    }
+    return { title, body: bodyText };
+  }
+  // Заголовка в списке нет — первая строка Body уже стала заголовком, показываем остаток.
+  const lines = bodyText.split("\n");
+  const rest = lines.slice(1).join("\n").trim();
+  if (rest) return { title, body: rest };
+  return bodyText.length > title.length ? { title, body: bodyText.slice(title.length).trim() } : { title, body: "" };
+}
 
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
   // ⭐ v8: defaults-принцип. getUiConfig объявлен НИЖЕ getBehaviourRuleForChoice/getButtonSx
@@ -110,11 +141,15 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   React.useEffect(() => {
     if (relatedFieldDefs.length === 0 || !relatedRef) {
       setRelatedValues(null);
+      setRelatedLoading(false);
       return;
     }
     let cancelled = false;
+    setRelatedLoading(true);
     fetchRelatedFields(relatedRef, relatedFieldDefs).then((values) => {
-      if (!cancelled) setRelatedValues(values);
+      if (cancelled) return;
+      setRelatedValues(values);
+      setRelatedLoading(false);
     });
     return () => {
       cancelled = true;
@@ -125,6 +160,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     () => (Array.isArray(relatedValues) ? relatedValues.filter((r) => r && r.value) : []),
     [relatedValues]
   );
+  // Поля настроены, но ещё грузятся — показываем скелетоны, чтобы карточки не «прыгали».
+  const [relatedLoading, setRelatedLoading] = React.useState(false);
 
   // ⭐ v8: helper для submit — определяет тип анимации и вызывает callback.
   // Приоритет: Behaviour.anim (per choice) → flow default (celebrate для found, sherlock для notFound) → none (extras).
@@ -192,6 +229,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
   const eo = extractEONumberFromTask(task);
   const headerTitle = [tk, eo ? `ЕО ${eo}` : ""].filter(Boolean).join(" • ") || task.Title || "Без текста";
+  const { title: displayTitle, body: displayBody } = splitTitleBody(task);
   const isUpdating = updatingId === task.Id;
   const isTaking = isUpdating && isNotStartedStatus(task.Status);
   const [confirmNotFoundMode, setConfirmNotFoundMode] = React.useState(() => initialAction === "notfound" && isInProgressStatus(task.Status) && !isCompleted);
@@ -364,6 +402,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       elevation={0}
       sx={{
         p: { xs: 1.5, sm: 2 },
+        pl: { xs: 2, sm: 2.4 },
         width: "100%",
         maxWidth: "100%",
         boxSizing: "border-box",
@@ -376,7 +415,23 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         position: "relative",
         opacity: isUpdating ? 0.65 : 1,
         pointerEvents: isUpdating ? "none" : "auto",
-        transition: "opacity 150ms",
+        transition: "opacity 150ms, box-shadow 180ms ease, border-color 180ms ease",
+        // цветовая полоса статуса слева: просрочено / выполнено / в работе
+        "&::before": {
+          content: '""',
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 4,
+          borderRadius: "28px 0 0 28px",
+          bgcolor: isOverdue ? "#e53935" : isCompleted ? "#2e7d32" : "#171c8f",
+          opacity: isCompleted ? 0.5 : 1,
+        },
+        "&:hover": {
+          borderColor: "rgba(23,28,143,0.22)",
+          boxShadow: "0 6px 18px rgba(15,18,61,0.10)",
+        },
         // content-visibility убран для виртуализованного списка — виртуализатор уже виртуализует,
         // двойная виртуализация оставляла пустое место при закрытии/удалении карточки
         willChange: "transform",
@@ -602,10 +657,45 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
           ))}
         </Box>
       )}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
-        <Typography variant="caption" sx={{ fontWeight: 800, color: "#171c8f", fontSize: "0.82rem", lineHeight: 1.3, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={headerTitle}>
-          {headerTitle}
-        </Typography>
+      {/* ── Шапка: поля из Behaviour.rf (ЕО, получатель, ...) + срок / время решения ── */}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1.25 }}>
+        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ flex: 1, minWidth: 0 }}>
+          {relatedRows.length > 0 ? (
+            relatedRows.map((row) => (
+              <Box
+                key={row.internalName}
+                title={`${row.title}: ${row.value} (${row.internalName})`}
+                sx={{
+                  minWidth: 0,
+                  maxWidth: "100%",
+                  px: 0.9,
+                  py: 0.4,
+                  borderRadius: "10px",
+                  bgcolor: "rgba(23,28,143,0.05)",
+                  border: "1px solid rgba(23,28,143,0.10)",
+                }}
+              >
+                <Typography sx={{ fontSize: "0.6rem", fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: "rgba(15,18,61,0.45)", lineHeight: 1.15 }}>
+                  {row.title}
+                </Typography>
+                <Typography sx={{ fontSize: "0.8rem", fontWeight: 800, color: "#171c8f", lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {row.value}
+                </Typography>
+              </Box>
+            ))
+          ) : relatedLoading ? (
+            [0, 1].map((i) => (
+              <Box key={i} sx={{ width: 96, height: 34, borderRadius: "10px", bgcolor: "rgba(23,28,143,0.05)", border: "1px solid rgba(23,28,143,0.08)" }} />
+            ))
+          ) : (
+            <Typography
+              sx={{ fontWeight: 800, color: "#171c8f", fontSize: "0.85rem", lineHeight: 1.35, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              title={headerTitle}
+            >
+              {headerTitle}
+            </Typography>
+          )}
+        </Stack>
         {(() => {
           if (isCompleted) {
             const solve = formatSolveTime(task);
@@ -633,56 +723,49 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         })()}
       </Box>
 
-      <Box>
+      {/* ── Заголовок и описание ── */}
+      <Box sx={{ mb: 1.25 }}>
         <Typography
-          variant="body1"
           sx={{
-            fontWeight: 600,
+            fontWeight: 800,
             color: "#0F123D",
-            whiteSpace: "pre-wrap",
+            fontSize: "0.98rem",
+            lineHeight: 1.35,
             wordBreak: "break-word",
-            mb: 0.75,
             display: "-webkit-box",
-            WebkitLineClamp: 6,
+            WebkitLineClamp: 2,
             WebkitBoxOrient: "vertical",
             overflow: "hidden",
           }}
-          title={task.Body}
+          title={displayTitle}
         >
-          {stripHtml(task.Body) || task.Title || "Без текста"}
+          {displayTitle}
         </Typography>
-        {/* Получатель скрыт — в заголовке уже ТК и ЕО, ниже только Body, как просил пользователь */}
+        {displayBody && (
+          <Typography
+            variant="body2"
+            sx={{
+              mt: 0.5,
+              color: "rgba(15,18,61,0.62)",
+              fontSize: "0.86rem",
+              lineHeight: 1.5,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              display: "-webkit-box",
+              WebkitLineClamp: 4,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+            title={displayBody}
+          >
+            {displayBody}
+          </Typography>
+        )}
       </Box>
-
-      {/* ⭐ Данные из связанного элемента (RelatedItems) — поля задаются в Behaviour.rf */}
-      {relatedRows.length > 0 && (
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1.25 }}>
-          {relatedRows.map((row) => (
-            <Chip
-              key={row.internalName}
-              size="small"
-              variant="outlined"
-              label={`${row.title}: ${row.value}`}
-              title={`${row.title}: ${row.value} (${row.internalName})`}
-              sx={{
-                fontWeight: 700,
-                fontSize: "0.72rem",
-                height: 26,
-                borderRadius: "10px",
-                bgcolor: "rgba(23,28,143,0.04)",
-                borderColor: "rgba(23,28,143,0.18)",
-                color: "#0F123D",
-                maxWidth: "100%",
-                "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" },
-              }}
-            />
-          ))}
-        </Stack>
-      )}
 
       {isCompleted ? (
         <Box sx={{ mt: 1.5 }}>
-          <Box sx={{ mb: 1.5, p: 1.25, borderRadius: 2, bgcolor: "rgba(46,125,50,0.08)", border: "1px solid rgba(46,125,50,0.18)", display: "flex", alignItems: "center", gap: 1.25 }}>
+          <Box sx={{ mb: 1.5, p: 1.25, borderRadius: "10px", bgcolor: "rgba(46,125,50,0.08)", border: "1px solid rgba(46,125,50,0.18)", display: "flex", alignItems: "center", gap: 1.25 }}>
             <Box sx={{ width: 36, height: 36, borderRadius: "50%", bgcolor: "rgba(46,125,50,0.14)", display: "grid", placeItems: "center", flexShrink: 0 }}>
               <CheckCircleIcon sx={{ color: "#2e7d32", fontSize: 22 }} />
             </Box>
@@ -759,7 +842,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       disabled={isUpdating}
                       onClick={() => onTakeInWork?.(task)}
                       sx={{
-                        borderRadius: 1.5,
+                        borderRadius: "12px",
                         fontWeight: 800,
                         textTransform: "none",
                         width: "100%",
@@ -800,7 +883,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               if (isLockedForMe) {
                 return (
                   <>
-                    <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 1, bgcolor: "rgba(255,193,7,0.12)", border: "1px solid rgba(255,193,7,0.3)" }}>
+                    <Box sx={{ mt: 1.5, p: 1.25, borderRadius: "10px", bgcolor: "rgba(255,193,7,0.12)", border: "1px solid rgba(255,193,7,0.3)" }}>
                       <Typography variant="body2" sx={{ fontWeight: 700, color: "#8d6e00" }}>
                         В работе у {taker}
                       </Typography>
@@ -893,8 +976,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               if (confirmNotFoundMode) {
                 return (
                   <>
-                    <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 1.5, bgcolor: "rgba(255, 243, 224, 0.7)", border: "1px solid rgba(229,57,53,0.18)", display: "flex", gap: 1.25, alignItems: "flex-start" }}>
-                      <Box sx={{ width: 36, height: 36, borderRadius: 1, bgcolor: "rgba(229,57,53,0.12)", display: "grid", placeItems: "center", flexShrink: 0, mt: 0.25 }}>
+                    <Box sx={{ mt: 1.5, p: 1.5, borderRadius: "10px", bgcolor: "rgba(255, 243, 224, 0.7)", border: "1px solid rgba(229,57,53,0.18)", display: "flex", gap: 1.25, alignItems: "flex-start" }}>
+                      <Box sx={{ width: 36, height: 36, borderRadius: "10px", bgcolor: "rgba(229,57,53,0.12)", display: "grid", placeItems: "center", flexShrink: 0, mt: 0.25 }}>
                         <SearchOffIcon sx={{ color: "#c62828", fontSize: 20 }} />
                       </Box>
                       <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -920,7 +1003,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           });
                         }}
                         sx={{
-                          borderRadius: 1.5,
+                          borderRadius: "12px",
                           fontWeight: 800,
                           textTransform: "none",
                           width: "100%",
@@ -939,7 +1022,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         variant="text"
                         onClick={() => setConfirmNotFoundMode(false)}
                         disabled={isUpdating}
-                        sx={{ width: "100%", mt: 0.5, borderRadius: 1.5, fontWeight: 700, textTransform: "none", color: "text.secondary", height: 36, ...(getActionSx("promptCancel") || getActionSx("cancel") || {}) }}
+                        sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 36, ...(getActionSx("promptCancel") || getActionSx("cancel") || {}) }}
                       >
                         Отмена
                       </Button>
@@ -1006,7 +1089,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           error={Boolean(additionalError && f.required && !String(promptFieldValues[f.internalName] || "").trim())}
                           sx={{
                             mb: 1,
-                            "& .MuiOutlinedInput-root": { borderRadius: 1.5, bgcolor: "#fff", fontSize: "0.95rem" },
+                            "& .MuiOutlinedInput-root": { borderRadius: "12px", bgcolor: "#fff", fontSize: "0.95rem" },
                             "& .MuiInputBase-input::placeholder": { opacity: 0.7 },
                           }}
                           onKeyDown={(e) => {
@@ -1084,7 +1167,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           });
                         }}
                         sx={{
-                          borderRadius: 1.5,
+                          borderRadius: "12px",
                           fontWeight: 800,
                           textTransform: "none",
                           width: "100%",
@@ -1110,7 +1193,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setAdditionalError("");
                         }}
                         disabled={isUpdating}
-                        sx={{ width: "100%", mt: 0.5, borderRadius: 1.5, fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32 }}
+                        sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32 }}
                       >
                         Отмена
                       </Button>
@@ -1161,7 +1244,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         disabled={isUpdating}
                         onClick={() => setConfirmNotFoundMode(true)}
                         sx={{
-                          borderRadius: 1.5,
+                          borderRadius: "12px",
                           fontWeight: 800,
                           textTransform: "none",
                           flex: "1 1 48%",
@@ -1208,7 +1291,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setFoundInputMode(true);
                         }}
                         sx={{
-                          borderRadius: 1.5,
+                          borderRadius: "12px",
                           fontWeight: 800,
                           textTransform: "none",
                           flex: "1 1 48%",
@@ -1237,7 +1320,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         disabled={isUpdating}
                         onClick={() => onResultClick(task, choice)}
                         sx={{
-                          borderRadius: 1.5,
+                          borderRadius: "12px",
                           fontWeight: 800,
                           textTransform: "none",
                           flex: "1 1 48%",
@@ -1275,7 +1358,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     disabled={isUpdating}
                     onClick={() => onTakeInWork?.(task)}
                     sx={{
-                      borderRadius: 1.5,
+                      borderRadius: "12px",
                       fontWeight: 800,
                       textTransform: "none",
                       width: "100%",
