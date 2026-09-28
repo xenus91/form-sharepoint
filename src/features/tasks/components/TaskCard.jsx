@@ -1,17 +1,15 @@
 // src/features/tasks/components/TaskCard.jsx
 // Extracted from TasksView.jsx — Phase 14 TasksView refactor (§31)
 // Pure presentation + inline result/AdditionalActions logic, orchestration stays in TasksView
-// ★ PR: promptable-поля теперь динамические — берутся из TaskPromptFields (SP) per (CType × ResultValue)
-//   с fallback на hardcoded resultConfig.js (legacy: одно поле Location1 для «найдена»).
+// ⭐ v8+: promptFields/AA/confirmation/animation — ТОЛЬКО через TaskBehaviour (lookup CT.Name → Title).
+// Списки TaskResultDefinitions/TaskPromptFields/TaskActionDefinitions удалены из SP — без legacy-фолбэков.
 
 import React from "react";
 import apiClient from "../../../api";
 import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
-import { resolveTaskResultDefinition } from "../../../services/taskResultDefinitions";
-import { resolvePromptFields } from "../../../services/taskPromptFields"; // ⭐ NEW
-import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title (без lookup-поля — SP не даёт default)
-import { resolveBehaviour, toRenderPromptFields } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
+import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title
+import { resolveBehaviour } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
 import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
 import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
@@ -50,49 +48,9 @@ function stripHtml(html) {
 
 
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
-  // Динамический UI конфиг. ⭐ v8+: defaults-принцип — ТОЛЬКО Behaviour.styling.
-// TaskResultDefinitions.Color/Variant/Gradient и захардкоженный resultConfig.js «найдена»/«не найдена»
-// НЕ применяются для стилей кнопок. Если Behaviour не настроен — возвращаем MUI defaults (variant=contained,
-// color=primary, без gradient).
-// Note: TaskResultDefinitions всё ещё используется через getResultDef() для AdditionalActions (Show/Required).
-  const getUiConfig = React.useCallback((choiceVal) => {
-    // Только Behaviour.styling
-    const tbSx = getButtonSx(choiceVal);
-    if (tbSx) {
-      return {
-        label: undefined,
-        variant: tbSx.variant || "contained",
-        color: "primary",
-        requiresLocation: false,
-        requiresAdditionalActions: false,
-        confirm: false,
-        gradient: tbSx.bg || null,
-        _key: "_behaviour",
-        _source: "task-behaviour",
-      };
-    }
-    // Дефолт: plain MUI
-    return {
-      label: undefined,
-      variant: "contained",
-      color: "primary",
-      requiresLocation: false,
-      requiresAdditionalActions: false,
-      confirm: false,
-      gradient: null,
-      _key: "_default",
-      _source: "mui-default",
-    };
-  }, [getButtonSx]);
-
-  const getResultDef = React.useCallback((choiceVal) => {
-    // Только для AdditionalActions (Show/Required). НЕ для Color/Variant/Gradient/RequiresConfirmed.
-    const ctId = task?.contentTypeId || task?.ContentTypeId || "";
-    if (taskConfig?.taskResultDefinitions) {
-      return resolveTaskResultDefinition(choiceVal, ctId, taskConfig.taskResultDefinitions);
-    }
-    return null;
-  }, [task?.contentTypeId, task?.ContentTypeId, taskConfig?.taskResultDefinitions]);
+  // ⭐ v8: defaults-принцип. getUiConfig объявлен НИЖЕ getBehaviourRuleForChoice/getButtonSx
+  // (зависимости ниже в файле). Реорганизация — поведение из TaskBehaviour,
+  // никаких legacy-фолбэков на TaskResultDefinitions/TaskPromptFields.
 
   // ⭐ v8: резолвер Behaviour rule (маппинг CT.Name → TaskBehaviour.Title) для конкретного choice.
   // Возвращает {promptFields, requiresConfirmed, showAdditionalActions, additionalActionsRequired, source} или null.
@@ -137,6 +95,43 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       setTimeout(submitFn, 1600);
     }
   }, [getBehaviourRuleForChoice]);
+
+  // ⭐ v8+: defaults-принцип — ТОЛЬКО Behaviour.styling.
+  // TaskResultDefinitions.Color/Variant/Gradient и захардкоженный resultConfig.js «найдена»/«не найдена»
+  // НЕ применяются для стилей кнопок. Если Behaviour не настроен — возвращаем MUI defaults (variant=contained,
+  // color=primary, без gradient).
+  const getUiConfig = React.useCallback((choiceVal) => {
+    const tbSx = getButtonSx(choiceVal);
+    if (tbSx) {
+      return {
+        label: undefined,
+        variant: tbSx.variant || "contained",
+        color: "primary",
+        requiresLocation: false,
+        requiresAdditionalActions: false,
+        confirm: false,
+        gradient: tbSx.bg || null,
+        _key: "_behaviour",
+        _source: "task-behaviour",
+      };
+    }
+    return {
+      label: undefined,
+      variant: "contained",
+      color: "primary",
+      requiresLocation: false,
+      requiresAdditionalActions: false,
+      confirm: false,
+      gradient: null,
+      _key: "_default",
+      _source: "mui-default",
+    };
+  }, [getButtonSx]);
+
+  // ⭐ v8+: список TaskResultDefinitions удалён в SP — AA/requiresConfirmed управляются
+  // ТОЛЬКО через TaskBehaviour (Behaviour.aa / Behaviour.aar / Behaviour.c).
+  // Никаких legacy-фолбэков.
+
   const dueInfo = formatDueLeft(task.DueDate);
   const tkRaw = extractTKNumberFromTask(task);
   const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
@@ -227,13 +222,14 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
           taskId: task.Id,
           ct: ctDbg,
           hasTaskConfig: !!taskConfig,
-          taskResultDefinitions: taskConfig?.taskResultDefinitions ? {byCtSize: taskConfig.taskResultDefinitions.byCt.size, globalSize: taskConfig.taskResultDefinitions.global.size, raw: taskConfig.taskResultDefinitions.raw} : null,
+          taskBehaviourSize: taskConfig?.taskBehaviour?.size || 0,
+          ctMetaResolved: taskConfig?.ctMetaMap?.get?.(ctDbg) || null,
           ctConfig: taskConfig?.ctConfigMap?.get(ctDbg) || null,
           choices, displayedChoices, dynamicInternalName
         });
       }catch(e){ __dlogAlways(e); }
     }
-  }, [task.Id, task?.contentTypeId, taskConfig?.taskResultDefinitions, choices, displayedChoices, dynamicInternalName]);
+  }, [task.Id, task?.contentTypeId, taskConfig?.taskBehaviour, taskConfig?.ctMetaMap, choices, displayedChoices, dynamicInternalName]);
   React.useEffect(() => {
     const def = getDefaultsForThisTask();
     if (def === null) return;
@@ -762,25 +758,20 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // Determine found / notFound choices — через конфиг + fallback на legacy строки, без хардкода конкретных значений
               // Для открытой задачи используем displayedChoices (свежие по ContentType)
               const choicesForButtons = displayedChoices || choices;
-              // ⭐ v8+: matches БЕЗ legacy-фолбэков. Defaults-принцип:
-              //   foundChoice   → Behaviour.promptFields || Behaviour.aa (AA-flow) || TaskResultDefinitions.ShowAdditionalActions (AA-flow)
-              //   notFoundChoice → Behaviour.requiresConfirmed=true
-              //   всё остальное  → plain MUI Button в extras-ветке, прямой submit, никаких confirm/промптов/цветов
+              // ⭐ v8+: matches БЕЗ legacy-фолбэков. Defaults-принцип — только TaskBehaviour:
+              //   foundChoice    → Behaviour.promptFields.length > 0 || Behaviour.aa === true
+              //   notFoundChoice → Behaviour.c === true
+              //   всё остальное   → plain MUI Button в extras-ветке, прямой submit
               const foundChoice = (() => {
                 return choicesForButtons.find((ch) => {
-                  // ⭐ v8: L0 — TaskBehaviour (наивысший приоритет)
                   const rule = getBehaviourRuleForChoice(ch);
                   if (rule && (rule.promptFields.length > 0 || rule.showAdditionalActions === true)) return true;
-                  // Legacy AA из TaskResultDefinitions (по решению плана — AA остаётся здесь)
-                  const def = getResultDef(ch);
-                  if (def && def.showAdditionalActions) return true;
                   return false;
                 }) || null;
               })();
               const notFoundChoice = (() => {
                 return choicesForButtons.find((ch) => {
                   if (ch === foundChoice) return false;
-                  // ⭐ v8: L0 — TaskBehaviour.requiresConfirmed=true
                   const rule = getBehaviourRuleForChoice(ch);
                   if (rule && rule.requiresConfirmed === true) return true;
                   return false;
@@ -791,18 +782,27 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 try {
                   const ctDbg = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
                   const dbgChoices = choicesForButtons.map(ch=>{
-                    const def = getResultDef(ch);
+                    const rule = getBehaviourRuleForChoice(ch);
                     const ui = getUiConfig(ch);
-                    return {choice:ch, def: def? {show:def.showAdditionalActions, required:def.additionalActionsRequired, source:def.source, ct:def.cfg?.contentTypeId}: null, ui: {requiresLocation:ui.requiresLocation, requiresAdditionalActions:ui.requiresAdditionalActions, confirm:ui.confirm, _source:ui._source}};
+                    return {
+                      choice: ch,
+                      rule: rule ? {
+                        promptFields: rule.promptFields.length,
+                        showAdditionalActions: rule.showAdditionalActions,
+                        requiresConfirmed: rule.requiresConfirmed,
+                        additionalActionsRequired: rule.additionalActionsRequired,
+                        animation: rule.animation,
+                        source: rule.source,
+                      } : null,
+                      ui: { _source: ui._source, variant: ui.variant, color: ui.color }
+                    };
                   });
                   __dlogAlways("[DBG:TaskCard:foundNotFound]", {
                     taskId: task.Id,
                     taskCT: ctDbg.slice(0,60),
                     taskCTfull: ctDbg,
-                    hasDefs: !!taskConfig?.taskResultDefinitions,
-                    byCtKeys: taskConfig?.taskResultDefinitions ? Array.from(taskConfig.taskResultDefinitions.byCt.keys()).map(k=>k.slice(0,24)+"…") : [],
-                    globalKeys: taskConfig?.taskResultDefinitions ? Array.from(taskConfig.taskResultDefinitions.global.keys()) : [],
-                    raw: taskConfig?.taskResultDefinitions?.raw?.map(r=>({ResultValue:r.resultValue, CType:r.contentTypeId, Show:r.showAdditionalActions})) || null,
+                    hasBehaviour: !!taskConfig?.taskBehaviour,
+                    ctMetaResolved: taskConfig?.ctMetaMap?.get?.(ctDbg) || null,
                     dbgChoices,
                     foundChoice, notFoundChoice,
                     displayedChoices: choicesForButtons
@@ -878,51 +878,17 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
 
               // Input mode для Найдена — inline в карточке (вернули обратно, Phase 17.11)
               // ShowAdditionalActions из TaskResultDefinitions управляет видимостью AdditionalActionsField
-              // ★ v8: promptable-поля рендерятся динамически — приоритет TaskBehaviour (lookup на CT),
-              //       затем TaskPromptFields (legacy), затем fallback на Location1 (hardcoded).
+              // ★ v8+: promptable-поля берутся ТОЛЬКО из TaskBehaviour. НЕТ legacy fallback на Location1 или иные источники.
+              //   Если Behaviour.p пустой или Behaviour не настроен — никаких дополнительных полей не показываем.
+              //   ShowAdditionalActions → Behaviour.aa, requiresConfirmed → Behaviour.c — обе только из Behaviour.
               if (foundInputMode) {
-                const defForFound = getResultDef(foundChoice);
-                // ⭐ v8: showAAInline сначала из TaskBehaviour, потом из TaskResultDefinitions, потом из RESULT_UI_CONFIG
                 const behaviourRuleForFound = getBehaviourRuleForChoice(foundChoice);
-                const showAAInline = behaviourRuleForFound && behaviourRuleForFound.showAdditionalActions !== null
-                  ? !!behaviourRuleForFound.showAdditionalActions
-                  : (defForFound ? !!defForFound.showAdditionalActions : !!getUiConfig(foundChoice).requiresAdditionalActions);
-                // ⭐ v8: resolve promptable-поля — сначала TaskBehaviour, потом TaskPromptFields (legacy), потом Location1
-                const ctIdForPrompt = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
-                let promptFields = null;
-                let fromTaskBehaviour = null;
-                if (behaviourRuleForFound && behaviourRuleForFound.promptFields.length > 0) {
-                  fromTaskBehaviour = behaviourRuleForFound.promptFields;
-                  promptFields = fromTaskBehaviour;
-                }
-                const fromSp = promptFields === null && taskConfig?.taskPromptFields
-                  ? resolvePromptFields(ctIdForPrompt, foundChoice, taskConfig.taskPromptFields)
-                  : null;
-                // ⭐ NEW: диагностический лог — почему поле НЕ показывается (или показывается).
-                if ((__forceTaskDbg || __DBG_ENABLED__) && (!fromSp || fromSp.length === 0) && !fromTaskBehaviour) {
-                  __dlogAlways("[DBG:TaskCard:promptFields-empty]", {
-                    ctIdForPrompt,
-                    foundChoice,
-                    behaviourRule: behaviourRuleForFound,
-                    taskConfig_taskPromptFields_null: taskConfig?.taskPromptFields === null,
-                    taskConfig_taskPromptFields_byKey_size: taskConfig?.taskPromptFields?.byKey?.size,
-                    fromSp,
-                  });
-                }
-                if (promptFields === null) {
-                  if (fromSp !== null) {
-                    // SP-список есть (даже если пустой) — НЕ fallback на legacy Location1
-                    promptFields = fromSp;
-                  } else {
-                    // SP 404 → legacy fallback на одно поле Location1 если cfg.requiresLocation=true
-                    const cfg = getUiConfig(foundChoice);
-                    promptFields = cfg.requiresLocation
-                      ? [{ internalName: "Location1", title: "Где найдена?", type: "multiline", required: false }]
-                      : [];
-                  }
-                }
+                // ⭐ v8+: showAAInline строго из Behaviour.aa. null/true → без UI (defaults), true → показать AA inline.
+                const showAAInline = behaviourRuleForFound?.showAdditionalActions === true;
+                // ⭐ v8+: promptFields строго из Behaviour. Без Behaviour — пусто (никаких legacy Location1).
+                const promptFields = behaviourRuleForFound?.promptFields || [];
                 // debug
-                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, defForFound, behaviourRule: behaviourRuleForFound, showAAInline, promptFields, fromTaskBehaviour: fromTaskBehaviour !== null, fromSp: fromSp !== null});
+                if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {foundChoice, behaviourRule: behaviourRuleForFound, showAAInline, promptFields});
                 const validateAdditional = () => {
                   if (!showAAInline) { setAdditionalError(""); return true; }
                   setAdditionalError("");
@@ -970,9 +936,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                               if (!validateAdditional()) return;
                               const acts = showAAInline ? additionalActions : [];
                               const req = showAAInline ? additionalRequired : "Нет";
-                              // ⭐ v8: Behaviour.c=true имеет приоритет над TaskResultDefinitions (defaults-принцип).
-                              // Если в Behaviour ничего не задано — fallback на legacy defForFound.requiresConfirmed.
-                              if ((behaviourRuleForFound && behaviourRuleForFound.requiresConfirmed === true) || (defForFound && defForFound.requiresConfirmed === true)) {
+                              // ⭐ v8+: requiresConfirmed строго из Behaviour.c. Никаких legacy-фолбэков.
+                              if (behaviourRuleForFound?.requiresConfirmed === true) {
                                 setInlineConfirmPending({ req, acts });
                                 return;
                               }
@@ -1028,9 +993,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           if (!validateAdditional()) return;
                           const acts = showAAInline ? additionalActions : [];
                           const req = showAAInline ? (additionalActions.length > 0 ? "Да" : "Нет") : "Нет";
-                          // ⭐ v8: Behaviour.c=true имеет приоритет над TaskResultDefinitions (defaults-принцип).
-                          // Если в Behaviour ничего не задано — fallback на legacy defForFound.requiresConfirmed.
-                          if ((behaviourRuleForFound && behaviourRuleForFound.requiresConfirmed === true) || (defForFound && defForFound.requiresConfirmed === true)) {
+                          // ⭐ v8+: requiresConfirmed строго из Behaviour.c.
+                          if (behaviourRuleForFound?.requiresConfirmed === true) {
                             setInlineConfirmPending({ req, acts });
                             return;
                           }

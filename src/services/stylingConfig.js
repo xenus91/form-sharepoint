@@ -72,8 +72,7 @@ export function resolveStylingForChoice(choice, parsedStyling) {
 
   const sx = {};
   if (entry.bg) {
-    sx.background = entry.bg;
-    sx.backgroundColor = entry.bg; // MUI fallback для некоторых тем
+    sx.background = entry.bg; // CSS shorthand: background-image + background-color reset
     sx["&:hover"] = { ...(sx["&:hover"] || {}), filter: "brightness(1.1)" };
   }
   if (entry.color) sx.color = entry.color;
