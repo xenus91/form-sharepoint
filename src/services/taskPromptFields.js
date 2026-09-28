@@ -17,8 +17,8 @@
 
 const LIST_TITLE = "TaskPromptFields";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskPromptFields:map:v1";
-const STORAGE_AT = "sp:taskPromptFields:at:v1";
+const STORAGE_KEY = "sp:taskPromptFields:map:v2";
+const STORAGE_AT = "sp:taskPromptFields:at:v2";
 
 let _cache = null; // { byKey: Map<`${ctId}|${res}`, fields[]>, byCtWildcard: Map<ctId, fields[]>, globalWildcard: fields[], globalByKey: Map<res, fields[]>, raw: Array }
 let _cacheAt = 0;
@@ -238,7 +238,12 @@ export async function fetchTaskPromptFields(apiClient, opts = {}) {
  * @returns {Array<{internalName:string,title:string,type:string,required:boolean,sortOrder:number}>}
  */
 export function resolvePromptFields(contentTypeId, resultValue, defs) {
-  if (!defs) return [];
+  if (!defs) {
+    if (typeof window !== "undefined" && (window.__forceTaskDbg || window.__DBG_ENABLED__)) {
+      console.warn("[DBG:taskPromptFields:resolve] defs==null → fallback, no fields will be shown", { contentTypeId, resultValue });
+    }
+    return [];
+  }
   const ctId = normCtype(contentTypeId);
   const n = norm(resultValue);
 
@@ -247,13 +252,16 @@ export function resolvePromptFields(contentTypeId, resultValue, defs) {
     const k = `${ctId}|${n}`;
     if (defs.byKey.has(k)) {
       const arr = defs.byKey.get(k);
-      if (arr.length) return arr;
+      if (arr.length) {
+        if (typeof window !== "undefined" && window.__DBG_ENABLED__) console.log("[DBG:taskPromptFields:resolve] L1 match", { ctId, n, count: arr.length });
+        return arr;
+      }
     }
   }
 
   // L2: prefix CT (longest match) × exact ResultValue
   if (ctId && defs.byKey.size) {
-    let best = null, bestLen = -1;
+    let best = null, bestLen = -1, bestKey = null;
     for (const [key, arr] of defs.byKey.entries()) {
       const pipeIdx = key.lastIndexOf("|");
       if (pipeIdx < 0) continue;
@@ -263,9 +271,13 @@ export function resolvePromptFields(contentTypeId, resultValue, defs) {
       if (ctId.startsWith(ctKey) && ctKey.length > bestLen && arr.length) {
         best = arr;
         bestLen = ctKey.length;
+        bestKey = key;
       }
     }
-    if (best) return best;
+    if (best) {
+      if (typeof window !== "undefined" && window.__DBG_ENABLED__) console.log("[DBG:taskPromptFields:resolve] L2 prefix match", { ctId, n, matchedKey: bestKey, count: best.length });
+      return best;
+    }
   }
 
   // L3: prefix CT × CT wildcard ResultValue=*
@@ -281,18 +293,41 @@ export function resolvePromptFields(contentTypeId, resultValue, defs) {
         bestLen = key.length;
       }
     }
-    if (best) return best;
+    if (best) {
+      if (typeof window !== "undefined" && window.__DBG_ENABLED__) console.log("[DBG:taskPromptFields:resolve] L3 ct-wildcard match", { ctId, n, count: best.length });
+      return best;
+    }
   }
 
   // L4: global wildcard (no CT, ResultValue=*)
-  if (defs.globalWildcard.length) return defs.globalWildcard;
+  if (defs.globalWildcard.length) {
+    if (typeof window !== "undefined" && window.__DBG_ENABLED__) console.log("[DBG:taskPromptFields:resolve] L4 global wildcard match", { count: defs.globalWildcard.length });
+    return defs.globalWildcard;
+  }
 
   // L5: global exact (no CT, specific ResultValue)
   if (defs.globalByKey.has(n)) {
     const arr = defs.globalByKey.get(n);
-    if (arr.length) return arr;
+    if (arr.length) {
+      if (typeof window !== "undefined" && window.__DBG_ENABLED__) console.log("[DBG:taskPromptFields:resolve] L5 global exact match", { ctId, n, count: arr.length });
+      return arr;
+    }
   }
 
+  // ⭐ DBG: no match — выводим полезную информацию чтобы пользователь мог диагностировать
+  if (typeof window !== "undefined" && (window.__forceTaskDbg || window.__DBG_ENABLED__)) {
+    const availableKeys = Array.from(defs.byKey?.keys?.() || []).slice(0, 20);
+    console.warn(
+      "[DBG:taskPromptFields:resolve] NO MATCH for (ctId, n).",
+      "\n  input:", JSON.stringify({ ctId, n }),
+      "\n  byKey size:", defs.byKey?.size || 0,
+      "\n  byCtWildcard size:", defs.byCtWildcard?.size || 0,
+      "\n  globalWildcard size:", defs.globalWildcard?.length || 0,
+      "\n  globalByKey size:", defs.globalByKey?.size || 0,
+      "\n  byKey sample keys (first 20):", availableKeys,
+      "\n  HINT: Compare ctId with first part of available keys. If the SP record's CType was set with different casing/whitespace, the lowercase normalization should handle it — but if CType format itself differs (e.g. parent vs child id), no match."
+    );
+  }
   return [];
 }
 

@@ -203,4 +203,31 @@ describe("taskPromptFields", () => {
     const fields = resolvePromptFields(CT_A, "Найдена", defs);
     expect(fields[0].internalName).toBe("Location1");
   });
+
+  // ⭐ Regression test: пользователь хранит CType в SP в одном регистре (напр. uppercase hex),
+  // а на Task приходит строка в другом регистре. normCtype должен мачить.
+  it("resolvePromptFields: SP record stored with UPPERCASE CType, resolve with lowercase input → match", async () => {
+    const UPPER_CT = "0X010800AAAAAAAAAAAAAAAAAAAAA"; // uppercase X
+    const lowerInput = "0x010800aaaaaaaaaaaaaaaaaaaaa"; // lowercase x
+    const apiClient = makeApiClient([
+      // SP record хранится как uppercase (как часто бывает в CType-полях SP при вводе вручную)
+      { Id: 1, CType: UPPER_CT, ResultValue: "Не исправлено", FieldInternalName: "CommentResult", FieldTitle: "Комментарий", FieldType: "text", Required: true, SortOrder: 10, Enabled: true },
+    ]);
+    const defs = await fetchTaskPromptFields(apiClient, { forceRefresh: true });
+    // Резолв с input в lowercase (задача передаёт CType как lowercase из task.contentTypeId)
+    const fields = resolvePromptFields(lowerInput, "Не исправлено", defs);
+    expect(fields.length).toBe(1);
+    expect(fields[0].internalName).toBe("CommentResult");
+    expect(fields[0].required).toBe(true);
+  });
+
+  it("resolvePromptFields: input CType with leading/trailing whitespace is trimmed and lowercased for match", async () => {
+    const apiClient = makeApiClient([
+      { Id: 1, CType: CT_A, ResultValue: "Найдена", FieldInternalName: "Location1", FieldTitle: "Где?", Required: true, SortOrder: 10, Enabled: true },
+    ]);
+    const defs = await fetchTaskPromptFields(apiClient, { forceRefresh: true });
+    const fields = resolvePromptFields("  0x010800aaaaaaaaaaaaaaaaaaaaa  ", "Найдена", defs);
+    expect(fields.length).toBe(1);
+    expect(fields[0].internalName).toBe("Location1");
+  });
 });

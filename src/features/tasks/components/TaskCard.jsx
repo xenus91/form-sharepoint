@@ -852,6 +852,18 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 const fromSp = taskConfig?.taskPromptFields
                   ? resolvePromptFields(ctIdForPrompt, foundChoice, taskConfig.taskPromptFields)
                   : null;
+                // ⭐ NEW: диагностический лог — почему поле НЕ показывается (или показывается).
+                if ((__forceTaskDbg || __DBG_ENABLED__) && (!fromSp || fromSp.length === 0)) {
+                  __dlogAlways("[DBG:TaskCard:promptFields-empty]", {
+                    ctIdForPrompt,
+                    foundChoice,
+                    taskConfig_taskPromptFields_null: taskConfig?.taskPromptFields === null,
+                    taskConfig_taskPromptFields_undefined: taskConfig?.taskPromptFields === undefined,
+                    taskConfig_taskPromptFields_typeof: typeof taskConfig?.taskPromptFields,
+                    taskConfig_taskPromptFields_byKey_size: taskConfig?.taskPromptFields?.byKey?.size,
+                    fromSp,
+                  });
+                }
                 let promptFields;
                 if (fromSp !== null) {
                   // SP-список есть (даже если пустой) — НЕ fallback на legacy Location1

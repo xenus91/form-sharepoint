@@ -13,8 +13,8 @@ import { RESULT_UI_CONFIG } from "../tasks/resultConfig";
 
 const LIST_TITLE = "TaskResultDefinitions";
 const CACHE_TTL_MS = 30 * 60 * 1000;
-const STORAGE_KEY = "sp:taskResultDefs:map:v5";
-const STORAGE_AT = "sp:taskResultDefs:at:v5";
+const STORAGE_KEY = "sp:taskResultDefs:map:v6";
+const STORAGE_AT = "sp:taskResultDefs:at:v6";
 
 let _cache = null; // { global: Map<norm, cfg>, byCt: Map<ctId, Map<norm,cfg>>, raw: Array }
 let _cacheAt = 0;
@@ -84,8 +84,15 @@ function parseBool(v, fallback=false){
   return fallback;
 }
 
+// Нормализует ContentTypeId к lowercase для детерминированного матчинга.
+// SP API может возвращать uppercase вариант hex, что приводит к ложным нулл-матчам
+// в prefix-lookup и exact-lookup. Все сравнения делаем через этот хелпер.
+function normCtype(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
 function getCtypeFromItem(item){
-  return String(item.CType||"").trim();
+  return normCtype(item.CType);
 }
 
 export async function fetchTaskResultDefinitions(apiClient, opts={}){
@@ -245,7 +252,7 @@ export function resolveTaskResultDefinition(resultValue, contentTypeId, defs){
     return null;
   }
   const n=norm(resultValue);
-  const ctId=String(contentTypeId||"").trim();
+  const ctId=normCtype(contentTypeId);
   // debug forced
   try{
     const dbgByCtKeys = Array.from(defs.byCt.keys()).map(k=>k.slice(0,30));
@@ -285,7 +292,7 @@ export function resolveResultUiConfig(choiceValue, contentTypeId, defs){
   const n=norm(choiceValue);
   // 1) per-CT defs если есть legacy Color/Variant
   if(defs && contentTypeId){
-    const ctMap=defs.byCt.get(String(contentTypeId).trim());
+    const ctMap=defs.byCt.get(normCtype(contentTypeId));
     if(ctMap && ctMap.has(n)){
       const cfg=ctMap.get(n);
       if(cfg.color || cfg.variant || cfg.gradient){
@@ -294,7 +301,7 @@ export function resolveResultUiConfig(choiceValue, contentTypeId, defs){
     }
     let best=null, bestLen=-1;
     for(const [ctKey, map] of defs.byCt.entries()){
-      if(String(contentTypeId).startsWith(ctKey) && ctKey.length>bestLen && map.has(n)){
+      if(normCtype(contentTypeId).startsWith(ctKey) && ctKey.length>bestLen && map.has(n)){
         best=map.get(n); bestLen=ctKey.length;
       }
     }

@@ -92,4 +92,19 @@ describe("taskResultDefinitions — RequiresConfirmed + Color/Variant/Gradient",
     expect(r.cfg.variant).toBe("contained");
     expect(r.cfg.gradient).toBe("linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)");
   });
+
+  // ⭐ Regression: пользователь хранит CType в SP в одном регистре,
+  // задачи приходят в другом. normCtype должен это сматчить.
+  it("resolveTaskResultDefinition: SP record CType mixed-case matches lowercase input", async () => {
+    const MIXED_CT = "0X010800AAAAAAAAAAAAAAAAAAAAA";
+    const LOWERCASE_INPUT = "0x010800aaaaaaaaaaaaaaaaaaaaa";
+    const apiClient = makeApiClient([
+      { Id: 1, CType: MIXED_CT, ResultValue: "Не найдена", ShowAdditionalActions: false, AdditionalsActionsRequired: false, RequiresConfirmed: "Да", SortOrder: 10, Enabled: true },
+    ]);
+    const defs = await fetchTaskResultDefinitions(apiClient, { forceRefresh: true });
+    const r = resolveTaskResultDefinition("Не найдена", LOWERCASE_INPUT, defs);
+    expect(r).not.toBeNull();
+    expect(r.showAdditionalActions).toBe(false);
+    expect(r.requiresConfirmed).toBe(true);
+  });
 });
