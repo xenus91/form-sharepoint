@@ -9,6 +9,11 @@ import { getResultFieldForTask } from "../../../tasks/resultField";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { TASKS_LIST_API } from "../../../tasks/config";
 
+// Минимальное время, которое карточка проводит в состоянии «Сохранение...» (мс).
+// Иначе при быстром ответе сервера оверлей мелькает и кажется, что карточка пропала мгновенно.
+const MIN_OVERLAY_MS = 500;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 // Системные поля, которые НЕ должны перезаписываться из promptFieldValues.
 // Защита от случайного damage при невалидной конфигурации TaskPromptFields.
 const SYSTEM_FIELDS = new Set([
