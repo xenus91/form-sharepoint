@@ -466,14 +466,14 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         </Box>
       );})()}
       {isUpdating && (() => {
+        // Никаких текстов под конкретные результаты: оверлей одинаковый для любого действия.
         const action = updatingAction || (isTaking ? "take" : null);
-        const isNotFoundAction = action === "notFound";
-        const isFoundAction = action === "found";
-        const overlayBg = isNotFoundAction ? "rgba(255, 235, 238, 0.88)" : isFoundAction ? "rgba(232, 245, 233, 0.88)" : "rgba(255,255,255,0.82)";
-        const spinnerColor = isNotFoundAction ? "#c62828" : isFoundAction ? "#2e7d32" : "#5A67D8";
-        const titleColor = isNotFoundAction ? "#b71c1c" : isFoundAction ? "#1b5e20" : "#171c8f";
-        const titleText = isNotFoundAction ? "ЕО не найдена" : isFoundAction ? "ЕО найдена — сохраняю..." : isTaking ? "Беру в работу..." : "Сохранение...";
-        const subText = isNotFoundAction ? "Создаю заявку на ООБ..." : isFoundAction ? "Фиксирую место и закрываю задачу..." : "Подождите, идёт проверка блокировки";
+        const isCompleteAction = action === "complete";
+        const overlayBg = "rgba(255,255,255,0.82)";
+        const spinnerColor = "#5A67D8";
+        const titleColor = "#171c8f";
+        const titleText = isTaking ? "Беру в работу..." : isCompleteAction ? "Сохранение..." : "Сохранение...";
+        const subText = isTaking ? "Подождите, идёт проверка блокировки" : isCompleteAction ? "Отправляю результат и закрываю задачу..." : "Подождите...";
         return (
           <Box
             sx={{
@@ -485,7 +485,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               placeItems: "center",
               zIndex: 5,
               borderRadius: 1,
-              border: isNotFoundAction ? "1px solid rgba(229,57,53,0.18)" : isFoundAction ? "1px solid rgba(46,125,50,0.18)" : "none",
+              border: "none",
             }}
           >
             <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1.25, p: 2, textAlign: "center" }}>
@@ -496,11 +496,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               <Typography variant="caption" sx={{ color: "text.secondary", textAlign: "center", lineHeight: 1.3 }}>
                 {subText}
               </Typography>
-              {isNotFoundAction && (
-                <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 700, mt: 0.5, fontSize: "0.75rem" }}>
-                  Создаю заявку на ООБ
-                </Typography>
-              )}
             </Box>
           </Box>
         );

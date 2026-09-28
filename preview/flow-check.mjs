@@ -22,13 +22,22 @@ for (const t of tasks) {
   }
 }
 
-async function renderOnce(spies) {
+async function renderOnce(spies, updating) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
-  root.render(createElement(ThemeProvider, { theme }, createElement(CardsScene, spies)));
+  root.render(createElement(ThemeProvider, { theme }, createElement(CardsScene, { ...spies, ...(updating || {}) })));
   await new Promise((r) => setTimeout(r, 900));
   return host;
+}
+
+console.log("\n=== Оверлей «Сохранение...» при submit ===");
+{
+  const host = await renderOnce({}, { updatingId: 651, updatingAction: "complete" });
+  const card = [...host.querySelectorAll(":scope > div > div > div")].find((c) => c.textContent.includes("#651"));
+  console.log("карточка #651:", card.textContent.replace(/\s+/g, " ").trim());
+  console.log("кнопки:", [...card.querySelectorAll("button")].map((b) => b.textContent.trim()).filter(Boolean).join(" | ") || "нет (оверлей перекрывает)");
+  host.remove();
 }
 
 console.log("\n=== Проверка loc (диалог «Где найдена ЕО?») ===");

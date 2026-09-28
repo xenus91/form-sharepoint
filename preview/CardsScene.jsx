@@ -123,7 +123,7 @@ export const choicesByTask = {
 
 export const CT = { CT_SEARCH, CT_FOUND, CT_FIX };
 
-export default function CardsScene({ onResultClick, onComplete }) {
+export default function CardsScene({ onResultClick, onComplete, updatingId = null, updatingAction = null }) {
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f5f6fb", p: 3, fontFamily: "'Poppins','Inter',sans-serif" }}>
       <Typography sx={{ fontWeight: 800, mb: 0.5, color: "#171c8f" }}>Предпросмотр карточек задач</Typography>
@@ -139,8 +139,8 @@ export default function CardsScene({ onResultClick, onComplete }) {
               isOverdue={!!t.overdue}
               fieldDefaultActions={[]}
               choices={choicesByTask[t.Id]}
-              updatingId={null}
-              updatingAction={null}
+              updatingId={updatingId}
+              updatingAction={updatingAction}
               onResultClick={onResultClick || (() => {})}
               onTakeInWork={() => {}}
               onComplete={onComplete || (() => {})}

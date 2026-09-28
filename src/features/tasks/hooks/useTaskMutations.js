@@ -212,16 +212,29 @@ export function useTaskMutations({
     }
   }, [entityType, inProgressStatusValue, currentUserId, currentUserTitle, notify, loadTasks, queryClient, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, setElementTaskMatch]);
 
+  // Успешное завершение: держим оверлей минимум MIN_OVERLAY_MS, обновляем список и только
+  // потом показываем snackbar — так карточка не «пропадает» раньше отклика сервера.
+  const finishSuccess = useCallback(async (message, startedAt) => {
+    const rest = MIN_OVERLAY_MS - (Date.now() - (startedAt || 0));
+    if (rest > 0) await sleep(rest);
+    queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    invalidate("/items");
+    if (typeof loadTasks === "function") await loadTasks({ silent: true });
+    notify(message, { severity: "success" });
+  }, [queryClient, invalidate, loadTasks, notify]);
+
   const completeTask = useCallback(async (task, resultValue, promptFieldValues, additionalRequired, additionalActions) => {
     // Backward compat: legacy string → { Location1: string }
     const normalizedPromptValues = normalizePromptFieldValues(promptFieldValues);
     const locationValue = normalizedPromptValues.Location1; // legacy contract — извлекаем для Location1-specific логики
     const prevTaskSnapshot = { ...task };
+    const startedAt = Date.now();
     setUpdatingId(task.Id);
     const _norm = String(resultValue || "").trim().toLowerCase();
     const _isNotFound = _norm === "не найдена" || _norm === "не найден" || _norm === "не найдено";
     const _isFound = _norm === "найден" || _norm === "найдена";
-    setUpdatingAction(_isNotFound ? "notFound" : _isFound ? "found" : null);
+    // Оверлей «Сохранение...» — один для любого результата (как при «Взять в работу»).
+    setUpdatingAction("complete");
     if (_isFound) {
       const reqNorm = String(additionalRequired || "Нет").trim();
       const acts = Array.isArray(additionalActions) ? additionalActions.filter(Boolean).map((v) => String(v).trim()).filter(Boolean) : [];
@@ -252,8 +265,9 @@ export function useTaskMutations({
       ...Object.fromEntries(Object.entries(normalizedPromptValues).filter(([k]) => k !== "Location1").map(([k, v]) => [k, v])),
       AdditionalsActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalsActionsRequired || "")),
       AdditionalActions: _isNotFound ? [] : (_isFound ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
-      Status: _targetStatusOpt,
-      PercentComplete: 1,
+      // ⭐ НЕ выставляем Status/PercentComplete оптимистично: иначе задача сразу
+      // отфильтровывается из вкладки «В работе» и карточка исчезает до ответа сервера,
+      // из-за чего оверлей «Сохранение...» не виден. Статус применится после refresh.
       Modified: new Date().toISOString(),
     };
     // For queryKey parity we use distribution-agnostic key; TasksView also uses distribution Id variant — optimistic will still appear via invalidate
@@ -405,7 +419,7 @@ export function useTaskMutations({
                 if (_isFound) flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false; else if (_isNotFound) flip.AdditionalsActionsRequired = false;
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 await postUpdateSafe(_isNotFound ? flip : flipWithStatus, "*");
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" }); queryClient.invalidateQueries({ queryKey: ["tasks"] }); invalidate("/items"); setTimeout(() => loadTasks({ silent: true }), 600); return;
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
               } catch {}
             }
             if (msg.includes("additionalactions")) {
@@ -413,7 +427,7 @@ export function useTaskMutations({
                 const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
                 const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
                 try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
-                notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" }); queryClient.invalidateQueries({ queryKey: ["tasks"] }); invalidate("/items"); setTimeout(() => loadTasks({ silent: true }), 600); return;
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
               } catch {}
             }
             const isFieldError = msg.includes("status") || msg.includes("percent");
@@ -437,7 +451,7 @@ export function useTaskMutations({
               const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
               const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
               try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
-              notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" }); queryClient.invalidateQueries({ queryKey: ["tasks"] }); invalidate("/items"); setTimeout(() => loadTasks({ silent: true }), 600); return;
+              await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
             } catch {}
           }
           const isFieldError = msg.includes("status") || msg.includes("percent");
@@ -450,10 +464,13 @@ export function useTaskMutations({
         }
       }
 
-      notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
+      // Карточка остаётся с оверлеем до обновления списка, и только потом показываем snackbar.
+      const rest = MIN_OVERLAY_MS - (Date.now() - startedAt);
+      if (rest > 0) await sleep(rest);
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       invalidate("/items");
-      setTimeout(() => loadTasks({ silent: true }), 600);
+      await loadTasks({ silent: true });
+      notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
     } catch (e) {
       console.error("complete task error", e);
       const msg = e?.response?.data?.error?.message?.value || e?.message || "Ошибка обновления задачи";
@@ -464,7 +481,7 @@ export function useTaskMutations({
       setUpdatingId(null);
       setUpdatingAction(null);
     }
-  }, [entityType, completedStatusValue, additionalRequiredIsBoolean, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult]);
+  }, [entityType, completedStatusValue, additionalRequiredIsBoolean, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult, finishSuccess]);
 
   return { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask };
 }
