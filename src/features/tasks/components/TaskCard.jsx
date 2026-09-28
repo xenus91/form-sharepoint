@@ -66,15 +66,25 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
 
   // ⭐ v8: резолвер sx-стилей для кнопки из TaskBehaviour.stylingResultButton (через CT.Name).
   // Возвращает объект для MUI sx или null.
-  const getButtonSx = React.useCallback((choiceVal) => {
+  const getTaskBehaviourConfig = React.useCallback(() => {
     const ctId = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
     if (!ctId || !taskConfig?.taskBehaviour || !taskConfig?.ctMetaMap) return null;
     const ctMeta = findContentTypeMeta(ctId, taskConfig.ctMetaMap);
-    if (!ctMeta || !ctMeta.name) return null;
-    const tb = resolveTaskBehaviourByName(ctMeta.name, taskConfig.taskBehaviour);
-    if (!tb || !tb.styling || !tb.styling.ok) return null;
-    return resolveStylingForChoice(choiceVal, tb.styling.value);
+    if (!ctMeta?.name) return null;
+    return resolveTaskBehaviourByName(ctMeta.name, taskConfig.taskBehaviour);
   }, [task?.contentTypeId, task?.ContentTypeId, task?.raw, taskConfig?.taskBehaviour, taskConfig?.ctMetaMap]);
+
+  const getButtonSx = React.useCallback((choiceVal) => {
+    const tb = getTaskBehaviourConfig();
+    if (!tb?.styling?.ok) return null;
+    return resolveStylingForChoice(choiceVal, tb.styling.value);
+  }, [getTaskBehaviourConfig]);
+
+  const getActionSx = React.useCallback((actionName) => {
+    const tb = getTaskBehaviourConfig();
+    if (!tb?.stylingActions?.ok) return null;
+    return resolveStylingForChoice(actionName, tb.stylingActions.value);
+  }, [getTaskBehaviourConfig]);
 
   // ⭐ v8: helper для submit — определяет тип анимации и вызывает callback.
   // Приоритет: Behaviour.anim (per choice) → flow default (celebrate для found, sherlock для notFound) → none (extras).
@@ -853,6 +863,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           color: "#fff",
                           "&:hover": { backgroundImage: "linear-gradient(180deg, #e57373 0%, #b71c1c 100%)" },
                           "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #ef9a9a 0%, #ef5350 100%)", color: "#fff", opacity: 1 },
+                          ...(getActionSx("promptSubmit") || {}),
                         }}
                       >
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "ЕО не найдена"}
@@ -861,7 +872,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         variant="text"
                         onClick={() => setConfirmNotFoundMode(false)}
                         disabled={isUpdating}
-                        sx={{ width: "100%", mt: 0.5, borderRadius: 1.5, fontWeight: 700, textTransform: "none", color: "text.secondary", height: 36 }}
+                        sx={{ width: "100%", mt: 0.5, borderRadius: 1.5, fontWeight: 700, textTransform: "none", color: "text.secondary", height: 36, ...(getActionSx("promptCancel") || getActionSx("cancel") || {}) }}
                       >
                         Отмена
                       </Button>
@@ -1016,6 +1027,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           color: "#fff",
                           "&:hover": { backgroundImage: "linear-gradient(180deg, #66bb6a 0%, #388e3c 100%)" },
                           "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #a5d6a7 0%, #66bb6a 100%)", color: "#fff", opacity: 1 },
+                          ...(getActionSx("promptSubmit") || {}),
                         }}
                       >
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : `Сохранить — ${foundChoice}`}

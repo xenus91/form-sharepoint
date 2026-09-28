@@ -102,8 +102,9 @@ export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
   if (!record) return null;
   const behaviour = parseBehaviour(record.behaviour);
   const styling = parseStyling(record.styling);
-  tbDebug("resolved", { contentTypeName, title: record.title, id: record.id, behaviourOk: behaviour.ok, stylingOk: styling.ok });
-  return { configId: record.id, raw: record, behaviour, styling, matchedBy: "ContentType.Name → TaskBehaviour.Title" };
+  const stylingActions = parseStyling(record.stylingActions);
+  tbDebug("resolved", { contentTypeName, title: record.title, id: record.id, behaviourOk: behaviour.ok, stylingOk: styling.ok, stylingActionsOk: stylingActions.ok });
+  return { configId: record.id, raw: record, behaviour, styling, stylingActions, matchedBy: "ContentType.Name → TaskBehaviour.Title" };
 }
 
 export function findContentTypeMeta(contentTypeId, ctMetaMap) {
