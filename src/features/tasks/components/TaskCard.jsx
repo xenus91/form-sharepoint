@@ -988,9 +988,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                               if (!validateAdditional()) return;
                               const acts = showAAInline ? additionalActions : [];
                               const req = showAAInline ? additionalRequired : "Нет";
-                              // ⭐ PR: если SP говорит RequiresConfirmed=true → открываем confirm-dialog inline,
-                              // не submit напрямую. Решает кейс «Не исправлено» с Comment + confirm-step в одной карточке.
-                              if (defForFound && defForFound.requiresConfirmed === true) {
+                              // ⭐ v8: Behaviour.c=true имеет приоритет над TaskResultDefinitions (defaults-принцип).
+                              // Если в Behaviour ничего не задано — fallback на legacy defForFound.requiresConfirmed.
+                              if ((behaviourRuleForFound && behaviourRuleForFound.requiresConfirmed === true) || (defForFound && defForFound.requiresConfirmed === true)) {
                                 setInlineConfirmPending({ req, acts });
                                 return;
                               }
@@ -1046,9 +1046,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           if (!validateAdditional()) return;
                           const acts = showAAInline ? additionalActions : [];
                           const req = showAAInline ? (additionalActions.length > 0 ? "Да" : "Нет") : "Нет";
-                          // ⭐ PR: если SP говорит RequiresConfirmed=true → открываем confirm-dialog inline,
-                          // не submit напрямую. Решает кейс «Не исправлено» с Comment + confirm-step в одной карточке.
-                          if (defForFound && defForFound.requiresConfirmed === true) {
+                          // ⭐ v8: Behaviour.c=true имеет приоритет над TaskResultDefinitions (defaults-принцип).
+                          // Если в Behaviour ничего не задано — fallback на legacy defForFound.requiresConfirmed.
+                          if ((behaviourRuleForFound && behaviourRuleForFound.requiresConfirmed === true) || (defForFound && defForFound.requiresConfirmed === true)) {
                             setInlineConfirmPending({ req, acts });
                             return;
                           }
