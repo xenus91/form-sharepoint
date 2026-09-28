@@ -100,6 +100,6 @@ export function choiceRequiresLocation(choiceValue) {
 export function choiceRequiresAdditionalActions(choiceValue) {
   return !!getResultUiConfig(choiceValue).requiresAdditionalActions;
 }
-export function choiceRequiresConfirm(choiceValue) {
+export function choiceRequiresConfirmed(choiceValue) {
   return !!getResultUiConfig(choiceValue).confirm;
 }

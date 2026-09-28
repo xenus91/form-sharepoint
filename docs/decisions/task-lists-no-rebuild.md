@@ -58,7 +58,7 @@ Enabled            // Yes/No
 ## Что было исправлено (левые поля убраны)
 
 **До (наш предыдущий 00521c0):**
-- `TaskResultDefinitions`: `Label, Color, Variant, RequiresLocation, RequiresConfirm, Gradient` — нет в плане, убраны (оставлены только для совместимости как legacy чтение, игнорируются если план-поля есть).
+- `TaskResultDefinitions`: `Label, Color, Variant, RequiresLocation, RequiresConfirmed, Gradient` — нет в плане, убраны (оставлены только для совместимости как legacy чтение, игнорируются если план-поля есть).
 - `TaskActionDefinitions`: `ActionValue, Label` — заменено на `ActionId` (план), `Label` оставлен как legacy fallback.
 - `TaskTypeConfiguration`: `ResultFieldInternalName, Required` (без `AdditionalActionsRequired/Enabled`) — заменено на план-поля, legacy `Required`/`ResultFieldInternalName` читаются для совместимости.
 

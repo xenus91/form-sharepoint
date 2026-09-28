@@ -22,7 +22,7 @@ Currently, two official plugins are available:
 | ResultValue | Text | Нормализованный choice (lowercase) |
 | ShowAdditionalActions | Yes/No | Показывать AdditionalActionsField |
 | AdditionalsActionsRequired | Yes/No | Required для AdditionalActions (legacy `AdditionalActionsRequired` авто-резолвится) |
-| RequiresConfirm | Yes/No | Показать confirm-модалку перед submit |
+| RequiresConfirmed | Yes/No | Показать confirm-модалку перед submit |
 | Color | Text | MUI color (`success`/`error`/`warning`/`primary`/`inherit`) |
 | Variant | Text | MUI variant (`contained`/`outlined`/`text`) |
 | Gradient | Text | CSS `linear-gradient(...)` |
@@ -31,7 +31,7 @@ Currently, two official plugins are available:
 
 Пример записи:
 
-| CType | ResultValue | ShowAdditionalActions | RequiresConfirm | Color | Gradient |
+| CType | ResultValue | ShowAdditionalActions | RequiresConfirmed | Color | Gradient |
 |---|---|---|---|---|---|
 | `0x0108...A` | Не найдена | Нет | Да | error | `linear-gradient(180deg, #e53935 0%, #b71c1c 100%)` |
 

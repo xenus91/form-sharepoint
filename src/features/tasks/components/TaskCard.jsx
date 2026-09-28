@@ -723,9 +723,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 // fallback для кастомных
                 c = choicesForButtons.find((ch) => {
                   const def = getResultDef(ch);
-                  // ⭐ NEW: RequiresConfirm из SP авторитетен (включая явное false),
+                  // ⭐ NEW: RequiresConfirmed из SP авторитетен (включая явное false),
                   // чтобы админ мог отключить confirm-модалку через SP.
-                  if (def && def.requiresConfirm !== null) return def.requiresConfirm === true;
+                  if (def && def.requiresConfirmed !== null) return def.requiresConfirmed === true;
                   if (def) return !def.showAdditionalActions && def.cfg;
                   return getUiConfig(ch).confirm;
                 });

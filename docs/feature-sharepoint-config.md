@@ -17,7 +17,7 @@
 | Что | Где настраивается |
 |---|---|
 | Цвет/вариант/градиент кнопки результата | `TaskResultDefinitions` (поля `Color`, `Variant`, `Gradient`) |
-| Показывать ли confirm-модалку перед submit | `TaskResultDefinitions` (поле `RequiresConfirm`) |
+| Показывать ли confirm-модалку перед submit | `TaskResultDefinitions` (поле `RequiresConfirmed`) |
 | **Произвольный список полей** для заполнения по `(ContentType × ResultValue)` | **`TaskPromptFields`** (новый список) |
 | Видимость и обязательность Additional Actions | `TaskResultDefinitions` (поля `ShowAdditionalActions`, `AdditionalsActionsRequired`) — без изменений |
 | Список Additional Actions (что доступно) | `TaskActionDefinitions` — без изменений |
@@ -139,22 +139,22 @@ Add-PnPField -List "TaskPromptFields" -DisplayName "Enabled" -InternalName "Enab
 | `Color` | Text | MUI color name: `success`/`error`/`warning`/`primary`/`inherit`/`info` | legacy → **primary** |
 | `Variant` | Text | MUI variant: `contained`/`outlined`/`text` | legacy → **primary** |
 | `Gradient` | Text (multi-line) | CSS `linear-gradient(...)` | legacy → **primary** |
-| **`RequiresConfirm`** | Yes/No | Показать confirm-модалку перед submit | **новое** |
+| **`RequiresConfirmed`** | Yes/No | Показать confirm-модалку перед submit | **новое** |
 
 ### 4.2. Graceful degradation
 
-Если в существующем tenant-списке нет колонок `RequiresConfirm` / `Color` / `Variant` / `Gradient` — код автоматически сделает fallback `$select` без них (graceful 400 → упрощённый запрос). Списку ничего не сломается.
+Если в существующем tenant-списке нет колонок `RequiresConfirmed` / `Color` / `Variant` / `Gradient` — код автоматически сделает fallback `$select` без них (graceful 400 → упрощённый запрос). Списку ничего не сломается.
 
 ### 4.3. Пример: расширенная запись
 
-| CType | ResultValue | ShowAdditionalActions | AdditionalsActionsRequired | **RequiresConfirm** | **Color** | **Gradient** | SortOrder | Enabled |
+| CType | ResultValue | ShowAdditionalActions | AdditionalsActionsRequired | **RequiresConfirmed** | **Color** | **Gradient** | SortOrder | Enabled |
 |---|---|---|---|---|---|---|---|---|
 | `0x010800...A` | `Не найдена` | Нет | Нет | **Да** | error | `linear-gradient(180deg, #e53935 0%, #b71c1c 100%)` | 10 | Да |
 | `0x010800...A` | `Найдена` | Да | Нет | Нет | success | `linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)` | 20 | Да |
 
-### 4.4. Тонкий момент: `RequiresConfirm` авторитетен
+### 4.4. Тонкий момент: `RequiresConfirmed` авторитетен
 
-Если в SP выставлено `RequiresConfirm=Нет` — это **отключает** confirm-модалку для этого `(CType, ResultValue)`, даже если в `resultConfig.js` для строки `не найдена` стоит `confirm: true`. То же для `RequiresLocation` через inline-режим. Явные значения из SP имеют приоритет над hardcoded fallback.
+Если в SP выставлено `RequiresConfirmed=Нет` — это **отключает** confirm-модалку для этого `(CType, ResultValue)`, даже если в `resultConfig.js` для строки `не найдена` стоит `confirm: true`. То же для `RequiresLocation` через inline-режим. Явные значения из SP имеют приоритет над hardcoded fallback.
 
 > Поле `RequiresLocation` в самом `TaskResultDefinitions` намеренно **не добавлено**: вся логика promptable-полей ушла в `TaskPromptFields`, чтобы не дублировать.
 
@@ -323,7 +323,7 @@ location.reload();
 В `TaskResultDefinitions`:
 - `CType = 0x010800...AAA`
 - `ResultValue = Отклонено`
-- `RequiresConfirm = Да`
+- `RequiresConfirmed = Да`
 
 ### 7.3. Отключить показ Location1 для кастомного ResultValue
 
@@ -381,9 +381,9 @@ location.reload();
 
 ### 8.4. Проверка override-семантики
 
-1. Создать запись в `TaskResultDefinitions`: `(CT=A, ResultValue=Найдена, RequiresConfirm=Нет)`.
+1. Создать запись в `TaskResultDefinitions`: `(CT=A, ResultValue=Найдена, RequiresConfirmed=Нет)`.
 2. В `resultConfig.js` оставить `requiresLocation: true` для «найдена».
-3. Завершить задачу CT=A с результатом «Найдена» → Location1 inline показывается (не LocationDialog), `RequiresConfirm=Нет` honored.
+3. Завершить задачу CT=A с результатом «Найдена» → Location1 inline показывается (не LocationDialog), `RequiresConfirmed=Нет` honored.
 
 ---
 

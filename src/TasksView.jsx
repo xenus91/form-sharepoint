@@ -339,7 +339,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     const isFoundExact = normalized === "найден" || normalized === "найдена";
     const isNotFoundExact = normalized === "не найдена" || normalized === "не найден" || normalized === "не найдено";
     // ⭐ NEW: routing через defs из TaskResultDefinitions (per CT × ResultValue)
-    // Приоритет: SP def.requiresLocation/requiresConfirm (если явно заданы в SP) → fallback на hardcoded resultConfig.js + legacy string match.
+    // Приоритет: SP def.requiresLocation/requiresConfirmed (если явно заданы в SP) → fallback на hardcoded resultConfig.js + legacy string match.
     const ctForRouting = String(task?.contentTypeId || task?.ContentTypeId || "").trim();
     const defForRouting = taskConfiguration.data?.taskResultDefinitions
       ? resolveTaskResultDefinition(resultValue, ctForRouting, taskConfiguration.data.taskResultDefinitions)
@@ -349,7 +349,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     // даже если строковое значение не «найдена»/«не найдена» (например, админ настроил custom CT с произвольным ResultValue).
     // Авторитетный override: явное false в SP отключает соответствующее поведение.
     const spExplicitLocation = defForRouting && defForRouting.requiresLocation !== null;
-    const spExplicitConfirm = defForRouting && defForRouting.requiresConfirm !== null;
+    const spExplicitConfirm = defForRouting && defForRouting.requiresConfirmed !== null;
     if (spExplicitLocation && defForRouting.requiresLocation === true) {
       setPendingTask(task);
       setPendingResult(resultValue);
@@ -370,13 +370,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       setLocationDialogOpen(true);
       return;
     }
-    if (spExplicitConfirm && defForRouting.requiresConfirm === true) {
+    if (spExplicitConfirm && defForRouting.requiresConfirmed === true) {
       setPendingTask(task);
       setPendingResult(resultValue);
       setConfirmNotFoundOpen(true);
       return;
     }
-    // Если SP явно отключил RequiresLocation/RequiresConfirm (false) — пропускаем соответствующие проверки,
+    // Если SP явно отключил RequiresLocation/RequiresConfirmed (false) — пропускаем соответствующие проверки,
     // идём прямо к completeTask ниже (с isFoundExact / isNotFoundExact как раньше).
     if (isFoundExact) {
       setPendingTask(task);
