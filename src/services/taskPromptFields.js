@@ -79,6 +79,13 @@ function norm(s) {
   return String(s || "").trim().toLowerCase();
 }
 
+// SharePoint ContentTypeId хранится в hex (lowercase в нашем коде), но реальный JSON-ответ может
+// содержать uppercase вариант. Нормализуем CType к lowercase чтобы матчинг был детерминирован
+// и не падал из-за капса.
+function normCtype(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
 function parseBool(v, fallback = false) {
   if (v === undefined || v === null || v === "") return fallback;
   if (v === true || v === 1 || v === "1") return true;
@@ -97,7 +104,7 @@ function parseFieldType(v) {
 
 function getCtypeFromItem(item) {
   const v = item.CType ?? item.ContentTypeId0 ?? item.ContentTypeId;
-  return String(v || "").trim();
+  return normCtype(v);
 }
 
 function isWildcardResultValue(v) {
@@ -232,7 +239,7 @@ export async function fetchTaskPromptFields(apiClient, opts = {}) {
  */
 export function resolvePromptFields(contentTypeId, resultValue, defs) {
   if (!defs) return [];
-  const ctId = String(contentTypeId || "").trim();
+  const ctId = normCtype(contentTypeId);
   const n = norm(resultValue);
 
   // L1: exact CT × exact ResultValue

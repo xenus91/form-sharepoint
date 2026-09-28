@@ -1069,7 +1069,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: cfg.color === "error" ? "#e53935" : "transparent" } : {}),
                         }}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : (cfg.label || notFoundChoice)}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : notFoundChoice}
                       </Button>
                       );
                     })()}
@@ -1104,7 +1104,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: "transparent" } : { color: "#fff" }),
                         }}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : (cfg.label || foundChoice)}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : foundChoice}
                       </Button>
                       );
                     })()}
@@ -1132,7 +1132,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           ...(!isContained ? { borderWidth: 1.5 } : {}),
                         }}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: isContained ? "#fff" : "inherit" }} /> : (cfg.label || choice)}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: isContained ? "#fff" : "inherit" }} /> : choice}
                       </Button>
                       );
                     })}
