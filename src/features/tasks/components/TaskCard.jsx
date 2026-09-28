@@ -84,7 +84,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     let anim = rule?.animation || null;
     if (!anim) {
       if (flowType === "found") anim = "celebrate";
-      else if (flowType === "notFound") anim = "sherlock";
+      // Для «Не исправлено» анимация по умолчанию отключена. Sherlock запускается
+      // только при явном Behaviour.anim="sherlock".
+      else if (flowType === "notFound") anim = "none";
       // "extra" (или неизвестный flow) — anim остаётся null → без анимации
     }
     if (anim === "celebrate") setShowCelebrate(true);
