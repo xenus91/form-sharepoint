@@ -21,7 +21,14 @@ export function parseStyling(text) {
   }
   let raw;
   try {
-    raw = JSON.parse(String(text));
+    const cleaned = String(text)
+      .replace(/&quot;/g, '"').replace(/&#34;/g, '"')
+      .replace(/&apos;/g, "'").replace(/&#39;/g, "'")
+      .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+      .replace(/&nbsp;/g, " ")
+      .replace(/<br\s*\/?>(\r?\n)?/gi, "\n")
+      .replace(/<[^>]+>/g, "").trim();
+    raw = JSON.parse(cleaned);
   } catch (e) {
     return { ok: false, value: {}, error: `StylingResultButton: invalid JSON — ${e.message}` };
   }

@@ -32,9 +32,9 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 // DBG helper (shared with TasksView)
 const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return false; }catch(_e){ void _e; return false; } })();
 const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
-const __dlogAlways = (...a)=>{ try{ console.log(...a);}catch{} };
+const __dlogAlways = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.info(...a);}catch{} };
 // Forced debug for Phase 17.8 - always log taskResult resolution (user requested)
-const __forceTaskDbg = true;
+const __forceTaskDbg = false;
 
 
 // stripHtml helper (was inline in TasksView, now local)

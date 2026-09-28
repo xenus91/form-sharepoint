@@ -117,24 +117,7 @@ export function clearCache() {
 }
 
 // Хелпер для прод-дебага: window.getCacheStats() / window.clearCache() / window.printCacheStats()
-export function exposeCacheStats() {
-  try {
-    if (typeof window !== "undefined") {
-      window.getCacheStats = getCacheStats;
-      window.clearCache = clearCache;
-      window.printCacheStats = () => {
-        const s = getCacheStats();
-        console.table(s);
-        console.log(`[cache] hits=${s.hits} miss=${s.miss} dedup=${s.dedup} errors=${s.errors} cached=${s.cached} inflight=${s.inflight}`);
-        return s;
-      };
-      console.log("[cache] helper exposed: window.getCacheStats(), window.clearCache(), window.printCacheStats()");
-    }
-  } catch (_e) { void _e; }
-}
-
-// Авто-expose в браузере
-exposeCacheStats();
+// Диагностические cache helpers не публикуются в window в production.
 
 // Декоратор для axios-клиента: автоматически кэширует успешные GET.
 // Уважает config.__noCache (true = пропустить кэш, для polling/refresh).

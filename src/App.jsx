@@ -1514,21 +1514,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
 
-  useEffect(() => {
-    if (currentView !== 'dob') return undefined;
-    const report = () => {
-      const shell = document.querySelector('[data-dob-shell]');
-      const page = document.querySelector('[data-dob-page]');
-      const editRoot = document.querySelector('[data-dob-edit-page]');
-      const root = document.getElementById('root');
-      console.groupCollapsed('[DOB layout] App diagnostic');
-      console.log({ hash: window.location.hash, viewport: window.innerWidth, documentWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth, rootWidth: root?.getBoundingClientRect().width, shellWidth: shell?.getBoundingClientRect().width, pageWidth: page?.getBoundingClientRect().width, editWidth: editRoot?.getBoundingClientRect().width, shellComputedWidth: shell ? getComputedStyle(shell).width : null, shellMaxWidth: shell ? getComputedStyle(shell).maxWidth : null });
-      console.groupEnd();
-    };
-    const timer = window.setTimeout(report, 50);
-    window.addEventListener('resize', report);
-    return () => { window.clearTimeout(timer); window.removeEventListener('resize', report); };
-  }, [currentView, hashElementId]);
 
   // синхронизация с hash — прямой переход по #tasks (+ elementId)
   useEffect(() => {
@@ -1697,7 +1682,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       if (!cancelled) {
         setTaskDistribution(dist);
         // Лог для отладки локальной смены РЦ
-        console.log("[tasks] distribution resolved", { officeForTasks, deptForTasks, distOffDepKey: dist?.OffDepKey, groupIds: dist ? getGroupIdsFromDistributionApp(dist) : [] });
       }
       try {
         const { data } = await apiClient.get(`${TASKS_LIST_API}/fields?$select=InternalName`, { headers: { Accept: "application/json;odata=verbose" } });
@@ -1714,7 +1698,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       const msg = isDcThuActive
         ? `РЦ сменён на ${effectiveOfficeForTasks} — задачи перезагружены`
         : `Локальный РЦ сброшен, задачи для ${effectiveOfficeForTasks || "профиля"} перезагружены`;
-      console.log("[tasks] local RC changed", { from: prevOfficeRef.current, to: effectiveOfficeForTasks });
       try { notify(msg, { severity: "info", autoHideDuration: 3000 }); } catch {}
     }
     prevOfficeRef.current = effectiveOfficeForTasks;

@@ -49,7 +49,7 @@ Lookup-поле на CT **не нужно** — оно не работает с 
 1. Откройте SP UI → `TaskBehaviour` → New item
 2. **Title** — точное имя CT (например `Исправление проблемной ЕО`). Можно скопировать из списка CT: `Tasks → List Settings → Content types → Имя_CT`
 3. **Behaviour / StylingResultButton** — JSON (см. ниже)
-4. Save → новая карточка автоматически подхватывается фронтом за ≤30 с (fingerprint)
+4. Save → после истечения cache TTL (30 минут) или ручного `window.__taskBehaviourForceRefresh()` конфигурация загрузится заново. При обычной работе список запрашивается один раз и берётся из sessionStorage-кэша.
 
 Если CT был переименован в SP — нужно переименовать и `Title` записи `TaskBehaviour`, иначе маппинг перестанет работать.
 
@@ -144,11 +144,12 @@ Lookup-поле на CT **не нужно** — оно не работает с 
 ## Проверка
 
 1. Откройте `http://localhost:5173/#tasks`
-2. DevTools → Console — должны появиться forced debug-логи:
+2. Для временной диагностики откройте страницу с `?dbg=1` или установите `localStorage.dbg_tasks = "1"`. В Console появятся только сообщения TaskBehaviour:
    ```
-   [DBG:taskBehaviour:fetch] parsed { resultsCount: N, byConfigIdSize: N, fingerprint: "..." }
-   [DBG:resolveTaskBehaviourByName] ctName="Исправление проблемной ЕО", matchedTitle="Исправление проблемной ЕО", configId=…
+   [TaskBehaviour] loaded { request: "...Enabled eq 1...", count: N, cache: "sessionStorage" }
+   [TaskBehaviour] resolved { contentTypeName: "...", title: "...", id: N, behaviourOk: true, stylingOk: true }
    ```
+   Без debug-флага приложение не пишет диагностические сообщения в Console.
 3. На задаче нужного CT нажмите Result-кнопку → должно появиться inline-поле с типом из `Behaviour.p`
 4. Если `Behaviour.c=true` — перед submit появится confirm-модалка
 
@@ -163,8 +164,9 @@ node scripts/migrate-ct-behaviour.cjs --apply      # создать записи
 
 ## Если что-то сломалось
 
-- `Behaviour` JSON битый → console warning + legacy UI (админ ничего не замечает)
-- `TaskBehaviour` отсутствует (404) → fingerprint-проверка возвращает null → фронт поднимает legacy-слои
+- `Behaviour` JSON битый → запись игнорируется для поведения, используется plain MUI UI
+- `TaskBehaviour` отсутствует (404) → используется plain MUI UI
+- список запрашивается одним GET; повторные компоненты используют React Query и sessionStorage-кэш
 - `Title` не совпадает с `ContentType.Name` → legacy UI
 - Запись `Enabled = Нет` → legacy UI
 - `__taskBehaviourForceRefresh()` в DevTools console — мгновенный refresh без ожидания TTL

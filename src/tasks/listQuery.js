@@ -51,7 +51,6 @@ export function buildTaskListQuery(opts = {}) {
 
   // Защита: удалённое поле EndJob фильтруем из всех входных массивов
   if (Array.isArray(taskFieldNames) && taskFieldNames.some((f) => String(f).toLowerCase() === "endjob")) {
-    console.warn("[listQuery] filtered EndJob from taskFieldNames");
     taskFieldNames = taskFieldNames.filter((f) => String(f).toLowerCase() !== "endjob");
   }
   // Extra select fields (OffDepKey, RelatedItems, AdditionalActions, Result fields)
@@ -73,7 +72,6 @@ export function buildTaskListQuery(opts = {}) {
   const effectiveRecipientField = effectiveRecipientFieldRaw && effectiveRecipientFieldRaw.toLowerCase() === "endjob" ? null : effectiveRecipientFieldRaw;
   if (effectiveRecipientField && shouldUseRecipient) {
     if (effectiveRecipientField.toLowerCase() === "endjob" || effectiveRecipientField.toLowerCase() === "recipient" && !shouldUseRecipient) {
-      console.warn("[listQuery] blocked", effectiveRecipientField, "as recipient field");
     } else {
       extraFields.push(`${effectiveRecipientField}/Id`);
       extraFields.push(`${effectiveRecipientField}/Title`);
@@ -136,19 +134,17 @@ export function buildTaskListQuery(opts = {}) {
       }
       // Лог для отладки фолбэка
       if (allIds.length !== groupIds.length) {
-        console.log("buildTaskListQuery: group + personal OR", { groupIds, currentUserId, filter: assignedFilter });
+
       }
     } else {
       assignedFilter = `AssignedToId eq ${currentUserId}`;
       if (distribution.OffDepKey) {
-        console.warn("DcEmail: группа не найдена для OffDepKey", distribution.OffDepKey, "— fallback к AssignedToId", currentUserId);
       }
     }
   } else {
     assignedFilter = `AssignedToId eq ${currentUserId}`;
   }
   if (!currentUserId) {
-    console.warn("buildTaskListQuery: currentUserId=null, фильтр будет невалидным", assignedFilter);
   }
 
   return `${TASKS_LIST_API}/items` +
