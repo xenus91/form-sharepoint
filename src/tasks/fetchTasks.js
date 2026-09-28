@@ -38,6 +38,9 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
       resultFieldInternalNames,
       distribution,
       currentUserId,
+      // Завершённые задачи грузятся отдельно и лениво (completedTasks.js),
+      // поэтому в основной запрос они не попадают.
+      excludeCompleted: true,
     });
 
   let nextUrl = buildUrl();

@@ -47,6 +47,7 @@ export function buildTaskListQuery(opts = {}) {
     currentUserId = null,
     top = 100,
     orderBy = "Created asc",
+    excludeCompleted = false,
   } = opts;
 
   // Защита: удалённое поле EndJob фильтруем из всех входных массивов
@@ -147,9 +148,17 @@ export function buildTaskListQuery(opts = {}) {
   if (!currentUserId) {
   }
 
+  // Завершённые задачи в основной запрос не попадают: их считает и грузит
+  // отдельный ленивый источник (tasks/completedTasks.js — RenderListDataAsStream).
+  // Исключаем на сервере по PercentComplete = 1 (остальные признаки завершённости
+  // отсекает клиентский isCompletedStatus в useTasksFiltering).
+  const finalFilter = excludeCompleted
+    ? `${assignedFilter} and (PercentComplete eq null or PercentComplete ne 1)`
+    : assignedFilter;
+
   return `${TASKS_LIST_API}/items` +
     `?$select=${selectFields}` +
     `&$expand=${expands.join(",")}` +
-    `&$filter=${encodeURIComponent(assignedFilter)}` +
+    `&$filter=${encodeURIComponent(finalFilter)}` +
     `&$orderby=${orderBy}&$top=${top}`;
 }

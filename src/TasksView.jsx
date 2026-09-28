@@ -30,6 +30,7 @@ import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
 import { useDistribution } from "./features/tasks/hooks/useDistribution";
 import { useTasksMetadata } from "./features/tasks/hooks/useTasksMetadata";
 import { useTasksFiltering } from "./features/tasks/hooks/useTasksFiltering";
+import { useCompletedTasks } from "./features/tasks/hooks/useCompletedTasks";
 import LocalRcBanner from "./features/tasks/components/LocalRcBanner";
 import { useHashPolling, useTasksFocusPolling } from "./features/tasks/hooks/useHashPolling";
 import TasksHeader from "./features/tasks/components/TasksHeader";
@@ -121,6 +122,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [isTabPending, startTabTransition] = useTransition();
   const [_isDataPending, _startDataTransition] = useTransition(); // eslint-disable-line no-unused-vars
   const lastFocusLoadRef = React.useRef(Date.now());
+  // Ссылка на обновление ленивого списка завершённых (хук создаётся ниже)
+  const completedRefreshRef = React.useRef(null);
   const lastHashFocusRef = React.useRef(Date.now());
   const virtualParentRef = React.useRef(null); // для виртуализации списка
   // PR1: hooks extraction — currentUser + distribution + metadata (fieldsLoading etc.)
@@ -264,6 +267,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     await queryClient.invalidateQueries({ queryKey: ['tasks'] });
     invalidate("/items");
     const res = await refetchTasks();
+    // Завершённые задачи живут в отдельном источнике — обновляем и их
+    try { await completedRefreshRef.current?.(); } catch {}
     return res.data;
   }, [queryClient, refetchTasks]);
 
@@ -323,6 +328,44 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     filteredTasks, groupedTasks,
     toggleGroup,
   } = useTasksFiltering(tasks, tab);
+
+  // ⭐ Завершённые задачи — отдельный ленивый источник (RenderListDataAsStream):
+  // счётчик считаем сразу, карточки грузим порциями по 20 при открытии вкладки.
+  const completed = useCompletedTasks({
+    currentUserId,
+    distribution,
+    recipientField,
+    scNumberField,
+    enabled: !!currentUserId && !fieldsLoading && !isHashMode,
+    autoLoad: tab === 1 && !isHashMode,
+  });
+  React.useEffect(() => {
+    completedRefreshRef.current = completed.refresh;
+  }, [completed.refresh]);
+  const completedTasks = completed.items;
+  const completedTotal = completed.count ?? completedCount;
+  // Пока первая страница ещё не загружена (и счётчик не сказал «0») — показываем спиннер,
+  // а не пустое состояние «Нет завершенных задач».
+  const completedLoading =
+    tab === 1 &&
+    ((completed.loading && completedTasks.length === 0) ||
+      (!completed.loaded && !completed.error && completed.count !== 0));
+  const completedGrouped = React.useMemo(() => {
+    if (!completedTasks.length) return [];
+    if (!groupingEnabled) return [["Все", completedTasks]];
+    const map = new Map();
+    for (const task of completedTasks) {
+      const sc = extractTKNumberFromTask(task);
+      if (!map.has(sc)) map.set(sc, []);
+      map.get(sc).push(task);
+    }
+    return Array.from(map.entries()).sort((a, b) => {
+      if (a[0] === "Без ТК") return 1;
+      if (b[0] === "Без ТК") return -1;
+      return a[0].localeCompare(b[0], "ru");
+    });
+  }, [completedTasks, groupingEnabled]);
+
   const useVirtual = false;
   const flatVirtualizer = useVirtualizer({
     count: 0,
@@ -462,7 +505,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={onClearElementHash} onRefresh={loadTasks} loading={loading} taskConfiguration={taskConfiguration} />
         {!isHashMode && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0 }}>
-            <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedCount} completedCount={completedCount} hashMode={isHashMode} isTabPending={isTabPending} />
+            <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedTotal} completedCount={completedTotal} hashMode={isHashMode} isTabPending={isTabPending} />
             <TasksGroupingToggle groupingEnabled={groupingEnabled} onToggle={setGroupingEnabled} countGroups={groupedTasks.length} isHashMode={isHashMode} tab={tab} />
           </Box>
         )}
@@ -513,19 +556,19 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         "&::-webkit-scrollbar-thumb:hover": { bgcolor: "rgba(23,28,143,0.6)" },
       }}>
       <TaskList
-        tasks={tasks}
+        tasks={tab === 1 ? completedTasks : tasks}
         tab={tab}
-        groupedTasks={groupedTasks}
-        filteredTasks={filteredTasks}
+        groupedTasks={tab === 1 ? completedGrouped : groupedTasks}
+        filteredTasks={tab === 1 ? completedTasks : filteredTasks}
         groupingEnabled={groupingEnabled}
         expandedGroups={expandedGroups}
         toggleGroup={toggleGroup}
         useVirtual={useVirtual}
         flatVirtualizer={flatVirtualizer}
         isTabPending={isTabPending}
-        loading={loading}
-        error={error}
-        isBackgroundFetching={isBackgroundFetching}
+        loading={tab === 1 ? completedLoading : loading}
+        error={tab === 1 ? completed.error : error}
+        isBackgroundFetching={tab === 1 ? false : isBackgroundFetching}
         taskConfig={taskConfiguration.data}
         resultFieldsMeta={resultFieldsMeta}
         ctResultMap={ctResultMap}
@@ -540,6 +583,33 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         currentUserTitle={currentUserTitle}
         onRetry={loadTasks}
       />
+      {tab === 1 && !isHashMode && completedTasks.length > 0 && (
+        <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.75, pt: 1, pb: 2 }}>
+          <Typography variant="caption" sx={{ color: "text.secondary" }}>
+            Показано {completedTasks.length} из {completedTotal ?? completedTasks.length}
+          </Typography>
+          {completed.hasMore ? (
+            <Button
+              variant="outlined"
+              onClick={() => completed.loadNext()}
+              disabled={completed.loading}
+              startIcon={completed.loading ? <CircularProgress size={16} /> : null}
+              sx={{ borderRadius: "12px", fontWeight: 700, textTransform: "none", px: 2.5 }}
+            >
+              {completed.loading ? "Загрузка..." : `Показать ещё ${completed.pageSize}`}
+            </Button>
+          ) : (
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              Все завершённые задачи загружены
+            </Typography>
+          )}
+          {completed.error && (
+            <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 700 }}>
+              {completed.error}
+            </Typography>
+          )}
+        </Box>
+      )}
       </Box>
 
       </>
