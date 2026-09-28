@@ -915,7 +915,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           key={f.internalName}
                           value={promptFieldValues[f.internalName] ?? ""}
                           onChange={(e) => setPromptFieldValues({ ...promptFieldValues, [f.internalName]: e.target.value })}
-                          placeholder={f.internalName !== f.title ? f.internalName : undefined}
+                          placeholder={f.title || f.internalName}
                           label={f.title}
                           size="small"
                           fullWidth
