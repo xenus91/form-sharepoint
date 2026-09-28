@@ -14,6 +14,7 @@ import { resolvePromptFields } from "../../../services/taskPromptFields"; // ⭐
 import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import AdditionalActionsField from "./AdditionalActionsField";
+import TaskConfirmNotFoundDialog from "./TaskConfirmNotFoundDialog";
 import { ADDITIONAL_ACTIONS_STANDARD } from "../../../tasks/config";
 import {
   Box, Paper, Typography, Button, Chip, CircularProgress, Stack, Divider, TextField, IconButton, Tooltip, Autocomplete,
@@ -76,6 +77,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // ⭐ NEW: promptFieldValues — object map { fieldInternalName: userValue }
   // Для backward compat: при submit legacy «Сохранить» ниже мы извлекаем .Location1.
   const [promptFieldValues, setPromptFieldValues] = React.useState({});
+  // ⭐ NEW: inlineConfirmPending — capture promptValues для передачи в TaskConfirmNotFoundDialog
+  // когда RequiresConfirmed=true в SP (sp → inline-mode + confirm-step). Решает кейс «Не исправлено» с комментарием.
+  const [inlineConfirmPending, setInlineConfirmPending] = React.useState(null); // { req, acts } | null
   // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice Fill-in)
   const [additionalActions, setAdditionalActions] = React.useState(() => {
     // Initial may not have taskConfig yet — use field fallback, will sync via effect when taskConfig loads
@@ -187,6 +191,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (!isInProgressStatus(task.Status)) {
       setConfirmNotFoundMode(false);
       setFoundInputMode(false);
+      setInlineConfirmPending(null);
       setPromptFieldValues({});
       const defReset = getDefaultsForThisTask() || [];
       setAdditionalActions([...defReset]);
@@ -210,6 +215,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
       setAdditionalActions([...task.AdditionalActions]);
     } else {
+      setInlineConfirmPending(null);
       const def = getDefaultsForThisTask() || [];
       setAdditionalActions([...def]);
     }
@@ -714,14 +720,20 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 return null;
               })();
               const notFoundChoice = (() => {
+                // ⭐ FIX дубль: если этот choice уже matched as foundChoice (например из-за promptFields
+                // или ShowAdditionalActions), то не матчим его ещё раз как notFoundChoice — иначе будут
+                // 2 кнопки с одинаковым label. Один choice должен вести только в один flow.
+                let c;
                 // Строгий матч Не найдена первым — иначе Найдена с Show=false забиралась как confirm
-                let c = choicesForButtons.find((ch) => {
+                c = choicesForButtons.find((ch) => {
+                  if (ch === foundChoice) return false;
                   const n = String(ch).trim().toLowerCase();
                   return n === "не найдена" || n === "не найден" || n === "не найдено";
                 });
                 if (c) return c;
                 // fallback для кастомных
                 c = choicesForButtons.find((ch) => {
+                  if (ch === foundChoice) return false;
                   const def = getResultDef(ch);
                   // ⭐ NEW: RequiresConfirmed из SP авторитетен (включая явное false),
                   // чтобы админ мог отключить confirm-модалку через SP.
@@ -900,6 +912,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                               if (!validateAdditional()) return;
                               const acts = showAAInline ? additionalActions : [];
                               const req = showAAInline ? additionalRequired : "Нет";
+                              // ⭐ PR: если SP говорит RequiresConfirmed=true → открываем confirm-dialog inline,
+                              // не submit напрямую. Решает кейс «Не исправлено» с Comment + confirm-step в одной карточке.
+                              if (defForFound && defForFound.requiresConfirmed === true) {
+                                setInlineConfirmPending({ req, acts });
+                                return;
+                              }
                               setShowCelebrate(true);
                               setTimeout(() => {
                                 if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
@@ -953,6 +971,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           if (!validateAdditional()) return;
                           const acts = showAAInline ? additionalActions : [];
                           const req = showAAInline ? (additionalActions.length > 0 ? "Да" : "Нет") : "Нет";
+                          // ⭐ PR: если SP говорит RequiresConfirmed=true → открываем confirm-dialog inline,
+                          // не submit напрямую. Решает кейс «Не исправлено» с Comment + confirm-step в одной карточке.
+                          if (defForFound && defForFound.requiresConfirmed === true) {
+                            setInlineConfirmPending({ req, acts });
+                            return;
+                          }
                           setShowCelebrate(true);
                           setTimeout(() => {
                             if (onComplete) onComplete(task, foundChoice, promptFieldValues, req, acts);
@@ -978,6 +1002,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         variant="text"
                         onClick={() => {
                           setFoundInputMode(false);
+                          setInlineConfirmPending(null);
                           setPromptFieldValues({});
                           setAdditionalActions([]);
                           setCustomActionInput("");
@@ -997,6 +1022,25 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         #{task.Id}
                       </Typography>
                     </Box>
+                    {/* ⭐ PR: inline confirm-step если RequiresConfirmed=true из SP. Кнопка «Сохранить» в этом
+                        случае НЕ submit напрямую — открывает этот диалог поверх inline-формы. После confirm
+                        completeTask вызывается с promptFieldValues (включая Comment из TaskPromptFields). */}
+                    <TaskConfirmNotFoundDialog
+                      open={!!inlineConfirmPending}
+                      onClose={() => setInlineConfirmPending(null)}
+                      pendingTask={task}
+                      pendingResult={foundChoice}
+                      updatingId={updatingId}
+                      onConfirm={(t, r) => {
+                        const p = inlineConfirmPending;
+                        setInlineConfirmPending(null);
+                        setShowCelebrate(true);
+                        setTimeout(() => {
+                          if (onComplete) onComplete(t, r, promptFieldValues, p?.req || "Нет", p?.acts || []);
+                          else onResultClick(t, r);
+                        }, 1600);
+                      }}
+                    />
                   </>
                 );
               }
