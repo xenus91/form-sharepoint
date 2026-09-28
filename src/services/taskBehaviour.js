@@ -326,4 +326,40 @@ if (typeof window !== "undefined") {
       return null;
     }
   };
+
+  // ⭐ Верификация маппинга CT.Name → TaskBehaviour.Title.
+  // Вызов: await __listTaskBehaviourMappings() — печатает в консоль таблицу всех CT и их matched-записей.
+  // Полезно после правок в SP для проверки, что маппинг работает.
+  window.__listTaskBehaviourMappings = async () => {
+    const client = await import("../api/sharepoint/client.js").then((m) => m.default).catch(() => null);
+    if (!client) { console.warn("apiClient not available"); return; }
+    const { fetchContentTypeMeta } = await import("../tasks/resultField");
+    const ctMetaMap = await fetchContentTypeMeta(client, { forceRefresh: true });
+    const tbMap = await fetchTaskBehaviour(client, { forceRefresh: true });
+    console.log("=== TaskBehaviour mapping table ===");
+    if (!ctMetaMap || ctMetaMap.size === 0) console.log("(нет ctMetaMap — ContentType метаданные не загружены)");
+    if (!tbMap || tbMap.size === 0) console.log("(нет TaskBehaviour записей)");
+    const rows = [];
+    if (ctMetaMap) {
+      for (const [ctId, meta] of ctMetaMap.entries()) {
+        const target = String(meta.name || "").trim().toLowerCase();
+        let found = null;
+        if (tbMap) {
+          for (const r of tbMap.values()) {
+            if (String(r.title || "").trim().toLowerCase() === target) { found = r; break; }
+          }
+        }
+        rows.push({
+          ctId: ctId.length > 24 ? "…" + ctId.slice(-22) : ctId,
+          ctName: meta.name,
+          matched: found ? `${found.id} — "${found.title}"` : "(нет)",
+          enabled: found ? !!found.enabled : false,
+        });
+      }
+    }
+    console.table(rows);
+    const matchedCount = rows.filter((r) => r.matched !== "(нет)").length;
+    console.log(`Итого: ${matchedCount}/${rows.length} CT имеют matching TaskBehaviour-запись`);
+    return rows;
+  };
 }
