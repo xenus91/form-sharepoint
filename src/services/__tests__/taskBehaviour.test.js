@@ -43,10 +43,11 @@ describe("taskBehaviour", () => {
       expect(m.get(2).enabled).toBe(false);
     });
 
-    it("returns null on 404 (list not in SP)", async () => {
+    it("returns empty Map on 404 (list not in SP — graceful fallback)", async () => {
       const api = makeApiClient(() => Promise.reject({ response: { status: 404, data: { error: { message: { value: "Not Found" } } } } }));
       const m = await fetchTaskBehaviour(api, { forceRefresh: true });
-      expect(m).toBeNull();
+      expect(m).toBeInstanceOf(Map);
+      expect(m.size).toBe(0);
     });
 
     it("returns empty Map on non-404 error (graceful fallback)", async () => {
@@ -88,7 +89,7 @@ describe("taskBehaviour", () => {
       const r = resolveTaskBehaviourByName("исправление проблемной ео", makeMap());
       expect(r).not.toBeNull();
       expect(r.configId).toBe(1);
-      expect(r.matchedBy).toBe("name");
+      expect(r.matchedBy).toBe("ContentType.Name → TaskBehaviour.Title");
       expect(r.behaviour.ok).toBe(true);
     });
 
@@ -134,7 +135,7 @@ describe("taskBehaviour", () => {
 
     it("возвращает matchedBy: 'name'", () => {
       const r = resolveTaskBehaviourByName("Исправление проблемной ЕО", makeMap());
-      expect(r.matchedBy).toBe("name");
+      expect(r.matchedBy).toBe("ContentType.Name → TaskBehaviour.Title");
     });
 
     it("выбирает первую enabled запись при множественных матчах (теоретически)", () => {

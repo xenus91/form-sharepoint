@@ -15,9 +15,52 @@ function normKey(s) { return String(s || "").trim().toLowerCase(); }
  * Парсит JSON StylingResultButton → { ok, value, error }.
  * value — нормализованный объект, ключи в lowercase, валидные поля приведены к типам.
  */
+// Строит карту стилей из уже распарсенного объекта StylingResultButton.
+function buildStyling(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, value: {}, error: "StylingResultButton: root must be a JSON object" };
+  }
+  const out = {};
+  for (const [rawKey, rawVal] of Object.entries(raw)) {
+    const key = normKey(rawKey);
+    if (!key) continue;
+    if (!rawVal || typeof rawVal !== "object" || Array.isArray(rawVal)) continue;
+
+    // Компактные ключи (bg/c/v/i) — основной формат из SP; длинные (background/color/variant/icon) — тоже принимаем.
+    const pick = (...names) => {
+      for (const n of names) {
+        const v = rawVal[n];
+        if (typeof v === "string") return v;
+      }
+      return undefined;
+    };
+    const entry = {};
+    const bg = pick("bg", "background");
+    const color = pick("c", "color");
+    const icon = pick("i", "icon");
+    const variantRaw = pick("v", "variant");
+    if (typeof bg === "string" && bg.length <= MAX_STR) entry.bg = bg;
+    if (typeof color === "string" && color.length <= MAX_STR) entry.color = color;
+    if (typeof variantRaw === "string") {
+      const v = normKey(variantRaw);
+      // Поддерживаем и компактные (ctd|out|tx), и нормальные MUI-имена
+      if (v === "ctd" || v === "contained") entry.variant = "contained";
+      else if (v === "out" || v === "outlined") entry.variant = "outlined";
+      else if (v === "tx" || v === "text") entry.variant = "text";
+    }
+    if (typeof icon === "string" && icon.length <= MAX_STR) entry.icon = icon;
+    if (Object.keys(entry).length) out[key] = entry;
+  }
+  return { ok: true, value: out };
+}
+
 export function parseStyling(text) {
   if (text === undefined || text === null || String(text).trim() === "") {
     return { ok: true, value: {} };
+  }
+  // Уже распарсенный объект (например, из кэша) — не гоняем через JSON.parse.
+  if (typeof text === "object" && !Array.isArray(text)) {
+    return buildStyling(text);
   }
   let raw;
   try {
@@ -32,30 +75,7 @@ export function parseStyling(text) {
   } catch (e) {
     return { ok: false, value: {}, error: `StylingResultButton: invalid JSON — ${e.message}` };
   }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { ok: false, value: {}, error: "StylingResultButton: root must be a JSON object" };
-  }
-
-  const out = {};
-  for (const [rawKey, rawVal] of Object.entries(raw)) {
-    const key = normKey(rawKey);
-    if (!key) continue;
-    if (!rawVal || typeof rawVal !== "object" || Array.isArray(rawVal)) continue;
-
-    const entry = {};
-    if (typeof rawVal.bg === "string" && rawVal.bg.length <= MAX_STR) entry.bg = rawVal.bg;
-    if (typeof rawVal.c === "string" && rawVal.c.length <= MAX_STR) entry.color = rawVal.c;
-    if (typeof rawVal.v === "string") {
-      const v = normKey(rawVal.v);
-      // Поддерживаем и компактные (ctd|out|tx), и нормальные MUI-имена
-      if (v === "ctd" || v === "contained") entry.variant = "contained";
-      else if (v === "out" || v === "outlined") entry.variant = "outlined";
-      else if (v === "tx" || v === "text") entry.variant = "text";
-    }
-    if (typeof rawVal.i === "string" && rawVal.i.length <= MAX_STR) entry.icon = rawVal.i;
-    if (Object.keys(entry).length) out[key] = entry;
-  }
-  return { ok: true, value: out };
+  return buildStyling(raw);
 }
 
 /**

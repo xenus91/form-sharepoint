@@ -44,4 +44,5 @@ node preview/.ssrout/flow-check.mjs     # поток результата: ро�
 | `jsdom-setup.mjs` | окружение jsdom (глобали для React/MUI) |
 | `client-check.mjs` | jsdom-рендер: печатает содержимое карточек и кнопки |
 | `flow-check.mjs` | проверка потока: `resolveResultFlow` + реальные клики + confirm-диалог |
+| `view-check.mjs` | рендер настоящего `TasksView` в jsdom: ловит warning React о порядке хуков |
 | `ssr-check.jsx` | серверный рендер (ловит runtime-ошибки компонентов) |

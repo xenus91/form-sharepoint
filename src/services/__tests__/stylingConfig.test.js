@@ -44,7 +44,8 @@ describe("stylingConfig", () => {
 
     it("ignores unknown variant codes", () => {
       const r = parseStyling('{"A":{"v":"wtf"}}');
-      expect(r.value.a.variant).toBeUndefined();
+      // Невалидный вариант → запись не создаётся вовсе (применится _default или MUI-дефолт)
+      expect(r.value.a).toBeUndefined();
     });
 
     it("ignores unknown keys silently", () => {
@@ -58,7 +59,8 @@ describe("stylingConfig", () => {
     it("drops strings longer than 500 chars", () => {
       const huge = "x".repeat(501);
       const r = parseStyling(JSON.stringify({ A: { bg: huge } }));
-      expect(r.value.a.bg).toBeUndefined();
+      // Слишком длинное значение отбрасывается → запись не создаётся
+      expect(r.value.a).toBeUndefined();
     });
 
     it("keeps strings exactly 500 chars", () => {

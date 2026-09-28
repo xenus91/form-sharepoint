@@ -41,7 +41,7 @@ describe("behaviourParser", () => {
 
     it("normalizes keys to lowercase", () => {
       const r = parseBehaviour('{"Исправлено":{},"HEHE":{},"  УСПЕШНО ":{}}');
-      expect(Object.keys(r.value).sort()).toEqual(["hehe", "исправлено", "успешно "].sort());
+      expect(Object.keys(r.value).sort()).toEqual(["hehe", "исправлено", "успешно"].sort());
     });
 
     it("returns error when promptField.f is missing", () => {
@@ -90,10 +90,16 @@ describe("behaviourParser", () => {
       expect(r.requiresConfirmed).toBe(false);
     });
 
-    it("uses _default when no match", () => {
+    it("uses fallback when no match: * имеет приоритет над _default", () => {
       const r = resolveBehaviour("SomeOtherChoice", parsed);
-      expect(r.source).toBe("_default");
+      // Приоритет: exact → «*» → _default (оба ключа — общий фолбэк, «*» проверяется первым).
+      expect(r.source).toBe("wildcard");
       expect(r.promptFields).toHaveLength(0);
+    });
+
+    it("uses _default when * отсутствует", () => {
+      const onlyDefault = parseBehaviour({ _default: { c: false } }).value;
+      expect(resolveBehaviour("SomeOtherChoice", onlyDefault).source).toBe("_default");
     });
 
     it("uses wildcard * when explicit match absent (before _default)", () => {

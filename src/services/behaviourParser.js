@@ -47,6 +47,10 @@ export function parseBehaviour(text) {
   if (text === undefined || text === null || String(text).trim() === "") {
     return { ok: true, value: {} };
   }
+  // Уже распарсенный объект (например, из кэша) — не гоняем через JSON.parse.
+  if (typeof text === "object" && !Array.isArray(text) && text !== null) {
+    return validateBehaviour(text);
+  }
   let raw;
   try {
     const cleaned = String(text)
