@@ -106,6 +106,20 @@ unconfigured.THU = "808117004021471765";
 unconfigured.SCNumber = "150";
 unconfigured.SCNumberText = "150";
 
+// ⭐ Прод-кейс: у задачи ПУСТОЙ RelatedItems (связь не читается), но enrich.js уже положил
+// в саму задачу THU / Recipient / SCNumber. Плитки из rf должны появиться из полей задачи.
+const prodCase = mkTask({
+  id: 655, itemId: 0, ctId: CT_FIX,
+  title: "Устранить проблемы:", body: "Устранить проблемы:\nДоступ к ТМЦ,Превышение допустимой высоты", status: "В процессе выполнения",
+  choices: ["Исправлено", "Не исправлено"],
+});
+prodCase.RelatedItems = "";
+prodCase.THU = "808117004021471765";
+prodCase.SCNumber = "150";
+prodCase.SCNumberText = "150";
+prodCase.Recipient = "Center";
+prodCase.DC_THU = "1050";
+
 export const tasks = [
   // 1) «Результат поиска ЕО» — Behaviour НЕ настроен → кнопки просто завершают задачу
   mkTask({
@@ -120,6 +134,7 @@ export const tasks = [
     choices: ["Исправлено", "Не исправлено"],
   }),
   unconfigured,
+  prodCase,
   // 3) «Результат задачи найденной ЕО» — Behaviour НЕ настроен, один результат «Выполнено»
   mkTask({
     id: 653, itemId: 24923, ctId: CT_FOUND,
@@ -129,6 +144,7 @@ export const tasks = [
 ];
 
 export const choicesByTask = {
+  655: ["Исправлено", "Не исправлено"],
   651: ["Найдена", "Не найдена"],
   652: ["Исправлено", "Не исправлено"],
   653: ["Выполнено"],

@@ -81,6 +81,58 @@ function splitTitleBody(task) {
   return bodyText.length > title.length ? { title, body: bodyText.slice(title.length).trim() } : { title, body: "" };
 }
 
+
+// ── Значения для Behaviour.rf ───────────────────────────────────────────────────
+// Данные для плиток берём из связанного элемента (RelatedItems → ProblemsPallet).
+// Если связи нет или запрос не вернул значение — берём поле из САМОЙ задачи:
+// enrich.js уже докачивает в неё THU / Recipient / SCNumber / DC_THU.
+const PLACEHOLDER_VALUES = new Set(["ео отсутствует", "отсутствует", "нет", "нет данных", "-", "—", "n/a"]);
+
+function cleanValue(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) return cleanValue(value[0]);
+  if (typeof value === "object") {
+    if (value.results && Array.isArray(value.results)) return cleanValue(value.results[0]);
+    if (value.Title !== undefined && value.Title !== null) return cleanValue(value.Title);
+    if (value.Value !== undefined && value.Value !== null) return cleanValue(value.Value);
+    if (typeof value.StringValue === "string") return cleanValue(value.StringValue);
+    return "";
+  }
+  return String(value)
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Читает поле из самой задачи: "THU", "Recipient/SCNumberText", "Recipient_x003a_SCNumberText". */
+function readTaskValue(task, path) {
+  const rawPath = String(path || "").trim();
+  if (!rawPath) return "";
+  const [head, tail] = rawPath.split("/");
+  const keys = tail
+    ? [tail, tail.replace(/Text$/, ""), `${head}_x003a_${tail}`, `${head}_x003A_${tail}`]
+    : [head, `${head}Text`, head.replace(/Text$/, "")];
+  for (const source of [task, task?.raw]) {
+    if (!source || typeof source !== "object") continue;
+    for (const key of keys) {
+      const value = cleanValue(source[key]);
+      if (value && !PLACEHOLDER_VALUES.has(value.toLowerCase())) return value;
+    }
+    if (tail) {
+      const node = source[head];
+      if (node && typeof node === "object") {
+        const value = cleanValue(node[tail]) || cleanValue(node[tail.replace(/Text$/, "")]);
+        if (value && !PLACEHOLDER_VALUES.has(value.toLowerCase())) return value;
+      }
+    }
+  }
+  return "";
+}
+
 const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig, pendingAnimation = null }) {
   // ⭐ v8: defaults-принцип. getUiConfig объявлен НИЖЕ getBehaviourRuleForChoice/getButtonSx
   // (зависимости ниже в файле). Реорганизация — поведение из TaskBehaviour,
@@ -186,12 +238,37 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [relatedFieldDefs, relatedValues, relatedRef, task?.Id, task?.RelatedItems]);
 
   const relatedRows = React.useMemo(() => {
-    if (!Array.isArray(relatedValues)) return [];
+    if (relatedFieldDefs.length === 0) return [];
     const zoneByField = new Map(relatedFieldDefs.map((f) => [f.internalName, f.zone || "header"]));
-    return relatedValues
-      .filter((r) => r && r.value)
-      .map((r) => ({ ...r, zone: zoneByField.get(r.internalName) || "header" }));
-  }, [relatedValues, relatedFieldDefs]);
+    const rows = [];
+    const filled = new Set();
+    // 1) значения из связанного элемента
+    for (const r of Array.isArray(relatedValues) ? relatedValues : []) {
+      if (!r) continue;
+      const value = cleanValue(r.value);
+      if (!value || PLACEHOLDER_VALUES.has(value.toLowerCase())) continue;
+      rows.push({
+        internalName: r.internalName,
+        title: r.title || r.internalName,
+        value,
+        zone: zoneByField.get(r.internalName) || "header",
+      });
+      filled.add(r.internalName);
+    }
+    // 2) фолбэк: то же поле есть в самой задаче (обогащение enrich.js)
+    for (const f of relatedFieldDefs) {
+      if (filled.has(f.internalName)) continue;
+      const value = readTaskValue(task, f.internalName);
+      if (!value) continue;
+      rows.push({
+        internalName: f.internalName,
+        title: f.title || f.internalName,
+        value,
+        zone: f.zone || "header",
+      });
+    }
+    return rows;
+  }, [relatedValues, relatedFieldDefs, task]);
   // Поля в шапке (по умолчанию) и поля перед описанием ("z": "body").
   const headerRows = React.useMemo(() => relatedRows.filter((r) => r.zone !== "body"), [relatedRows]);
   const bodyRows = React.useMemo(() => relatedRows.filter((r) => r.zone === "body"), [relatedRows]);
