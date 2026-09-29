@@ -95,37 +95,40 @@ function wrapOr(parts) {
 }
 
 /**
- * CAML-фильтр «задача завершена» — зеркалит isCompletedStatus() из tasks/status.js.
+ * CAML-фильтр «задача завершена».
  *
- * ⚠️ Нельзя искать просто Contains "Выполн": статус «В процессе выполнения» (и «Выполняется»)
- * тоже его содержит — такие задачи попадали в завершённые. Ищем «Выполнено/Выполнена»
- * и дополнительно исключаем явные «в работе» через <Not><Contains>.
+ * ⚠️ Только <Eq> — никаких <Contains>, <Not> и вложенных <Or> с Contains:
+ * на поле Status (Choice) такие конструкции вызывают ошибку
+ * 500 «Один или несколько типов полей установлены неправильно».
+ *
+ * Логика: PercentComplete = 1 ИЛИ Status ТОЧНО равен одному из COMPLETED_STATUS_VALUES
+ * («Завершена», «Завершено», …). Статусы «в работе» («В процессе выполнения», «Выполняется»)
+ * сюда не попадают, потому что сравнение точное, а не по подстроке.
  */
-const COMPLETED_CAML = `
-  <Or>
-    <Eq><FieldRef Name="PercentComplete" /><Value Type="Number">1</Value></Eq>
-    <Or>
-      <Contains><FieldRef Name="Status" /><Value Type="Text">Заверш</Value></Contains>
-      <Or>
-        <Contains><FieldRef Name="Status" /><Value Type="Text">Выполнено</Value></Contains>
-        <Contains><FieldRef Name="Status" /><Value Type="Text">Выполнена</Value></Contains>
-      </Or>
-    </Or>
-  </Or>`;
+function buildCompletedCaml(extraStatuses = []) {
+  const statuses = resolveCompletedStatuses(extraStatuses);
+  const eqParts = statuses.map(
+    (sv) => `<Eq><FieldRef Name="Status" /><Value Type="Text">${escXml(sv)}</Value></Eq>`
+  );
+  // Собираем цепочку <Or> из точных сравнений.
+  let statusOr = eqParts[eqParts.length - 1];
+  for (let i = eqParts.length - 2; i >= 0; i -= 1) statusOr = `<Or>${eqParts[i]}${statusOr}</Or>`;
 
-/** CAML-исключение статусов «в работе» («В процессе выполнения», «Выполняется», «Не начата»). */
-const NOT_ACTIVE_CAML = `
-  <And>
-    <Not><Contains><FieldRef Name="Status" /><Value Type="Text">В процессе</Value></Contains></Not>
-    <And>
-      <Not><Contains><FieldRef Name="Status" /><Value Type="Text">Выполня</Value></Contains></Not>
-      <Not><Contains><FieldRef Name="Status" /><Value Type="Text">Не начат</Value></Contains></Not>
-    </And>
-  </And>`;
+  return `<Or>` +
+    `<Eq><FieldRef Name="PercentComplete" /><Value Type="Number">1</Value></Eq>` +
+    statusOr +
+    `</Or>`;
+}
 
-export function buildCompletedViewXml({ currentUserId, distribution, pageSize, fields = VIEW_FIELDS }) {
+export function buildCompletedViewXml({
+  currentUserId,
+  distribution,
+  pageSize,
+  fields = VIEW_FIELDS,
+  extraStatuses = [],
+}) {
   const assigned = buildAssignedCaml(currentUserId, distribution);
-  const completed = `<And>${COMPLETED_CAML}${NOT_ACTIVE_CAML}</And>`;
+  const completed = buildCompletedCaml(extraStatuses);
   const where = assigned
     ? `<Where><And>${assigned}${completed}</And></Where>`
     : `<Where>${completed}</Where>`;
@@ -164,6 +167,7 @@ async function renderListData({ viewXml, paging = null }) {
       viewXml,
       payload: apiErrorPayload(e),
     });
+    markCamlBroken(e);
     throw e;
   }
   // В разных версиях ответ приходит как d.RenderListDataAsStream / d / корень
@@ -183,32 +187,65 @@ function extractBadField(message) {
   return m ? m[1].trim() : "";
 }
 
-/** Статусы, которые считаем завершёнными (для REST-фильтра: Choice-поля не поддерживают substringof). */
+/**
+ * Статусы завершённых задач можно задать без пересборки:
+ *   localStorage.setItem("completedTasks.statuses", JSON.stringify(["Завершена"]))
+ * Если ключ задан — используются ТОЛЬКО эти значения.
+ */
+function resolveCompletedStatuses(extra = []) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const raw = window.localStorage.getItem("completedTasks.statuses");
+      const arr = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(arr) && arr.length) {
+        const statuses = [...new Set([...arr, ...extra])].filter(Boolean);
+        __dlog("statuses", { source: "localStorage", statuses });
+        return statuses;
+      }
+    }
+  } catch {}
+  return [...new Set([...COMPLETED_STATUS_VALUES, ...extra])];
+}
+
+/**
+ * Статусы, которые считаем завершёнными.
+ * Для REST используется ТОЧНОЕ сравнение (eq): Choice-поле Status не поддерживает substringof
+ * (ошибка 400 «Value does not fall within the expected range»).
+ */
 const COMPLETED_STATUS_VALUES = [
   "Завершена",
   "Завершено",
   "Завершены",
   "Завершён",
+  "Завершен",
   "Выполнено",
   "Выполнена",
   "Выполнены",
   "Completed",
 ];
 
-/** REST-фильтры «завершённые» — от точного к самому простому. */
-function buildCompletedRestFilters({ assignedFilter, extraStatuses = [] }) {
-  const statuses = [...new Set([...COMPLETED_STATUS_VALUES, ...extraStatuses])]
-    .map((s) => `Status eq '${String(s).replace(/'/g, "''")}'`)
+/**
+ * REST-фильтры «завершённые» — от точного к самому простому.
+ * `assignedOnly: true` у последнего варианта: фильтруем только по исполнителю,
+ * а завершённость определяем на клиенте (isCompletedStatus) — так работает на любом списке.
+ */
+function buildCompletedRestFilters({ assignedFilter, extraStatuses = [], assignedOnlyVariant = false }) {
+  const statuses = resolveCompletedStatuses(extraStatuses)
+    .map((sv) => `Status eq '${String(sv).replace(/'/g, "''")}'`)
     .join(" or ");
   const base = assignedFilter ? `(${assignedFilter}) and ` : "";
-  return [
-    // 1) процент 100 или один из известных статусов
-    `${base}(PercentComplete eq 1 or ${statuses})`,
-    // 2) только процент
-    `${base}PercentComplete eq 1`,
-    // 3) только статусы
-    `${base}(${statuses})`,
+  const filters = [
+    { filter: `${base}(PercentComplete eq 1 or ${statuses})`, name: "percent+status" },
+    { filter: `${base}PercentComplete eq 1`, name: "percent" },
+    { filter: `${base}(${statuses})`, name: "status" },
   ];
+  if (assignedOnlyVariant) {
+    filters.push({
+      filter: assignedFilter ? `(${assignedFilter})` : "",
+      name: "assignedOnly+clientFilter",
+    });
+  }
+  return filters.filter((f) => f.filter);
 }
 
 /** REST-фолбэк счётчика: $top=1 + $inlinecount=allpages, несколько вариантов фильтра. */
@@ -220,17 +257,18 @@ async function fetchCompletedCountFallback({ currentUserId, distribution, extraS
   const assignedFilter = list.map((id) => `AssignedToId eq ${id}`).join(" or ");
 
   let lastError = null;
-  for (const filter of buildCompletedRestFilters({ assignedFilter, extraStatuses })) {
+  for (const { filter, name } of buildCompletedRestFilters({ assignedFilter, extraStatuses })) {
     try {
       const url = `${TASKS_LIST_API}/items?$select=Id&$filter=${encodeURIComponent(filter)}&$top=1&$inlinecount=allpages`;
-      __dlog("count:request", { url, filter });
+      __dlog("count:request", { url, filter, name });
       const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
       const count = data?.d?.__count != null ? Number(data.d.__count) : null;
-      __dlog("count:result", { count, source: "REST $inlinecount" });
-      return { count, source: "REST $inlinecount" };
+      dbgWarn("completedTasks:count", `сработал фильтр «${name}»`, { count, filter });
+      return { count, source: `REST $inlinecount (${name})` };
     } catch (e) {
       lastError = e;
       dbgError("completedTasks:count:filterFailed", {
+        name,
         filter,
         status: apiErrorStatus(e),
         message: describeApiError(e),
@@ -251,14 +289,17 @@ async function fetchCompletedCountFallback({ currentUserId, distribution, extraS
 /**
  * Количество завершённых задач (всё время).
  *
- * 1) RenderListDataAsStream с минимальным ViewFields (только ID) → RowCount.
- *    Минимум полей нужен, чтобы «битое» поле списка не ломало подсчёт
- *    (ошибка 500 «Один или несколько типов полей установлены неправильно»).
- * 2) Фолбэк — REST $inlinecount (фильтр по eq: Choice-поля не поддерживают substringof).
+ * 1) REST $inlinecount — основной путь (на «битых» списках CAML падает);
+ * 2) RenderListDataAsStream с минимальным ViewFields (только ID) — крайний фолбэк.
  *
  * @returns {Promise<{count:number|null, source:string}>}
  */
 export async function fetchCompletedCount({ currentUserId, distribution, extraStatuses = [] }) {
+  const rest = await fetchCompletedCountFallback({ currentUserId, distribution, extraStatuses });
+  if (typeof rest.count === "number") return rest;
+
+  if (isCamlBroken()) return { count: null, source: "error (caml disabled)" };
+
   try {
     const payload = await renderListData({
       viewXml: buildCompletedViewXml({ currentUserId, distribution, pageSize: 1, fields: ["ID"] }),
@@ -273,10 +314,8 @@ export async function fetchCompletedCount({ currentUserId, distribution, extraSt
     // Диагностика уже записана внутри renderListData ([completedTasks:failed]).
     __dlog("count via RenderListDataAsStream failed", apiErrorStatus(e), describeApiError(e));
   }
-  return fetchCompletedCountFallback({ currentUserId, distribution, extraStatuses });
+  return { count: null, source: "error" };
 }
-
-// ── Маппинг строки RenderListDataAsStream → сырой REST-элемент ───────────────────────
 
 function asText(value) {
   if (value === null || value === undefined) return "";
@@ -383,6 +422,34 @@ function getUsableFields() {
   return [...VIEW_FIELDS];
 }
 
+/** Ключ признака «CAML/RenderListDataAsStream на этом списке не работает». */
+function camlBrokenKey() {
+  return `completedTasks.camlBroken.${listIdFromApi()}`;
+}
+
+/** CAML уже падал на этом списке — больше не пытаемся (REST справляется сам). */
+function isCamlBroken() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    if (window.localStorage.getItem("completedTasks.forceCaml") === "1") return false;
+    return window.localStorage.getItem(camlBrokenKey()) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markCamlBroken(e) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    window.localStorage.setItem(camlBrokenKey(), "1");
+  } catch {}
+  dbgWarn("completedTasks:camlDisabled", "RenderListDataAsStream на этом списке не работает — дальше используем только REST", {
+    status: apiErrorStatus(e),
+    message: describeApiError(e),
+    hint: 'вернуть CAML можно так: localStorage.setItem("completedTasks.forceCaml", "1")',
+  });
+}
+
 /** Один пробный запрос: просто проверяем, что сервер отвечает без ошибки. */
 async function probeFields(ctx, fields) {
   const viewXml = buildCompletedViewXml({ ...ctx, fields, pageSize: 1 });
@@ -440,9 +507,41 @@ async function resolveUsableFields(ctx, fields, depth = 0) {
  * @param {{ currentUserId:number|null, distribution:object|null, pageSize?:number, paging?:string|null, recipientField?:string|null, scNumberField?:string|null }} opts
  * @returns {Promise<{ tasks:Array, nextPaging:string|null, rowCount:number|null, source:string }>}
  */
-// ── REST-фолбэк страницы завершённых ─────────────────────────────────────────
-// Если RenderListDataAsStream недоступен или падает (как бывает при «битых» полях списка),
-// грузим завершённые обычным REST. Пейджинг — через $skiptoken.
+/**
+ * Загружает одну страницу завершённых задач.
+ *
+ * Основной путь — REST (он работает даже на списках, где CAML/RenderListDataAsStream
+ * падает 500 «типы полей установлены неправильно»). Порядок фильтров:
+ *   1) PercentComplete eq 1 or Status eq 'Завершена' …   (точное сравнение, без substringof)
+ *   2) PercentComplete eq 1
+ *   3) Status eq 'Завершена' …
+ *   4) только «мои» + фильтрация завершённых на клиенте — работает на любом списке
+ *
+ * Если REST не сработал совсем — крайний фолбэк: RenderListDataAsStream.
+ *
+ * @param {{ currentUserId:number|null, distribution:object|null, pageSize?:number, paging?:string|null, recipientField?:string|null, scNumberField?:string|null, extraStatuses?:string[] }} opts
+ * @returns {Promise<{ tasks:Array, nextPaging:string|null, rowCount:number|null, source:string }>}
+ */
+export async function fetchCompletedTasksPage(opts) {
+  try {
+    const page = await fetchCompletedTasksPageRest(opts);
+    if (page?.tasks?.length || page?.nextPaging) return page;
+    dbgWarn("completedTasks:page", "REST вернул пустую страницу — пробую CAML");
+  } catch (e) {
+    dbgWarn("completedTasks:page:restFailed", "REST не сработал — пробую CAML", {
+      status: apiErrorStatus(e),
+      message: describeApiError(e),
+    });
+  }
+  if (isCamlBroken()) {
+    dbgWarn("completedTasks:page", "CAML отключён (ранее падал на этом списке) — работаем на REST");
+    throw new Error("completed: REST empty and CAML disabled");
+  }
+  return fetchCompletedTasksPageCaml(opts);
+}
+
+// ── REST-загрузка страницы завершённых ───────────────────────────────────────
+// Пейджинг — через $skiptoken.
 
 const REST_PAGE_FIELDS = [
   "Id", "Title", "Body", "Status", "PercentComplete", "DueDate", "Created", "Modified",
@@ -468,6 +567,7 @@ async function fetchCompletedTasksPageRest({
   paging = null,
   recipientField = null,
   scNumberField = null,
+  extraStatuses = [],
 }) {
   const ids = new Set();
   if (currentUserId != null) ids.add(Number(currentUserId));
@@ -480,24 +580,34 @@ async function fetchCompletedTasksPageRest({
   let lastError = null;
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
-    for (const filter of buildCompletedRestFilters({ assignedFilter })) {
+    for (const { filter, name } of buildCompletedRestFilters({
+      assignedFilter,
+      extraStatuses,
+      assignedOnlyVariant: true,
+    })) {
       try {
         const skiptoken = restPagingToSkiptoken(paging);
         let url =
           `${TASKS_LIST_API}/items?$select=${select}&$expand=AssignedTo,Editor` +
           `&$filter=${encodeURIComponent(filter)}&$orderby=Modified desc&$top=${pageSize}`;
         if (skiptoken) url += `&$skiptoken=${encodeURIComponent(skiptoken)}`;
-        __dlog("page:rest:request", { url });
+        __dlog("page:rest:request", { url, name });
         const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
         const rows = Array.isArray(data?.d?.results) ? data.d.results : [];
         const tasks = rows
           .map((row) => rowToRawTask(row))
           .filter((r) => r.Id != null)
+          // Страховка: при фильтре «только мои» завершённость определяем на клиенте.
           .filter((r) => isCompletedStatus(r.Status, r.PercentComplete))
           .map((r) => toDomainTask(r, { recipientField, scNumberField }));
         const nextPaging = skiptokenFromNext(data?.d?.__next);
-        __dlog("page:rest:result", { tasks: tasks.length, nextPaging });
-        return { tasks, nextPaging, rowCount: null, source: "REST" };
+        dbgWarn("completedTasks:page", `сработал фильтр «${name}»`, { tasks: tasks.length, nextPaging });
+        return {
+          tasks,
+          nextPaging,
+          rowCount: null,
+          source: name === "assignedOnly+clientFilter" ? "REST (client-filter)" : "REST",
+        };
       } catch (e) {
         lastError = e;
         const bad = extractFieldFromError(e);
@@ -511,6 +621,7 @@ async function fetchCompletedTasksPageRest({
           }
         }
         dbgError("completedTasks:page:rest:failed", {
+          name,
           filter,
           status: apiErrorStatus(e),
           message: describeApiError(e),
@@ -521,7 +632,7 @@ async function fetchCompletedTasksPageRest({
   throw lastError || new Error("fetchCompletedTasksPageRest failed");
 }
 
-export async function fetchCompletedTasksPage({
+async function fetchCompletedTasksPageCaml({
   currentUserId,
   distribution,
   pageSize = COMPLETED_PAGE_SIZE,
@@ -595,25 +706,10 @@ export async function fetchCompletedTasksPage({
       break;
     }
   }
-  // CAML не сработал — пробуем обычный REST (например, список с «битыми» полями).
-  dbgWarn("completedTasks:page", "RenderListDataAsStream не сработал — перехожу на REST-фолбэк", {
-    status: apiErrorStatus(lastError),
-    message: describeApiError(lastError),
+  // REST уже пробовали (он идёт первым) — здесь просто фиксируем итог.
+  dbgError("completedTasks:page:failed", {
+    caml: describeApiError(lastError),
+    hint: "REST и CAML не сработали — завершённые задачи загрузить не удалось",
   });
-  try {
-    return await fetchCompletedTasksPageRest({
-      currentUserId,
-      distribution,
-      pageSize,
-      paging,
-      recipientField,
-      scNumberField,
-    });
-  } catch (restError) {
-    dbgError("completedTasks:page:failed", {
-      caml: describeApiError(lastError),
-      rest: describeApiError(restError),
-    });
-    throw restError;
-  }
+  throw lastError || new Error("fetchCompletedTasksPage failed");
 }

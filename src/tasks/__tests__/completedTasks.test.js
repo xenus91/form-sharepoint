@@ -25,33 +25,52 @@ describe("completedTasks", () => {
     apiState.post.mockReset();
   });
 
-  describe("buildCompletedViewXml", () => {
+  describe("buildCompletedViewXml — старые проверки", () => {
     const xml = buildCompletedViewXml({ currentUserId: 42, distribution: null, pageSize: 20 });
-
-    it("ищет PercentComplete = 1", () => {
-      expect(xml).toContain('<FieldRef Name="PercentComplete"');
-    });
 
     it("НЕ ищет просто «Выполн» (иначе матчится «В процессе выполнения»)", () => {
       expect(xml).not.toContain(">Выполн<");
     });
 
-    it("ищет завершённые статусы «Заверш» / «Выполнено» / «Выполнена»", () => {
-      expect(xml).toContain("Заверш");
-      expect(xml).toContain("Выполнено");
-      expect(xml).toContain("Выполнена");
+    it("PercentComplete = 1 присутствует", () => {
+      expect(xml).toContain('<Value Type="Number">1</Value>');
+    });
+  });
+
+  describe("buildCompletedViewXml — новый CAML", () => {
+    const xml = buildCompletedViewXml({ currentUserId: 10, distribution: null, pageSize: 20, fields: ["ID"] });
+
+    it("использует только Eq (без Contains / Not)", () => {
+      expect(xml).not.toContain("<Contains>");
+      expect(xml).not.toContain("<Not>");
+      expect(xml).toContain("<Eq>");
     });
 
-    it("исключает статусы «в работе» через <Not><Contains>", () => {
-      expect(xml).toContain("<Not>");
-      expect(xml).toContain("В процессе");
-      expect(xml).toContain("Выполня");
-      expect(xml).toContain("Не начат");
+    it("ищет PercentComplete = 1 или Status = Завершена (точное сравнение)", () => {
+      expect(xml).toContain('<Value Type="Number">1</Value>');
+      expect(xml).toContain('<Value Type="Text">Завершена</Value>');
+      expect(xml).not.toContain("Заверш<"); // не по подстроке, а целиком
+    });
+
+    it("фильтрует по исполнителю", () => {
+      expect(xml).toContain('Name="AssignedTo"');
+      expect(xml).toContain('<Value Type="Integer">10</Value>');
     });
   });
 
   describe("fetchCompletedCount", () => {
-    it("основной источник — RowCount (ViewFields только ID)", async () => {
+    it("основной источник — REST $inlinecount (не CAML)", async () => {
+      apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { RowCount: 137, Row: [] } } } });
+      apiState.get.mockResolvedValue({ data: { d: { results: [], __count: 42 } } });
+      const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
+      expect(res.count).toBe(42);
+      expect(res.source).toContain("inlinecount");
+      // CAML не вызывается, пока REST отвечает
+      expect(apiState.post).not.toHaveBeenCalled();
+    });
+
+    it("фолбэк на RowCount с минимальными ViewFields, если REST не дал число", async () => {
+      apiState.get.mockRejectedValue(new Error("400"));
       apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { RowCount: 137, Row: [] } } } });
       const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
       expect(res.count).toBe(137);
@@ -59,19 +78,9 @@ describe("completedTasks", () => {
       const viewXml = apiState.post.mock.calls[0][1].parameters.ViewXml;
       expect(viewXml).toContain('<FieldRef Name="ID" />');
       expect(viewXml).not.toContain('<FieldRef Name="RelatedItems" />');
-      expect(apiState.get).not.toHaveBeenCalled();
-    });
-
-    it("фолбэк на REST $inlinecount, если RowCount нет", async () => {
-      apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { Row: [] } } } });
-      apiState.get.mockResolvedValue({ data: { d: { results: [], __count: 5 } } });
-      const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
-      expect(res.count).toBe(5);
-      expect(res.source).toContain("inlinecount");
     });
 
     it("REST-фильтр использует eq по статусу (Choice не поддерживает substringof)", async () => {
-      apiState.post.mockRejectedValue(new Error("boom"));
       apiState.get.mockResolvedValue({ data: { d: { results: [], __count: 0 } } });
       await fetchCompletedCount({ currentUserId: 42, distribution: null });
       const url = apiState.get.mock.calls[0][0];
@@ -81,6 +90,8 @@ describe("completedTasks", () => {
       expect(filter).toContain("PercentComplete eq 1");
       expect(filter).toContain("Status eq 'Завершена'");
       expect(filter).toContain("Status eq 'Выполнено'");
+      expect(filter).not.toContain("В процессе"); // старые фильтры с substringof убраны
+      expect(filter).not.toContain("Выполня");
     });
 
     it("при ошибке первого фильтра пробует следующие", async () => {
@@ -94,8 +105,8 @@ describe("completedTasks", () => {
     });
   });
 
-  describe("REST-фолбэк страницы", () => {
-    it("если CAML не работает — грузит через REST и возвращает nextPaging", async () => {
+  describe("REST — основной путь страницы", () => {
+    it("грузит через REST и возвращает nextPaging (CAML не нужен)", async () => {
       apiState.post.mockRejectedValue(new Error("500 field types"));
       apiState.get.mockResolvedValue({
         data: {

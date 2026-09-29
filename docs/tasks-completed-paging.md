@@ -159,3 +159,58 @@ node preview/.ssrout/completed-check.mjs
 
 Мок (`preview/mockApi.js`) эмулирует оба прод-сбоя: 500 при `RelatedItems` в `ViewFields`
 и 400 на `substringof` — проверка должна показать самовосстановление и загрузку завершённых.
+
+## CAML: только `<Eq>` (исправление ошибки 500)
+
+`RenderListDataAsStream` на части списков падает:
+
+```text
+HTTP 500 · Один или несколько типов полей установлены неправильно.
+Перейдите на страницу параметров списка и удалите эти поля.
+```
+
+Причина — конструкции `<Contains>` и `<Not><Contains>` по полю `Status` (тип Choice).
+Поэтому в CAML осталось **только точное сравнение `<Eq>`**:
+
+```xml
+<Where>
+  <And>
+    <Eq><FieldRef Name="AssignedTo" LookupId="TRUE" /><Value Type="Integer">10</Value></Eq>
+    <Or>
+      <Eq><FieldRef Name="PercentComplete" /><Value Type="Number">1</Value></Eq>
+      <Eq><FieldRef Name="Status" /><Value Type="Text">Завершена</Value></Eq>
+      <!-- … остальные завершённые статусы -->
+    </Or>
+  </And>
+</Where>
+```
+
+Точное сравнение решает и старую проблему: «В процессе выполнения» и «Выполняется» больше
+не попадают в завершённые (раньше матчились по подстроке «Выполн»).
+
+### Порядок источников
+
+| Что | Сначала | Потом |
+|---|---|---|
+| Страница завершённых | REST (`eq`-фильтры, `$skiptoken`) | `RenderListDataAsStream` |
+| Счётчик | REST `$inlinecount` | `RenderListDataAsStream` (ViewFields: только `ID`) |
+
+REST идёт первым: он работает даже на списках, где CAML ломается.
+
+### Автоотключение CAML
+
+Если `RenderListDataAsStream` хоть раз упадёт, в `localStorage` ставится
+`completedTasks.camlBroken.<guid> = "1"` — дальше используется только REST
+(чтобы не засорять консоль одинаковыми 500-ми). Вернуть CAML:
+
+```js
+localStorage.setItem("completedTasks.forceCaml", "1");
+```
+
+### Свои статусы завершённых (без пересборки)
+
+```js
+localStorage.setItem("completedTasks.statuses", JSON.stringify(["Завершена"]));
+```
+
+После этого и CAML, и REST-фильтр ищут **только** указанные значения.
