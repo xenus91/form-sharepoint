@@ -135,20 +135,28 @@ TAG="completedTasks" node preview/.ssrout/log-check.mjs
 
 ### 2. Счётчик
 
-Порядок источников:
+Порядок:
 
-1. `RenderListDataAsStream` с **минимальным** `ViewFields` (только `ID`) → `RowCount`.
-   Минимум полей — чтобы «битое» поле не ломало подсчёт.
-2. REST `$top=1&$inlinecount=allpages` — фильтры перебираются по очереди:
-   * `PercentComplete eq 1 or Status eq 'Завершена' or …` (точное сравнение, **без** `substringof`);
-   * `PercentComplete eq 1`;
-   * только статусы.
+1. REST `$top=1&$inlinecount=allpages` — используется, только если вернул `> 0`
+   (на части ферм фильтр `Status eq 'Завершена'` по Choice-полю даёт 0 строк);
+2. CAML `RenderListDataAsStream` с `RowLimit = 2000` и `ViewFields = ID` → считаем `Row.length`
+   (`RowCount` тоже учитывается через `Math.max`).
+
+**`RowCount` ≠ общее число.** На части ферм он равен размеру страницы: при
+`RowLimit Paged="TRUE" = 1` ответ содержит 1 строку и `RowCount = 1`. Поэтому считать
+надо по строкам, а не по `RowCount` с маленьким `RowLimit`.
 
 ### 3. REST-фолбэк самой вкладки
 
-Если CAML не сработал совсем, страница завершённых грузится обычным REST
-(`$filter` по тем же eq-фильтрам, `$orderby=Modified desc`, пейджинг через `$skiptoken`).
-В логе это видно как `[completedTasks] page:rest:request` / `page:rest:result`, `source: "REST"`.
+Если CAML не сработал (падает или вернул пусто), страница завершённых грузится обычным REST
+(`$filter` по `eq`-фильтрам, `$orderby=Modified desc`, пейджинг через `$skiptoken`).
+В логе видно `page:rest:request` / `page:rest:result`, `source: "REST"`.
+
+### Отображение количества
+
+Если счётчик неизвестен (`null`), в интерфейсе выводится «Показано N» без «из X» —
+ноль вместо неизвестного числа не подставляется никогда (раньше подставлялся
+`completedCount` из активной выборки, где завершённых задач нет → «из 0»).
 
 ### Как посмотреть
 
