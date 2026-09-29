@@ -50,6 +50,40 @@ const STYLING_ACTIONS_FIX = `{
   "promptCancel": { "bg": "#ffffff", "c": "#5f6368", "v": "out", "i": "close" }
 }`;
 
+// ⭐ Конфиг пользователя для «Результат поиска ЕО»: подтверждение ДВУМЯ КНОПКАМИ В КАРТОЧКЕ
+// («Создать заявку» / «Отмена»), без диалога и без запроса полей — ключ "ic": true.
+const BEHAVIOUR_SEARCH = `{
+  "_default": {
+    "rf": [
+      { "f": "THU", "ti": "ЕО" },
+      { "f": "Recipient/SCNumberText", "ti": "Получатель" }
+    ]
+  },
+  "Найдена":    { "loc": true, "aa": true, "aar": false, "anim": "celebrate" },
+  "Не найдена": {
+    "ic": true,
+    "ok": "Создать заявку",
+    "no": "Отмена",
+    "anim": { "type": "sherlock", "title": "Создаю заявку на ООБ", "text": "Отправляю запрос в ООБ...", "emoji": "\uD83D\uDD75️" }
+  }
+}`;
+
+const STYLING_SEARCH = `{
+  "_default":   { "bg": "linear-gradient(180deg, #5a67d8 0%, #434190 100%)", "c": "#ffffff", "v": "ctd" },
+  "Найдена":    { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "checkcircle" },
+  "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "searchoff" }
+}`;
+
+const behaviourRecordSearch = {
+  id: 2,
+  title: "Результат поиска ЕО",
+  description: "",
+  behaviour: BEHAVIOUR_SEARCH,
+  styling: STYLING_SEARCH,
+  stylingActions: STYLING_ACTIONS_FIX,
+  enabled: true,
+};
+
 const behaviourRecord = {
   id: 1,
   title: "Задача исправления проблемной ЕО",
@@ -62,7 +96,7 @@ const behaviourRecord = {
 };
 
 export const taskConfig = {
-  taskBehaviour: new Map([[1, behaviourRecord]]),
+  taskBehaviour: new Map([[1, behaviourRecord], [2, behaviourRecordSearch]]),
   ctMetaMap: new Map(Object.entries(CT_NAMES).map(([id, name]) => [id, { id, name, stringId: id }])),
   ctConfigMap: new Map(),
 };

@@ -116,6 +116,16 @@ export function validateBehaviour(obj) {
       rule.requiresConfirmed = rawVal.c === true || rawVal.c === 1 || String(rawVal.c).toLowerCase() === "true";
     }
 
+    // ic → inlineConfirm: подтверждение двумя кнопками В КАРТОЧКЕ, без диалога.
+    // Допустимая альтернативная запись: "c": "inline".
+    if (rawVal.ic !== undefined) {
+      rule.inlineConfirm = rawVal.ic === true || rawVal.ic === 1 || String(rawVal.ic).toLowerCase() === "true";
+    }
+    if (typeof rawVal.c === "string" && String(rawVal.c).toLowerCase() === "inline") {
+      rule.inlineConfirm = true;
+      rule.requiresConfirmed = false;
+    }
+
     // aa → showAdditionalActions
     if (rawVal.aa !== undefined) {
       rule.showAdditionalActions = rawVal.aa === true || rawVal.aa === 1 || String(rawVal.aa).toLowerCase() === "true";
@@ -229,6 +239,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
   const norm = normKey(choiceValue);
   const empty = {
     promptFields: [],
+    inlineConfirm: null,
     requiresConfirmed: null,
     showAdditionalActions: null,
     additionalActionsRequired: null,
@@ -252,6 +263,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
 
   return {
     promptFields: Array.isArray(rule.promptFields) ? rule.promptFields : [],
+    inlineConfirm: rule.inlineConfirm === undefined ? null : !!rule.inlineConfirm,
     requiresConfirmed: rule.requiresConfirmed === undefined ? null : !!rule.requiresConfirmed,
     showAdditionalActions: rule.showAdditionalActions === undefined ? null : !!rule.showAdditionalActions,
     additionalActionsRequired: rule.additionalActionsRequired === undefined ? null : !!rule.additionalActionsRequired,

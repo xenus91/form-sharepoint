@@ -440,6 +440,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // ⭐ NEW: inlineConfirmPending — capture promptValues для передачи в TaskConfirmNotFoundDialog
   // когда RequiresConfirmed=true в SP (sp → inline-mode + confirm-step). Решает кейс «Не исправлено» с комментарием.
   const [inlineConfirmPending, setInlineConfirmPending] = React.useState(null); // { req, acts } | null
+  // ⭐ Behaviour.ic: подтверждение двумя кнопками В КАРТОЧКЕ («Создать заявку» / «Отмена»),
+  // без диалога и без запроса дополнительных полей.
+  const [inlineConfirmOnly, setInlineConfirmOnly] = React.useState(false);
   // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice Fill-in)
   const [additionalActions, setAdditionalActions] = React.useState(() => {
     // Initial may not have taskConfig yet — use field fallback, will sync via effect when taskConfig loads
@@ -569,6 +572,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (!isInProgressStatus(task.Status)) {
       setInlineChoice(null);
       setInlineConfirmPending(null);
+      setInlineConfirmOnly(false);
       setPromptFieldValues({});
       const defReset = getDefaultsForThisTask() || [];
       setAdditionalActions([...defReset]);
@@ -579,6 +583,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // Also reset when task changes id
   React.useEffect(() => {
     setInlineChoice(null);
+    setInlineConfirmOnly(false);
     setPromptFieldValues({});
     if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
       setAdditionalActions([...task.AdditionalActions]);
@@ -1329,7 +1334,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 600, display: "block", mb: 1 }}>{additionalError}</Typography>
                       )}
                       {/* Кнопки сохранить/отмена нужны только если есть что заполнять */}
-                      {(promptFields.length > 0 || showAAInline) && (
+                      {(promptFields.length > 0 || showAAInline || inlineConfirmOnly) && (
                       <Button
                         variant="contained"
                         color="success"
@@ -1365,15 +1370,16 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         variant={getActionVariant("promptSubmit") || "contained"}
                         startIcon={getActionIcon("promptSubmit") || undefined}
                       >
-                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : `Сохранить — ${inlineChoice}`}
+                        {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : (inlineConfirmOnly ? (behaviourRuleForFound?.confirmTexts?.okText || "Подтвердить") : `Сохранить — ${inlineChoice}`)}
                       </Button>
                       )}
-                      {(promptFields.length > 0 || showAAInline) && (
+                      {(promptFields.length > 0 || showAAInline || inlineConfirmOnly) && (
                       <Button
                         variant="text"
                         onClick={() => {
                           setInlineChoice(null);
                           setInlineConfirmPending(null);
+                          setInlineConfirmOnly(false);
                           setPromptFieldValues({});
                           setAdditionalActions([]);
                           setCustomActionInput("");
@@ -1384,7 +1390,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         startIcon={getActionIcon("promptCancel") || undefined}
                         sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32, ...(getActionSx("promptCancel") || {}) }}
                       >
-                        Отмена
+                        {inlineConfirmOnly ? (behaviourRuleForFound?.confirmTexts?.cancelText || "Отмена") : "Отмена"}
                       </Button>
                       )}
                     </Box>
@@ -1443,8 +1449,15 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           const rule = getBehaviourRuleForChoice(notFoundChoice);
                           const needsForm = (rule?.promptFields?.length || 0) > 0 || rule?.showAdditionalActions === true;
                           setInlineChoice(notFoundChoice);
-                          // Если вводить нечего — сразу диалог подтверждения (без промежуточной кнопки «Сохранить»)
-                          if (!needsForm) setInlineConfirmPending({ req: "Нет", acts: [] });
+                          setInlineConfirmPending(null);
+                          if (needsForm) {
+                            setInlineConfirmOnly(false);
+                            return;
+                          }
+                          // ⭐ Если вводить нечего: при Behaviour.ic — две кнопки в карточке,
+                          // иначе — диалог подтверждения (без промежуточной кнопки «Сохранить»).
+                          if (rule?.inlineConfirm === true) setInlineConfirmOnly(true);
+                          else setInlineConfirmPending({ req: "Нет", acts: [] });
                         }}
                         sx={{
                           borderRadius: "12px",
@@ -1479,7 +1492,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           // в runSubmit без промежуточного prompt-экрана.
                           // Правил нет или они «прямые» (без prompt/AA/confirm) — завершаем сразу.
                           // Никаких строковых спец-случаев: поток задаётся только Behaviour.
-                          if (!rule || (rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true)) {
+                          const icRule = rule?.inlineConfirm === true;
+                          if (!rule || (rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true && !icRule)) {
                             runSubmit(foundChoice, "found", () => {
                               if (onComplete) onComplete(task, foundChoice, {}, "Нет", []);
                               else onResultClick(task, foundChoice);
@@ -1495,6 +1509,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setPromptFieldValues({});
                           setAdditionalError("");
                           setCustomActionInput("");
+                          setInlineConfirmPending(null);
+                          // ⭐ Behaviour.ic: две кнопки в карточке, без диалога и без полей
+                          setInlineConfirmOnly(icRule);
                           setInlineChoice(foundChoice);
                         }}
                         sx={{
@@ -1528,7 +1545,17 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         startIcon={cfg.icon || undefined}
                         size="large"
                         disabled={isUpdating}
-                        onClick={() => onResultClick(task, choice)}
+                        onClick={() => {
+                          const rule = getBehaviourRuleForChoice(choice);
+                          const needsForm = (rule?.promptFields?.length || 0) > 0 || rule?.showAdditionalActions === true;
+                          if (rule?.inlineConfirm === true && !needsForm) {
+                            setInlineChoice(choice);
+                            setInlineConfirmPending(null);
+                            setInlineConfirmOnly(true);
+                            return;
+                          }
+                          onResultClick(task, choice);
+                        }}
                         sx={{
                           borderRadius: "12px",
                           fontWeight: 800,

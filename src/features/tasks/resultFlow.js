@@ -23,6 +23,11 @@ export function resolveResultFlow(choiceValue, rule) {
   if (rule.requiresLocation === true) {
     return { action: "location", reason: "behaviour.loc" };
   }
+  // ⭐ ic: подтверждение показано двумя кнопками в самой карточке, диалог не нужен —
+  // к моменту вызова пользователь уже нажал «Создать заявку».
+  if (rule.inlineConfirm === true) {
+    return { action: "complete", reason: "behaviour.ic" };
+  }
   if (rule.requiresConfirmed === true) {
     return { action: "confirm", reason: "behaviour.c" };
   }
