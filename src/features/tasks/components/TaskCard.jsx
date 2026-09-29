@@ -1257,6 +1257,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 const promptFields = behaviourRuleForFound?.promptFields || [];
                 // debug
                 if (__forceTaskDbg || __DBG_ENABLED__) __dlogAlways("[DBG:TaskCard:showAA]", {inlineChoice, behaviourRule: behaviourRuleForFound, showAAInline, promptFields});
+                // ⭐ Behaviour.ic: кнопки подтверждения в карточке — это confirm/cancel (как в диалоге),
+                // а НЕ promptSubmit/promptCancel: те относятся к форме ввода полей (p/aa).
+                const icMode = inlineConfirmOnly && promptFields.length === 0 && !showAAInline;
+                const icUi = icMode ? getUiConfig(inlineChoice) : null;
+                const submitStyleKey = icMode ? "confirm" : "promptSubmit";
+                const cancelStyleKey = icMode ? "cancel" : "promptCancel";
                 const validateAdditional = () => {
                   if (!showAAInline) { setAdditionalError(""); return true; }
                   setAdditionalError("");
@@ -1380,14 +1386,26 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           width: "100%",
                           height: 48,
                           fontSize: "1rem",
-                          backgroundImage: "linear-gradient(180deg, #43a047 0%, #2e7d32 100%)",
-                          color: "#fff",
-                          "&:hover": { backgroundImage: "linear-gradient(180deg, #66bb6a 0%, #388e3c 100%)" },
-                          "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #a5d6a7 0%, #66bb6a 100%)", color: "#fff", opacity: 1 },
-                          ...(getActionSx("promptSubmit") || {}),
+                          // ic-режим: база — цвет самой кнопки результата (например красный для «Не найдена»),
+                          // иначе дефолтный зелёный градиент формы ввода. Сверху всегда накладывается StylingActions.
+                          ...(icMode
+                            ? {
+                                ...(icUi?.gradient ? { backgroundImage: icUi.gradient, backgroundColor: "transparent" } : {}),
+                                ...(icUi?.bgColor ? { backgroundImage: "none", backgroundColor: icUi.bgColor } : {}),
+                                ...(icUi?.textColor ? { color: icUi.textColor } : {}),
+                                "&:hover": { filter: "brightness(1.08)" },
+                                "&.Mui-disabled": { opacity: 0.7 },
+                              }
+                            : {
+                                backgroundImage: "linear-gradient(180deg, #43a047 0%, #2e7d32 100%)",
+                                color: "#fff",
+                                "&:hover": { backgroundImage: "linear-gradient(180deg, #66bb6a 0%, #388e3c 100%)" },
+                                "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #a5d6a7 0%, #66bb6a 100%)", color: "#fff", opacity: 1 },
+                              }),
+                          ...(getActionSx(submitStyleKey) || {}),
                         }}
-                        variant={getActionVariant("promptSubmit") || "contained"}
-                        startIcon={getActionIcon("promptSubmit") || undefined}
+                        variant={getActionVariant(submitStyleKey) || (icMode ? icUi?.variant || "contained" : "contained")}
+                        startIcon={getActionIcon(submitStyleKey) || undefined}
                       >
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : (inlineConfirmOnly ? (behaviourRuleForFound?.confirmTexts?.okText || "Подтвердить") : `Сохранить — ${inlineChoice}`)}
                       </Button>
@@ -1405,9 +1423,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setAdditionalError("");
                         }}
                         disabled={isUpdating}
-                        variant={getActionVariant("promptCancel") || "text"}
-                        startIcon={getActionIcon("promptCancel") || undefined}
-                        sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32, ...(getActionSx("promptCancel") || {}) }}
+                        variant={getActionVariant(cancelStyleKey) || "text"}
+                        startIcon={getActionIcon(cancelStyleKey) || undefined}
+                        sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32, ...(getActionSx(cancelStyleKey) || {}) }}
                       >
                         {inlineConfirmOnly ? (behaviourRuleForFound?.confirmTexts?.cancelText || "Отмена") : "Отмена"}
                       </Button>

@@ -62,7 +62,7 @@ const BEHAVIOUR_SEARCH = `{
   "Найдена":    { "loc": true, "aa": true, "aar": false, "anim": "celebrate" },
   "Не найдена": {
     "ic": true,
-    "ok": "Создать заявку",
+    "ok": "Подтвердить «Не найдена»",
     "no": "Отмена",
     "anim": { "type": "sherlock", "title": "Создаю заявку на ООБ", "text": "Отправляю запрос в ООБ...", "emoji": "\uD83D\uDD75️" }
   }
@@ -74,13 +74,24 @@ const STYLING_SEARCH = `{
   "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "searchoff" }
 }`;
 
+// ⭐ StylingActions пользователя: confirm — КРАСНЫЙ (send), cancel — серый текст (close),
+// promptSubmit/promptCancel — для формы ввода полей (зелёный save / серый close).
+const STYLING_ACTIONS_SEARCH = `{
+  "_default":     { "v": "ctd" },
+  "takeInWork":   { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd", "i": "playarrow" },
+  "confirm":      { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "send" },
+  "cancel":       { "c": "#5f6368", "v": "tx", "i": "close" },
+  "promptSubmit": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "save" },
+  "promptCancel": { "c": "#5f6368", "v": "tx", "i": "close" }
+}`;
+
 const behaviourRecordSearch = {
   id: 2,
   title: "Результат поиска ЕО",
   description: "",
   behaviour: BEHAVIOUR_SEARCH,
   styling: STYLING_SEARCH,
-  stylingActions: STYLING_ACTIONS_FIX,
+  stylingActions: STYLING_ACTIONS_SEARCH,
   enabled: true,
 };
 
