@@ -14,6 +14,23 @@ import apiClient from "../api";
 import { TASKS_LIST_API } from "./config";
 import { getGroupIdsFromDistribution } from "./distribution";
 import { toDomainTask } from "../domain/tasks/taskModel";
+import { isCompletedStatus } from "./status";
+
+/**
+ * REST-фильтр «завершённые» — то же правило, что в isCompletedStatus().
+ * Исключаем «В процессе выполнения» / «Выполняется» / «Не начата».
+ */
+export function buildCompletedRestFilter() {
+  return (
+    "(PercentComplete eq 1" +
+    " or substringof('Заверш',Status)" +
+    " or substringof('Выполнено',Status)" +
+    " or substringof('Выполнена',Status))" +
+    " and not substringof('В процессе',Status)" +
+    " and not substringof('Выполня',Status)" +
+    " and not substringof('Не начат',Status)"
+  );
+}
 
 export const COMPLETED_PAGE_SIZE = 20;
 
@@ -88,19 +105,41 @@ function wrapOr(parts) {
   return node;
 }
 
-/** CAML-фильтр «задача завершена» — зеркалит isCompletedStatus() из tasks/status.js. */
+/**
+ * CAML-фильтр «задача завершена» — зеркалит isCompletedStatus() из tasks/status.js.
+ *
+ * ⚠️ Нельзя искать просто Contains "Выполн": статус «В процессе выполнения» (и «Выполняется»)
+ * тоже его содержит — такие задачи попадали в завершённые. Ищем «Выполнено/Выполнена»
+ * и дополнительно исключаем явные «в работе» через <Not><Contains>.
+ */
 const COMPLETED_CAML = `
   <Or>
     <Eq><FieldRef Name="PercentComplete" /><Value Type="Number">1</Value></Eq>
     <Or>
       <Contains><FieldRef Name="Status" /><Value Type="Text">Заверш</Value></Contains>
-      <Contains><FieldRef Name="Status" /><Value Type="Text">Выполн</Value></Contains>
+      <Or>
+        <Contains><FieldRef Name="Status" /><Value Type="Text">Выполнено</Value></Contains>
+        <Contains><FieldRef Name="Status" /><Value Type="Text">Выполнена</Value></Contains>
+      </Or>
     </Or>
   </Or>`;
 
+/** CAML-исключение статусов «в работе» («В процессе выполнения», «Выполняется», «Не начата»). */
+const NOT_ACTIVE_CAML = `
+  <And>
+    <Not><Contains><FieldRef Name="Status" /><Value Type="Text">В процессе</Value></Contains></Not>
+    <And>
+      <Not><Contains><FieldRef Name="Status" /><Value Type="Text">Выполня</Value></Contains></Not>
+      <Not><Contains><FieldRef Name="Status" /><Value Type="Text">Не начат</Value></Contains></Not>
+    </And>
+  </And>`;
+
 export function buildCompletedViewXml({ currentUserId, distribution, pageSize, fields = VIEW_FIELDS }) {
   const assigned = buildAssignedCaml(currentUserId, distribution);
-  const where = assigned ? `<Where><And>${assigned}${COMPLETED_CAML}</And></Where>` : `<Where>${COMPLETED_CAML}</Where>`;
+  const completed = `<And>${COMPLETED_CAML}${NOT_ACTIVE_CAML}</And>`;
+  const where = assigned
+    ? `<Where><And>${assigned}${completed}</And></Where>`
+    : `<Where>${completed}</Where>`;
   const viewFields = fields.map((f) => `<FieldRef Name="${escXml(f)}" />`).join("");
   return `<View Scope="RecursiveAll"><ViewFields>${viewFields}</ViewFields><Query>${where}<OrderBy><FieldRef Name="Modified" Ascending="FALSE" /></OrderBy></Query><RowLimit Paged="TRUE">${pageSize}</RowLimit></View>`;
 }
@@ -145,19 +184,21 @@ function extractBadField(message) {
  * @returns {Promise<{count:number|null, source:string}>}
  */
 export async function fetchCompletedCount({ currentUserId, distribution }) {
+  // Основной источник — REST $inlinecount: он корректно считает все строки по фильтру.
+  const rest = await fetchCompletedCountFallback({ currentUserId, distribution });
+  if (typeof rest.count === "number") return rest;
+  // Фолбэк — RowCount из RenderListDataAsStream.
   try {
     const payload = await renderListData({
       viewXml: buildCompletedViewXml({ currentUserId, distribution, pageSize: 1 }),
     });
     const rowCount = payload?.RowCount;
     if (typeof rowCount === "number") return { count: rowCount, source: "RenderListDataAsStream" };
-    // Бывает, что сервер не отдаёт RowCount — тогда считаем «вручную» по LastRow/Row,
-    // но для полного числа нужна отдельная оценка: используем REST-фолбэк ниже.
     __dlog("no RowCount in payload");
   } catch (e) {
     __dlog("count via RenderListDataAsStream failed", e?.response?.status, e?.message);
   }
-  return fetchCompletedCountFallback({ currentUserId, distribution });
+  return { count: null, source: "error" };
 }
 
 /** REST-фолбэк: $top=1 + $inlinecount=allpages по тому же фильтру. */
@@ -168,8 +209,7 @@ async function fetchCompletedCountFallback({ currentUserId, distribution }) {
     for (const id of (distribution ? getGroupIdsFromDistribution(distribution) || [] : [])) ids.add(Number(id));
     const list = [...ids].filter((n) => !Number.isNaN(n));
     const assigned = list.map((id) => `AssignedToId eq ${id}`).join(" or ");
-    const completed = "(PercentComplete eq 1 or substringof('Заверш',Status) or substringof('Выполн',Status))";
-    const filter = assigned ? `(${assigned}) and ${completed}` : completed;
+    const filter = assigned ? `(${assigned}) and ${buildCompletedRestFilter()}` : buildCompletedRestFilter();
     const url = `${TASKS_LIST_API}/items?$select=Id&$filter=${encodeURIComponent(filter)}&$top=1&$inlinecount=allpages`;
     const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
     const count = data?.d?.__count != null ? Number(data.d.__count) : null;
@@ -268,6 +308,9 @@ export async function fetchCompletedTasksPage({
       const tasks = rows
         .map((row) => rowToRawTask(row))
         .filter((r) => r.Id != null)
+        // Страховка: если CAML всё же пропустил «в работе» (например, нестандартный статус),
+        // отсекаем такие строки по тому же правилу isCompletedStatus().
+        .filter((r) => isCompletedStatus(r.Status, r.PercentComplete))
         .map((r) => toDomainTask(r, { recipientField, scNumberField }));
       return { tasks, nextPaging: nextHref, rowCount, source: "RenderListDataAsStream" };
     } catch (e) {
