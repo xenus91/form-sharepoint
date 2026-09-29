@@ -32,8 +32,9 @@ describe("completedTasks", () => {
       expect(xml).not.toContain(">Выполн<");
     });
 
-    it("PercentComplete = 1 присутствует", () => {
-      expect(xml).toContain('<Value Type="Number">1</Value>');
+    it("PercentComplete не участвует в фильтре (только во ViewFields)", () => {
+      const query = xml.slice(xml.indexOf("<Query>"), xml.indexOf("</Query>"));
+      expect(query).not.toContain("PercentComplete");
     });
   });
 
@@ -46,10 +47,13 @@ describe("completedTasks", () => {
       expect(xml).toContain("<Eq>");
     });
 
-    it("ищет PercentComplete = 1 или Status = Завершена (точное сравнение)", () => {
-      expect(xml).toContain('<Value Type="Number">1</Value>');
+    it("ищет Status = Завершена — одно условие", () => {
       expect(xml).toContain('<Value Type="Text">Завершена</Value>');
       expect(xml).not.toContain("Заверш<"); // не по подстроке, а целиком
+      const query2 = xml.slice(xml.indexOf("<Query>"), xml.indexOf("</Query>"));
+      expect(query2).not.toContain("PercentComplete");
+      // ровно один фильтр по Status
+      expect(xml.match(/Name="Status"/g).length).toBe(1);
     });
 
     it("фильтрует по исполнителю", () => {
@@ -87,21 +91,19 @@ describe("completedTasks", () => {
       const filter = decodeURIComponent(url.split("$filter=")[1]);
       // никаких substringof — они дают 400 "Value does not fall within the expected range"
       expect(filter).not.toContain("substringof");
-      expect(filter).toContain("PercentComplete eq 1");
+      expect(filter).not.toContain("PercentComplete");
       expect(filter).toContain("Status eq 'Завершена'");
-      expect(filter).toContain("Status eq 'Выполнено'");
       expect(filter).not.toContain("В процессе"); // старые фильтры с substringof убраны
       expect(filter).not.toContain("Выполня");
+      expect(filter.split("Status eq").length - 1).toBe(1); // один фильтр по Status
     });
 
-    it("при ошибке первого фильтра пробует следующие", async () => {
+    it("если фильтр по Status не проходит — счётчик null (без PercentComplete-костылей)", async () => {
       apiState.post.mockRejectedValue(new Error("boom"));
-      apiState.get
-        .mockRejectedValueOnce(new Error("400"))
-        .mockResolvedValueOnce({ data: { d: { results: [], __count: 8 } } });
+      apiState.get.mockRejectedValue(new Error("400"));
       const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
-      expect(res.count).toBe(8);
-      expect(apiState.get).toHaveBeenCalledTimes(2);
+      expect(res.count).toBeNull();
+      expect(apiState.get).toHaveBeenCalledTimes(1); // один фильтр — по Status
     });
   });
 

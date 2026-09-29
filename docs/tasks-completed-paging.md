@@ -160,7 +160,7 @@ node preview/.ssrout/completed-check.mjs
 Мок (`preview/mockApi.js`) эмулирует оба прод-сбоя: 500 при `RelatedItems` в `ViewFields`
 и 400 на `substringof` — проверка должна показать самовосстановление и загрузку завершённых.
 
-## CAML: только `<Eq>` (исправление ошибки 500)
+## CAML: одно условие — `Status = Завершена`
 
 `RenderListDataAsStream` на части списков падает:
 
@@ -169,48 +169,33 @@ HTTP 500 · Один или несколько типов полей устан�
 Перейдите на страницу параметров списка и удалите эти поля.
 ```
 
-Причина — конструкции `<Contains>` и `<Not><Contains>` по полю `Status` (тип Choice).
-Поэтому в CAML осталось **только точное сравнение `<Eq>`**:
+Причина — конструкции `<Contains>` и `<Not><Contains>` по полю `Status` (тип Choice),
+а также лишние условия. Поэтому фильтр максимально простой — **одно условие**:
 
 ```xml
 <Where>
   <And>
     <Eq><FieldRef Name="AssignedTo" LookupId="TRUE" /><Value Type="Integer">10</Value></Eq>
-    <Or>
-      <Eq><FieldRef Name="PercentComplete" /><Value Type="Number">1</Value></Eq>
-      <Eq><FieldRef Name="Status" /><Value Type="Text">Завершена</Value></Eq>
-      <!-- … остальные завершённые статусы -->
-    </Or>
+    <Eq><FieldRef Name="Status" /><Value Type="Text">Завершена</Value></Eq>
   </And>
 </Where>
 ```
 
-Точное сравнение решает и старую проблему: «В процессе выполнения» и «Выполняется» больше
-не попадают в завершённые (раньше матчились по подстроке «Выполн»).
+Никакого `PercentComplete`, никаких `<Or>`, `<Contains>`, `<Not>`.
+Точное сравнение заодно решает старую проблему: «В процессе выполнения» и «Выполняется»
+больше не попадают в завершённые (раньше матчились по подстроке «Выполн»).
 
-### Порядок источников
+REST-фильтр — такой же:
 
-| Что | Сначала | Потом |
-|---|---|---|
-| Страница завершённых | REST (`eq`-фильтры, `$skiptoken`) | `RenderListDataAsStream` |
-| Счётчик | REST `$inlinecount` | `RenderListDataAsStream` (ViewFields: только `ID`) |
-
-REST идёт первым: он работает даже на списках, где CAML ломается.
-
-### Автоотключение CAML
-
-Если `RenderListDataAsStream` хоть раз упадёт, в `localStorage` ставится
-`completedTasks.camlBroken.<guid> = "1"` — дальше используется только REST
-(чтобы не засорять консоль одинаковыми 500-ми). Вернуть CAML:
-
-```js
-localStorage.setItem("completedTasks.forceCaml", "1");
+```text
+$filter=(AssignedToId eq 10) and Status eq 'Завершена'
 ```
 
-### Свои статусы завершённых (без пересборки)
+### Свой статус (без пересборки)
 
 ```js
 localStorage.setItem("completedTasks.statuses", JSON.stringify(["Завершена"]));
 ```
 
-После этого и CAML, и REST-фильтр ищут **только** указанные значения.
+Можно несколько — тогда условия объединятся через `or` (в CAML — через `<Or>`).
+Если ключ задан, используются **только** перечисленные значения.

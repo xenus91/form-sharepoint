@@ -81,17 +81,19 @@ describe("логирование завершённых задач", () => {
     );
     expect(call).toBeTruthy();
     expect(call[1].status).toBe(400);
-    expect(apiState.get.mock.calls.length).toBeGreaterThan(1); // пробовал несколько фильтров
+    expect(apiState.get.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("каждый неудачный REST-фильтр логируется отдельно", async () => {
+  it("неудачный REST-фильтр логируется с именем и текстом фильтра", async () => {
     apiState.post.mockRejectedValue(new Error("boom"));
     apiState.get.mockRejectedValue(spError(400, "Invalid filter"));
     await fetchCompletedCount({ currentUserId: 42, distribution: null });
     const calls = errorSpy.mock.calls.filter((args) =>
       String(args[0]).includes("[completedTasks:count:filterFailed]")
     );
-    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    expect(calls[0][1].name).toBe("status");
+    expect(String(calls[0][1].filter)).toContain("Status eq 'Завершена'");
   });
 
   it("«битое» поле ищется делением пополам и отключается", async () => {

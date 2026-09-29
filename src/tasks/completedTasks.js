@@ -18,21 +18,6 @@ import { isCompletedStatus } from "./status";
 import { DBG_ENABLED, dbg, dbgError, dbgWarn } from "../utils/dbg";
 import { apiErrorStatus, describeApiError, extractFieldFromError, apiErrorPayload } from "../utils/apiError";
 
-/**
- * REST-фильтр «завершённые» — то же правило, что в isCompletedStatus().
- * Исключаем «В процессе выполнения» / «Выполняется» / «Не начата».
- */
-export function buildCompletedRestFilter() {
-  return (
-    "(PercentComplete eq 1" +
-    " or substringof('Заверш',Status)" +
-    " or substringof('Выполнено',Status)" +
-    " or substringof('Выполнена',Status))" +
-    " and not substringof('В процессе',Status)" +
-    " and not substringof('Выполня',Status)" +
-    " and not substringof('Не начат',Status)"
-  );
-}
 
 export const COMPLETED_PAGE_SIZE = 20;
 
@@ -95,29 +80,21 @@ function wrapOr(parts) {
 }
 
 /**
- * CAML-фильтр «задача завершена».
+ * CAML-фильтр «задача завершена»: ровно одно условие — Status = «Завершена».
  *
- * ⚠️ Только <Eq> — никаких <Contains>, <Not> и вложенных <Or> с Contains:
- * на поле Status (Choice) такие конструкции вызывают ошибку
- * 500 «Один или несколько типов полей установлены неправильно».
- *
- * Логика: PercentComplete = 1 ИЛИ Status ТОЧНО равен одному из COMPLETED_STATUS_VALUES
- * («Завершена», «Завершено», …). Статусы «в работе» («В процессе выполнения», «Выполняется»)
- * сюда не попадают, потому что сравнение точное, а не по подстроке.
+ * Без PercentComplete, без <Contains> и <Not>: на части списков такие конструкции
+ * вызывают 500 «Один или несколько типов полей установлены неправильно».
+ * Точное сравнение заодно отсекает «В процессе выполнения» / «Выполняется».
  */
 function buildCompletedCaml(extraStatuses = []) {
   const statuses = resolveCompletedStatuses(extraStatuses);
   const eqParts = statuses.map(
     (sv) => `<Eq><FieldRef Name="Status" /><Value Type="Text">${escXml(sv)}</Value></Eq>`
   );
-  // Собираем цепочку <Or> из точных сравнений.
-  let statusOr = eqParts[eqParts.length - 1];
-  for (let i = eqParts.length - 2; i >= 0; i -= 1) statusOr = `<Or>${eqParts[i]}${statusOr}</Or>`;
-
-  return `<Or>` +
-    `<Eq><FieldRef Name="PercentComplete" /><Value Type="Number">1</Value></Eq>` +
-    statusOr +
-    `</Or>`;
+  if (eqParts.length === 1) return eqParts[0];
+  let or = eqParts[eqParts.length - 1];
+  for (let i = eqParts.length - 2; i >= 0; i -= 1) or = `<Or>${eqParts[i]}${or}</Or>`;
+  return or;
 }
 
 export function buildCompletedViewXml({
@@ -188,10 +165,14 @@ function extractBadField(message) {
 }
 
 /**
- * Статусы завершённых задач можно задать без пересборки:
+ * Статус завершённой задачи — ровно один: Status = «Завершена».
+ *
+ * Переопределить без пересборки (массив, если статусов несколько):
  *   localStorage.setItem("completedTasks.statuses", JSON.stringify(["Завершена"]))
  * Если ключ задан — используются ТОЛЬКО эти значения.
  */
+const DEFAULT_COMPLETED_STATUS = "Завершена";
+
 function resolveCompletedStatuses(extra = []) {
   try {
     if (typeof window !== "undefined" && window.localStorage) {
@@ -204,46 +185,30 @@ function resolveCompletedStatuses(extra = []) {
       }
     }
   } catch {}
-  return [...new Set([...COMPLETED_STATUS_VALUES, ...extra])];
+  const statuses = [...new Set([DEFAULT_COMPLETED_STATUS, ...extra])].filter(Boolean);
+  __dlog("statuses", { source: "default", statuses });
+  return statuses;
 }
 
-/**
- * Статусы, которые считаем завершёнными.
- * Для REST используется ТОЧНОЕ сравнение (eq): Choice-поле Status не поддерживает substringof
- * (ошибка 400 «Value does not fall within the expected range»).
- */
-const COMPLETED_STATUS_VALUES = [
-  "Завершена",
-  "Завершено",
-  "Завершены",
-  "Завершён",
-  "Завершен",
-  "Выполнено",
-  "Выполнена",
-  "Выполнены",
-  "Completed",
-];
+
+
+
 
 /**
- * REST-фильтры «завершённые» — от точного к самому простому.
- * `assignedOnly: true` у последнего варианта: фильтруем только по исполнителю,
- * а завершённость определяем на клиенте (isCompletedStatus) — так работает на любом списке.
+ * REST-фильтры «завершённые»: одно условие — Status eq «Завершена».
+ * Второй вариант (assignedOnly) — без Status вообще: «только мои» + определение
+ * завершённости на клиенте. Нужен крайним фолбэком, если сервер отвергает фильтр по Status.
  */
 function buildCompletedRestFilters({ assignedFilter, extraStatuses = [], assignedOnlyVariant = false }) {
-  const statuses = resolveCompletedStatuses(extraStatuses)
-    .map((sv) => `Status eq '${String(sv).replace(/'/g, "''")}'`)
-    .join(" or ");
+  const statuses = resolveCompletedStatuses(extraStatuses).map(
+    (sv) => `Status eq '${String(sv).replace(/'/g, "''")}'`
+  );
   const base = assignedFilter ? `(${assignedFilter}) and ` : "";
-  const filters = [
-    { filter: `${base}(PercentComplete eq 1 or ${statuses})`, name: "percent+status" },
-    { filter: `${base}PercentComplete eq 1`, name: "percent" },
-    { filter: `${base}(${statuses})`, name: "status" },
-  ];
-  if (assignedOnlyVariant) {
-    filters.push({
-      filter: assignedFilter ? `(${assignedFilter})` : "",
-      name: "assignedOnly+clientFilter",
-    });
+  const byStatus = statuses.length > 1 ? `(${statuses.join(" or ")})` : statuses.join(" or ");
+
+  const filters = [{ filter: `${base}${byStatus}`, name: "status" }];
+  if (assignedOnlyVariant && assignedFilter) {
+    filters.push({ filter: `(${assignedFilter})`, name: "assignedOnly+clientFilter" });
   }
   return filters.filter((f) => f.filter);
 }
