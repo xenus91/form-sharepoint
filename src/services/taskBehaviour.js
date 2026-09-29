@@ -96,6 +96,29 @@ export function clearTaskBehaviourCache() {
 export function getTaskBehaviourDebug() { return { size: cache?.size || 0, age_ms: cacheAt ? Date.now() - cacheAt : null, cached: !!cache }; }
 function norm(value) { return String(value || "").trim().toLowerCase(); }
 
+// ── «Мягкое» сравнение названий ──────────────────────────────────────────────────
+// В SharePoint имя типа контента и Title записи часто расходятся морфологией:
+//   ContentType.Name  = «Исправление проблемной ЕО»
+//   TaskBehaviour.Title = «Задача исправления проблемной ЕО»
+// Простое вхождение подстроки тут не работает («исправление» ≠ «исправления»),
+// поэтому сравниваем наборы основ слов.
+function stemTokens(value) {
+  const words = (norm(value).match(/[a-z\u0430-\u044f\u04510-9]+/gi) || []).filter((w) => w.length >= 2);
+  // грубая основа: обрезаем окончание у длинных слов
+  return new Set(words.map((w) => (w.length > 6 ? w.slice(0, w.length - 2) : w)));
+}
+/** true, если названия «почти одинаковые»: все основы одного входят в другое и разница не более одного слова. */
+function namesLookSame(a, b) {
+  const sa = stemTokens(a);
+  const sb = stemTokens(b);
+  if (sa.size < 2 || sb.size < 2) return false;
+  const [small, big] = sa.size <= sb.size ? [sa, sb] : [sb, sa];
+  if (big.size - small.size > 1) return false;
+  for (const token of small) if (!big.has(token)) return false;
+  return true;
+}
+const warnedPartial = new Set();
+
 // Записи с таким Title считаются «общими»: они применяются к любому типу контента,
 // у которого нет собственной записи в TaskBehaviour.
 const FALLBACK_TITLES = new Set(["*", "_default", "default"]);
@@ -106,7 +129,32 @@ export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
   // 1) точное совпадение ContentType.Name → TaskBehaviour.Title
   let record = records.find((item) => norm(item.title) === norm(contentTypeName));
   let matchedBy = "ContentType.Name → TaskBehaviour.Title";
-  // 2) общая запись («*» / «_default») — если своей у типа контента нет
+  // 2) частичное совпадение: названия входят друг в друга.
+  //    Пример: тип контента «Исправление проблемной ЕО», запись «Задача исправления проблемной ЕО».
+  //    Берём самую длинную подходящую запись (самую специфичную).
+  if (!record) {
+    const partial = records
+      .filter((item) => {
+        const title = norm(item.title);
+        if (!title || FALLBACK_TITLES.has(title)) return false;
+        return namesLookSame(title, contentTypeName);
+      })
+      .sort((a, b) => norm(b.title).length - norm(a.title).length);
+    if (partial.length) {
+      record = partial[0];
+      matchedBy = "ContentType.Name ⇄ TaskBehaviour.Title (частичное совпадение)";
+      const warnKey = `${norm(contentTypeName)}::${record.id}`;
+      if (!warnedPartial.has(warnKey)) {
+        warnedPartial.add(warnKey);
+        // Видно в консоли без ?dbg=1 — рекомендуем сделать названия одинаковыми.
+        console.warn(
+          `[TaskBehaviour] тип контента «${contentTypeName}» найден по частичному совпадению с записью «${record.title}». ` +
+          `Рекомендуется переименовать запись TaskBehaviour в точное имя типа контента: «${contentTypeName}».`
+        );
+      }
+    }
+  }
+  // 3) общая запись («*» / «_default») — если своей у типа контента нет
   if (!record) {
     record = records.find((item) => FALLBACK_TITLES.has(norm(item.title)));
     matchedBy = "TaskBehaviour fallback ('*' / '_default')";

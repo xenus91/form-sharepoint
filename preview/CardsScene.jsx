@@ -12,7 +12,9 @@ const CT_FIX = "0x0108003365C4474CAE8C42BCE396314E88E51F008DE7E6A51CADB449AD082B
 const CT_NAMES = {
   [CT_SEARCH]: "Результат поиска ЕО",
   [CT_FOUND]: "Результат задачи найденной ЕО",
-  [CT_FIX]: "Задача исправления проблемной ЕО",
+  // ⚠️ В проде тип контента называется именно так, а запись TaskBehaviour — «Задача исправления проблемной ЕО».
+  // Проверяем, что конфиг всё равно находитcя (частичное совпадение).
+  [CT_FIX]: "Исправление проблемной ЕО",
 };
 
 // ── TaskBehaviour (из sp:taskBehaviour:map:v2) ─────────────────────────────────
@@ -94,6 +96,16 @@ const mkTask = ({ id, itemId, ctId, title, body, status, choices, result = "", o
   overdue,
 });
 
+// Задача без настроек, но с собственными полями ТК/ЕО: шапка должна быть ПУСТОЙ (без legacy-подстановки).
+const unconfigured = mkTask({
+  id: 654, itemId: 24924, ctId: CT_SEARCH,
+  title: "Поиск ЕО", body: "Проверить ЕО 808117004021471765 для ТК 150 в зоне отгрузки", status: "Не начата",
+  choices: ["Найдена", "Не найдена"],
+});
+unconfigured.THU = "808117004021471765";
+unconfigured.SCNumber = "150";
+unconfigured.SCNumberText = "150";
+
 export const tasks = [
   // 1) «Результат поиска ЕО» — Behaviour НЕ настроен → кнопки просто завершают задачу
   mkTask({
@@ -107,6 +119,7 @@ export const tasks = [
     title: "Устранить проблемы:", body: BODY, status: "В процессе",
     choices: ["Исправлено", "Не исправлено"],
   }),
+  unconfigured,
   // 3) «Результат задачи найденной ЕО» — Behaviour НЕ настроен, один результат «Выполнено»
   mkTask({
     id: 653, itemId: 24923, ctId: CT_FOUND,
@@ -119,6 +132,7 @@ export const choicesByTask = {
   651: ["Найдена", "Не найдена"],
   652: ["Исправлено", "Не исправлено"],
   653: ["Выполнено"],
+  654: ["Найдена", "Не найдена"],
 };
 
 export const CT = { CT_SEARCH, CT_FOUND, CT_FIX };

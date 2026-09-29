@@ -3,12 +3,11 @@ import "./jsdom-setup.mjs";
 const { createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { ThemeProvider, createTheme } = await import("@mui/material");
-const { default: CardsScene, tasks, taskConfig } = await import("./CardsScene");
+const { default: CardsScene, tasks, taskConfig, choicesByTask } = await import("./CardsScene");
 const { resolveTaskRule } = await import("../src/services/taskBehaviour");
 const { resolveResultFlow } = await import("../src/features/tasks/resultFlow");
 
 const theme = createTheme({ shape: { borderRadius: 28 }, palette: { primary: { main: "#171c8f" } } });
-const choicesByTask = { 651: ["Найдена", "Не найдена"], 652: ["Исправлено", "Не исправлено"], 653: ["Выполнено"] };
 
 console.log("=== resolveResultFlow (логика TasksView.handleResultClick) ===");
 for (const t of tasks) {

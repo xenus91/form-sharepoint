@@ -207,6 +207,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // useEffect для дефолта удалён
   const [pendingCustomAction, setPendingCustomAction] = useState("");
   const [pendingAdditionalError, setPendingAdditionalError] = useState("");
+  // ⭐ Анимация, которой управляет TasksView (ветки location/confirm/complete).
+  //   Сама отрисовка живёт в карточке — сюда передаём { taskId, anim, config }.
+  const [pendingAnimation, setPendingAnimation] = useState(null);
   // PR2: hash-роут вынесен  // PR2: hash-роут вынесен в useHashElement (RelatedItems 1→1, CAML+OData, guards)
   const {
     elementIdParam, setElementIdParam,
@@ -397,7 +400,19 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       });
     }
 
+    // ⭐ Behaviour.anim: сначала проигрываем анимацию на карточке (1.6 с), затем продолжаем поток.
+    const anim = rule?.animation || null;
+    const runAfterAnimation = (fn) => {
+      if (!anim || anim === "none") { fn(); return; }
+      setPendingAnimation({ taskId: task.Id, anim, config: rule?.animationConfig || null });
+      window.setTimeout(() => {
+        setPendingAnimation(null);
+        fn();
+      }, 1600);
+    };
+
     if (flow.action === "location") {
+      runAfterAnimation(() => {
       setPendingTask(task);
       setPendingResult(resultValue);
       setLocationComment("");
@@ -415,18 +430,21 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       setPendingCustomAction("");
       setPendingAdditionalError("");
       setLocationDialogOpen(true);
+      });
       return;
     }
 
     if (flow.action === "confirm") {
-      setPendingTask(task);
-      setPendingResult(resultValue);
-      setConfirmNotFoundOpen(true);
+      runAfterAnimation(() => {
+        setPendingTask(task);
+        setPendingResult(resultValue);
+        setConfirmNotFoundOpen(true);
+      });
       return;
     }
 
-    // complete: без доп. действий
-    completeTask(task, resultValue, {}, "", []);
+    // complete: без доп. действий (анимация — если задана в Behaviour.anim)
+    runAfterAnimation(() => completeTask(task, resultValue, {}, "", []));
   }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
@@ -505,6 +523,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             ctResultMap={ctResultMap}
             updatingId={updatingId}
             updatingAction={updatingAction}
+            pendingAnimation={pendingAnimation}
             onResultClick={handleResultClick}
             onTakeInWork={handleTakeInWork}
             onComplete={completeTask}

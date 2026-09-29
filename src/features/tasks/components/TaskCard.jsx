@@ -12,7 +12,7 @@ import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../servic
 import { resolveBehaviour, resolveBehaviourCard } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
 import { parseRelatedRef, fetchRelatedFields } from "../../../tasks/relatedFields"; // ⭐ поля из связанного элемента (Behaviour.rf)
 import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
-import { formatDueLeft, formatDueDateFull, formatSolveTime, extractTKNumberFromTask, extractEONumberFromTask } from "../../../tasks/formatters";
+import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import AdditionalActionsField from "./AdditionalActionsField";
 import TaskConfirmNotFoundDialog from "./TaskConfirmNotFoundDialog";
@@ -81,7 +81,7 @@ function splitTitleBody(task) {
   return bodyText.length > title.length ? { title, body: bodyText.slice(title.length).trim() } : { title, body: "" };
 }
 
-const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig }) {
+const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig, pendingAnimation = null }) {
   // ⭐ v8: defaults-принцип. getUiConfig объявлен НИЖЕ getBehaviourRuleForChoice/getButtonSx
   // (зависимости ниже в файле). Реорганизация — поведение из TaskBehaviour,
   // никаких legacy-фолбэков на TaskResultDefinitions/TaskPromptFields.
@@ -170,6 +170,21 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     };
   }, [relatedFieldDefs, relatedRef]);
 
+  // Диагностика (?dbg=1): поля настроены, но значений нет — причина видна в консоли.
+  React.useEffect(() => {
+    if (!(__forceTaskDbg || __DBG_ENABLED__)) return;
+    if (relatedFieldDefs.length === 0) return;
+    if (Array.isArray(relatedValues) && relatedValues.some((r) => r && r.value)) return;
+    __dlogAlways("[DBG:TaskCard:relatedFields:empty]", {
+      taskId: task?.Id,
+      fields: relatedFieldDefs.map((f) => f.internalName),
+      hasRelatedItems: !!task?.RelatedItems,
+      relatedItems: String(task?.RelatedItems || "").slice(0, 200),
+      relatedRef,
+      relatedValues,
+    });
+  }, [relatedFieldDefs, relatedValues, relatedRef, task?.Id, task?.RelatedItems]);
+
   const relatedRows = React.useMemo(() => {
     if (!Array.isArray(relatedValues)) return [];
     const zoneByField = new Map(relatedFieldDefs.map((f) => [f.internalName, f.zone || "header"]));
@@ -195,7 +210,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     if (anim === "celebrate") {
       setCelebrateConfig(rule?.animationConfig || null);
       setShowCelebrate(true);
-    } else if (anim === "sherlock") setShowSherlock(true);
+    } else if (anim === "sherlock") {
+      // Текст/эмодзи берём ТОЛЬКО из Behaviour.anim ({"type":"sherlock","title":...,"text":...,"emoji":...}).
+      setSherlockConfig(rule?.animationConfig || null);
+      setShowSherlock(true);
+    }
     if (anim === "none" || !anim) {
       submitFn();
     } else {
@@ -240,10 +259,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // Никаких legacy-фолбэков.
 
   const dueInfo = formatDueLeft(task.DueDate);
-  const tkRaw = extractTKNumberFromTask(task);
-  const tk = tkRaw !== "Без ТК" ? tkRaw.replace(/^TK/, "ТК ") : "";
-  const eo = extractEONumberFromTask(task);
-  const headerTitle = [tk, eo ? `ЕО ${eo}` : ""].filter(Boolean).join(" • ") || task.Title || "Без текста";
+  // Заголовок-фолбэк «ТК … • ЕО …» убран: шапка карточки формируется ТОЛЬКО из Behaviour.rf.
+  // Нет настроенных полей (или они не загрузились) — шапка пустая, без legacy-подстановок.
   const { title: displayTitle, body: displayBody } = splitTitleBody(task);
   const isUpdating = updatingId === task.Id;
   const isTaking = isUpdating && isNotStartedStatus(task.Status);
@@ -379,6 +396,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const [additionalError, setAdditionalError] = React.useState("");
   const [showCelebrate, setShowCelebrate] = React.useState(false);
   const [celebrateConfig, setCelebrateConfig] = React.useState(null);
+  const [sherlockConfig, setSherlockConfig] = React.useState(null);
   const [showSherlock, setShowSherlock] = React.useState(false);
   // Reset inline modes when task status changes (e.g., after take)
   React.useEffect(() => {
@@ -414,7 +432,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [showCelebrate]);
   React.useEffect(() => {
     if (showSherlock) {
-      const t = setTimeout(() => setShowSherlock(false), 1600);
+      const t = setTimeout(() => { setShowSherlock(false); setSherlockConfig(null); }, 1600);
       return () => clearTimeout(t);
     }
   }, [showSherlock]);
@@ -500,7 +518,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
           </Box>
         );
       })()}
-      {showCelebrate && (
+      {(showCelebrate || pendingAnimation?.anim === "celebrate") && (() => {
+        const cfgExternal = pendingAnimation?.anim === "celebrate" ? (pendingAnimation.config || null) : null;
+        const cfg = cfgExternal || celebrateConfig || null;
+        return (
         <Box
           sx={{
             position: "absolute",
@@ -541,7 +562,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               animation: `${celebratePop} 1.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards`,
             }}
           >
-            {celebrateConfig?.emoji || "🎉"}
+            {cfg?.emoji || "🎉"}
           </Box>
           <Typography
             sx={{
@@ -555,7 +576,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               animationDelay: "0.08s",
             }}
           >
-            {celebrateConfig?.title || "Задача исправлена"}
+            {cfg?.title || "Задача исправлена"}
           </Typography>
           <Typography
             sx={{
@@ -567,7 +588,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               opacity: 0.9,
             }}
           >
-            {celebrateConfig?.text || "Результат сохранён"}
+            {cfg?.text || "Результат сохранён"}
           </Typography>
           {/* floating mini emojis - centered cluster */}
           {["✨", "🌟", "✅", "🎈"].map((em, i) => (
@@ -586,8 +607,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
             </Box>
           ))}
         </Box>
-      )}
-      {showSherlock && (
+        );
+      })()}
+      {(showSherlock || pendingAnimation?.anim === "sherlock") && (() => {
+        const cfgExternal = pendingAnimation?.anim === "sherlock" ? (pendingAnimation.config || null) : null;
+        const cfg = cfgExternal || sherlockConfig || null;
+        return (
         <Box
           sx={{
             position: "absolute",
@@ -628,7 +653,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               animation: `${celebratePop} 1.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards`,
             }}
           >
-            🕵️
+            {cfg?.emoji || "🕵️"}
           </Box>
           <Typography
             sx={{
@@ -640,9 +665,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               textAlign: "center",
               animation: `${celebratePop} 1.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards`,
               animationDelay: "0.08s",
+              // текст показываем только если он задан в Behaviour.anim
+              ...(cfg?.title ? {} : { display: "none" }),
             }}
           >
-            ЕО не найдена
+            {cfg?.title || ""}
           </Typography>
           <Typography
             sx={{
@@ -652,9 +679,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               mt: 0.25,
               textAlign: "center",
               opacity: 0.9,
+              // текст показываем только если он задан в Behaviour.anim
+              ...(cfg?.text ? {} : { display: "none" }),
             }}
           >
-            Создаю запрос на ООБ...
+            {cfg?.text || ""}
           </Typography>
           {/* floating mini emojis - detective theme centered cluster */}
           {["🔍", "📋", "❓", "🗂️"].map((em, i) => (
@@ -673,7 +702,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
             </Box>
           ))}
         </Box>
-      )}
+        );
+      })()}
       {/* ── Шапка: поля из Behaviour.rf (ЕО, получатель, ...) + срок / время решения ── */}
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1.25 }}>
         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ flex: 1, minWidth: 0 }}>
@@ -704,14 +734,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
             [0, 1].map((i) => (
               <Box key={i} sx={{ width: 96, height: 34, borderRadius: "10px", bgcolor: "rgba(23,28,143,0.05)", border: "1px solid rgba(23,28,143,0.08)" }} />
             ))
-          ) : (
-            <Typography
-              sx={{ fontWeight: 800, color: "#171c8f", fontSize: "0.85rem", lineHeight: 1.35, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-              title={headerTitle}
-            >
-              {headerTitle}
-            </Typography>
-          )}
+          ) : null}
         </Stack>
         {(() => {
           if (isCompleted) {
@@ -1137,6 +1160,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       {additionalError && additionalActions.length === 0 && (
                         <Typography variant="caption" sx={{ color: "#c62828", fontWeight: 600, display: "block", mb: 1 }}>{additionalError}</Typography>
                       )}
+                      {/* Кнопки сохранить/отмена нужны только если есть что заполнять */}
+                      {(promptFields.length > 0 || showAAInline) && (
                       <Button
                         variant="contained"
                         color="success"
@@ -1172,6 +1197,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       >
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : `Сохранить — ${inlineChoice}`}
                       </Button>
+                      )}
+                      {(promptFields.length > 0 || showAAInline) && (
                       <Button
                         variant="text"
                         onClick={() => {
@@ -1187,6 +1214,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       >
                         Отмена
                       </Button>
+                      )}
                     </Box>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
@@ -1234,7 +1262,13 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         color={cfg.color}
                         size="large"
                         disabled={isUpdating}
-                        onClick={() => setInlineChoice(notFoundChoice)}
+                        onClick={() => {
+                          const rule = getBehaviourRuleForChoice(notFoundChoice);
+                          const needsForm = (rule?.promptFields?.length || 0) > 0 || rule?.showAdditionalActions === true;
+                          setInlineChoice(notFoundChoice);
+                          // Если вводить нечего — сразу диалог подтверждения (без промежуточной кнопки «Сохранить»)
+                          if (!needsForm) setInlineConfirmPending({ req: "Нет", acts: [] });
+                        }}
                         sx={{
                           borderRadius: "12px",
                           fontWeight: 800,

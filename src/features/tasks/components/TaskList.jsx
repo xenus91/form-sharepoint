@@ -33,6 +33,7 @@ const TaskList = React.memo(function TaskList({
   fieldDefaultActions = null,
   updatingId = null,
   updatingAction = null,
+  pendingAnimation = null,
   onResultClick,
   onTakeInWork,
   onComplete,
@@ -118,8 +119,8 @@ const TaskList = React.memo(function TaskList({
                             choices={choices}
                             resultFieldsMeta={resultFieldsMeta}
                             ctResultMap={ctResultMap}
-                            updatingId={updatingId}
-                            updatingAction={updatingAction}
+                            updatingId={updatingId}                            updatingAction={updatingAction}
+                            pendingAnimation={pendingAnimation}
                             onResultClick={onResultClick}
                             onTakeInWork={onTakeInWork}
                             onComplete={onComplete}
@@ -147,8 +148,8 @@ const TaskList = React.memo(function TaskList({
                       choices={choices}
                       resultFieldsMeta={resultFieldsMeta}
                       ctResultMap={ctResultMap}
-                      updatingId={updatingId}
-                      updatingAction={updatingAction}
+                      updatingId={updatingId}                      updatingAction={updatingAction}
+                      pendingAnimation={pendingAnimation}
                       onResultClick={onResultClick}
                       onTakeInWork={onTakeInWork}
                       onComplete={onComplete}
@@ -229,8 +230,8 @@ const TaskList = React.memo(function TaskList({
                         choices={choices}
                         resultFieldsMeta={resultFieldsMeta}
                         ctResultMap={ctResultMap}
-                        updatingId={updatingId}
-                        updatingAction={updatingAction}
+                        updatingId={updatingId}                        updatingAction={updatingAction}
+                        pendingAnimation={pendingAnimation}
                         onResultClick={onResultClick}
                         onTakeInWork={onTakeInWork}
                         onComplete={onComplete}
