@@ -157,8 +157,9 @@ npx vite build --config preview/vite.config.js --ssr completed-check.mjs --outDi
 node preview/.ssrout/completed-check.mjs
 ```
 
-Мок (`preview/mockApi.js`) эмулирует оба прод-сбоя: 500 при `RelatedItems` в `ViewFields`
-и 400 на `substringof` — проверка должна показать самовосстановление и загрузку завершённых.
+Мок (`preview/mockApi.js`) эмулирует оба прод-сбоя: `RenderListDataAsStream` **всегда**
+возвращает 500, а REST — 400 на `substringof`. Проверка показывает, что завершённые
+загружаются по REST, а задача «В процессе выполнения» отсеивается.
 
 ## CAML: одно условие — `Status = Завершена`
 
