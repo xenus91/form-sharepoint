@@ -275,7 +275,21 @@ await window.__taskBehaviourForceRefresh();
 | `bg` | `background` | строка ≤ 500 | любой CSS (`#fff`, `linear-gradient(...)`, `rgba(...)`) | Фон кнопки. Автоматически добавляется hover `brightness(1.1)` |
 | `c` | `color` | строка ≤ 500 | любой CSS-цвет | Цвет текста |
 | `v` | `variant` | строка | `ctd` = `contained`, `out` = `outlined`, `tx` = `text` | Вид кнопки MUI |
-| `i` | `icon` | строка ≤ 500 | имя иконки MUI | Зарезервировано |
+| `i` | `icon` | строка ≤ 500 | имя иконки из списка ниже или emoji (1–4 символа) | Иконка слева от текста |
+
+**Иконки (`i`)** — имя без регистра из списка (иначе emoji-строка до 4 символов, иначе иконки не будет):
+
+```text
+add · arrowforward · cancel · check / checkcircle · close · delete · done · edit
+error / erroroutline · help · location / locationon · play / playarrow
+save · search · searchoff · send · warning / warningamber
+```
+
+Пример: `"i": "checkcircle"` или `"i": "🔍"`.
+
+**Плоский цвет тоже можно.** `bg` принимает и градиент, и обычный цвет
+(`"#2e7d32"`, `rgb(...)`, `var(--...)`) — градиент уходит в `background-image`,
+плоский цвет — в `background-color`.
 
 - Принимаются и короткие (`bg`/`c`/`v`/`i`), и полные (`background`/`color`/`variant`/`icon`) имена.
 - Неизвестный `v` — запись игнорируется целиком (применится `_default` или стандартный вид MUI).
@@ -297,6 +311,9 @@ await window.__taskBehaviourForceRefresh();
 | `confirm` | Кнопка подтверждения в диалоге (`ok`) |
 | `cancel` | Кнопка отмены в диалоге (`no`) |
 | `_default` | Фолбэк для всех перечисленных |
+
+Работают те же ключи: `bg`, `c`, `v` (теперь и вариант — он передаётся в проп `variant`,
+а не в `sx`) и `i` (иконка).
 
 ```jsonc
 {
@@ -409,8 +426,17 @@ await window.__taskBehaviourForceRefresh();
 // StylingResultButton
 {
   "_default":   { "bg": "linear-gradient(180deg, #5a67d8 0%, #434190 100%)", "c": "#ffffff", "v": "ctd" },
-  "Найдена":    { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd" },
-  "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd" }
+  "Найдена":    { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "checkcircle" },
+  "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "searchoff" }
+}
+// StylingActions
+{
+  "_default":     { "v": "ctd" },
+  "takeInWork":   { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd", "i": "playarrow" },
+  "confirm":      { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "send" },
+  "cancel":       { "c": "#5f6368", "v": "tx", "i": "close" },
+  "promptSubmit": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "save" },
+  "promptCancel": { "c": "#5f6368", "v": "tx", "i": "close" }
 }
 ```
 

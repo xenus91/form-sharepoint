@@ -14,6 +14,8 @@ import { parseRelatedRef, fetchRelatedFields } from "../../../tasks/relatedField
 import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
+import { resolveStylingIcon, isGradient } from "../../../services/stylingConfig";
+import { renderStylingIcon } from "../../../services/stylingIcons";
 import AdditionalActionsField from "./AdditionalActionsField";
 import TaskConfirmNotFoundDialog from "./TaskConfirmNotFoundDialog";
 import { ADDITIONAL_ACTIONS_STANDARD } from "../../../tasks/config";
@@ -166,11 +168,47 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     return resolveStylingForChoice(choiceVal, tb.styling.value);
   }, [getTaskBehaviourConfig]);
 
-  const getActionSx = React.useCallback((actionName) => {
-    const tb = getTaskBehaviourConfig();
-    if (!tb?.stylingActions?.ok) return null;
-    return resolveStylingForChoice(actionName, tb.stylingActions.value);
-  }, [getTaskBehaviourConfig]);
+  // variant — это проп MUI <Button>, а не CSS: в sx его класть нельзя, поэтому выносим отдельно.
+  const getActionStyle = React.useCallback(
+    (actionName) => {
+      const tb = getTaskBehaviourConfig();
+      if (!tb?.stylingActions?.ok) return null;
+      const sx = resolveStylingForChoice(actionName, tb.stylingActions.value);
+      if (!sx) return null;
+      const { variant, ...rest } = sx;
+      return { sx: rest, variant: variant || null };
+    },
+    [getTaskBehaviourConfig]
+  );
+
+  const getActionSx = React.useCallback(
+    (actionName) => getActionStyle(actionName)?.sx || null,
+    [getActionStyle]
+  );
+
+  const getActionVariant = React.useCallback(
+    (actionName) => getActionStyle(actionName)?.variant || null,
+    [getActionStyle]
+  );
+
+  // ⭐ Иконки из StylingResultButton / StylingActions (ключ "i").
+  const getButtonIcon = React.useCallback(
+    (choiceVal) => {
+      const tb = getTaskBehaviourConfig();
+      if (!tb?.styling?.ok) return null;
+      return renderStylingIcon(resolveStylingIcon(choiceVal, tb.styling.value), React.createElement);
+    },
+    [getTaskBehaviourConfig]
+  );
+
+  const getActionIcon = React.useCallback(
+    (actionName) => {
+      const tb = getTaskBehaviourConfig();
+      if (!tb?.stylingActions?.ok) return null;
+      return renderStylingIcon(resolveStylingIcon(actionName, tb.stylingActions.value), React.createElement);
+    },
+    [getTaskBehaviourConfig]
+  );
 
   // ⭐ Карточные поля из связанного элемента: Behaviour.rf (в "_default"/"*"/"_card").
   // Формат: [{ internalName, title, sortOrder }], например [{ f: "THU" }, { f: "Recipient/SCNumberText" }].
@@ -351,14 +389,20 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   const getUiConfig = React.useCallback((choiceVal) => {
     const tbSx = getButtonSx(choiceVal);
     if (tbSx) {
+      // bg может быть и градиентом, и плоским цветом: плоский цвет нельзя класть в background-image
+      const bgRaw = tbSx.bg || null;
+      const gradient = bgRaw && isGradient(bgRaw) ? bgRaw : null;
       return {
         label: undefined,
         variant: tbSx.variant || "contained",
         color: "primary",
+        textColor: tbSx.color || null,
+        bgColor: bgRaw && !gradient ? bgRaw : null,
+        icon: getButtonIcon(choiceVal),
         requiresLocation: false,
         requiresAdditionalActions: false,
         confirm: false,
-        gradient: tbSx.bg || null,
+        gradient,
         _key: "_behaviour",
         _source: "task-behaviour",
       };
@@ -1051,6 +1095,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           // ⭐ StylingActions.takeInWork (если задан)
                       ...(getActionSx("takeInWork") || {}),
                       }}
+                    variant={getActionVariant("takeInWork") || "contained"}
+                  startIcon={getActionIcon("takeInWork") || undefined}
                     >
                       {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "Взять в работу"}
                     </Button>
@@ -1316,6 +1362,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #a5d6a7 0%, #66bb6a 100%)", color: "#fff", opacity: 1 },
                           ...(getActionSx("promptSubmit") || {}),
                         }}
+                        variant={getActionVariant("promptSubmit") || "contained"}
+                        startIcon={getActionIcon("promptSubmit") || undefined}
                       >
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : `Сохранить — ${inlineChoice}`}
                       </Button>
@@ -1332,6 +1380,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setAdditionalError("");
                         }}
                         disabled={isUpdating}
+                        variant={getActionVariant("promptCancel") || "text"}
+                        startIcon={getActionIcon("promptCancel") || undefined}
                         sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32, ...(getActionSx("promptCancel") || {}) }}
                       >
                         Отмена
@@ -1352,6 +1402,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     <TaskConfirmNotFoundDialog
                       confirmSx={getActionSx("confirm") || null}
                       cancelSx={getActionSx("cancel") || null}
+                      confirmIcon={getActionIcon("confirm") || null}
+                      cancelIcon={getActionIcon("cancel") || null}
+                      confirmVariant={getActionVariant("confirm") || "contained"}
+                      cancelVariant={getActionVariant("cancel") || null}
                       open={!!inlineConfirmPending}
                       onClose={() => setInlineConfirmPending(null)}
                       pendingTask={task}
@@ -1382,6 +1436,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       <Button
                         variant={tbSx?.variant || cfg.variant}
                         color={cfg.color}
+                        startIcon={cfg.icon || undefined}
                         size="large"
                         disabled={isUpdating}
                         onClick={() => {
@@ -1400,7 +1455,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           height: 48,
                           fontSize: "1rem",
                           ...(tbSx || {}),
-                          ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: cfg.color === "error" ? "#e53935" : "transparent" } : {}),
+                          ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: cfg.textColor || "#fff", borderColor: "transparent" } : {}),
+                          ...(cfg.bgColor ? { backgroundImage: "none", backgroundColor: cfg.bgColor, color: cfg.textColor || "#fff", borderColor: "transparent" } : {}),
                         }}
                       >
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : notFoundChoice}
@@ -1414,6 +1470,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       <Button
                         variant={tbSx?.variant || cfg.variant}
                         color={cfg.color}
+                        startIcon={cfg.icon || undefined}
                         size="large"
                         disabled={isUpdating}
                         onClick={() => {
@@ -1449,7 +1506,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           height: 48,
                           fontSize: "1rem",
                           ...(tbSx || {}),
-                          ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: "transparent" } : { color: "#fff" }),
+                          ...(cfg.gradient ? { backgroundImage: cfg.gradient, color: cfg.textColor || "#fff", borderColor: "transparent" } : {}),
+                          ...(cfg.bgColor ? { backgroundImage: "none", backgroundColor: cfg.bgColor, color: cfg.textColor || "#fff", borderColor: "transparent" } : {}),
+                          ...(!cfg.gradient && !cfg.bgColor ? { color: cfg.textColor || "#fff" } : {}),
                         }}
                       >
                         {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : foundChoice}
@@ -1466,6 +1525,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         key={choice}
                         variant={tbSx?.variant || cfg.variant}
                         color={cfg.color}
+                        startIcon={cfg.icon || undefined}
                         size="large"
                         disabled={isUpdating}
                         onClick={() => onResultClick(task, choice)}
@@ -1478,7 +1538,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           height: 48,
                           fontSize: "1rem",
                           ...(tbSx || {}),
-                          ...(isContained && cfg.gradient ? { backgroundImage: cfg.gradient, color: "#fff", borderColor: "transparent", "&:hover": { backgroundImage: cfg.gradient, filter: "brightness(0.92)" } } : {}),
+                          ...(isContained && cfg.gradient ? { backgroundImage: cfg.gradient, color: cfg.textColor || "#fff", borderColor: "transparent", "&:hover": { backgroundImage: cfg.gradient, filter: "brightness(0.92)" } } : {}),
+                          ...(isContained && cfg.bgColor ? { backgroundImage: "none", backgroundColor: cfg.bgColor, color: cfg.textColor || "#fff", borderColor: "transparent", "&:hover": { backgroundColor: cfg.bgColor, filter: "brightness(0.92)" } } : {}),
                           ...(!isContained ? { borderWidth: 1.5 } : {}),
                         }}
                       >
@@ -1519,6 +1580,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       "&:hover": { backgroundImage: "linear-gradient(180deg, #8D95FF 0%, #6B7CFF 100%)" },
                     ...(getActionSx("takeInWork") || {}),
                     }}
+                  variant={getActionVariant("takeInWork") || "contained"}
+                  startIcon={getActionIcon("takeInWork") || undefined}
                   >
                     {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "Взять в работу"}
                   </Button>

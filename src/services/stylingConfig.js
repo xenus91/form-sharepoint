@@ -99,10 +99,30 @@ export function resolveStylingForChoice(choice, parsedStyling) {
 
   const sx = {};
   if (entry.bg) {
-    sx.background = entry.bg; // CSS shorthand: background-image + background-color reset
+    // CSS shorthand `background` одинаково работает и для градиента, и для плоского цвета.
+    // Важно только НЕ класть плоский цвет в background-image — см. isGradient() ниже
+    // (getUiConfig в TaskCard использует его, чтобы развести эти случаи).
+    sx.background = entry.bg;
     sx["&:hover"] = { ...(sx["&:hover"] || {}), filter: "brightness(1.1)" };
   }
   if (entry.color) sx.color = entry.color;
   if (entry.variant) sx.variant = entry.variant;
   return Object.keys(sx).length ? sx : null;
+}
+
+/** Градиент/картинка (их можно класть в background-image) или плоский цвет. */
+export function isGradient(value) {
+  const v = String(value || "").trim().toLowerCase();
+  return v.includes("gradient") || v.includes("url(") || v.includes("image-set");
+}
+
+/**
+ * Иконка для choice из StylingResultButton / StylingActions (ключ "i").
+ * @returns {string|null} имя иконки / emoji / null
+ */
+export function resolveStylingIcon(choice, parsedStyling) {
+  if (!parsedStyling || typeof parsedStyling !== "object") return null;
+  const norm = normKey(choice);
+  const entry = parsedStyling[norm] || parsedStyling._default;
+  return entry?.icon || null;
 }

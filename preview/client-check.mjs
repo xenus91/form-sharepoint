@@ -16,6 +16,9 @@ cards.forEach((c, i) => {
   console.log(`--- Карточка ${i + 1} ---`);
   console.log(c.textContent.replace(/\s+/g, " ").trim());
 });
+console.log("=== Кнопки с иконками ===");
+const allBtns = [...document.querySelectorAll("#root button")];
+console.log("Всего кнопок:", allBtns.length, "с иконкой:", allBtns.filter((b) => b.querySelector("svg")).length);
 console.log("=== Кнопки ===");
 cards.forEach((c, i) => {
   const btns = [...c.querySelectorAll("button")].map((b) => b.textContent.trim()).filter(Boolean);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseStyling, resolveStylingForChoice } from "../stylingConfig";
+import { parseStyling, resolveStylingForChoice, isGradient, resolveStylingIcon } from "../stylingConfig";
 
 describe("stylingConfig", () => {
   describe("parseStyling", () => {
@@ -73,6 +73,44 @@ describe("stylingConfig", () => {
       const r = parseStyling('{"A":"string","B":{"bg":"#fff"}}');
       expect(r.value.a).toBeUndefined();
       expect(r.value.b.bg).toBe("#fff");
+    });
+  });
+
+  describe("isGradient", () => {
+    it("градиент и картинку нельзя класть в background-image? — наоборот: их можно", () => {
+      expect(isGradient("linear-gradient(180deg,#43a047,#2e7d32)")).toBe(true);
+      expect(isGradient("radial-gradient(circle, #fff, #000)")).toBe(true);
+      expect(isGradient('url("/img/bg.png")')).toBe(true);
+    });
+
+    it("плоский цвет — не градиент (его нельзя подставлять в background-image)", () => {
+      expect(isGradient("#43a047")).toBe(false);
+      expect(isGradient("rgb(67,160,71)")).toBe(false);
+      expect(isGradient("var(--brand)")).toBe(false);
+    });
+  });
+
+  describe("resolveStylingIcon", () => {
+    const parsed = parseStyling(
+      JSON.stringify({
+        _default: { i: "help" },
+        "Найдена": { i: "checkcircle" },
+        "Не найдена": { i: "searchoff" },
+      })
+    ).value;
+
+    it("иконка по точному choice", () => {
+      expect(resolveStylingIcon("Найдена", parsed)).toBe("checkcircle");
+      expect(resolveStylingIcon("Не найдена", parsed)).toBe("searchoff");
+    });
+
+    it("фолбэк на _default", () => {
+      expect(resolveStylingIcon("Что-то ещё", parsed)).toBe("help");
+    });
+
+    it("null, если иконок нет", () => {
+      expect(resolveStylingIcon("Найдена", parseStyling(JSON.stringify({ "Найдена": { bg: "#fff" } })).value)).toBeNull();
+      expect(resolveStylingIcon("Найдена", null)).toBeNull();
     });
   });
 

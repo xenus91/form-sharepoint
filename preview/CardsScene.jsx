@@ -37,17 +37,17 @@ const BEHAVIOUR_FIX = `{
 
 const STYLING_FIX = `{
   "_default": { "bg": "linear-gradient(180deg, #5a67d8 0%, #434190 100%)", "c": "#ffffff", "v": "ctd" },
-  "Исправлено": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd" },
-  "Не исправлено": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd" }
+  "Исправлено": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "checkcircle" },
+  "Не исправлено": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "cancel" }
 }`;
 
 const STYLING_ACTIONS_FIX = `{
   "_default": { "v": "ctd" },
-  "takeInWork": { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd" },
-  "confirm": { "bg": "#2e7d32", "c": "#ffffff", "v": "ctd" },
-  "cancel": { "bg": "#ffffff", "c": "#5f6368", "v": "out" },
-  "promptSubmit": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd" },
-  "promptCancel": { "bg": "#ffffff", "c": "#5f6368", "v": "out" }
+  "takeInWork": { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd", "i": "playarrow" },
+  "confirm": { "bg": "#2e7d32", "c": "#ffffff", "v": "ctd", "i": "done" },
+  "cancel": { "bg": "#ffffff", "c": "#5f6368", "v": "out", "i": "close" },
+  "promptSubmit": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "save" },
+  "promptCancel": { "bg": "#ffffff", "c": "#5f6368", "v": "out", "i": "close" }
 }`;
 
 const behaviourRecord = {
