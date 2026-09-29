@@ -320,6 +320,20 @@ save · search · searchoff · send · warning / warningamber
 
 Пример: `"i": "checkcircle"` или `"i": "🔍"`.
 
+**Иконок нет нигде — по умолчанию.** `i` включается только если вы его написали:
+нет ключа `i` — нет и иконки. Если иконки не нужны вообще, добавьте на верхний уровень
+`StylingResultButton` / `StylingActions`:
+
+```jsonc
+{
+  "i": false,          // ← выключатель иконок для всего поля (даже если в записи остался "i")
+  "_default": { "v": "ctd" },
+  "Найдена": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd" }
+}
+```
+
+То же самое: `"icons": false` или `"i": "none"`. Отдельно в записи: `"i": "none"`.
+
 **Плоский цвет тоже можно.** `bg` принимает и градиент, и обычный цвет
 (`"#2e7d32"`, `rgb(...)`, `var(--...)`) — градиент уходит в `background-image`,
 плоский цвет — в `background-color`.
@@ -346,7 +360,8 @@ save · search · searchoff · send · warning / warningamber
 | `_default` | Фолбэк для всех перечисленных |
 
 Работают те же ключи: `bg`, `c`, `v` (теперь и вариант — он передаётся в проп `variant`,
-а не в `sx`) и `i` (иконка).
+а не в `sx`) и `i` (иконка, по умолчанию её нет; глобально выключается через `"i": false`
+на верхнем уровне).
 
 ```jsonc
 {
@@ -458,18 +473,20 @@ save · search · searchoff · send · warning / warningamber
 }
 // StylingResultButton
 {
+  "i": false,
   "_default":   { "bg": "linear-gradient(180deg, #5a67d8 0%, #434190 100%)", "c": "#ffffff", "v": "ctd" },
-  "Найдена":    { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "checkcircle" },
-  "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "searchoff" }
+  "Найдена":    { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd" },
+  "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd" }
 }
 // StylingActions
 {
+  "i": false,
   "_default":     { "v": "ctd" },
-  "takeInWork":   { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd", "i": "playarrow" },
-  "confirm":      { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "send" },
-  "cancel":       { "c": "#5f6368", "v": "tx", "i": "close" },
-  "promptSubmit": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "save" },
-  "promptCancel": { "c": "#5f6368", "v": "tx", "i": "close" }
+  "takeInWork":   { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd" },
+  "confirm":      { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd" },
+  "cancel":       { "c": "#5f6368", "v": "tx" },
+  "promptSubmit": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd" },
+  "promptCancel": { "c": "#5f6368", "v": "tx" }
 }
 ```
 

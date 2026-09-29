@@ -69,20 +69,22 @@ const BEHAVIOUR_SEARCH = `{
 }`;
 
 const STYLING_SEARCH = `{
+  "i": false,
   "_default":   { "bg": "linear-gradient(180deg, #5a67d8 0%, #434190 100%)", "c": "#ffffff", "v": "ctd" },
-  "Найдена":    { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "checkcircle" },
-  "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "searchoff" }
+  "Найдена":    { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd" },
+  "Не найдена": { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd" }
 }`;
 
 // ⭐ StylingActions пользователя: confirm — КРАСНЫЙ (send), cancel — серый текст (close),
 // promptSubmit/promptCancel — для формы ввода полей (зелёный save / серый close).
 const STYLING_ACTIONS_SEARCH = `{
+  "i": false,
   "_default":     { "v": "ctd" },
-  "takeInWork":   { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd", "i": "playarrow" },
-  "confirm":      { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd", "i": "send" },
-  "cancel":       { "c": "#5f6368", "v": "tx", "i": "close" },
-  "promptSubmit": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd", "i": "save" },
-  "promptCancel": { "c": "#5f6368", "v": "tx", "i": "close" }
+  "takeInWork":   { "bg": "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", "c": "#ffffff", "v": "ctd" },
+  "confirm":      { "bg": "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", "c": "#ffffff", "v": "ctd" },
+  "cancel":       { "c": "#5f6368", "v": "tx" },
+  "promptSubmit": { "bg": "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", "c": "#ffffff", "v": "ctd" },
+  "promptCancel": { "c": "#5f6368", "v": "tx" }
 }`;
 
 const behaviourRecordSearch = {

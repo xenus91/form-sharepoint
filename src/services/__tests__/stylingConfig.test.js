@@ -155,4 +155,26 @@ describe("stylingConfig", () => {
       expect(sx["&:hover"].filter).toBe("brightness(1.1)");
     });
   });
+
+  it('"i": false на верхнем уровне выключает иконки везде', () => {
+    const text = JSON.stringify({ i: false, _default: { v: "ctd" }, "Найдена": { bg: "#2e7d32", i: "checkcircle" } });
+    const parsed = parseStyling(text);
+    expect(parsed.ok).toBe(true);
+    expect(resolveStylingIcon("Найдена", parsed.value)).toBe(null);
+    expect(resolveStylingIcon("Не найдена", parsed.value)).toBe(null);
+    // стили при этом продолжают работать
+    expect(resolveStylingForChoice("Найдена", parsed.value)).toMatchObject({ background: "#2e7d32" });
+  });
+
+  it('"icons": false — то же самое', () => {
+    const parsed = parseStyling(JSON.stringify({ icons: false, "Найдена": { i: "checkcircle" } }));
+    expect(resolveStylingIcon("Найдена", parsed.value)).toBe(null);
+  });
+
+  it('"i": "none" в записи = без иконки', () => {
+    const parsed = parseStyling(JSON.stringify({ "Найдена": { bg: "#2e7d32", i: "none" } }));
+    expect(resolveStylingIcon("Найдена", parsed.value)).toBe(null);
+    expect(resolveStylingForChoice("Найдена", parsed.value)).toMatchObject({ background: "#2e7d32" });
+  });
+
 });

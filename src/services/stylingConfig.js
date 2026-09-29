@@ -21,6 +21,15 @@ function buildStyling(raw) {
     return { ok: false, value: {}, error: "StylingResultButton: root must be a JSON object" };
   }
   const out = {};
+
+  // ⭐ Глобальный выключатель иконок: { "i": false, ... } (или "icons": false) на верхнем уровне.
+  //    Удобно, когда иконки не нужны вообще: даже если в какой-то записи остался "i",
+  //    он не будет нарисован.
+  const rootSwitch = raw.i !== undefined ? raw.i : raw.icons;
+  if (rootSwitch === false || normKey(rootSwitch) === "none" || normKey(rootSwitch) === "off") {
+    out.__iconsOff = true;
+  }
+
   for (const [rawKey, rawVal] of Object.entries(raw)) {
     const key = normKey(rawKey);
     if (!key) continue;
@@ -48,7 +57,8 @@ function buildStyling(raw) {
       else if (v === "out" || v === "outlined") entry.variant = "outlined";
       else if (v === "tx" || v === "text") entry.variant = "text";
     }
-    if (typeof icon === "string" && icon.length <= MAX_STR) entry.icon = icon;
+    // "i": "none" / "" — то же, что отсутствие иконки
+    if (typeof icon === "string" && icon.length <= MAX_STR && normKey(icon) !== "none" && normKey(icon) !== "") entry.icon = icon;
     if (Object.keys(entry).length) out[key] = entry;
   }
   return { ok: true, value: out };
@@ -122,6 +132,7 @@ export function isGradient(value) {
  */
 export function resolveStylingIcon(choice, parsedStyling) {
   if (!parsedStyling || typeof parsedStyling !== "object") return null;
+  if (parsedStyling.__iconsOff === true) return null; // глобальный выключатель "i": false
   const norm = normKey(choice);
   const entry = parsedStyling[norm] || parsedStyling._default;
   return entry?.icon || null;
