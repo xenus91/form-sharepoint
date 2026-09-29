@@ -23,7 +23,9 @@ function plain(value) {
 const RADIUS_OUTER = "14px";
 const RADIUS_INNER = "10px";
 
-export default function TaskConfirmNotFoundDialog({ open, onClose, pendingTask, pendingResult, updatingId, onConfirm, confirmTexts }) {
+export default function TaskConfirmNotFoundDialog({
+  confirmSx = null,
+  cancelSx = null, open, onClose, pendingTask, pendingResult, updatingId, onConfirm, confirmTexts }) {
   const title = confirmTexts?.title || "Подтверждение";
   const message =
     confirmTexts?.message ||
@@ -43,8 +45,8 @@ export default function TaskConfirmNotFoundDialog({ open, onClose, pendingTask, 
         )}
       </DialogContent>
       <DialogActions sx={{ p: 2, gap: 1 }}>
-        <Button onClick={onClose} color="inherit" sx={{ borderRadius: RADIUS_INNER, fontWeight: 700 }} disabled={updatingId === pendingTask?.Id}>{cancelText}</Button>
-        <Button onClick={() => { const task = pendingTask; const result = pendingResult; onClose?.(); if (task) onConfirm?.(task, result); }} variant="contained" color="error" sx={{ borderRadius: RADIUS_INNER, fontWeight: 800, backgroundImage: "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)" }} disabled={updatingId === pendingTask?.Id}>
+        <Button onClick={onClose} color="inherit" sx={{ borderRadius: RADIUS_INNER, fontWeight: 700, ...(cancelSx || {}) }} disabled={updatingId === pendingTask?.Id}>{cancelText}</Button>
+        <Button onClick={() => { const task = pendingTask; const result = pendingResult; onClose?.(); if (task) onConfirm?.(task, result); }} variant="contained" color="error" sx={{ borderRadius: RADIUS_INNER, fontWeight: 800, backgroundImage: "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", ...(confirmSx || {}) }} disabled={updatingId === pendingTask?.Id}>
           {updatingId === pendingTask?.Id ? <CircularProgress size={20} sx={{ color: "white" }} /> : okText}
         </Button>
       </DialogActions>

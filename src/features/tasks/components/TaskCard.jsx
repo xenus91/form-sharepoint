@@ -902,6 +902,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         color: "#fff",
                         "&:hover": { backgroundImage: "linear-gradient(180deg, #8D95FF 0%, #6B7CFF 100%)" },
                         "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #9BA3FF 0%, #7B84FF 100%)", color: "#fff", opacity: 1 },
+                        // ⭐ StylingActions.takeInWork (если задан)
+                          // ⭐ StylingActions.takeInWork (если задан)
+                      ...(getActionSx("takeInWork") || {}),
                       }}
                     >
                       {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "Взять в работу"}
@@ -1180,7 +1183,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setAdditionalError("");
                         }}
                         disabled={isUpdating}
-                        sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32 }}
+                        sx={{ width: "100%", mt: 0.5, borderRadius: "12px", fontWeight: 700, textTransform: "none", color: "text.secondary", height: 32, ...(getActionSx("promptCancel") || {}) }}
                       >
                         Отмена
                       </Button>
@@ -1197,6 +1200,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         случае НЕ submit напрямую — открывает этот диалог поверх inline-формы. После confirm
                         completeTask вызывается с promptFieldValues (включая Comment из TaskPromptFields). */}
                     <TaskConfirmNotFoundDialog
+                      confirmSx={getActionSx("confirm") || null}
+                      cancelSx={getActionSx("cancel") || null}
                       open={!!inlineConfirmPending}
                       onClose={() => setInlineConfirmPending(null)}
                       pendingTask={task}
@@ -1356,6 +1361,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       backgroundImage: "linear-gradient(180deg, #7B84FF 0%, #5A67D8 100%)",
                       color: "#fff",
                       "&:hover": { backgroundImage: "linear-gradient(180deg, #8D95FF 0%, #6B7CFF 100%)" },
+                    ...(getActionSx("takeInWork") || {}),
                     }}
                   >
                     {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "Взять в работу"}

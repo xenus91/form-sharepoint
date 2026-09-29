@@ -2,6 +2,9 @@
 
 > Версия: 2026-09-28 (v8+: defaults-политика ужесточена). Шпаргалка для админа.
 
+> 📘 **Полная инструкция по настройке каждого поля и JSON-ключа: [docs/taskbehaviour-config.md](./taskbehaviour-config.md).**
+> Здесь — обзор возможностей и принципов.
+
 ## Что это такое
 
 `TaskBehaviour` — список SharePoint, в котором админ хранит **компактный JSON** для каждого типа задач. Резолвер в `TaskCard.jsx` маппит **`ContentType.Name` → `TaskBehaviour.Title`** (нормализованно: trim + lowercase), без участия lookup-полей — SharePoint не позволяет задать default-значение для lookup на ContentType, поэтому архитектура — по имени.
