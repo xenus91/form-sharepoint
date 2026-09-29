@@ -358,6 +358,25 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // Поля настроены, но ещё грузятся — показываем скелетоны, чтобы карточки не «прыгали».
   const [relatedLoading, setRelatedLoading] = React.useState(false);
 
+  // Диагностика (?dbg=1): что именно решил код при нажатии кнопки результата.
+  const dbgClick = React.useCallback(
+    (choice, decision, rule) => {
+      if (!(__forceTaskDbg || __DBG_ENABLED__)) return;
+      __dlogAlways("[DBG:click]", {
+        taskId: task?.Id,
+        choice,
+        decision, // "inline-buttons" | "dialog" | "form" | "direct-submit"
+        inlineConfirm: rule?.inlineConfirm ?? null,
+        requiresConfirmed: rule?.requiresConfirmed ?? null,
+        promptFields: rule?.promptFields?.length || 0,
+        showAA: rule?.showAdditionalActions ?? null,
+        animation: rule?.animation || null,
+        ruleSource: rule?.source || null,
+      });
+    },
+    [task?.Id]
+  );
+
   // ⭐ v8: helper для submit — определяет тип анимации и вызывает callback.
   // Приоритет: Behaviour.anim (per choice) → flow default (celebrate для found, sherlock для notFound) → none (extras).
   // Если Behaviour.anim="none" — callback вызывается немедленно, без анимации и задержки.
@@ -1451,13 +1470,14 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setInlineChoice(notFoundChoice);
                           setInlineConfirmPending(null);
                           if (needsForm) {
+                            dbgClick(notFoundChoice, "form", rule);
                             setInlineConfirmOnly(false);
                             return;
                           }
                           // ⭐ Если вводить нечего: при Behaviour.ic — две кнопки в карточке,
                           // иначе — диалог подтверждения (без промежуточной кнопки «Сохранить»).
-                          if (rule?.inlineConfirm === true) setInlineConfirmOnly(true);
-                          else setInlineConfirmPending({ req: "Нет", acts: [] });
+                          if (rule?.inlineConfirm === true) { dbgClick(notFoundChoice, "inline-buttons", rule); setInlineConfirmOnly(true); }
+                          else { dbgClick(notFoundChoice, "dialog", rule); setInlineConfirmPending({ req: "Нет", acts: [] }); }
                         }}
                         sx={{
                           borderRadius: "12px",
@@ -1494,6 +1514,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           // Никаких строковых спец-случаев: поток задаётся только Behaviour.
                           const icRule = rule?.inlineConfirm === true;
                           if (!rule || (rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true && !icRule)) {
+                            dbgClick(foundChoice, "direct-submit", rule);
                             runSubmit(foundChoice, "found", () => {
                               if (onComplete) onComplete(task, foundChoice, {}, "Нет", []);
                               else onResultClick(task, foundChoice);
@@ -1511,6 +1532,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           setCustomActionInput("");
                           setInlineConfirmPending(null);
                           // ⭐ Behaviour.ic: две кнопки в карточке, без диалога и без полей
+                          dbgClick(foundChoice, icRule ? "inline-buttons" : "form", rule);
                           setInlineConfirmOnly(icRule);
                           setInlineChoice(foundChoice);
                         }}
@@ -1549,11 +1571,13 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           const rule = getBehaviourRuleForChoice(choice);
                           const needsForm = (rule?.promptFields?.length || 0) > 0 || rule?.showAdditionalActions === true;
                           if (rule?.inlineConfirm === true && !needsForm) {
+                            dbgClick(choice, "inline-buttons", rule);
                             setInlineChoice(choice);
                             setInlineConfirmPending(null);
                             setInlineConfirmOnly(true);
                             return;
                           }
+                          dbgClick(choice, "direct-submit", rule);
                           onResultClick(task, choice);
                         }}
                         sx={{

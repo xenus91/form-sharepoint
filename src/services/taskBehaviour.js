@@ -167,6 +167,19 @@ export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
   const behaviour = parseBehaviour(record.behaviour);
   const styling = parseStyling(record.styling);
   const stylingActions = parseStyling(record.stylingActions);
+  // ⚠️ Ошибку разбора пишем ВСЕГДА: невалидный JSON молча отключает всё поведение
+  // (задача завершается по нажатию, без подтверждений и анимаций) — это очень похоже
+  // на «код не работает», хотя причина в тексте конфига.
+  if (!behaviour.ok) {
+    console.warn("[TaskBehaviour] Behaviour не разобран — настройки НЕ применяются", {
+      title: record.title,
+      id: record.id,
+      error: behaviour.error,
+      raw: String(record.behaviour || "").slice(0, 400),
+    });
+  }
+  if (!styling.ok) console.warn("[TaskBehaviour] StylingResultButton не разобран", { title: record.title, error: styling.error });
+  if (!stylingActions.ok) console.warn("[TaskBehaviour] StylingActions не разобран", { title: record.title, error: stylingActions.error });
   tbDebug("resolved", { contentTypeName, title: record.title, id: record.id, matchedBy, behaviourOk: behaviour.ok, stylingOk: styling.ok, stylingActionsOk: stylingActions.ok });
   return { configId: record.id, raw: record, behaviour, styling, stylingActions, matchedBy };
 }
