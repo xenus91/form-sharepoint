@@ -183,54 +183,97 @@ function extractBadField(message) {
   return m ? m[1].trim() : "";
 }
 
-/**
- * Количество завершённых задач (всё время).
- * Сначала пробуем RowCount из RenderListDataAsStream, иначе — REST $inlinecount.
- *
- * @returns {Promise<{count:number|null, source:string}>}
- */
-export async function fetchCompletedCount({ currentUserId, distribution }) {
-  // Основной источник — REST $inlinecount: он корректно считает все строки по фильтру.
-  const rest = await fetchCompletedCountFallback({ currentUserId, distribution });
-  if (typeof rest.count === "number") return rest;
-  // Фолбэк — RowCount из RenderListDataAsStream.
-  try {
-    const payload = await renderListData({
-      viewXml: buildCompletedViewXml({ currentUserId, distribution, pageSize: 1 }),
+/** Статусы, которые считаем завершёнными (для REST-фильтра: Choice-поля не поддерживают substringof). */
+const COMPLETED_STATUS_VALUES = [
+  "Завершена",
+  "Завершено",
+  "Завершены",
+  "Завершён",
+  "Выполнено",
+  "Выполнена",
+  "Выполнены",
+  "Completed",
+];
+
+/** REST-фильтры «завершённые» — от точного к самому простому. */
+function buildCompletedRestFilters({ assignedFilter, extraStatuses = [] }) {
+  const statuses = [...new Set([...COMPLETED_STATUS_VALUES, ...extraStatuses])]
+    .map((s) => `Status eq '${String(s).replace(/'/g, "''")}'`)
+    .join(" or ");
+  const base = assignedFilter ? `(${assignedFilter}) and ` : "";
+  return [
+    // 1) процент 100 или один из известных статусов
+    `${base}(PercentComplete eq 1 or ${statuses})`,
+    // 2) только процент
+    `${base}PercentComplete eq 1`,
+    // 3) только статусы
+    `${base}(${statuses})`,
+  ];
+}
+
+/** REST-фолбэк счётчика: $top=1 + $inlinecount=allpages, несколько вариантов фильтра. */
+async function fetchCompletedCountFallback({ currentUserId, distribution, extraStatuses = [] }) {
+  const ids = new Set();
+  if (currentUserId != null) ids.add(Number(currentUserId));
+  for (const id of (distribution ? getGroupIdsFromDistribution(distribution) || [] : [])) ids.add(Number(id));
+  const list = [...ids].filter((n) => !Number.isNaN(n));
+  const assignedFilter = list.map((id) => `AssignedToId eq ${id}`).join(" or ");
+
+  let lastError = null;
+  for (const filter of buildCompletedRestFilters({ assignedFilter, extraStatuses })) {
+    try {
+      const url = `${TASKS_LIST_API}/items?$select=Id&$filter=${encodeURIComponent(filter)}&$top=1&$inlinecount=allpages`;
+      __dlog("count:request", { url, filter });
+      const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
+      const count = data?.d?.__count != null ? Number(data.d.__count) : null;
+      __dlog("count:result", { count, source: "REST $inlinecount" });
+      return { count, source: "REST $inlinecount" };
+    } catch (e) {
+      lastError = e;
+      dbgError("completedTasks:count:filterFailed", {
+        filter,
+        status: apiErrorStatus(e),
+        message: describeApiError(e),
+      });
+    }
+  }
+  if (lastError) {
+    dbgError("completedTasks:count:failed", {
+      status: apiErrorStatus(lastError),
+      message: describeApiError(lastError),
+      badField: extractFieldFromError(lastError) || null,
+      payload: apiErrorPayload(lastError),
     });
-    const rowCount = payload?.RowCount;
-    if (typeof rowCount === "number") return { count: rowCount, source: "RenderListDataAsStream" };
-    __dlog("no RowCount in payload");
-  } catch (e) {
-    __dlog("count via RenderListDataAsStream failed", e?.response?.status, e?.message);
   }
   return { count: null, source: "error" };
 }
 
-/** REST-фолбэк: $top=1 + $inlinecount=allpages по тому же фильтру. */
-async function fetchCompletedCountFallback({ currentUserId, distribution }) {
+/**
+ * Количество завершённых задач (всё время).
+ *
+ * 1) RenderListDataAsStream с минимальным ViewFields (только ID) → RowCount.
+ *    Минимум полей нужен, чтобы «битое» поле списка не ломало подсчёт
+ *    (ошибка 500 «Один или несколько типов полей установлены неправильно»).
+ * 2) Фолбэк — REST $inlinecount (фильтр по eq: Choice-поля не поддерживают substringof).
+ *
+ * @returns {Promise<{count:number|null, source:string}>}
+ */
+export async function fetchCompletedCount({ currentUserId, distribution, extraStatuses = [] }) {
   try {
-    const ids = new Set();
-    if (currentUserId != null) ids.add(Number(currentUserId));
-    for (const id of (distribution ? getGroupIdsFromDistribution(distribution) || [] : [])) ids.add(Number(id));
-    const list = [...ids].filter((n) => !Number.isNaN(n));
-    const assigned = list.map((id) => `AssignedToId eq ${id}`).join(" or ");
-    const filter = assigned ? `(${assigned}) and ${buildCompletedRestFilter()}` : buildCompletedRestFilter();
-    const url = `${TASKS_LIST_API}/items?$select=Id&$filter=${encodeURIComponent(filter)}&$top=1&$inlinecount=allpages`;
-    __dlog("count:request", { url, filter });
-    const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
-    const count = data?.d?.__count != null ? Number(data.d.__count) : null;
-    __dlog("count:result", { count, source: "REST $inlinecount" });
-    return { count, source: "REST $inlinecount" };
-  } catch (e) {
-    dbgError("completedTasks:count:failed", {
-      status: apiErrorStatus(e),
-      message: describeApiError(e),
-      badField: extractFieldFromError(e) || null,
-      payload: apiErrorPayload(e),
+    const payload = await renderListData({
+      viewXml: buildCompletedViewXml({ currentUserId, distribution, pageSize: 1, fields: ["ID"] }),
     });
-    return { count: null, source: "error" };
+    const rowCount = payload?.RowCount;
+    if (typeof rowCount === "number") {
+      __dlog("count:result", { count: rowCount, source: "RenderListDataAsStream" });
+      return { count: rowCount, source: "RenderListDataAsStream" };
+    }
+    __dlog("no RowCount in payload");
+  } catch (e) {
+    // Диагностика уже записана внутри renderListData ([completedTasks:failed]).
+    __dlog("count via RenderListDataAsStream failed", apiErrorStatus(e), describeApiError(e));
   }
+  return fetchCompletedCountFallback({ currentUserId, distribution, extraStatuses });
 }
 
 // ── Маппинг строки RenderListDataAsStream → сырой REST-элемент ───────────────────────
@@ -293,12 +336,191 @@ function rowToRawTask(row) {
   return raw;
 }
 
+// ── Самовосстановление набора полей ──────────────────────────────────────────
+// SharePoint может падать 500 «Один или несколько типов полей установлены неправильно»
+// из-за «битого» поля в ViewFields — при этом имя поля в тексте ошибки НЕ называется.
+// Тогда перебираем поля делением пополам и находим рабочий набор (запоминаем его).
+
+/** Минимальный набор — карточка без него невозможна, поля проверенные. */
+const CORE_FIELDS = ["ID", "Title", "Status", "PercentComplete", "Modified", "AssignedTo", "ContentTypeId"];
+
+const usableFieldsCache = new Map(); // listId -> string[]
+
+function listIdFromApi() {
+  const m = String(TASKS_LIST_API || "").match(/guid'([^']+)'/i);
+  return m ? m[1].toLowerCase() : "default";
+}
+
+function readStoredFields(key) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(key);
+    const arr = raw ? JSON.parse(raw) : null;
+    return Array.isArray(arr) && arr.length ? arr : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeFields(key, fields) {
+  usableFieldsCache.set(key, fields);
+  try {
+    if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem(key, JSON.stringify(fields));
+  } catch {}
+}
+
+/** Рабочий набор полей: из памяти → из localStorage → полный список. */
+function getUsableFields() {
+  const key = `completedTasks.usableFields.${listIdFromApi()}`;
+  const fromMemory = usableFieldsCache.get(key);
+  if (fromMemory) return fromMemory;
+  const stored = readStoredFields(key);
+  if (stored) {
+    usableFieldsCache.set(key, stored);
+    dbgWarn("completedTasks:fields", "использую сохранённый набор полей", stored);
+    return stored;
+  }
+  return [...VIEW_FIELDS];
+}
+
+/** Один пробный запрос: просто проверяем, что сервер отвечает без ошибки. */
+async function probeFields(ctx, fields) {
+  const viewXml = buildCompletedViewXml({ ...ctx, fields, pageSize: 1 });
+  await renderListData({ viewXml });
+  return true;
+}
+
+/**
+ * Рекурсивный поиск рабочего набора: пробуем базу, потом добавляем кандидатов
+ * половинками. Возвращает максимальный набор полей, который сервер принимает.
+ */
+async function resolveUsableFields(ctx, fields, depth = 0) {
+  const base = CORE_FIELDS.filter((f) => fields.includes(f));
+  const candidates = fields.filter((f) => !base.includes(f));
+  if (candidates.length === 0) return fields;
+  if (depth > 6) return base;
+
+  try {
+    await probeFields(ctx, base);
+  } catch (e) {
+    dbgError("completedTasks:fields:coreFailed", {
+      base,
+      status: apiErrorStatus(e),
+      message: describeApiError(e),
+    });
+    return fields; // сами базовые поля не проходят — ничего не трогаем, отдаём как есть
+  }
+
+  const grow = async (current, rest, d) => {
+    if (rest.length === 0) return current;
+    try {
+      await probeFields(ctx, [...current, ...rest]);
+      return [...current, ...rest];
+    } catch {
+      if (rest.length === 1) {
+        dbgWarn("completedTasks:badField", `поле "${rest[0]}" ломает запрос (ViewFields) — отключаю`);
+        return current;
+      }
+      if (d > 6) return current;
+      const mid = Math.ceil(rest.length / 2);
+      const left = await grow(current, rest.slice(0, mid), d + 1);
+      return await grow(left, rest.slice(mid), d + 1);
+    }
+  };
+
+  return await grow(base, candidates, 0);
+}
+
 /**
  * Загружает одну страницу завершённых задач.
+ *
+ * Если сервер отвергает ViewFields (500 «типы полей установлены неправильно» и имя поля
+ * не названо) — автоматически ищет рабочий набор полей делением пополам и запоминает его.
  *
  * @param {{ currentUserId:number|null, distribution:object|null, pageSize?:number, paging?:string|null, recipientField?:string|null, scNumberField?:string|null }} opts
  * @returns {Promise<{ tasks:Array, nextPaging:string|null, rowCount:number|null, source:string }>}
  */
+// ── REST-фолбэк страницы завершённых ─────────────────────────────────────────
+// Если RenderListDataAsStream недоступен или падает (как бывает при «битых» полях списка),
+// грузим завершённые обычным REST. Пейджинг — через $skiptoken.
+
+const REST_PAGE_FIELDS = [
+  "Id", "Title", "Body", "Status", "PercentComplete", "DueDate", "Created", "Modified",
+  "ContentTypeId", "RelatedItems", "Location1", "ResultSearchTHU",
+  "AdditionalsActionsRequired", "AdditionalActions",
+];
+
+function restPagingToSkiptoken(paging) {
+  if (!paging) return null;
+  const m = String(paging).match(/p_ID[=:](\d+)/i);
+  return m ? `Paged=TRUE&p_ID=${m[1]}` : String(paging).replace(/^\?/, "");
+}
+
+function skiptokenFromNext(nextUrl) {
+  const m = String(nextUrl || "").match(/\$skiptoken=([^&]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+async function fetchCompletedTasksPageRest({
+  currentUserId,
+  distribution,
+  pageSize = COMPLETED_PAGE_SIZE,
+  paging = null,
+  recipientField = null,
+  scNumberField = null,
+}) {
+  const ids = new Set();
+  if (currentUserId != null) ids.add(Number(currentUserId));
+  for (const id of (distribution ? getGroupIdsFromDistribution(distribution) || [] : [])) ids.add(Number(id));
+  const list = [...ids].filter((n) => !Number.isNaN(n));
+  const assignedFilter = list.map((id) => `AssignedToId eq ${id}`).join(" or ");
+
+  let fields = [...REST_PAGE_FIELDS];
+  let select = `${fields.join(",")},AssignedTo/Title,Editor/Title`;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (const filter of buildCompletedRestFilters({ assignedFilter })) {
+      try {
+        const skiptoken = restPagingToSkiptoken(paging);
+        let url =
+          `${TASKS_LIST_API}/items?$select=${select}&$expand=AssignedTo,Editor` +
+          `&$filter=${encodeURIComponent(filter)}&$orderby=Modified desc&$top=${pageSize}`;
+        if (skiptoken) url += `&$skiptoken=${encodeURIComponent(skiptoken)}`;
+        __dlog("page:rest:request", { url });
+        const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
+        const rows = Array.isArray(data?.d?.results) ? data.d.results : [];
+        const tasks = rows
+          .map((row) => rowToRawTask(row))
+          .filter((r) => r.Id != null)
+          .filter((r) => isCompletedStatus(r.Status, r.PercentComplete))
+          .map((r) => toDomainTask(r, { recipientField, scNumberField }));
+        const nextPaging = skiptokenFromNext(data?.d?.__next);
+        __dlog("page:rest:result", { tasks: tasks.length, nextPaging });
+        return { tasks, nextPaging, rowCount: null, source: "REST" };
+      } catch (e) {
+        lastError = e;
+        const bad = extractFieldFromError(e);
+        if (bad) {
+          const before = fields.length;
+          fields = fields.filter((f) => f.toLowerCase() !== bad.toLowerCase());
+          if (fields.length !== before) {
+            select = `${fields.join(",")},AssignedTo/Title,Editor/Title`;
+            dbgWarn("completedTasks:badField", `поле "${bad}" отсутствует в списке — убираю из REST-запроса`);
+            break; // повторяем перебор фильтров уже с новым набором полей
+          }
+        }
+        dbgError("completedTasks:page:rest:failed", {
+          filter,
+          status: apiErrorStatus(e),
+          message: describeApiError(e),
+        });
+      }
+    }
+  }
+  throw lastError || new Error("fetchCompletedTasksPageRest failed");
+}
+
 export async function fetchCompletedTasksPage({
   currentUserId,
   distribution,
@@ -307,11 +529,13 @@ export async function fetchCompletedTasksPage({
   recipientField = null,
   scNumberField = null,
 }) {
-  let fields = [...VIEW_FIELDS];
+  let fields = getUsableFields();
   let attempt = 0;
   let lastError = null;
+  let searched = false;
+  const ctx = { currentUserId, distribution };
 
-  while (attempt < 5) {
+  while (attempt < 6) {
     const viewXml = buildCompletedViewXml({ currentUserId, distribution, pageSize, fields });
     try {
       const payload = await renderListData({ viewXml, paging });
@@ -338,6 +562,7 @@ export async function fetchCompletedTasksPage({
         nextHref,
         ids: tasks.map((t) => t.Id),
       });
+      if (searched || fields.length !== VIEW_FIELDS.length) storeFields(`completedTasks.usableFields.${listIdFromApi()}`, fields);
       return { tasks, nextPaging: nextHref, rowCount, source: "RenderListDataAsStream" };
     } catch (e) {
       lastError = e;
@@ -348,6 +573,21 @@ export async function fetchCompletedTasksPage({
         fields = fields.filter((f) => f.toLowerCase() !== bad.toLowerCase());
         if (fields.length !== before) {
           dbgWarn("completedTasks:badField", `поле "${bad}" отсутствует в списке — убираю из ViewXml и повторяю`);
+          searched = true;
+          attempt += 1;
+          continue;
+        }
+      }
+      // Имя поля не названо (500 «типы полей установлены неправильно») — ищем рабочий набор.
+      if (!searched) {
+        searched = true;
+        dbgWarn("completedTasks:fields", "запрос отклонён, ищу рабочий набор полей", {
+          status: apiErrorStatus(e),
+          message: describeApiError(e),
+        });
+        const usable = await resolveUsableFields(ctx, fields);
+        if (usable.length !== fields.length || usable.length < VIEW_FIELDS.length) {
+          fields = usable;
           attempt += 1;
           continue;
         }
@@ -355,5 +595,25 @@ export async function fetchCompletedTasksPage({
       break;
     }
   }
-  throw lastError || new Error("fetchCompletedTasksPage failed");
+  // CAML не сработал — пробуем обычный REST (например, список с «битыми» полями).
+  dbgWarn("completedTasks:page", "RenderListDataAsStream не сработал — перехожу на REST-фолбэк", {
+    status: apiErrorStatus(lastError),
+    message: describeApiError(lastError),
+  });
+  try {
+    return await fetchCompletedTasksPageRest({
+      currentUserId,
+      distribution,
+      pageSize,
+      paging,
+      recipientField,
+      scNumberField,
+    });
+  } catch (restError) {
+    dbgError("completedTasks:page:failed", {
+      caml: describeApiError(lastError),
+      rest: describeApiError(restError),
+    });
+    throw restError;
+  }
 }

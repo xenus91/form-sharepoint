@@ -69,17 +69,47 @@ describe("логирование завершённых задач", () => {
     expect(viewXml).toContain("AssignedTo");
   });
 
-  it("ошибка счётчика логируется с тегом [completedTasks:count:failed]", async () => {
-    apiState.get.mockRejectedValue(spError(500, "Value does not fall within the expected range."));
-    apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { RowCount: 3, Row: [] } } } });
+  it("ошибка счётчика логируется, когда упали и CAML, и все REST-фильтры", async () => {
+    apiState.post.mockRejectedValue(spError(500, "One or more field types are not installed properly."));
+    apiState.get.mockRejectedValue(spError(400, "Value does not fall within the expected range."));
 
     const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
-    expect(res.count).toBe(3); // фолбэк на RowCount
+    expect(res.count).toBeNull();
 
     const call = errorSpy.mock.calls.find((args) =>
       String(args[0]).includes("[completedTasks:count:failed]")
     );
     expect(call).toBeTruthy();
-    expect(call[1].status).toBe(500);
+    expect(call[1].status).toBe(400);
+    expect(apiState.get.mock.calls.length).toBeGreaterThan(1); // пробовал несколько фильтров
+  });
+
+  it("каждый неудачный REST-фильтр логируется отдельно", async () => {
+    apiState.post.mockRejectedValue(new Error("boom"));
+    apiState.get.mockRejectedValue(spError(400, "Invalid filter"));
+    await fetchCompletedCount({ currentUserId: 42, distribution: null });
+    const calls = errorSpy.mock.calls.filter((args) =>
+      String(args[0]).includes("[completedTasks:count:filterFailed]")
+    );
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("«битое» поле ищется делением пополам и отключается", async () => {
+    const boom = spError(500, "One or more field types are not installed properly.");
+    let n = 0;
+    apiState.post.mockImplementation(() => {
+      n += 1;
+      // успех только если в ViewFields нет RelatedItems
+      const viewXml = apiState.post.mock.calls[n - 1][1].parameters.ViewXml;
+      if (viewXml.includes('Name="RelatedItems"')) return Promise.reject(boom);
+      return Promise.resolve({ data: { d: { RenderListDataAsStream: { Row: [], RowCount: 0 } } } });
+    });
+
+    const page = await fetchCompletedTasksPage({ currentUserId: 42, distribution: null });
+    expect(page.tasks).toEqual([]);
+    const finalViewXml = apiState.post.mock.calls[apiState.post.mock.calls.length - 1][1].parameters.ViewXml;
+    expect(finalViewXml).not.toContain('Name="RelatedItems"');
+    const warn = warnSpy.mock.calls.find((args) => String(args[0]).includes("[completedTasks:badField]"));
+    expect(warn).toBeTruthy();
   });
 });

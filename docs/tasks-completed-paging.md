@@ -110,3 +110,52 @@ Status содержит «В процессе» / «Выполня» / «Не н
 npx vite build --config preview/vite.config.js --ssr log-check.mjs --outDir .ssrout --logLevel error
 TAG="completedTasks" node preview/.ssrout/log-check.mjs
 ```
+
+## Устойчивость к «битым» полям списка
+
+Реальные списки SharePoint иногда содержат поля с неправильным типом. Тогда:
+
+* `RenderListDataAsStream` → **500 «Один или несколько типов полей установлены неправильно…»**
+  (имя поля сервер **не называет**);
+* REST-фильтр с `substringof('…',Status)` по Choice-полю → **400 «Value does not fall within the expected range»**.
+
+Оба случая обрабатываются автоматически.
+
+### 1. Поиск рабочего набора полей (ViewFields)
+
+`fetchCompletedTasksPage()` при ошибке без имени поля:
+
+1. пробует базовый набор `CORE_FIELDS = ID, Title, Status, PercentComplete, Modified, AssignedTo, ContentTypeId`;
+2. добавляет остальные поля половинками (деление пополам), отбрасывая те, на которых запрос падает;
+3. найденный набор запоминается в памяти и в `localStorage.completedTasks.usableFields.<listGuid>`
+   — повторных переборов не будет.
+
+Если сервер **называет** поле (`Column 'X' does not exist`) — поле просто убирается из `ViewXml`,
+запрос повторяется (до 5 раз).
+
+### 2. Счётчик
+
+Порядок источников:
+
+1. `RenderListDataAsStream` с **минимальным** `ViewFields` (только `ID`) → `RowCount`.
+   Минимум полей — чтобы «битое» поле не ломало подсчёт.
+2. REST `$top=1&$inlinecount=allpages` — фильтры перебираются по очереди:
+   * `PercentComplete eq 1 or Status eq 'Завершена' or …` (точное сравнение, **без** `substringof`);
+   * `PercentComplete eq 1`;
+   * только статусы.
+
+### 3. REST-фолбэк самой вкладки
+
+Если CAML не сработал совсем, страница завершённых грузится обычным REST
+(`$filter` по тем же eq-фильтрам, `$orderby=Modified desc`, пейджинг через `$skiptoken`).
+В логе это видно как `[completedTasks] page:rest:request` / `page:rest:result`, `source: "REST"`.
+
+### Как посмотреть
+
+```bash
+npx vite build --config preview/vite.config.js --ssr completed-check.mjs --outDir .ssrout --logLevel error
+node preview/.ssrout/completed-check.mjs
+```
+
+Мок (`preview/mockApi.js`) эмулирует оба прод-сбоя: 500 при `RelatedItems` в `ViewFields`
+и 400 на `substringof` — проверка должна показать самовосстановление и загрузку завершённых.

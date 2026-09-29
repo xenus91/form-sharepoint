@@ -51,30 +51,70 @@ describe("completedTasks", () => {
   });
 
   describe("fetchCompletedCount", () => {
-    it("возвращает количество из REST $inlinecount", async () => {
-      apiState.get.mockResolvedValue({ data: { d: { results: [], __count: 137 } } });
+    it("основной источник — RowCount (ViewFields только ID)", async () => {
+      apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { RowCount: 137, Row: [] } } } });
       const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
       expect(res.count).toBe(137);
+      expect(res.source).toBe("RenderListDataAsStream");
+      const viewXml = apiState.post.mock.calls[0][1].parameters.ViewXml;
+      expect(viewXml).toContain('<FieldRef Name="ID" />');
+      expect(viewXml).not.toContain('<FieldRef Name="RelatedItems" />');
+      expect(apiState.get).not.toHaveBeenCalled();
+    });
+
+    it("фолбэк на REST $inlinecount, если RowCount нет", async () => {
+      apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { Row: [] } } } });
+      apiState.get.mockResolvedValue({ data: { d: { results: [], __count: 5 } } });
+      const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
+      expect(res.count).toBe(5);
       expect(res.source).toContain("inlinecount");
     });
 
-    it("REST-фильтр исключает статусы «в работе»", async () => {
+    it("REST-фильтр использует eq по статусу (Choice не поддерживает substringof)", async () => {
+      apiState.post.mockRejectedValue(new Error("boom"));
       apiState.get.mockResolvedValue({ data: { d: { results: [], __count: 0 } } });
       await fetchCompletedCount({ currentUserId: 42, distribution: null });
       const url = apiState.get.mock.calls[0][0];
       const filter = decodeURIComponent(url.split("$filter=")[1]);
-      expect(filter).toContain("not substringof('В процессе',Status)");
-      expect(filter).toContain("not substringof('Выполня',Status)");
-      expect(filter).toContain("not substringof('Не начат',Status)");
-      expect(filter).toContain("substringof('Заверш',Status)");
+      // никаких substringof — они дают 400 "Value does not fall within the expected range"
+      expect(filter).not.toContain("substringof");
+      expect(filter).toContain("PercentComplete eq 1");
+      expect(filter).toContain("Status eq 'Завершена'");
+      expect(filter).toContain("Status eq 'Выполнено'");
     });
 
-    it("фолбэк на RowCount, если REST не дал число", async () => {
-      apiState.get.mockRejectedValue(new Error("boom"));
-      apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { RowCount: 12, Row: [] } } } });
+    it("при ошибке первого фильтра пробует следующие", async () => {
+      apiState.post.mockRejectedValue(new Error("boom"));
+      apiState.get
+        .mockRejectedValueOnce(new Error("400"))
+        .mockResolvedValueOnce({ data: { d: { results: [], __count: 8 } } });
       const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
-      expect(res.count).toBe(12);
-      expect(res.source).toBe("RenderListDataAsStream");
+      expect(res.count).toBe(8);
+      expect(apiState.get).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("REST-фолбэк страницы", () => {
+    it("если CAML не работает — грузит через REST и возвращает nextPaging", async () => {
+      apiState.post.mockRejectedValue(new Error("500 field types"));
+      apiState.get.mockResolvedValue({
+        data: {
+          d: {
+            results: [
+              { Id: 11, Title: "Завершённая", Status: "Завершена", PercentComplete: 1 },
+              { Id: 12, Title: "В работе", Status: "В процессе выполнения", PercentComplete: 0 },
+            ],
+            __next: "https://sp/sites/x/_api/web/lists(guid'1')/items?$skiptoken=Paged%3dTRUE%26p_ID%3d12",
+          },
+        },
+      });
+      const page = await fetchCompletedTasksPage({ currentUserId: 42, distribution: null });
+      expect(page.source).toBe("REST");
+      expect(page.tasks.map((t) => t.Id)).toEqual([11]);
+      expect(page.nextPaging).toBe("Paged=TRUE&p_ID=12");
+      const url = apiState.get.mock.calls[0][0];
+      expect(decodeURIComponent(url)).not.toContain("substringof");
+      expect(decodeURIComponent(url)).toContain("Status eq 'Завершена'");
     });
   });
 
