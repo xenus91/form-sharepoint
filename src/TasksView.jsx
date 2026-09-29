@@ -348,7 +348,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     completedRefreshRef.current = completed.refresh;
   }, [completed.refresh]);
   const completedTasks = completed.items;
-  const completedTotal = completed.count ?? completedCount;
+  // Счётчик может быть неизвестен (null) — тогда показываем количество уже загруженных,
+  // но НИКОГДА не подставляем 0:completedCount считает завершённые внутри активной выборки,
+  // а завершённые в неё не попадают (там всегда 0).
+  const completedTotal =
+    completed.count != null
+      ? Math.max(completed.count, completed.items?.length || 0)
+      : completed.items?.length || null;
   // Пока первая страница ещё не загружена (и счётчик не сказал «0») — показываем спиннер,
   // а не пустое состояние «Нет завершенных задач».
   const completedLoading =
@@ -583,7 +589,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       {tab === 1 && !isHashMode && completedTasks.length > 0 && (
         <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.75, pt: 1, pb: 2 }}>
           <Typography variant="caption" sx={{ color: "text.secondary" }}>
-            Показано {completedTasks.length} из {completedTotal ?? completedTasks.length}
+            Показано {completedTasks.length}
+            {completedTotal != null ? ` из ${completedTotal}` : ""}
           </Typography>
           {completed.hasMore ? (
             <Button

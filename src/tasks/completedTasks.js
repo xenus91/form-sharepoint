@@ -21,6 +21,10 @@ import { apiErrorStatus, describeApiError, extractFieldFromError, apiErrorPayloa
 
 export const COMPLETED_PAGE_SIZE = 20;
 
+// Сколько строк запрашиваем для подсчёта через CAML. RowCount в RenderListDataAsStream
+// на части ферм равен размеру страницы, поэтому считаем сами по числу строк.
+const COMPLETED_COUNT_ROWLIMIT = 2000;
+
 // Диагностика: ?dbg=1 (или localStorage dbg / dbg_tasks = 1). См. src/utils/dbg.js.
 const __DBG_ENABLED__ = DBG_ENABLED;
 const __dlog = (...a) => dbg("completedTasks", ...a);
@@ -254,27 +258,38 @@ async function fetchCompletedCountFallback({ currentUserId, distribution, extraS
 /**
  * Количество завершённых задач (всё время).
  *
- * 1) REST $inlinecount — основной путь (на «битых» списках CAML падает);
- * 2) RenderListDataAsStream с минимальным ViewFields (только ID) — крайний фолбэк.
+ * 1) REST $inlinecount — дёшево, но на части списков по Choice-полю Status отдаёт 0;
+ *    результат используем, только если он больше нуля.
+ * 2) CAML: RowLimit = COMPLETED_COUNT_ROWLIMIT, ViewFields — только ID, считаем строки.
+ *    RowCount тоже учитываем (на некоторых фермах он и есть общее число).
  *
  * @returns {Promise<{count:number|null, source:string}>}
  */
 export async function fetchCompletedCount({ currentUserId, distribution, extraStatuses = [] }) {
   const rest = await fetchCompletedCountFallback({ currentUserId, distribution, extraStatuses });
-  if (typeof rest.count === "number") return rest;
+  if (typeof rest.count === "number" && rest.count > 0) return rest;
+  dbgWarn("completedTasks:count", "REST дал 0/null — считаем через CAML", {
+    restCount: rest.count,
+    restSource: rest.source,
+  });
 
   if (isCamlBroken()) return { count: null, source: "error (caml disabled)" };
 
   try {
     const payload = await renderListData({
-      viewXml: buildCompletedViewXml({ currentUserId, distribution, pageSize: 1, fields: ["ID"] }),
+      viewXml: buildCompletedViewXml({
+        currentUserId,
+        distribution,
+        pageSize: COMPLETED_COUNT_ROWLIMIT,
+        fields: ["ID"],
+        extraStatuses,
+      }),
     });
-    const rowCount = payload?.RowCount;
-    if (typeof rowCount === "number") {
-      __dlog("count:result", { count: rowCount, source: "RenderListDataAsStream" });
-      return { count: rowCount, source: "RenderListDataAsStream" };
-    }
-    __dlog("no RowCount in payload");
+    const rows = Array.isArray(payload?.Row) ? payload.Row.length : 0;
+    const rowCount = typeof payload?.RowCount === "number" ? payload.RowCount : 0;
+    const count = Math.max(rows, rowCount);
+    dbgWarn("completedTasks:count:caml", { rows, rowCount, nextHref: payload?.NextHref || null, count });
+    if (count > 0) return { count, source: "RenderListDataAsStream (rows)" };
   } catch (e) {
     // Диагностика уже записана внутри renderListData ([completedTasks:failed]).
     __dlog("count via RenderListDataAsStream failed", apiErrorStatus(e), describeApiError(e));
@@ -475,34 +490,30 @@ async function resolveUsableFields(ctx, fields, depth = 0) {
 /**
  * Загружает одну страницу завершённых задач.
  *
- * Основной путь — REST (он работает даже на списках, где CAML/RenderListDataAsStream
- * падает 500 «типы полей установлены неправильно»). Порядок фильтров:
- *   1) PercentComplete eq 1 or Status eq 'Завершена' …   (точное сравнение, без substringof)
- *   2) PercentComplete eq 1
- *   3) Status eq 'Завершена' …
- *   4) только «мои» + фильтрация завершённых на клиенте — работает на любом списке
- *
- * Если REST не сработал совсем — крайний фолбэк: RenderListDataAsStream.
+ * Основной путь — CAML/RenderListDataAsStream с одним условием Status = «Завершена»:
+ * на части списков REST-фильтр по Choice-полю Status возвращает 0 строк, хотя CAML
+ * те же задачи отдаёт. Если CAML недоступен (ранее падал) — работаем через REST.
  *
  * @param {{ currentUserId:number|null, distribution:object|null, pageSize?:number, paging?:string|null, recipientField?:string|null, scNumberField?:string|null, extraStatuses?:string[] }} opts
  * @returns {Promise<{ tasks:Array, nextPaging:string|null, rowCount:number|null, source:string }>}
  */
 export async function fetchCompletedTasksPage(opts) {
-  try {
-    const page = await fetchCompletedTasksPageRest(opts);
-    if (page?.tasks?.length || page?.nextPaging) return page;
-    dbgWarn("completedTasks:page", "REST вернул пустую страницу — пробую CAML");
-  } catch (e) {
-    dbgWarn("completedTasks:page:restFailed", "REST не сработал — пробую CAML", {
-      status: apiErrorStatus(e),
-      message: describeApiError(e),
-    });
+  if (!isCamlBroken()) {
+    try {
+      const page = await fetchCompletedTasksPageCaml(opts);
+      if (page?.tasks?.length || page?.nextPaging) return page;
+      dbgWarn("completedTasks:page", "CAML вернул пустую страницу — пробую REST");
+    } catch (e) {
+      dbgWarn("completedTasks:page:camlFailed", "CAML не сработал — перехожу на REST", {
+        status: apiErrorStatus(e),
+        message: describeApiError(e),
+      });
+    }
   }
   if (isCamlBroken()) {
     dbgWarn("completedTasks:page", "CAML отключён (ранее падал на этом списке) — работаем на REST");
-    throw new Error("completed: REST empty and CAML disabled");
   }
-  return fetchCompletedTasksPageCaml(opts);
+  return fetchCompletedTasksPageRest(opts);
 }
 
 // ── REST-загрузка страницы завершённых ───────────────────────────────────────

@@ -78,7 +78,7 @@ describe("completedTasks", () => {
       apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { RowCount: 137, Row: [] } } } });
       const res = await fetchCompletedCount({ currentUserId: 42, distribution: null });
       expect(res.count).toBe(137);
-      expect(res.source).toBe("RenderListDataAsStream");
+      expect(res.source).toContain("RenderListDataAsStream");
       const viewXml = apiState.post.mock.calls[0][1].parameters.ViewXml;
       expect(viewXml).toContain('<FieldRef Name="ID" />');
       expect(viewXml).not.toContain('<FieldRef Name="RelatedItems" />');

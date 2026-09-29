@@ -28,6 +28,8 @@ describe("логирование завершённых задач", () => {
   beforeEach(() => {
     apiState.get.mockReset();
     apiState.post.mockReset();
+    // REST-фолбэк по умолчанию отвечает пусто, чтобы тесты CAML не падали на деструктуризации
+    apiState.get.mockResolvedValue({ data: { d: { results: [], __count: 0 } } });
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -40,9 +42,8 @@ describe("логирование завершённых задач", () => {
     apiState.post.mockRejectedValue(
       spError(400, "Column 'Location1' does not exist. It may have been deleted by another user.")
     );
-    await expect(
-      fetchCompletedTasksPage({ currentUserId: 42, distribution: null })
-    ).rejects.toBeTruthy();
+    // CAML падает → страница уходит на REST-фолбэк, но падение должно быть залогировано
+    await fetchCompletedTasksPage({ currentUserId: 42, distribution: null });
 
     const call = errorSpy.mock.calls.find((args) => String(args[0]).includes("[completedTasks:failed]"));
     expect(call).toBeTruthy();
@@ -51,6 +52,18 @@ describe("логирование завершённых задач", () => {
     expect(payload.badField).toBe("Location1");
     expect(String(payload.message)).toContain("does not exist");
     expect(String(payload.viewXml)).toContain("<View");
+  });
+
+  it("если упали и CAML, и REST — ошибка пробрасывается и логируется", async () => {
+    apiState.post.mockRejectedValue(spError(500, "field types"));
+    apiState.get.mockRejectedValue(spError(400, "Invalid filter"));
+    await expect(
+      fetchCompletedTasksPage({ currentUserId: 42, distribution: null })
+    ).rejects.toBeTruthy();
+    const warn = warnSpy.mock.calls.find((args) =>
+      String(args[0]).includes("[completedTasks:page:camlFailed]")
+    );
+    expect(warn).toBeTruthy();
   });
 
   it("отсутствующее поле логируется warn-ом и убирается из ViewXml", async () => {

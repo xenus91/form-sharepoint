@@ -9,40 +9,16 @@ const RELATED_ROWS = [
 const apiClient = {
   get: async (url) => {
     if (typeof console !== "undefined") console.debug("[MOCK GET]", String(url).slice(0, 150));
+    const decoded = decodeURIComponent(String(url));
+
+    // ⚠️ Эмуляция прода: REST-фильтр по Choice-полю Status НЕ матчит ничего (0 строк),
+    // хотя CAML те же задачи отдаёт.
+    if (decoded.includes("Status eq")) {
+      return { data: { d: { results: [], __count: 0 } } };
+    }
+
     // Батч полей связанного элемента (relatedFields.js)
-    // Счётчик завершённых: эмулируем прод — substringof на Choice-поле даёт 400
-    if (String(url).includes("$inlinecount=allpages")) {
-      const decoded = decodeURIComponent(String(url));
-      if (decoded.includes("substringof")) {
-        const err = new Error("Request failed with status code 400");
-        err.response = { status: 400, data: { error: { message: { value: "Value does not fall within the expected range." } } } };
-        throw err;
-      }
-      return { data: { d: { results: [], __count: 4 } } };
-    }
-    const decodedUrl = decodeURIComponent(String(url));
-    // Страница завершённых (REST): AssignedToId + eq-фильтр по статусу
-    if (decodedUrl.includes("AssignedToId eq") && decodedUrl.includes("Status eq")) {
-      if (decodedUrl.includes("substringof")) {
-        const err = new Error("Request failed with status code 400");
-        err.response = { status: 400, data: { error: { message: { value: "Value does not fall within the expected range." } } } };
-        throw err;
-      }
-      return {
-        data: {
-          d: {
-            results: [
-              { Id: 901, Title: "Исправить паллет", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-20T10:00:00Z" },
-              { Id: 902, Title: "Найти ЕО", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-19T10:00:00Z" },
-              { Id: 903, Title: "В работе", Status: "В процессе выполнения", PercentComplete: 0, Modified: "2026-09-18T10:00:00Z" },
-            ],
-            __next: "http://localhost/api/web/lists(guid'463B634E')/items?$skiptoken=Paged%3dTRUE%26p_ID%3d903",
-          },
-        },
-      };
-    }
-    if (String(url).includes("$filter")) {
-      const decoded = decodeURIComponent(String(url));
+    if (decoded.includes("$filter")) {
       const ids = [...decoded.matchAll(/\(Id eq (\d+)\)/g)].map((m) => Number(m[1]));
       return { data: { d: { results: RELATED_ROWS.filter((r) => ids.includes(r.Id)) } } };
     }
@@ -55,14 +31,23 @@ const apiClient = {
   },
   post: async (url, body) => {
     if (typeof console !== "undefined") console.debug("[MOCK POST]", String(url).slice(0, 80));
-    // ⚠️ Эмуляция прода: RenderListDataAsStream ВСЕГДА падает 500 из-за «битых» полей списка.
+    // CAML работает. RowCount = числу возвращённых строк (такое поведение фермы у пользователя).
     if (String(url).includes("RenderListDataAsStream")) {
-      const err = new Error("Request failed with status code 500");
-      err.response = {
-        status: 500,
-        data: { error: { message: { value: "Один или несколько типов полей установлены неправильно. Перейдите на страницу параметров списка и удалите эти поля." } } },
-      };
-      throw err;
+      const viewXml = String(body?.parameters?.ViewXml || "");
+      const limitMatch = viewXml.match(/RowLimit Paged="TRUE">(\d+)</);
+      const limit = limitMatch ? Number(limitMatch[1]) : 20;
+      const all = [
+        { ID: 901, Title: "Исправить паллет", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-20T10:00:00Z" },
+        { ID: 902, Title: "Найти ЕО", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-19T10:00:00Z" },
+        { ID: 904, Title: "Проверить ячейку", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-18T10:00:00Z" },
+        { ID: 905, Title: "Переместить паллет", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-17T10:00:00Z" },
+        { ID: 906, Title: "Списать ЕО", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-16T10:00:00Z" },
+        { ID: 907, Title: "Проверить ТК", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-15T10:00:00Z" },
+        { ID: 908, Title: "Исправить вес", Status: "Завершена", PercentComplete: 1, Modified: "2026-09-14T10:00:00Z" },
+      ];
+      // «в работе» не должен попасть в завершённые
+      const rows = all.slice(0, limit);
+      return { data: { d: { RenderListDataAsStream: { Row: rows, RowCount: rows.length, NextHref: rows.length < all.length ? "?Paged=TRUE&p_ID=908" : null } } } };
     }
     return { data: { d: {} } };
   },
