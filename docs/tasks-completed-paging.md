@@ -83,3 +83,30 @@ Status содержит «В процессе» / «Выполня» / «Не н
 
 **Счётчик:** основной источник — REST `$top=1&$inlinecount=allpages` (`d.__count`),
 фолбэк — `RowCount` из RenderListDataAsStream.
+
+## Диагностика завершённых задач
+
+Включить: **`?dbg=1`** в адресе (или `localStorage.dbg = "1"` / `localStorage.dbg_tasks = "1"`).
+Ошибки и предупреждения пишутся в консоль **всегда**, без флага.
+
+| Метка | Когда | Что показывает |
+|---|---|---|
+| `[completedTasks] request` | перед запросом (при `?dbg=1`) | URL, `Paging`, полный `ViewXml` |
+| `[completedTasks] response` | ответ получен (при `?dbg=1`) | `RowCount`, число строк, `NextHref` |
+| `[completedTasks:page:result]` | страница разобрана (`?dbg=1`) | сколько строк, сколько задач, сколько отсеяно, Id |
+| `[completedTasks:page:filtered]` | **всегда** (warn) | строки «в работе», отсеянные клиентом: `{ Id, Status, PercentComplete }` |
+| `[completedTasks:badField]` | **всегда** (warn) | «поле X отсутствует в списке — убираю из ViewXml» |
+| `[completedTasks:failed]` | **всегда** (error) | URL, HTTP-статус, текст SharePoint, имя «плохого» поля, ViewXml, сырой ответ |
+| `[completedTasks:count:request]` / `count:result` | счётчик (`?dbg=1`) | REST-URL с фильтром и посчитанное число |
+| `[completedTasks:count:failed]` | **всегда** (error) | почему REST-счётчик не сработал |
+| `[useCompletedTasks] loadNext failed` | **всегда** (error) | статус и краткий текст для UI |
+
+В интерфейсе при ошибке показывается **реальная причина от SharePoint**
+(например, `HTTP 400 · Column 'Location1' does not exist…`) вместо общей фразы про поля.
+
+Живая проверка логов на стенде:
+
+```bash
+npx vite build --config preview/vite.config.js --ssr log-check.mjs --outDir .ssrout --logLevel error
+TAG="completedTasks" node preview/.ssrout/log-check.mjs
+```

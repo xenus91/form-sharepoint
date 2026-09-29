@@ -24,6 +24,7 @@ const TaskList = React.memo(function TaskList({
   isTabPending = false,
   loading = false,
   error = "",
+  errorDetail = "",
   isBackgroundFetching = false,
   // config / callbacks
   taskConfig = null,
@@ -55,9 +56,16 @@ const TaskList = React.memo(function TaskList({
     return (
       <Paper sx={{ p: 3, borderRadius: 3, bgcolor: "rgba(229,57,53,0.06)", border: "1px solid rgba(229,57,53,0.2)" }}>
         <Typography color="error" sx={{ fontWeight: 700 }}>{error}</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-          Проверьте, что список содержит поля AssignedTo, Body, ResultSearchTHU, Location1.
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1, whiteSpace: "pre-wrap" }}>
+          {errorDetail
+            ? errorDetail
+            : "Проверьте, что список содержит поля AssignedTo, Body, ResultSearchTHU, Location1."}
         </Typography>
+        {errorDetail ? (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+            Подробности — в консоли браузера (метка [completedTasks:failed]).
+          </Typography>
+        ) : null}
         <Button sx={{ mt: 2 }} variant="outlined" onClick={onRetry}>Повторить</Button>
       </Paper>
     );

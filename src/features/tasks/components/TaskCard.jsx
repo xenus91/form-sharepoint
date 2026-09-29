@@ -205,22 +205,47 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
 
   const [relatedValues, setRelatedValues] = React.useState(null);
   React.useEffect(() => {
+    const dbgOn = __forceTaskDbg || __DBG_ENABLED__;
     if (relatedFieldDefs.length === 0 || !relatedRef) {
       setRelatedValues(null);
       setRelatedLoading(false);
+      if (dbgOn && relatedFieldDefs.length > 0) {
+        __dlogAlways("[DBG:TaskCard:rf:source]", {
+          taskId: task?.Id,
+          reason: "нет связи RelatedItems → значения берём из полей самой задачи",
+          hasRelatedItems: !!task?.RelatedItems,
+          relatedItems: String(task?.RelatedItems || "").slice(0, 200),
+          fields: relatedFieldDefs.map((f) => f.internalName),
+        });
+      }
       return;
     }
     let cancelled = false;
     setRelatedLoading(true);
+    if (dbgOn) {
+      __dlogAlways("[DBG:TaskCard:rf:request]", {
+        taskId: task?.Id,
+        listId: relatedRef.listId,
+        itemId: relatedRef.itemId,
+        fields: relatedFieldDefs.map((f) => f.internalName),
+      });
+    }
     fetchRelatedFields(relatedRef, relatedFieldDefs).then((values) => {
       if (cancelled) return;
+      if (__forceTaskDbg || __DBG_ENABLED__) {
+        __dlogAlways("[DBG:TaskCard:rf:response]", {
+          taskId: task?.Id,
+          itemId: relatedRef.itemId,
+          values: Array.isArray(values) ? values.map((v) => ({ f: v.internalName, v: v.value })) : values,
+        });
+      }
       setRelatedValues(values);
       setRelatedLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [relatedFieldDefs, relatedRef]);
+  }, [relatedFieldDefs, relatedRef, task?.Id, task?.RelatedItems]);
 
   // Диагностика (?dbg=1): поля настроены, но значений нет — причина видна в консоли.
   React.useEffect(() => {
@@ -251,6 +276,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         internalName: r.internalName,
         title: r.title || r.internalName,
         value,
+        source: "related",
         zone: zoneByField.get(r.internalName) || "header",
       });
       filled.add(r.internalName);
@@ -264,7 +290,14 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         internalName: f.internalName,
         title: f.title || f.internalName,
         value,
+        source: "task",
         zone: f.zone || "header",
+      });
+    }
+    if (__forceTaskDbg || __DBG_ENABLED__) {
+      __dlogAlways("[DBG:TaskCard:rf:rows]", {
+        taskId: task?.Id,
+        rows: rows.map((r) => ({ f: r.internalName, ti: r.title, v: r.value, src: r.source, z: r.zone })),
       });
     }
     return rows;
@@ -272,6 +305,18 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // Поля в шапке (по умолчанию) и поля перед описанием ("z": "body").
   const headerRows = React.useMemo(() => relatedRows.filter((r) => r.zone !== "body"), [relatedRows]);
   const bodyRows = React.useMemo(() => relatedRows.filter((r) => r.zone === "body"), [relatedRows]);
+
+  // Диагностика (?dbg=1): что ушло в шапку, а что — перед описанием.
+  React.useEffect(() => {
+    if (!(__forceTaskDbg || __DBG_ENABLED__)) return;
+    if (relatedFieldDefs.length === 0) return;
+    const brief = (rows) => rows.map((r) => `${r.title}=${r.value} (${r.source})`);
+    __dlogAlways("[DBG:TaskCard:rf:zones]", {
+      taskId: task?.Id,
+      header: brief(headerRows),
+      body: brief(bodyRows),
+    });
+  }, [headerRows, bodyRows, relatedFieldDefs.length, task?.Id]);
   // Поля настроены, но ещё грузятся — показываем скелетоны, чтобы карточки не «прыгали».
   const [relatedLoading, setRelatedLoading] = React.useState(false);
 

@@ -452,3 +452,24 @@ await window.__taskBehaviourForceRefresh();
 | **`sp:AdditionalActions:Default`** | sessionStorage / настройки | Список доп. действий по умолчанию |
 | **Заголовок задачи** | Поле `Title` списка задач | Формируется как `<DC_THU>_<THU>`; для завершённых задач заголовок строится по тому же принципу, что и для активных |
 | **Завершённые задачи** | Автоматически | Показываются счётчиком и подгружаются страницами по 20 (кнопка «Показать ещё») |
+
+## Диагностика полей карточки (`rf`)
+
+Включить: **`?dbg=1`** (или `localStorage.dbg = "1"`). Логи идут в консоль браузера:
+
+| Метка | Что показывает |
+|---|---|
+| `[DBG:TaskCard:relatedFields]` | найдена ли запись `TaskBehaviour` для типа контента, `matchedBy`, список полей из `rf` |
+| `[DBG:TaskCard:rf:source]` | нет связи `RelatedItems` → значения берём из полей самой задачи |
+| `[DBG:TaskCard:rf:request]` | запрос к связанному элементу: `listId`, `itemId`, поля |
+| `[DBG:TaskCard:rf:response]` | что вернул связанный список: поле → значение |
+| `[DBG:TaskCard:rf:rows]` | итоговые строки с источником: `src: "related"` (связанный элемент) или `"task"` (поля задачи) |
+| `[DBG:TaskCard:rf:zones]` | что ушло в шапку, а что перед описанием (`z: "body"`), в формате `Заголовок=Значение (источник)` |
+| `[DBG:TaskCard:relatedFields:empty]` | поля настроены, но значений нет — причина: `hasRelatedItems`, `relatedItems`, `relatedRef` |
+
+Живая проверка на стенде:
+
+```bash
+npx vite build --config preview/vite.config.js --ssr log-check.mjs --outDir .ssrout --logLevel error
+WAIT=2000 TAG="rf:" node preview/.ssrout/log-check.mjs
+```

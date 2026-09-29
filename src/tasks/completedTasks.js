@@ -15,6 +15,8 @@ import { TASKS_LIST_API } from "./config";
 import { getGroupIdsFromDistribution } from "./distribution";
 import { toDomainTask } from "../domain/tasks/taskModel";
 import { isCompletedStatus } from "./status";
+import { DBG_ENABLED, dbg, dbgError, dbgWarn } from "../utils/dbg";
+import { apiErrorStatus, describeApiError, extractFieldFromError, apiErrorPayload } from "../utils/apiError";
 
 /**
  * REST-фильтр «завершённые» — то же правило, что в isCompletedStatus().
@@ -34,22 +36,9 @@ export function buildCompletedRestFilter() {
 
 export const COMPLETED_PAGE_SIZE = 20;
 
-const __DBG_ENABLED__ = (() => {
-  try {
-    if (typeof window === "undefined") return false;
-    if (new URLSearchParams(window.location.search).get("dbg") === "1") return true;
-    if (window.localStorage?.getItem("dbg_tasks") === "1") return true;
-    return false;
-  } catch {
-    return false;
-  }
-})();
-const __dlog = (...a) => {
-  if (!__DBG_ENABLED__) return;
-  try {
-    console.log("[completedTasks]", ...a);
-  } catch {}
-};
+// Диагностика: ?dbg=1 (или localStorage dbg / dbg_tasks = 1). См. src/utils/dbg.js.
+const __DBG_ENABLED__ = DBG_ENABLED;
+const __dlog = (...a) => dbg("completedTasks", ...a);
 
 // Поля, которые нужны карточке завершённой задачи.
 // Несуществующие поля автоматически вычищаются при ошибке (см. retryWithoutBadField).
@@ -154,14 +143,31 @@ async function renderListData({ viewXml, paging = null }) {
       ...(paging ? { Paging: paging } : {}),
     },
   };
-  const { data } = await apiClient.post(`${TASKS_LIST_API}/RenderListDataAsStream`, body, {
-    headers: {
-      Accept: "application/json;odata=verbose",
-      "Content-Type": "application/json;odata=verbose",
-    },
-  });
+  const url = `${TASKS_LIST_API}/RenderListDataAsStream`;
+  __dlog("request", { url, paging, viewXml });
+  let response;
+  try {
+    response = await apiClient.post(url, body, {
+      headers: {
+        Accept: "application/json;odata=verbose",
+        "Content-Type": "application/json;odata=verbose",
+      },
+    });
+  } catch (e) {
+    // Полная диагностика падения — пишем ВСЕГДА, без ?dbg=1.
+    dbgError("completedTasks:failed", {
+      url,
+      paging,
+      status: apiErrorStatus(e),
+      message: describeApiError(e),
+      badField: extractFieldFromError(e) || null,
+      viewXml,
+      payload: apiErrorPayload(e),
+    });
+    throw e;
+  }
   // В разных версиях ответ приходит как d.RenderListDataAsStream / d / корень
-  const payload = data?.d?.RenderListDataAsStream || data?.d || data || {};
+  const payload = response?.data?.d?.RenderListDataAsStream || response?.data?.d || response?.data || {};
   __dlog("response", {
     keys: Object.keys(payload || {}).slice(0, 12),
     rowCount: payload?.RowCount,
@@ -211,11 +217,18 @@ async function fetchCompletedCountFallback({ currentUserId, distribution }) {
     const assigned = list.map((id) => `AssignedToId eq ${id}`).join(" or ");
     const filter = assigned ? `(${assigned}) and ${buildCompletedRestFilter()}` : buildCompletedRestFilter();
     const url = `${TASKS_LIST_API}/items?$select=Id&$filter=${encodeURIComponent(filter)}&$top=1&$inlinecount=allpages`;
+    __dlog("count:request", { url, filter });
     const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
     const count = data?.d?.__count != null ? Number(data.d.__count) : null;
+    __dlog("count:result", { count, source: "REST $inlinecount" });
     return { count, source: "REST $inlinecount" };
   } catch (e) {
-    __dlog("count fallback failed", e?.response?.status, e?.message);
+    dbgError("completedTasks:count:failed", {
+      status: apiErrorStatus(e),
+      message: describeApiError(e),
+      badField: extractFieldFromError(e) || null,
+      payload: apiErrorPayload(e),
+    });
     return { count: null, source: "error" };
   }
 }
@@ -305,6 +318,11 @@ export async function fetchCompletedTasksPage({
       const rows = Array.isArray(payload?.Row) ? payload.Row : [];
       const nextHref = typeof payload?.NextHref === "string" ? payload.NextHref.replace(/^\?/, "") : null;
       const rowCount = typeof payload?.RowCount === "number" ? payload.RowCount : null;
+      const dropped = rows
+        .map((row) => rowToRawTask(row))
+        .filter((r) => r.Id != null && !isCompletedStatus(r.Status, r.PercentComplete))
+        .map((r) => ({ Id: r.Id, Status: r.Status, PercentComplete: r.PercentComplete }));
+      if (dropped.length) dbgWarn("completedTasks:page:filtered", "строки «в работе» отсеяны", dropped);
       const tasks = rows
         .map((row) => rowToRawTask(row))
         .filter((r) => r.Id != null)
@@ -312,6 +330,14 @@ export async function fetchCompletedTasksPage({
         // отсекаем такие строки по тому же правилу isCompletedStatus().
         .filter((r) => isCompletedStatus(r.Status, r.PercentComplete))
         .map((r) => toDomainTask(r, { recipientField, scNumberField }));
+      __dlog("page:result", {
+        rows: rows.length,
+        tasks: tasks.length,
+        dropped: dropped.length,
+        rowCount,
+        nextHref,
+        ids: tasks.map((t) => t.Id),
+      });
       return { tasks, nextPaging: nextHref, rowCount, source: "RenderListDataAsStream" };
     } catch (e) {
       lastError = e;
@@ -321,7 +347,7 @@ export async function fetchCompletedTasksPage({
         const before = fields.length;
         fields = fields.filter((f) => f.toLowerCase() !== bad.toLowerCase());
         if (fields.length !== before) {
-          __dlog(`поле "${bad}" отсутствует в списке — убираю из ViewXml и повторяю`);
+          dbgWarn("completedTasks:badField", `поле "${bad}" отсутствует в списке — убираю из ViewXml и повторяю`);
           attempt += 1;
           continue;
         }

@@ -564,6 +564,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         isTabPending={isTabPending}
         loading={tab === 1 ? completedLoading : loading}
         error={tab === 1 ? completed.error : error}
+        errorDetail={tab === 1 ? completed.errorDetail : ""}
         isBackgroundFetching={tab === 1 ? false : isBackgroundFetching}
         taskConfig={taskConfiguration.data}
         resultFieldsMeta={resultFieldsMeta}

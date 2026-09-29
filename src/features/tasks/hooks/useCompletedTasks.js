@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { COMPLETED_PAGE_SIZE, fetchCompletedCount, fetchCompletedTasksPage } from "../../../tasks/completedTasks";
+import { describeApiError } from "../../../utils/apiError";
 
 export function useCompletedTasks({
   currentUserId,
@@ -25,6 +26,7 @@ export function useCompletedTasks({
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [errorDetail, setErrorDetail] = useState(""); // текст ошибки SharePoint
 
   const inFlight = useRef(false);
   const pagingRef = useRef(null); // null — ещё не грузили; "" — страниц больше нет
@@ -56,6 +58,7 @@ export function useCompletedTasks({
       inFlight.current = true;
       setLoading(true);
       setError("");
+      setErrorDetail("");
       try {
         const page = await fetchCompletedTasksPage({
           currentUserId,
@@ -78,8 +81,14 @@ export function useCompletedTasks({
         setLoadedOnce(true);
         if (countQuery.data?.count == null && typeof page.rowCount === "number") countQuery.refetch();
       } catch (e) {
+        const detail = describeApiError(e);
         setError("Не удалось загрузить завершённые задачи.");
-        console.warn("[useCompletedTasks] loadNext failed", e?.response?.status, e?.message);
+        setErrorDetail(detail);
+        console.error("[useCompletedTasks] loadNext failed", {
+          status: e?.response?.status ?? null,
+          detail,
+          error: e,
+        });
       } finally {
         inFlight.current = false;
         setLoading(false);
@@ -106,6 +115,7 @@ export function useCompletedTasks({
     setLoadedOnce(false);
     setNextPaging(null);
     setError("");
+    setErrorDetail("");
   }, [currentUserId, distKey]);
 
   const loadNext = useCallback(() => loadPage(false), [loadPage]);
@@ -132,6 +142,7 @@ export function useCompletedTasks({
     items,
     loading,
     error,
+    errorDetail,
     hasMore: !!nextPaging,
     loaded: loadedOnce,
     loadNext,
