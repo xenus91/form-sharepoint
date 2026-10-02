@@ -96,7 +96,7 @@ export default function DobTasksView({ onOpenDrawer }) {
       <Box sx={{ p: 2 }}>
         <Alert severity="error" sx={{ borderRadius: 1.5 }}>
           Не удалось загрузить поля ДОБ ({msg}) — проверьте доступ к{' '}
-          <code>/sites/dob/doblogistic/_api/web/lists(guid&apos;64DB263C-2ED6-4FD5-8760-AE5E3E4A331C&apos;)</code>.
+          <code>/sites/dob/doblogistic/_api/web/lists(guid&apos;21B5B544-BD98-4B06-891F-C5A137331394&apos;)</code>.
           <Box sx={{ mt: 1 }}>
             <Button size="small" variant="outlined" onClick={handleRefresh}>
               Повторить

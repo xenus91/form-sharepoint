@@ -13,6 +13,7 @@ const SELECT_ADDITIONAL = "AdditionalsActionsRequired,AdditionalActions";
 
 /**
  * @typedef {object} BuildTaskListQueryOpts
+ * @property {string} [listApi=TASKS_LIST_API] — путь к списку (например, "/web/lists(guid'…')"). По умолчанию — основной список задач.
  * @property {string[]} [taskFieldNames=[]] — доступные поля в списке (OffDepKey, RelatedItems)
  * @property {boolean} [useDueDate=true] — выбирать ли поле DueDate
  * @property {boolean} [useAdditionalActions=true] — включать ли AdditionalActions поля
@@ -20,6 +21,7 @@ const SELECT_ADDITIONAL = "AdditionalsActionsRequired,AdditionalActions";
  * @property {string[]} [resultFieldInternalNames=[]] — InternalName полей результата (динамически по ContentType)
  * @property {object|null} [distribution=null] — DcEmail-запись (для фильтра по группе)
  * @property {number|null} [currentUserId=null] — Id текущего пользователя (fallback для фильтра)
+ * @property {number[]} [assignedIds=null] — массив Id для AssignedToId OR-фильтра. Если передан — игнорирует distribution/currentUserId-логику.
  * @property {number} [top=100] — page size
  * @property {string} [orderBy="Created asc"]
  */
@@ -38,6 +40,7 @@ const SELECT_ADDITIONAL = "AdditionalsActionsRequired,AdditionalActions";
  */
 export function buildTaskListQuery(opts = {}) {
   let {
+    listApi = TASKS_LIST_API, // legacy: если не передан — основной список
     taskFieldNames = [],
     useDueDate = true,
     useAdditionalActions = true,
@@ -45,6 +48,7 @@ export function buildTaskListQuery(opts = {}) {
     useRecipient = null,
     distribution = null,
     currentUserId = null,
+    assignedIds = null, // новый: массив Id для OR-фильтра
     top = 100,
     orderBy = "Created asc",
     excludeCompleted = false,
@@ -117,11 +121,21 @@ export function buildTaskListQuery(opts = {}) {
   const effectiveExpandRecipient = shouldUseRecipient ? (recipientField || null) : null;
   if (effectiveExpandRecipient && shouldUseRecipient) expands.push(effectiveExpandRecipient);
 
-  // Filter по AssignedToId — серверный фильтр по группе + текущему юзеру (OR), чтобы персональные задачи не терялись.
-  // OffDepKey в Tasks больше не используем как фолбэк — он ненадёжен (поле может быть пустым/неиндексированным и даёт 0).
-  // Поэтому: если группа найдена — фильтр (group1 or group2 or currentUserId), иначе только currentUserId.
+  // Filter по AssignedToId:
+  //   - если передан assignedIds (массив) → OR-фильтр по этим Id (multi-source)
+  //   - иначе legacy: distribution → группа + currentUserId, fallback на currentUserId
   let assignedFilter;
-  if (distribution) {
+  if (Array.isArray(assignedIds) && assignedIds.length > 0) {
+    const ids = [...new Set(assignedIds.map(Number).filter((n) => Number.isFinite(n)))];
+    if (ids.length === 0) {
+      // нет ни одного валидного Id — пустой фильтр (на источнике ничего не вернётся)
+      assignedFilter = "AssignedToId eq -1";
+    } else if (ids.length === 1) {
+      assignedFilter = `AssignedToId eq ${ids[0]}`;
+    } else {
+      assignedFilter = `(${ids.map((id) => `AssignedToId eq ${id}`).join(" or ")})`;
+    }
+  } else if (distribution) {
     const groupIds = getGroupIdsFromDistribution(distribution);
     if (groupIds.length > 0) {
       // Включаем и группу и персональный Id, чтобы фолбэк работал даже когда группа существует но задач в ней нет
@@ -156,7 +170,7 @@ export function buildTaskListQuery(opts = {}) {
     ? `${assignedFilter} and (PercentComplete eq null or PercentComplete ne 1)`
     : assignedFilter;
 
-  return `${TASKS_LIST_API}/items` +
+  return `${listApi}/items` +
     `?$select=${selectFields}` +
     `&$expand=${expands.join(",")}` +
     `&$filter=${encodeURIComponent(finalFilter)}` +

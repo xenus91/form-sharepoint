@@ -4,7 +4,10 @@
 import axios from 'axios';
 
 export const DOB_SITE_RELATIVE = '/sites/dob/doblogistic';
-export const DOB_LIST_GUID = '64DB263C-2ED6-4FD5-8760-AE5E3E4A331C';
+// FIX: был устаревший/неверный GUID '64DB263C-2ED6-4FD5-8760-AE5E3E4A331C'.
+// Заменён на корректный GUID списка "Requests" (заявки ДОБ logistic) на этом сайте.
+// Связано с задачей ООБ (см. ADR docs/decisions/dob-task-sources.md).
+export const DOB_LIST_GUID = '21B5B544-BD98-4B06-891F-C5A137331394';
 
 // Build absolute or proxy-aware base for dob site
 export function dobApiBase() {

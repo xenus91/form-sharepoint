@@ -6,30 +6,46 @@ const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}ca
 // eslint-disable-next-line no-unused-vars
 const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollapsed(...a);}catch(_e){ void _e;} };
 // eslint-disable-next-line no-unused-vars
-// eslint-disable-next-line no-unused-vars
 const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch(_e){ void _e;} };
 
-import apiClient, { normalizeNextUrl } from "../api";
+import { normalizeNextUrl } from "../api";
 import { buildTaskListQuery } from "./listQuery";
+// eslint-disable-next-line no-unused-vars
 import { mapRawTask } from "./mapping";
 import { toDomainTask } from "../domain/tasks/taskModel";
+import { getSourceById } from "./sources";
+import { makeSourceClient } from "./sourceClient";
 
 /**
- * Чистая fetch-функция для списка задач (без React state).
- * Повторяет логику loadTasks из TasksView, но возвращает Promise<Array<Task>>.
- * Используется TanStack Query queryFn.
+ * Чистая fetch-функция для одного источника задач (multi-source).
+ * @param {{id:string, clientKind:"main"|"dob", listApi?:string|null, resolveListApi?:(()=>string|Promise<string>)|null}} source
+ * @param {{apiBase:string, listApi:()=>string|Promise<string>, get:(url:string, opts?:any)=>Promise<{data:any}>}} client
+ * @param {{ currentUserId?:number|null, distribution?:any, taskFieldNames?:string[], recipientField?:string|null, scNumberField?:string|null, resultFieldInternalNames?:string[], assignedIds?:number[]|null, listApi?:string|null, excludeCompleted?:boolean }} [opts]
+ * @returns {Promise<Array>}
  */
-export async function fetchTasks({ currentUserId, distribution, taskFieldNames = [], recipientField = null, scNumberField = null, resultFieldInternalNames = [] }) {
-  __dlog("[DBG:fetchTasks] start", { currentUserId, distribution: distribution?.Id||distribution?.OffDepKey||null, resultFieldInternalNames, taskFieldNamesLen: taskFieldNames.length });
-  if (!currentUserId) return [];
+export async function fetchTasksForSource(source, client, opts = {}) {
+  if (!source || !client) throw new Error("[fetchTasksForSource] source & client required");
+  const {
+    currentUserId = null,
+    distribution = null,
+    taskFieldNames = [],
+    recipientField = null,
+    scNumberField = null,
+    resultFieldInternalNames = [],
+    assignedIds = null,
+    listApi = null,
+    excludeCompleted = true,
+  } = opts;
+  __dlog("[DBG:fetchTasksForSource] start", { sourceId: source.id, currentUserId, distributionId: distribution?.Id||null, assignedIdsLen: Array.isArray(assignedIds) ? assignedIds.length : null });
+  if (!currentUserId && !(Array.isArray(assignedIds) && assignedIds.length > 0)) return [];
   let useDueDate = true;
   let useAdditionalActions = true;
   let useRecipient = !!recipientField;
-  // Recipient в Tasks может отсутствовать (как сейчас - поле удалено). Не пробуем дефолт "Recipient" на первом рендере,
-  // чтобы не падать с 400 "Recipient не существует". Данные Recipient теперь берём только из связанного элемента через enrich.
   let effectiveRecipientField = recipientField || null;
+  const effectiveListApi = listApi || (typeof client.listApi === "function" ? await client.listApi() : "");
   const buildUrl = () =>
     buildTaskListQuery({
+      listApi: effectiveListApi,
       taskFieldNames,
       useDueDate,
       useAdditionalActions,
@@ -38,36 +54,43 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
       resultFieldInternalNames,
       distribution,
       currentUserId,
-      // Завершённые задачи грузятся отдельно и лениво (completedTasks.js),
-      // поэтому в основной запрос они не попадают.
-      excludeCompleted: true,
+      assignedIds,
+      excludeCompleted,
     });
 
   let nextUrl = buildUrl();
-  __dlog("[DBG:fetchTasks] buildUrl", nextUrl.slice(0,1200));
+  __dlog("[DBG:fetchTasksForSource] buildUrl", nextUrl.slice(0,1200));
   let all = [];
   let safety = 0;
   while (nextUrl && safety < 20) {
     try {
-      const { data } = await apiClient.get(nextUrl, {
+      let urlForClient = nextUrl;
+      if (typeof client.apiBase === "string" && client.apiBase && !/^https?:\/\//.test(nextUrl) && !nextUrl.startsWith("/api/") && !nextUrl.startsWith("/dob-api/")) {
+        urlForClient = `${client.apiBase}${nextUrl.startsWith("/") ? nextUrl : `/${nextUrl}`}`;
+      } else if (/^https?:\/\//.test(nextUrl) && client.apiBase && client.apiBase.startsWith("/")) {
+        try {
+          const u = new URL(nextUrl);
+          urlForClient = u.pathname + u.search;
+        } catch (_e) { void _e; }
+      }
+      const resp = await client.get(urlForClient, {
         headers: { Accept: "application/json;odata=verbose" },
-        __noCache: true, // TanStack — единственный кэш
+        __noCache: true,
       });
+      const data = resp?.data || {};
       const results = data?.d?.results || [];
       all = all.concat(results);
       nextUrl = data?.d?.__next ? normalizeNextUrl(data.d.__next) : null;
     } catch (e) {
       const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
       if (msg.includes("endjob")) {
-        console.warn("[fetchTasks] EndJob field missing, retry without it (field was deleted)");
-        // EndJob был удалён — фильтруем его из всех списков и ретраим
+        console.warn(`[fetchTasksForSource:${source.id}] EndJob field missing, retry without it`);
         taskFieldNames = taskFieldNames.filter((f) => f.toLowerCase() !== "endjob");
         resultFieldInternalNames = resultFieldInternalNames.filter((f) => f.toLowerCase() !== "endjob");
         if (effectiveRecipientField && effectiveRecipientField.toLowerCase() === "endjob") {
           effectiveRecipientField = null;
           useRecipient = false;
         }
-        // также чистим кэш, чтобы не возвращать старый URL с EndJob
         try { const { invalidate } = await import("../sp/cache.js"); invalidate("EndJob"); } catch (_e) { void _e; }
         nextUrl = buildUrl();
         continue;
@@ -97,18 +120,57 @@ export async function fetchTasks({ currentUserId, distribution, taskFieldNames =
     safety += 1;
   }
 
-  // Domain mapping — централизованно, сохраняет legacy поля для совместимости ( §9 )
-  const mapped = all.map((r) => toDomainTask(r, { recipientField: effectiveRecipientField, scNumberField }));
-  try{
+  return all.map((r) => toDomainTask(r, { recipientField: effectiveRecipientField, scNumberField }));
+}
+
+/**
+ * Legacy fetch — тонкая обёртка над fetchTasksForSource("main", …).
+ * Поведение #tasks не меняется.
+ * @param {{ currentUserId?:number|null, distribution?:any, taskFieldNames?:string[], recipientField?:string|null, scNumberField?:string|null, resultFieldInternalNames?:string[] }} opts
+ */
+export async function fetchTasks(opts = {}) {
+  __dlog("[DBG:fetchTasks] start", { currentUserId: opts.currentUserId, distribution: opts.distribution?.Id||opts.distribution?.OffDepKey||null, resultFieldInternalNames: opts.resultFieldInternalNames, taskFieldNamesLen: (opts.taskFieldNames||[]).length });
+  const source = getSourceById("main");
+  if (!source) throw new Error("[fetchTasks] main source not configured");
+  const client = makeSourceClient(source);
+  const mapped = await fetchTasksForSource(source, client, opts);
+  // Совместимость с прежним логированием
+  try {
     const byType = {};
-    for(const m of mapped){ const ct = String(m.ContentTypeId||'').slice(0,18); byType[ct]=(byType[ct]||0)+1; }
-    __dlog("[DBG:fetchTasks] results", { rawCount: all.length, mappedCount: mapped.length, byContentTypePrefix: byType, sample: mapped.slice(0,3).map(m=>({Id:m.Id, Title:(m.Title||'').slice(0,40), Status:m.Status, ContentTypeId:String(m.ContentTypeId||'').slice(0,60), RelatedItems: !!m.RelatedItems, Recipient: m.Recipient||'(empty)', SCNumber:m.SCNumber||'(empty)', THU:m.THU||'(empty)', ResultTHU: m.ResultSearchTHU, ResultValue: m.ResultValue, rawKeys: Object.keys(m.raw||{}).filter(k=>k.toLowerCase().includes('result')).slice(0,5)})) });
-    // отдельно логируем задачи типа завершения поиска ЕО (где есть ResultSearchComplete в raw или ct содержит заверш)
-    const comp = mapped.filter(m=> {
-      const keys = Object.keys(m.raw||{});
-      return keys.some(k=>k.toLowerCase().includes('resultcomplete')||k.toLowerCase().includes('complete')) || String(m.Title||'').toLowerCase().includes('заверш') || String(m.raw?.ContentType?.Name||'').toLowerCase().includes('заверш');
+    for (const m of mapped) {
+      const ct = String(m.ContentTypeId || "").slice(0, 18);
+      byType[ct] = (byType[ct] || 0) + 1;
+    }
+    __dlog("[DBG:fetchTasks] results", {
+      rawCount: mapped.length,
+      mappedCount: mapped.length,
+      byContentTypePrefix: byType,
+      sample: mapped.slice(0, 3).map((m) => ({
+        Id: m.Id,
+        Title: (m.Title || "").slice(0, 40),
+        Status: m.Status,
+        ContentTypeId: String(m.ContentTypeId || "").slice(0, 60),
+        RelatedItems: !!m.RelatedItems,
+        Recipient: m.Recipient || "(empty)",
+        SCNumber: m.SCNumber || "(empty)",
+        THU: m.THU || "(empty)",
+        ResultTHU: m.ResultSearchTHU,
+        ResultValue: m.ResultValue,
+        rawKeys: Object.keys(m.raw || {}).filter((k) => k.toLowerCase().includes("result")).slice(0, 5),
+      })),
     });
-    if(comp.length){ __dlog("[DBG:fetchTasks] completion-type tasks", comp.map(m=>({Id:m.Id, Title:m.Title, ContentTypeId:m.ContentTypeId, rawResultKeys: Object.keys(m.raw||{}).filter(k=>k.toLowerCase().includes('result')), ResultSearchTHU:m.ResultSearchTHU, rawComplete: m.raw?.ResultSearchComplete||m.raw?.ResultComplete||m.raw?.Result||'(none)'}))); }
-  }catch(_e){ void _e; } // eslint-disable-line no-empty
+    const comp = mapped.filter((m) => {
+      const keys = Object.keys(m.raw || {});
+      return keys.some((k) => k.toLowerCase().includes("resultcomplete") || k.toLowerCase().includes("complete")) || String(m.Title || "").toLowerCase().includes("заверш") || String(m.raw?.ContentType?.Name || "").toLowerCase().includes("заверш");
+    });
+    if (comp.length) {
+      __dlog("[DBG:fetchTasks] completion-type tasks", comp.map((m) => ({
+        Id: m.Id, Title: m.Title, ContentTypeId: m.ContentTypeId,
+        rawResultKeys: Object.keys(m.raw || {}).filter((k) => k.toLowerCase().includes("result")),
+        ResultSearchTHU: m.ResultSearchTHU,
+        rawComplete: m.raw?.ResultSearchComplete || m.raw?.ResultComplete || m.raw?.Result || "(none)",
+      })));
+    }
+  } catch (_e) { void _e; }
   return mapped;
 }

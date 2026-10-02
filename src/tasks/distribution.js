@@ -224,6 +224,76 @@ export function clearTasksFieldsCache() {
 }
 
 /**
+ * Нормализация массива значений Email из DcEmail-записи в плоский список принципалов.
+ * Email — множественный выбор (AllowMultiple=true): {results:[{Id,Title,LoginName,EMail}, …]}
+ * Поддерживает также одиночный объект {Id,…} или массив [{Id,…}].
+ * @param {any} rawEmail
+ * @returns {Array<{id:number,title:string|null,loginName:string|null,email:string|null}>}
+ */
+function _flattenEmailPrincipals(rawEmail) {
+  const out = [];
+  if (rawEmail == null) return out;
+  let arr = null;
+  if (Array.isArray(rawEmail)) arr = rawEmail;
+  else if (Array.isArray(rawEmail.results)) arr = rawEmail.results;
+  else if (typeof rawEmail === "object" && rawEmail.Id != null) arr = [rawEmail];
+  if (!arr) return out;
+  for (const it of arr) {
+    if (it == null) continue;
+    if (typeof it === "number" || typeof it === "string") {
+      const n = Number(it);
+      if (!Number.isNaN(n)) out.push({ id: n, title: null, loginName: null, email: null });
+      continue;
+    }
+    const id = Number(it.Id);
+    if (Number.isNaN(id)) continue;
+    out.push({
+      id,
+      title: typeof it.Title === "string" ? it.Title : null,
+      loginName: typeof it.LoginName === "string" ? it.LoginName : null,
+      email: typeof it.EMail === "string" ? it.EMail : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Эвристика классификации принципала: user или group.
+ * Правила (см. ADR docs/decisions/dob-task-sources.md):
+ *  - есть SMTP-email (содержит "@") → user
+ *  - loginName содержит claim-префикс (`i:0#.f|membership|`, `i:0#.w|`) → user
+ *  - loginName содержит `@` или `\` → user
+ *  - иначе → group
+ *  @param {{title?:string|null,loginName?:string|null,email?:string|null}} p
+ *  @returns {"user"|"group"|"unknown"}
+ */
+export function classifyPrincipal(p) {
+  if (!p) return "unknown";
+  const email = (p.email || "").trim();
+  const login = (p.loginName || "").trim();
+  const title = (p.title || "").trim();
+  if (email && email.includes("@")) return "user";
+  if (/i:0#\.[a-z]+\|/i.test(login)) return "user";
+  if (login.includes("@") || login.includes("\\")) return "user";
+  if (title) return "group";
+  return "unknown";
+}
+
+/**
+ * Список принципалов (users + groups) из DcEmail-записи.
+ * Аддитивная функция — НЕ ломает getGroupIdsFromDistribution.
+ * @param {object|null} dist
+ * @returns {Array<{id:number,title:string|null,loginName:string|null,email:string|null,isUser:boolean,kind:"user"|"group"|"unknown"}>}
+ */
+export function listDistributionPrincipals(dist) {
+  if (!dist) return [];
+  return _flattenEmailPrincipals(dist.Email).map((p) => {
+    const kind = classifyPrincipal(p);
+    return { ...p, isUser: kind === "user", kind };
+  });
+}
+
+/**
  * Получить InternalName всех полей в Tasks list (для динамического определения
  * какие поля доступны — RelatedItems, OffDepKey и т.д. (Recipient/WorkflowItemId выпилены).
  * @returns {Promise<string[]>}
