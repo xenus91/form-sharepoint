@@ -106,7 +106,22 @@ export function buildTaskListQuery(opts = {}) {
     }
   }
 
-  const selectFieldsBase = useDueDate ? SELECT_BASE : SELECT_BASE_NO_DUE;
+  const selectFieldsBaseRaw = useDueDate ? SELECT_BASE : SELECT_BASE_NO_DUE;
+  // Per-source filter: если taskFieldNames известны (новые per-source хуки),
+  // убираем из базы поля, которых нет в списке. Иначе — SharePoint вернёт 400.
+  // SELECT_BASE_NO_DUE/SELECT_BASE — захардкоженный минимальный набор + ResultSearchTHU;
+  // для dob ResultSearchTHU не существует — нужно фильтровать.
+  const selectFieldsBase = (Array.isArray(taskFieldNames) && taskFieldNames.length > 0)
+    ? selectFieldsBaseRaw.split(",").filter((f) => {
+        const trimmed = f.trim();
+        // Если в списке нет поля — выкидываем (для дочерних типа ResultSearchTHU/Id)
+        if (trimmed.includes("/")) {
+          const base = trimmed.split("/")[0];
+          return taskFieldNames.includes(base) || taskFieldNames.includes(trimmed);
+        }
+        return taskFieldNames.includes(trimmed);
+      }).join(",")
+    : selectFieldsBaseRaw;
   // Если useAdditionalActions false — не добавляем AdditionalActions даже если они есть в extraFields (для retry)
   let finalExtra = extraFields;
   if (!useAdditionalActions) {
