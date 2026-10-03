@@ -83,6 +83,11 @@ export async function fetchTasksMultiSource(opts) {
   const sources = (opts.sources || []).filter((s) => s && s.enabled !== false);
   const principals = opts.principals || (opts.distribution ? listDistributionPrincipals(opts.distribution) : []);
 
+  // Per-source подготовка полей. Caller может передать opts.sourceFields[sourceId]
+  // (готовый кэш), либо мы используем opts.taskFieldNames как fallback (для main).
+  // Для источников без готового списка полей — fallback на переданный общий taskFieldNames.
+  const sourceFieldsById = opts.sourceFieldsById || {};
+
   const perSourceStats = {};
   const errors = [];
   if (sources.length === 0) {
@@ -116,11 +121,14 @@ export async function fetchTasksMultiSource(opts) {
       return [];
     }
 
+    // Per-source fields: prefer pre-fetched, fallback to opts.taskFieldNames
+    const fieldsForSource = sourceFieldsById[source.id] || opts.taskFieldNames || [];
+
     try {
       const rows = await fetchTasksForSource(source, client, {
         currentUserId: identity?.userId ?? null,
         distribution: opts.distribution,
-        taskFieldNames: opts.taskFieldNames,
+        taskFieldNames: fieldsForSource,
         recipientField: opts.recipientField,
         scNumberField: opts.scNumberField,
         resultFieldInternalNames: opts.resultFieldInternalNames,
