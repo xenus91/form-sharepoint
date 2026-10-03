@@ -58,6 +58,61 @@ const ACTION_ICONS = {
  */
 const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition, row, actions, onClose }) {
   const list = Array.isArray(actions) ? actions : [];
+  const sticky = list.filter((a) => a.sticky);
+  const scrollable = list.filter((a) => !a.sticky);
+
+  /** Кнопка действия или информационная плашка (без обработчика). */
+  const renderAction = (action) => (action.kind === "info" ? (
+    <Box
+      key={action.key}
+      sx={{
+        px: 0.75,
+        py: 0.5,
+        borderRadius: "7px",
+        bgcolor: "rgba(255,193,7,0.12)",
+        border: "1px solid rgba(255,193,7,0.3)",
+      }}
+    >
+      <Typography variant="caption" sx={{ display: "block", fontWeight: 700, color: "#8d6e00" }}>
+        {action.label}
+      </Typography>
+      {action.hint && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+          {action.hint}
+        </Typography>
+      )}
+    </Box>
+  ) : (
+    <Button
+      key={action.key}
+      fullWidth
+      size="small"
+      variant={action.variant || "outlined"}
+      color={action.color || "primary"}
+      startIcon={typeof action.icon === "string" ? ACTION_ICONS[action.icon] || null : action.icon || null}
+      disabled={!!action.disabled}
+      title={action.hint || undefined}
+      onClick={(event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        onClose?.();
+        action.onClick?.();
+      }}
+      sx={{
+        justifyContent: "flex-start",
+        textTransform: "none",
+        fontWeight: 700,
+        borderRadius: "7px",
+        minHeight: 32,
+        fontSize: 12.5,
+        px: 1.25,
+        ...(action.sx || {}),
+      }}
+    >
+      {action.label}
+    </Button>
+  ));
+
   return (
     <Popover
       open={!!open && !!anchorPosition && !!row}
@@ -81,6 +136,11 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
             p: 0.75,
             minWidth: 224,
             maxWidth: 320,
+            // Меню никогда не вылезает за экран: список результатов прокручивается,
+            // «Изменить» закреплена внизу и видна всегда.
+            maxHeight: "min(78vh, 620px)",
+            display: "flex",
+            flexDirection: "column",
             overflow: "visible",
           },
         },
@@ -96,63 +156,21 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
         </Typography>
       </Box>
       <Divider sx={{ mb: 0.5 }} />
-      <Stack spacing={0.5} data-testid="tasks-row-actions-list">
-        {list.map((action) => action.kind === "info" ? (
-          <Box
-            key={action.key}
-            sx={{
-              px: 0.75,
-              py: 0.5,
-              borderRadius: 1.5,
-              bgcolor: "rgba(255,193,7,0.12)",
-              border: "1px solid rgba(255,193,7,0.3)",
-            }}
-          >
-            <Typography variant="caption" sx={{ display: "block", fontWeight: 700, color: "#8d6e00" }}>
-              {action.label}
-            </Typography>
-            {action.hint && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                {action.hint}
-              </Typography>
-            )}
-          </Box>
-        ) : (
-          <Button
-            key={action.key}
-            fullWidth
-            size="small"
-            variant={action.variant || "outlined"}
-            color={action.color || "primary"}
-            startIcon={typeof action.icon === "string" ? ACTION_ICONS[action.icon] || null : action.icon || null}
-            disabled={!!action.disabled}
-            title={action.hint || undefined}
-            onClick={(event) => {
-              event.stopPropagation();
-              event.preventDefault();
-              onClose?.();
-              action.onClick?.();
-            }}
-            sx={{
-              justifyContent: "flex-start",
-              textTransform: "none",
-              fontWeight: 700,
-              borderRadius: "7px",
-              minHeight: 32,
-              fontSize: 12.5,
-              px: 1.25,
-              ...(action.sx || {}),
-            }}
-          >
-            {action.label}
-          </Button>
-        ))}
-        {list.length === 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ px: 0.75, py: 0.5 }}>
-            Нет доступных действий
-          </Typography>
-        )}
+      {/* Прокручиваемая часть: кнопок результата может быть много — меню не должно
+          вылезать за экран. «Изменить» (sticky) закреплена ниже и видна всегда. */}
+      <Stack
+        spacing={0.5}
+        data-testid="tasks-row-actions-list"
+        sx={{ maxHeight: "min(52vh, 380px)", overflowY: "auto", overflowX: "hidden", pr: scrollable.length > 0 ? 0.25 : 0 }}
+      >
+        {scrollable.map((action) => renderAction(action))}
       </Stack>
+      {sticky.length > 0 && (
+        <>
+          <Divider sx={{ my: 0.5 }} />
+          {sticky.map((action) => renderAction(action))}
+        </>
+      )}
     </Popover>
   );
 });

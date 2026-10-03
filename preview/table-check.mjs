@@ -73,6 +73,23 @@ if (inProgressRow) {
   console.log("   действия строки «в работе»:", labelsInProgress.join(" | "));
   check(labelsInProgress.some((t) => /Найдена|Не найдена/.test(t)), "есть кнопки результатов (как в карточке)");
   check(!labelsInProgress.some((t) => /Взять в работу/.test(t)), "«Взять в работу» для задачи в работе не предлагается");
+
+  // ⭐ Цвета и иконки кнопок результата — ровно как в карточке: их задаёт
+  // Behaviour-пайплайн (background/color/hover + «i»), а не набор по умолчанию.
+  // sx из Behaviour уезжает в CSS-класс (emotion), поэтому проверяем computed style.
+  const buttonByText = (re) => [...(openPopup()?.querySelectorAll("button") || [])].find((b) => re.test(b.textContent || ""));
+  const foundBtn = buttonByText(/Найдена/);
+  const foundBg = window.getComputedStyle(foundBtn).backgroundImage;
+  check(/linear-gradient\(180deg, #2e7d32/.test(foundBg), "«Найдена» залита градиентом из Behaviour (как в карточке)", foundBg);
+  check(window.getComputedStyle(foundBtn).color === "rgb(255, 255, 255)", "цвет текста кнопки — из Behaviour (#fff)");
+  const notFoundBtn = buttonByText(/Не найдена/);
+  const notFoundBg = window.getComputedStyle(notFoundBtn).backgroundColor;
+  check(notFoundBg === "rgb(198, 40, 40)", "«Не найдена» залита плоским цветом из Behaviour", notFoundBg);
+  check(!!foundBtn?.querySelector("svg"), "иконка результата пришла из Behaviour («i»)", "svg внутри кнопки");
+
+  // «Изменить» закреплена внизу: она вне прокручиваемого списка действий
+  const list = openPopup()?.querySelector('[data-testid="tasks-row-actions-list"]');
+  check(!!list && !/Изменить/.test(list.textContent || ""), "«Изменить» закреплена внизу и не скроллится вместе со списком");
 }
 
 // строка «Не начата» → «Взять в работу»
@@ -84,6 +101,15 @@ if (notStartedCell) {
   const labelsNew = [...(openPopup()?.querySelectorAll("button") || [])].map((b) => (b.textContent || "").trim());
   console.log("   действия строки «Не начата»:", labelsNew.join(" | "));
   check(labelsNew.some((t) => /Взять в работу/.test(t)), "есть «Взять в работу»");
+
+  // «Взять в работу» — тот же индиговый градиент, что у кнопки карточки
+  const takeBtn = [...(openPopup()?.querySelectorAll("button") || [])].find((b) => /Взять в работу/.test(b.textContent || ""));
+  const takeBg = window.getComputedStyle(takeBtn).backgroundImage;
+  check(/linear-gradient\(180deg, (#7B84FF|rgb\(123, 132, 255\))/.test(takeBg), "«Взять в работу» — градиент карточки", takeBg);
+  // «Изменить» — вторичная: рамка/текст цвета #171c8f, как у кнопки внешней карточки
+  const editBtn = [...(openPopup()?.querySelectorAll("button") || [])].find((b) => /Изменить/.test(b.textContent || ""));
+  const editColor = window.getComputedStyle(editBtn).color;
+  check(/rgb\(23, 28, 143\)/.test(editColor), "«Изменить» — вторичная, как в карточке", editColor);
 }
 
 console.log(`\n=== Итог: ${problems === 0 ? "ОК — действия открываются в точке клика" : `проблем: ${problems}`} ===`);

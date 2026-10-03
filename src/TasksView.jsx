@@ -27,7 +27,8 @@ import { resolveTaskRule } from "./services/taskBehaviour";
 import { resolveResultFlow } from "./features/tasks/resultFlow";
 import { resolveBehaviour } from "./services/behaviourParser";
 import { resolveTaskBehaviourByName, findContentTypeMeta } from "./services/taskBehaviour";
-import { resolveStylingForChoice } from "./services/stylingConfig";
+import { resolveStylingForChoice, resolveStylingIcon } from "./services/stylingConfig";
+import { renderStylingIcon } from "./services/stylingIcons";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
 import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
 import { useDistribution } from "./features/tasks/hooks/useDistribution";
@@ -598,9 +599,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return () => { cancelled = true; };
   }, [tableData.rows, isMainInProgressRow, resultFieldMetaForRow]);
 
-  // Вид кнопки результата — из Behaviour.stylingResultButton для типа контента задачи
-  // (тот же резолвер, что в карточке).
-  const resolveRowChoiceStyling = useCallback((row, choice) => {
+  // Правила Behaviour строки — по типу контента задачи. Единственный резолвер,
+  // на котором стоят и стили, и иконки, и логика «результат одним кликом»:
+  // так таблица гарантированно повторяет карточку (TaskCard использует те же
+  // resolveTaskBehaviourByName/findContentTypeMeta).
+  const rowTaskBehaviour = useCallback((row) => {
     try {
       const data = taskConfiguration?.data;
       if (!data?.taskBehaviour || !data?.ctMetaMap) return null;
@@ -608,44 +611,48 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       if (!ctId) return null;
       const ctMeta = findContentTypeMeta(ctId, data.ctMetaMap);
       if (!ctMeta?.name) return null;
-      const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
-      if (!tb?.styling?.ok) return null;
-      return resolveStylingForChoice(choice, tb.styling.value);
-    } catch (_e) { return null; }
+      return resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
+    } catch (_e) { void _e; return null; }
   }, [taskConfiguration?.data]);
+
+  // Вид кнопки результата — из Behaviour.stylingResultButton (тот же резолвер,
+  // что в карточке): background/color/hover/variant.
+  const resolveRowChoiceStyling = useCallback((row, choice) => {
+    const tb = rowTaskBehaviour(row);
+    if (!tb?.styling?.ok) return null;
+    return resolveStylingForChoice(choice, tb.styling.value);
+  }, [rowTaskBehaviour]);
+
+  // Иконка результата — из Behaviour «i» (StylingResultButton), как в карточке.
+  const resolveRowChoiceIcon = useCallback((row, choice) => {
+    const tb = rowTaskBehaviour(row);
+    if (!tb?.styling?.ok) return null;
+    return renderStylingIcon(resolveStylingIcon(choice, tb.styling.value), React.createElement);
+  }, [rowTaskBehaviour]);
 
   // Вид кнопки «Взять в работу» — Behaviour.stylingActions (ключ «takeInWork»),
   // тот же резолвер, что в карточке; если не задан — вид по умолчанию.
   const resolveRowTakeStyling = useCallback((row) => {
-    try {
-      const data = taskConfiguration?.data;
-      if (!data?.taskBehaviour || !data?.ctMetaMap) return null;
-      const ctId = String(row?.contentTypeId || row?.ContentTypeId || row?.raw?.ContentTypeId?.StringValue || "").trim();
-      if (!ctId) return null;
-      const ctMeta = findContentTypeMeta(ctId, data.ctMetaMap);
-      if (!ctMeta?.name) return null;
-      const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
-      if (!tb?.stylingActions?.ok) return null;
-      return resolveStylingForChoice("takeInWork", tb.stylingActions.value);
-    } catch (_e) { return null; }
-  }, [taskConfiguration?.data]);
+    const tb = rowTaskBehaviour(row);
+    if (!tb?.stylingActions?.ok) return null;
+    return resolveStylingForChoice("takeInWork", tb.stylingActions.value);
+  }, [rowTaskBehaviour]);
+
+  // Иконка кнопки «Взять в работу» — из Behaviour «i» (StylingActions.takeInWork).
+  const resolveRowTakeIcon = useCallback((row) => {
+    const tb = rowTaskBehaviour(row);
+    if (!tb?.stylingActions?.ok) return null;
+    return renderStylingIcon(resolveStylingIcon("takeInWork", tb.stylingActions.value), React.createElement);
+  }, [rowTaskBehaviour]);
 
   // Правило Behaviour для конкретного результата строки — по нему решаем, можно ли
   // завершить задачу «одним кликом» из таблицы или нужен inline-экран карточки
   // (prompt-поля/доп. действия/подтверждение кнопками).
   const resolveRowChoiceRule = useCallback((row, choice) => {
-    try {
-      const data = taskConfiguration?.data;
-      if (!data?.taskBehaviour || !data?.ctMetaMap) return null;
-      const ctId = String(row?.contentTypeId || row?.ContentTypeId || row?.raw?.ContentTypeId?.StringValue || "").trim();
-      if (!ctId) return null;
-      const ctMeta = findContentTypeMeta(ctId, data.ctMetaMap);
-      if (!ctMeta?.name) return null;
-      const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
-      if (!tb?.behaviour?.ok) return null;
-      return resolveBehaviour(choice, tb.behaviour.value);
-    } catch (_e) { return null; }
-  }, [taskConfiguration?.data]);
+    const tb = rowTaskBehaviour(row);
+    if (!tb?.behaviour?.ok) return null;
+    return resolveBehaviour(choice, tb.behaviour.value);
+  }, [rowTaskBehaviour]);
 
   // Задачу уже взял кто-то другой (та же проверка, что в TaskCard).
   const isRowTakenByOther = useCallback((row) => {
@@ -668,37 +675,50 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return Array.isArray(choices) ? choices.map(String) : [];
   }, [rowChoices, resultFieldMetaForRow, choices]);
 
-  const getTableRowActions = useCallback((row) => buildRowActions(row, {
-    canTake: canTakeTableRow(row),
-    taking: !!externalTakingId && externalTakingId === row?.compositeId,
-    updating: !!updatingId && updatingId === row?.Id,
-    takenByOther: isRowTakenByOther(row),
-    takerLabel: row?.EditorTitle || row?.Editor || "",
-    choices: choicesForRow(row),
-    resolveStyling: (choice) => resolveRowChoiceStyling(row, choice),
-    takeStyling: resolveRowTakeStyling(row),
-    onTake: () => handleTakeTableRow(row),
-    onResult: (choice) => {
-      // Как в карточке: если по Behaviour результат требует формы (prompt-поля,
-      // доп. действия) или подтверждения кнопками — открываем карточку сразу с этим
-      // результатом, чтобы пользователь заполнил всё там же, где и обычно.
-      const rule = resolveRowChoiceRule(row, choice);
-      const needsCardForm = !!rule && (
-        (rule.promptFields?.length || 0) > 0
-        || rule.showAdditionalActions === true
-        || rule.inlineConfirm === true
-      );
-      if (needsCardForm) {
-        openTaskForm(row?.compositeId, tableData.sources, { action: choice });
-        return;
-      }
-      handleResultClick(row, choice);
-    },
-    onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
-  }), [
+  const getTableRowActions = useCallback((row) => {
+    const actions = buildRowActions(row, {
+      canTake: canTakeTableRow(row),
+      taking: !!externalTakingId && externalTakingId === row?.compositeId,
+      updating: !!updatingId && updatingId === row?.Id,
+      takenByOther: isRowTakenByOther(row),
+      takerLabel: row?.EditorTitle || row?.Editor || "",
+      choices: choicesForRow(row),
+      resolveStyling: (choice) => resolveRowChoiceStyling(row, choice),
+      resolveIcon: (choice) => resolveRowChoiceIcon(row, choice),
+      takeStyling: resolveRowTakeStyling(row),
+      takeIcon: () => resolveRowTakeIcon(row),
+      onTake: () => handleTakeTableRow(row),
+      onResult: (choice) => {
+        // Как в карточке: если по Behaviour результат требует формы (prompt-поля,
+        // доп. действия) или подтверждения кнопками — открываем карточку сразу с этим
+        // результатом, чтобы пользователь заполнил всё там же, где и обычно.
+        const rule = resolveRowChoiceRule(row, choice);
+        const needsCardForm = !!rule && (
+          (rule.promptFields?.length || 0) > 0
+          || rule.showAdditionalActions === true
+          || rule.inlineConfirm === true
+        );
+        if (needsCardForm) {
+          openTaskForm(row?.compositeId, tableData.sources, { action: choice });
+          return;
+        }
+        handleResultClick(row, choice);
+      },
+      onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
+    });
+    if (__DBG_ENABLED__) {
+      __dlog("[DBG:rowActions]", {
+        id: row?.compositeId,
+        sourceId: row?.sourceId,
+        status: row?.Status,
+        actions: actions.map((a) => ({ key: a.key, kind: a.kind || "button", disabled: !!a.disabled })),
+      });
+    }
+    return actions;
+  }, [
     canTakeTableRow, externalTakingId, updatingId, isRowTakenByOther, choicesForRow,
-    resolveRowChoiceStyling, resolveRowTakeStyling, resolveRowChoiceRule,
-    handleTakeTableRow, handleResultClick, tableData.sources,
+    resolveRowChoiceStyling, resolveRowChoiceIcon, resolveRowTakeStyling, resolveRowTakeIcon,
+    resolveRowChoiceRule, handleTakeTableRow, handleResultClick, tableData.sources,
   ]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.

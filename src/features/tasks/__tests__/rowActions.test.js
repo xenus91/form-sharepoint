@@ -47,23 +47,49 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(onResult).toHaveBeenCalledWith("Не найдена");
   });
 
-  it("вид кнопки результата берётся из Behaviour.stylingResultButton", () => {
+  it("цвета кнопок результата — ровно как в карточке (StylingResultButton → sx)", () => {
+    // Форма, которую реально отдаёт resolveStylingForChoice: background (shorthand),
+    // color, variant и hover — всё это TaskCard переносит в sx без изменений.
     const stylingByChoice = {
-      "Найдена": { variant: "contained", bg: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", color: "#fff" },
-      "Не найдена": { variant: "contained", bg: "#c62828", color: "#fff" },
-      "Не требуется": { variant: "outlined", bg: null, color: "#171c8f" },
+      "Найдена": {
+        background: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)",
+        color: "#fff",
+        variant: "contained",
+        "&:hover": { filter: "brightness(1.1)" },
+      },
+      "Не найдена": { background: "#c62828", color: "#fff", variant: "contained", "&:hover": { filter: "brightness(1.1)" } },
+      "Не требуется": { color: "#171c8f", variant: "outlined" },
     };
     const actions = buildRowActions(MAIN_IN_PROGRESS, {
       choices: ["Найдена", "Не найдена", "Не требуется"],
       resolveStyling: (choice) => stylingByChoice[choice] || null,
     });
     const [found, notFound, notNeeded] = actions;
-    expect(found.sx.backgroundImage).toContain("linear-gradient");
-    expect(notFound.sx.backgroundColor).toBe("#c62828");
-    expect(notFound.sx.backgroundImage).toBeUndefined();
-    // outline-кнопка цвет не заливает — только рамка, как в карточке
+
+    expect(found.variant).toBe("contained");
+    expect(found.sx.background).toBe(stylingByChoice["Найдена"].background); // градиент не теряется
+    expect(found.sx.color).toBe("#fff");
+    expect(found.sx["&:hover"]).toEqual({ filter: "brightness(1.1)" }); // hover — как в карточке
+    expect(found.sx.variant).toBeUndefined(); // variant — проп кнопки, внутрь sx не попадает
+
+    expect(notFound.sx.background).toBe("#c62828"); // плоский цвет — тоже через background
+
+    // outline-кнопка: цвет текста из Behaviour + утолщённая рамка, как в TaskCard
     expect(notNeeded.variant).toBe("outlined");
-    expect(notNeeded.sx).toEqual({ borderWidth: 1.5 });
+    expect(notNeeded.sx).toEqual({ borderWidth: 1.5, color: "#171c8f" });
+  });
+
+  it("иконки действий берутся из Behaviour («i») — как в карточке", () => {
+    const ICON = { type: "icon", name: "DoneIcon" };
+    const actions = buildRowActions(MAIN_IN_PROGRESS, {
+      choices: ["Найдена", "Не найдена"],
+      resolveIcon: (choice) => (choice === "Найдена" ? ICON : null),
+    });
+    expect(actions[0].icon).toBe(ICON); // иконка из Behaviour
+    expect(actions[1].icon).toBe("result"); // нет «i» — нейтральная по умолчанию
+
+    const [take] = buildRowActions(MAIN_NOT_STARTED, { canTake: true, takeIcon: () => ICON });
+    expect(take.icon).toBe(ICON);
   });
 
   it("чужую задачу «в работе» нельзя взять: плашка «В работе у X» без кнопок результатов", () => {
@@ -109,13 +135,24 @@ describe("buildRowActions — паритет с карточкой", () => {
     const [take] = buildRowActions(MAIN_NOT_STARTED, { canTake: true });
     expect(take.sx.backgroundImage).toBe(DEFAULT_TAKE_SX.backgroundImage);
 
-    // Behaviour.stylingActions.takeInWork (как в TaskCard) переопределяет вид
+    // Behaviour.stylingActions.takeInWork (как в TaskCard) накладывается поверх
     const [custom] = buildRowActions(MAIN_NOT_STARTED, {
       canTake: true,
-      takeStyling: { variant: "outlined", bg: "#0d47a1", color: "#fff" },
+      takeStyling: { variant: "outlined", background: "#0d47a1", color: "#fff" },
     });
     expect(custom.variant).toBe("outlined");
-    expect(custom.sx.backgroundColor).toBe("#0d47a1");
+    expect(custom.sx.background).toBe("#0d47a1");
+    expect(custom.sx.backgroundImage).toBeUndefined(); // outline не заливаем градиентом
+
+    // contained + Behaviour: стили сверху градиента карточки
+    const [gradientTake] = buildRowActions(MAIN_NOT_STARTED, {
+      canTake: true,
+      takeStyling: { variant: "contained", background: "linear-gradient(90deg,#000,#fff)", color: "#000" },
+    });
+    expect(gradientTake.sx.background).toBe("linear-gradient(90deg,#000,#fff)");
+    expect(gradientTake.sx.color).toBe("#000");
+    // как в карточке: базовый hover «Взять в работу» остаётся (Behaviour его не задаёт)
+    expect(gradientTake.sx["&:hover"]).toEqual(DEFAULT_TAKE_SX["&:hover"]);
 
     // «Изменить» — вторичная, как в карточке внешней задачи
     const edit = buildRowActions(MAIN_NOT_STARTED, { canTake: true }).pop();
@@ -133,12 +170,37 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(dobActions.every((a) => a.disabled)).toBe(true);
   });
 
-  it("resultActionSx: градиент/плоский цвет только для contained", () => {
-    expect(resultActionSx({ variant: "contained", bg: "linear-gradient(90deg,#000,#fff)" }))
-      .toEqual({ backgroundImage: "linear-gradient(90deg,#000,#fff)", color: "#fff", borderColor: "transparent" });
-    expect(resultActionSx({ variant: "contained", bg: "#123456", color: "#fff" }))
-      .toEqual({ backgroundColor: "#123456", color: "#fff", borderColor: "transparent" });
-    expect(resultActionSx({ variant: "outlined", bg: "#123456" })).toEqual({ borderWidth: 1.5 });
-    expect(resultActionSx(null)).toEqual({ borderWidth: 1.5 });
+  it("resultActionSx: стили Behaviour проходят насквозь, outline — только рамка", () => {
+    const styled = { variant: "contained", background: "linear-gradient(90deg,#000,#fff)", color: "#fff", "&:hover": { filter: "brightness(1.1)" } };
+    expect(resultActionSx(styled, styled.variant)).toEqual({
+      background: "linear-gradient(90deg,#000,#fff)",
+      color: "#fff",
+      "&:hover": { filter: "brightness(1.1)" },
+    });
+    expect(resultActionSx({ variant: "outlined", background: "#123456" }, "outlined"))
+      .toEqual({ borderWidth: 1.5, background: "#123456" });
+    // нет Behaviour — MUI defaults (contained primary), как в карточке
+    expect(resultActionSx(null)).toEqual({});
+  });
+
+  it("«Изменить» есть в меню ВСЕГДА и закреплена внизу (в т.ч. у «образцовых»/dob)", () => {
+    // dob-строка «в работе»: взять нельзя — «Изменить» обязана остаться
+    const dob = buildRowActions({ sourceId: "dob", Id: 2, Status: "В работе" }, { canTake: false });
+    expect(labels(dob)).toEqual(["Изменить"]);
+    expect(dob.at(-1).sticky).toBe(true);
+
+    // много кнопок результата — «Изменить» всё равно последняя и закреплена
+    const many = buildRowActions(MAIN_IN_PROGRESS, {
+      choices: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"],
+    });
+    expect(many.at(-1)).toMatchObject({ key: "edit", sticky: true });
+    const notSticky = many.filter((a) => !a.sticky);
+    expect(notSticky).toHaveLength(10);
+
+    // у всех веток (main/dob, любой статус) ровно одна «Изменить»
+    for (const row of [MAIN_NOT_STARTED, MAIN_IN_PROGRESS, MAIN_DONE, MAIN_CANCELLED, DOB_NOT_STARTED, DOB_IN_PROGRESS]) {
+      const actions = buildRowActions(row, { canTake: true, choices: ["Найдена"] });
+      expect(actions.filter((a) => a.key === "edit")).toHaveLength(1);
+    }
   });
 });

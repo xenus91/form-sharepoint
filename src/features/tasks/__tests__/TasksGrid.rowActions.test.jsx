@@ -208,6 +208,55 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
   });
 
+  it("«Изменить» закреплена внизу меню и видна даже при большом списке результатов", async () => {
+    const onEdit = vi.fn();
+    const choices = Array.from({ length: 12 }, (_, i) => `Результат ${i + 1}`);
+    const { host } = renderGrid({
+      getRowActions: () => [
+        ...choices.map((label) => ({ key: `result:${label}`, label, icon: "result", onClick: () => {} })),
+        { key: "edit", label: "Изменить", icon: "edit", variant: "outlined", sticky: true, onClick: onEdit },
+      ],
+    });
+    await settle(400);
+    await clickCell(rowByText(host, /Основная задача ООБ/), 200, 300);
+
+    const paper = openPopup();
+    expect(paper).toBeTruthy();
+    // кнопки результата — в прокручиваемом контейнере, «Изменить» — вне его, внизу
+    const list = paper.querySelector('[data-testid="tasks-row-actions-list"]');
+    expect(list).toBeTruthy();
+    expect(list.textContent).not.toContain("Изменить");
+    expect([...list.querySelectorAll("button")]).toHaveLength(choices.length);
+
+    const buttons = popupButtons();
+    expect(buttons.at(-1).textContent).toBe("Изменить");
+    expect(paper.lastElementChild.contains(buttons.at(-1))).toBe(true);
+
+    await act(async () => {
+      buttons.at(-1).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 120));
+    });
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("клик по кнопке «Изменить» у dob-строки работает, даже если взять её нельзя", async () => {
+    const onEdit = vi.fn();
+    const { host } = renderGrid({
+      getRowActions: (row) => (row.sourceId === "dob"
+        ? [{ key: "edit", label: "Изменить", icon: "edit", variant: "outlined", sticky: true, onClick: () => onEdit(row.compositeId) }]
+        : [{ key: "take", label: "Взять в работу", icon: "take", onClick: () => {} }]),
+    });
+    await settle(400);
+    await clickCell(rowByText(host, /Заявка ООБ/), 200, 300);
+
+    expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
+    await act(async () => {
+      popupButtons()[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 120));
+    });
+    expect(onEdit).toHaveBeenCalledWith("dob:1");
+  });
+
   it("двойной клик по строке открывает форму (onRowOpen)", async () => {
     const onRowOpen = vi.fn();
     const { host } = renderGrid({ onRowOpen });

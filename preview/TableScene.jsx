@@ -6,10 +6,11 @@
 //
 // Запуск: npm run preview:cards -- --open   →   http://localhost:5180/?scene=table
 
-import { useMemo, useState } from "react";
+import { createElement, useMemo, useState } from "react";
 import { Box, Paper, Typography } from "@mui/material";
 import TasksGrid from "../src/features/tasks/components/TasksGrid";
 import { buildRowActions } from "../src/features/tasks/lib/rowActions";
+import { renderStylingIcon } from "../src/services/stylingIcons";
 
 const TITLES = [
   "Заявка ООБ",
@@ -31,6 +32,25 @@ const DESCRIPTIONS = [
 
 // Значения поля результата для main-задач «в работе» (в приложении — по типу контента).
 const CHOICES_BY_CT = { main: ["Найдена", "Не найдена"] };
+
+// Стили и иконки — ровно в той форме, которую отдаёт Behaviour-пайплайн
+// (src/services/stylingConfig.js: background + hover + color + variant; «i» → иконка).
+// Таблица обязана рисовать их ТАК ЖЕ, как карточка — это и проверяем глазами.
+const STYLE_BY_CHOICE = {
+  "Найдена": {
+    background: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)",
+    color: "#fff",
+    variant: "contained",
+    "&:hover": { filter: "brightness(1.1)" },
+  },
+  "Не найдена": {
+    background: "#c62828",
+    color: "#fff",
+    variant: "contained",
+    "&:hover": { filter: "brightness(1.1)" },
+  },
+};
+const ICON_BY_CHOICE = { "Найдена": "done", "Не найдена": "searchoff" };
 
 const STATUSES = ["Не начата", "В работе", "Завершена", "Отменена"];
 const ASSIGNEES = ["Поршаков Сергей", "Иванов Пётр", "Смирнова Анна", "Группа ООБ"];
@@ -109,7 +129,8 @@ export default function TableScene() {
             choices: row.Status === "В работе"
               ? (row.sourceId === "main" ? CHOICES_BY_CT.main : [])
               : [],
-            resolveStyling: () => null,
+            resolveStyling: (choice) => STYLE_BY_CHOICE[choice] || null,
+            resolveIcon: (choice) => renderStylingIcon(ICON_BY_CHOICE[choice] || null, createElement),
             onTake: () => setMessage(`Взять в работу задачу #${row.Id} (в приложении — MERGE статуса: main-список или сайт источника)`),
             onResult: (choice) => setMessage(`Результат «${choice}» по задаче #${row.Id} (в приложении — тот же поток, что в карточке)`),
             onEdit: () => setMessage(`Изменить задачу #${row.Id} (в приложении — форма задачи: #tasks/<Id> или форма источника)`),
