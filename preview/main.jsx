@@ -1,12 +1,12 @@
 // preview/main.jsx — точка входа браузерного предпросмотра (npm run preview:cards).
-import React from "react";
 import { createRoot } from "react-dom/client";
 import { ThemeProvider, createTheme } from "@mui/material";
 import CardsScene from "./CardsScene";
 import TableScene from "./TableScene";
+import RelatedScene from "./RelatedScene";
 
-// ?scene=table — предпросмотр табличного режима #tasks (закреплённая шапка,
-// фильтры, сортировка) на мок-данных; по умолчанию — карточки.
+// ?scene=table — табличный режим #tasks (шапка, поиск, кнопки на строке),
+// ?scene=related — диалог «Связанная заявка»; по умолчанию — карточки.
 const scene = new URLSearchParams(window.location.search).get("scene");
 
 const theme = createTheme({
@@ -25,6 +25,6 @@ const theme = createTheme({
 
 createRoot(document.getElementById("root")).render(
   <ThemeProvider theme={theme}>
-    {scene === "table" ? <TableScene /> : <CardsScene />}
+    {scene === "table" ? <TableScene /> : scene === "related" ? <RelatedScene /> : <CardsScene />}
   </ThemeProvider>
 );

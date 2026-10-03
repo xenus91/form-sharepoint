@@ -20,6 +20,10 @@ export default defineConfig({
         if (source === "./api" || source === "../api" || source === "../../api" || source === "../../../api") {
           return path.resolve(here, "mockApi.js");
         }
+        // DOB-модули (диалог связанной заявки) — тоже на мок, без SharePoint.
+        if (/(^|\/)dobApi(\.js)?$/.test(source) || /(^|\/)dobClient(\.js)?$/.test(source)) {
+          return path.resolve(here, "mockDob.js");
+        }
         return null;
       },
     },

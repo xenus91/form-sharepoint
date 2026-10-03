@@ -10,8 +10,8 @@
 npm run preview:cards      # vite с preview/vite.config.js, порт 5180
 ```
 
-Откроется сцена `preview/CardsScene.jsx` (`?scene=table` — табличный режим на мок-данных,
-см. `preview/TableScene.jsx`):
+Откроется сцена `preview/CardsScene.jsx` (`?scene=table` — табличный режим,
+`?scene=related` — диалог «Связанная заявка» на мок-данных):
 
 - карточка «в работе» (своя запись TaskBehaviour по имени типа контента);
 - просроченная карточка;
@@ -29,6 +29,8 @@ node preview/.ssrout/client-check.mjs   # содержимое карточек 
 
 npx vite build --config preview/vite.config.js --ssr flow-check.mjs --outDir .ssrout
 node preview/.ssrout/flow-check.mjs     # поток результата: роутинг + клики + диалоги
+
+npx vite-node --config preview/vite.config.js preview/related-check.mjs   # диалог «Связанная заявка» (чипы/подписи/кнопки — не должны находиться)
 ```
 
 Выводит содержимое каждой карточки так, как оно выглядит после загрузки данных
@@ -41,7 +43,10 @@ node preview/.ssrout/flow-check.mjs     # поток результата: ро�
 | `vite.config.js` | root = `preview/`, подменяет `src/api.js` на мок (`resolveId`-плагин) |
 | `mockApi.js` | заглушка `apiClient`: отдаёт связанные элементы ProblemsPallet |
 | `CardsScene.jsx` | задачи и конфиг `TaskBehaviour` из реального кэша пользователя |
-| `TableScene.jsx` | табличный режим `#tasks` на мок-данных: закреплённая шапка, фильтры, сортировка (`?scene=table`) |
+| `TableScene.jsx` | табличный режим `#tasks` на мок-данных: закреплённая шапка, поиск, кнопки на строке (`?scene=table`) |
+| `RelatedScene.jsx` | диалог «Связанная заявка» (read-only) на мок-данных (`?scene=related`) |
+| `mockDob.js` | заглушка DOB-API (`dobApi`/`dobClient`) для сцен предпросмотра |
+| `related-check.mjs` | jsdom-проверка диалога «Связанная заявка»: печатает текст/поля и ловит лишние чипы, подписи и кнопки |
 | `main.jsx` | точка входа для браузера |
 | `jsdom-setup.mjs` | окружение jsdom (глобали для React/MUI) |
 | `client-check.mjs` | jsdom-рендер: печатает содержимое карточек и кнопки |
