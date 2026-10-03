@@ -1471,9 +1471,12 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10, #dob_tasks/10)
     let elementId = null;
     let elementAction = null;
+    // kind: "element" — явная ссылка на элемент ProblemsPallet (id=/elementid=),
+    // "auto" — путь #tasks/<n>: сначала задача с Id=n, элемент — фолбэк (hashRoute.js).
+    let elementKind = "auto";
     // 1) id=число (любой вариант: id=10, elementid=10, ?id=10 &id=10 /id=10)
     const mId = low.match(/(?:elementid|\bid)\s*=\s*(\d{1,19})/);
-    if (mId) elementId = mId[1];
+    if (mId) { elementId = mId[1]; elementKind = "element"; }
     else {
       // Dob: #dob_tasks/9723 or #dob/10
       const mDob = raw.match(/#\/?(?:dob_tasks|dob)\/(\d{1,19})/i);
@@ -1515,13 +1518,14 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       else elementAction = v;
     } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
     else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
-    return { view, elementId, elementAction, elementListGuid };
+    return { view, elementId, elementAction, elementListGuid, elementKind };
   };
   const getViewFromHash = () => parseHash().view;
   const [currentView, setCurrentView] = useState(() => getViewFromHash());
   const [hashElementId, setHashElementId] = useState(() => parseHash().elementId);
   const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
   const [hashElementListGuid, setHashElementListGuid] = useState(() => parseHash().elementListGuid);
+  const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
   const [tasksActiveCount, setTasksActiveCount] = useState(0);
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
@@ -1535,6 +1539,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setHashElementId(p.elementId);
       setHashElementAction(p.elementAction);
       setHashElementListGuid(p.elementListGuid);
+      setHashElementKind(p.elementKind || "auto");
     };
     window.addEventListener("hashchange", onHash);
     onHash();
@@ -1930,7 +1935,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         </Drawer>
         {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
-          <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onCountChange={setTasksActiveCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
+          <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onCountChange={setTasksActiveCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} initialElementKind={hashElementKind} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
         </Box>
         {/* Keep modals for operation date etc accessible in tasks view as well */}
       </ThemeProvider>

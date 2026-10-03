@@ -7,6 +7,7 @@ import TaskCard from "./TaskCard";
 import { isCompletedStatus } from "../../../tasks/status";
 
 export default function TasksHashContent({
+  matchMode = null,
   elementLoading,
   elementTaskSearching,
   elementTaskMatch,
@@ -33,8 +34,12 @@ export default function TasksHashContent({
     return (
       <Box sx={{ display: "grid", placeItems: "center", py: 6, gap: 1.5 }}>
         <CircularProgress />
-        <Typography variant="body2" color="text.secondary">Загружаю элемент #{elementIdParam}...</Typography>
-        <Typography variant="caption" color="text.secondary">Ищу связанную задачу...</Typography>
+        <Typography variant="body2" color="text.secondary">
+          {matchMode === "task" ? `Загружаю задачу #${elementIdParam}...` : `Загружаю элемент #${elementIdParam}...`}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {matchMode === "task" ? "Открываю карточку задачи..." : "Ищу связанную задачу..."}
+        </Typography>
       </Box>
     );
   }
@@ -78,6 +83,10 @@ export default function TasksHashContent({
         </Box>
       )}
       <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Задача для элемента #{elementIdParam} не найдена. Если она уже выполнена другим сотрудником — откройте вкладку «Завершённые» или найдите её в диалоге элемента.</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+        Если ссылка ведёт на задачу по её Id — откройте её из таблицы/списка. Ссылки на элемент ProblemsPallet указывайте как
+        <b> #tasks/id={elementIdParam}</b> (Id берётся из ProblemsPallet).
+      </Typography>
       <Button size="small" variant="outlined" sx={{ mt: 1.5, borderRadius: 1.5 }} onClick={() => onClearElementHash?.()}>К списку задач</Button>
     </Paper>
   );

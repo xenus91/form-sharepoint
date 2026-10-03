@@ -124,7 +124,7 @@ function stripHtml(html) {
 // и стабилен между рендерами, поэтому достаточно одного объявления.
 
 // eslint-disable-next-line no-unused-vars
-export default function TasksView({ userProfile: propUserProfile, currentUserId: propCurrentUserId, onBack: _onBack, onCountChange, initialElementId, initialElementAction, onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
+export default function TasksView({ userProfile: propUserProfile, currentUserId: propCurrentUserId, onBack: _onBack, onCountChange, initialElementId, initialElementAction, initialElementKind = "auto", onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
   const { notify } = useNotifications();
   // fieldsLoading + taskConfiguration теперь внутри useTasksMetadata (PR1)
   const [isTabPending, startTabTransition] = useTransition();
@@ -295,10 +295,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     elementTaskMatch, setElementTaskMatch,
     elementError, setElementError,
     elementNotFound, setElementNotFound,
+    matchMode,
     autoTabAppliedForElement, setAutoTabAppliedForElement,
     taskIndex, findTaskByElementId,
     isHashMode,
-  } = useHashElement({ initialElementId, initialElementAction, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
+  } = useHashElement({ initialElementId, initialElementAction, initialElementKind, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
   // Для открытой задачи — свежие choices по ContentType, но не на каждый polling tasks (60с)
   // Сравниваем dataUpdatedAt и троттлим 5 мин, чтобы не дёргать 2 тяжёлых запроса каждые 60с
   const lastResultFieldsRefreshRef = React.useRef(0);
@@ -602,6 +603,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       {isHashMode ? (
         <Box sx={{ minHeight: 320, display: "block" }}>
           <TasksHashContent
+            matchMode={matchMode}
             elementLoading={elementLoading}
             elementTaskSearching={elementTaskSearching}
             elementTaskMatch={elementTaskMatch}
@@ -796,6 +798,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
             <TaskElementDialog
         open={elementDialogOpen}
+        matchMode={matchMode}
         onClose={() => setElementDialogOpen(false)}
         elementData={elementData}
         elementIdParam={elementIdParam}

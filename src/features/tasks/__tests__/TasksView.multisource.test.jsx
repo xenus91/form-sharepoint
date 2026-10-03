@@ -167,7 +167,7 @@ const settle = async (ms = 600) => {
   }
 };
 
-function renderTasksView() {
+function renderTasksView(props = {}) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
@@ -177,7 +177,7 @@ function renderTasksView() {
       <QueryClientProvider client={qc}>
         <ThemeProvider theme={createTheme()}>
           <NotificationsProvider>
-            <TasksView />
+            <TasksView {...props} />
           </NotificationsProvider>
         </ThemeProvider>
       </QueryClientProvider>
@@ -283,6 +283,20 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(merge).toBeTruthy();
     expect(merge.url).toContain("lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')/items(1)");
     expect(merge.body).toEqual({ Status: "В работе" });
+  }, 30000);
+
+  it("#tasks/<Id задачи> открывает карточку задачи, а не ищет элемент ProblemsPallet", async () => {
+    // Проверяем роут из таблицы: openTaskForm(main:10) → #tasks/10.
+    const host = renderTasksView({ initialElementId: "10" });
+    await settle(3000);
+
+    // карточка задачи отрисована в hash-режиме
+    expect(host.textContent).toContain("Основная задача ООБ");
+    // и НЕТ сообщения про элемент ProblemsPallet
+    expect(host.textContent).not.toMatch(/Связанная задача для элемента/);
+    expect(host.textContent).not.toMatch(/Задача для элемента #10 не найдена/);
+    // элемент ProblemsPallet по этому Id не запрашивался
+    expect(state.requests.some((r) => /ProblemsPallet/i.test(r.url))).toBe(false);
   }, 30000);
 
   it("клик по строке только выделяет, а кнопка «Изменить» открывает форму задачи источника", async () => {

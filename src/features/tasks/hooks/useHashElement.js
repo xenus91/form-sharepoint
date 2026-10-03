@@ -4,12 +4,13 @@
 import { useState, useEffect, useMemo } from "react";
 import { buildTaskIndex, findInIndex } from "../../../utils/taskIndex";
 import { HASH_LOG, HASH_WARN } from "../../../tasks/log";
-import { searchTaskByRelatedItem } from "../../../tasks/hashSearch";
+import { searchTaskByRelatedItem, fetchFullTask } from "../../../tasks/hashSearch";
+import { resolveHashTarget, findTaskByIdInList } from "../../../tasks/hashRoute";
 import { fetchProblemsPalletItem } from "../../../tasks/problemsPallet";
 import { getGroupIdsFromDistribution } from "../../../tasks/distribution";
 import { isCompletedStatus } from "../../../tasks/status";
 
-export function useHashElement({ initialElementId, initialElementAction, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition }) {
+export function useHashElement({ initialElementId, initialElementAction, initialElementKind = "auto", tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition }) {
   const [elementIdParam, setElementIdParam] = useState(() => initialElementId ? String(initialElementId) : null);
   const [elementActionParam, setElementActionParam] = useState(() => initialElementAction || null);
   const [elementDialogOpen, setElementDialogOpen] = useState(false);
@@ -21,6 +22,9 @@ export function useHashElement({ initialElementId, initialElementAction, tasks, 
   const [elementError, setElementError] = useState("");
   const [elementNotFound, setElementNotFound] = useState(false);
   const [autoTabAppliedForElement, setAutoTabAppliedForElement] = useState(false);
+  // "task" — открыта карточка задачи по её Id (#tasks/<TaskId>);
+  // "element" — старый путь через элемент ProblemsPallet (RelatedItems.ItemId).
+  const [matchMode, setMatchMode] = useState(null);
 
   const taskIndex = useMemo(() => buildTaskIndex(tasks), [tasks]);
   const findTaskByElementId = (allTasks, elementId) => findInIndex(taskIndex, elementId);
@@ -44,6 +48,7 @@ export function useHashElement({ initialElementId, initialElementAction, tasks, 
       setElementLoading(false);
       setElementTaskSearching(false);
       setIsHashTaskRefreshing(false);
+      setMatchMode(null);
       return;
     }
     let cancelled = false;
@@ -51,7 +56,7 @@ export function useHashElement({ initialElementId, initialElementAction, tasks, 
       HASH_LOG("hash run triggered", {elementIdParam, tasksLen: tasks.length, elementTaskMatch: elementTaskMatch?.Id, elementLoading, elementTaskSearching, distribution: distribution? getGroupIdsFromDistribution(distribution): null, currentUserId});
       if (elementTaskMatch && !elementLoading && !elementTaskSearching) {
         if (tasks.length > 0) {
-          const stillMatched = findTaskByElementId(tasks, elementIdParam);
+          const stillMatched = findTaskByElementId(tasks, elementIdParam) || findTaskByIdInList(tasks, elementIdParam);
           if (stillMatched && stillMatched.Id === elementTaskMatch.Id) { HASH_LOG("guard: same task still matched, skip"); return; }
           if (elementTaskMatch && !stillMatched) { HASH_LOG("guard: keep global match, skip"); return; }
         } else {
@@ -62,7 +67,7 @@ export function useHashElement({ initialElementId, initialElementAction, tasks, 
       if (elementLoading || elementTaskSearching) { HASH_LOG("guard: already loading/searching, skip"); return; }
       if (elementNotFound || elementError) {
         if (tasks.length > 0) {
-          const localCheck = findTaskByElementId(tasks, elementIdParam);
+          const localCheck = findTaskByElementId(tasks, elementIdParam) || findTaskByIdInList(tasks, elementIdParam);
           if (!localCheck) { HASH_LOG("guard: already notFound/error, no local task, skip re-search"); return; }
           HASH_LOG("guard: notFound but local now found, will retry");
         } else {
@@ -73,6 +78,33 @@ export function useHashElement({ initialElementId, initialElementAction, tasks, 
       const isThu = /^\d{17,18}$/.test(String(elementIdParam).trim());
       HASH_LOG("hash run params", {isThu, elementIdParam, tasksLen: tasks.length});
       let matched = null;
+
+      // #tasks/<id>: сначала пробуем открыть ЗАДАЧУ с этим Id (локально или
+      // догрузив с сервера). Элемент ProblemsPallet — только фолбэк (см. hashRoute.js).
+      const target = await resolveHashTarget(elementIdParam, {
+        tasks,
+        fetchTaskById: fetchFullTask,
+        kind: initialElementKind === "element" ? "element" : "auto",
+      });
+      if (cancelled) { HASH_LOG("cancelled after resolveHashTarget"); return; }
+      if (target.mode === "task" && target.task) {
+        HASH_LOG("resolved as task by Id", target.task.Id, target.source);
+        setMatchMode("task");
+        setElementData(null);
+        setElementLoading(false);
+        setElementTaskSearching(false);
+        setElementNotFound(false);
+        setElementError("");
+        setElementTaskMatch(target.task);
+        if (!autoTabAppliedForElement) {
+          const isComp = isCompletedStatus(target.task.Status, target.task.PercentComplete);
+          const targetTab = isComp ? 1 : 0;
+          if (tab !== targetTab) startTabTransition(() => setTab(targetTab));
+          setAutoTabAppliedForElement(true);
+        }
+        return;
+      }
+      setMatchMode("element");
       if (tasks.length > 0) {
         matched = findTaskByElementId(tasks, elementIdParam);
         HASH_LOG("local findTaskByElementId", matched? `found #${matched.Id}` : "not found in local tasks");
@@ -175,7 +207,7 @@ export function useHashElement({ initialElementId, initialElementAction, tasks, 
     };
     run();
     return () => { cancelled = true; };
-  }, [elementIdParam, distribution, currentUserId]);
+  }, [elementIdParam, distribution, currentUserId, initialElementKind]);
 
   useEffect(() => {
     if (elementTaskMatch && !autoTabAppliedForElement) {
@@ -206,6 +238,7 @@ export function useHashElement({ initialElementId, initialElementAction, tasks, 
     elementTaskMatch, setElementTaskMatch,
     elementError, setElementError,
     elementNotFound, setElementNotFound,
+    matchMode,
     autoTabAppliedForElement, setAutoTabAppliedForElement,
     taskIndex, findTaskByElementId,
     isHashMode,

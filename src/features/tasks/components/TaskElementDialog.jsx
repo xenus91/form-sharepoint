@@ -9,6 +9,7 @@ import { isCompletedStatus } from "../../../tasks/status";
 
 export default function TaskElementDialog({
   open,
+  matchMode = null,
   onClose,
   elementData,
   elementIdParam,
@@ -37,7 +38,11 @@ export default function TaskElementDialog({
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: "14px", maxHeight: "85vh" } }}>
       <DialogTitle sx={{ fontWeight: 800, pr: 6, display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
         <AssignmentIcon sx={{ color: "#171c8f" }} />
-        {elementData ? `ЕО ${elementData.THU || elementData.Title || ""} • #${elementData.Id}` : elementIdParam ? (/^\d{17,18}$/.test(String(elementIdParam)) ? `ЕО ${elementIdParam}` : `Элемент #${elementIdParam}`) : "Элемент"}
+        {elementData
+          ? `ЕО ${elementData.THU || elementData.Title || ""} • #${elementData.Id}`
+          : elementIdParam
+            ? (/^\d{17,18}$/.test(String(elementIdParam)) ? `ЕО ${elementIdParam}` : matchMode === "task" ? `Задача #${elementIdParam}` : `Элемент #${elementIdParam}`)
+            : "Элемент"}
         <Box sx={{ flex: 1 }} />
         <IconButton size="small" onClick={onClose} sx={{ ml: 1 }}><Typography sx={{ fontSize: 18, lineHeight: 1 }}>✕</Typography></IconButton>
       </DialogTitle>
@@ -45,7 +50,9 @@ export default function TaskElementDialog({
         {elementLoading || elementTaskSearching ? (
           <Box sx={{ display: "grid", placeItems: "center", py: 4, gap: 1.5 }}>
             <CircularProgress />
-            <Typography variant="body2" color="text.secondary">Загружаю элемент ProblemsPallet #{elementIdParam}...</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {matchMode === "task" ? `Загружаю задачу #${elementIdParam}...` : `Загружаю элемент ProblemsPallet #${elementIdParam}...`}
+            </Typography>
           </Box>
         ) : elementError && !elementTaskMatch && !elementData ? (
           <Box sx={{ p: 2, borderRadius: "10px", bgcolor: "rgba(229,57,53,0.06)", border: "1px solid rgba(229,57,53,0.18)", textAlign: "center" }}>
