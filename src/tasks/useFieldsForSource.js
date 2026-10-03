@@ -12,6 +12,9 @@ const CORE_FIELDS = ["Id", "Title", "Body", "AssignedTo/Id", "AssignedTo/Title",
 
 /**
  * Возвращает список InternalName полей для данного источника.
+ * При ошибке (нет доступа, GUID не нашёлся) — возвращает [],
+ * чтобы не блокировать работу других источников.
+ *
  * @param {{id:string, clientKind:"main"|"dob", listApi?:string|null, listTitle?:string|null, enabled?:boolean}} source
  * @param {{enabled?:boolean, staleTimeMs?:number}} [opts]
  * @returns {import('@tanstack/react-query').UseQueryResult<string[]>}
@@ -22,27 +25,46 @@ export function useFieldsForSource(source, { enabled = true, staleTimeMs = 5 * 6
     queryFn: async () => {
       if (!source) return [];
       const client = makeSourceClient(source);
-      const listApi = await resolveSourceListApi(source, {
-        apiBase: client.apiBase,
-        get: client.get,
-      });
+      let listApi;
+      try {
+        listApi = await resolveSourceListApi(source, {
+          apiBase: client.apiBase,
+          get: client.get,
+        });
+      } catch (e) {
+        // Title-резолв не нашёлся — не блокируем остальные источники
+        if (typeof window !== "undefined" && window.localStorage?.getItem("dbg_tasks") === "1") {
+          // eslint-disable-next-line no-console
+          console.warn(`[useFieldsForSource:${source.id}] resolveListApi failed`, e?.message || e);
+        }
+        return [];
+      }
       // listApi уже содержит полный путь:
       // - main: "/web/lists(guid'…')" — apiClient.get префиксует свой baseURL="/api"
       // - dob:  "/dob-api/sites/dob/doblogistic/_api/web/lists(guid'…')" — уже с префиксом
       // Поэтому НЕ добавляем client.apiBase ранее (иначе будет двойной префикс).
       const url = `${listApi}/fields?$select=InternalName,Title,TypeAsString&$top=200`;
-      const resp = await client.get(url, {
-        headers: { Accept: "application/json;odata=verbose" },
-        __noCache: true,
-      });
-      const raw = resp?.data?.d?.results || [];
-      const names = raw.map((f) => f.InternalName).filter(Boolean);
-      // EndJob удалён из всех списков — фильтруем на всякий случай
-      return names.filter((n) => n.toLowerCase() !== "endjob");
+      try {
+        const resp = await client.get(url, {
+          headers: { Accept: "application/json;odata=verbose" },
+          __noCache: true,
+        });
+        const raw = resp?.data?.d?.results || [];
+        const names = raw.map((f) => f.InternalName).filter(Boolean);
+        // EndJob удалён из всех списков — фильтруем на всякий случай
+        return names.filter((n) => n.toLowerCase() !== "endjob");
+      } catch (e) {
+        if (typeof window !== "undefined" && window.localStorage?.getItem("dbg_tasks") === "1") {
+          // eslint-disable-next-line no-console
+          console.warn(`[useFieldsForSource:${source.id}] /fields failed`, e?.response?.status, e?.message);
+        }
+        return [];
+      }
     },
     enabled: !!source && source.enabled !== false && enabled,
     staleTime: staleTimeMs,
     refetchOnWindowFocus: false,
+    retry: 0, // ошибка одного источника не должна ломать всю таблицу
   });
 }
 
