@@ -48,6 +48,7 @@ import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import { openTaskForm } from "./features/tasks/lib/openTaskForm";
 import { buildRowActions } from "./features/tasks/lib/rowActions";
+import { resolveResultDispatch } from "./features/tasks/lib/resultDispatch";
 import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
@@ -689,16 +690,14 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       takeIcon: () => resolveRowTakeIcon(row),
       onTake: () => handleTakeTableRow(row),
       onResult: (choice) => {
-        // Как в карточке: если по Behaviour результат требует формы (prompt-поля,
-        // доп. действия) или подтверждения кнопками — открываем карточку сразу с этим
-        // результатом, чтобы пользователь заполнил всё там же, где и обычно.
-        const rule = resolveRowChoiceRule(row, choice);
-        const needsCardForm = !!rule && (
-          (rule.promptFields?.length || 0) > 0
-          || rule.showAdditionalActions === true
-          || rule.inlineConfirm === true
-        );
-        if (needsCardForm) {
+        // Кнопка таблицы = кнопка карточки. Решение — общий диспетчер
+        // (features/tasks/lib/resultDispatch.js), тот же, что использует карточка:
+        //  • card-form / card-buttons — это UI карточки, открываем её сразу с этим
+        //    результатом (#tasks/<Id>?action=…);
+        //  • flow — диалог местоположения / подтверждения / запись, всё это работает
+        //    прямо из таблицы (loc + aa собирает доп. действия внутри диалога).
+        const dispatch = resolveResultDispatch(resolveRowChoiceRule(row, choice));
+        if (dispatch !== "flow") {
           openTaskForm(row?.compositeId, tableData.sources, { action: choice });
           return;
         }

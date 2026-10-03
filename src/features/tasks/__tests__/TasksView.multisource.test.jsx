@@ -102,6 +102,35 @@ const TASK_BEHAVIOUR_RECORD = {
   StylingActions: "",
 };
 
+// ⭐ Реальные настройки пользователя для «Результат поиска ЕО» (ТНУ):
+//   «Найдена»     { "loc": true, "aa": true }      → диалог местоположения (+ доп. действия)
+//   «Не найдена»  { "ic": true, "ok": …, "no": … } → две кнопки подтверждения в карточке
+const TASK_BEHAVIOUR_THU = {
+  Id: 2,
+  Title: "Задача ТНУ",
+  Enabled: true,
+  Behaviour: JSON.stringify({
+    "найдена": { loc: true, aa: true, aar: false, anim: "celebrate" },
+    "не найдена": { ic: true, ok: "Подтвердить «Не найдена»", no: "Отмена" },
+  }),
+  StylingResultButton: JSON.stringify({
+    "_default": { bg: "linear-gradient(180deg, #5a67d8 0%, #434190 100%)", c: "#ffffff", v: "ctd" },
+    "Найдена": { bg: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c: "#ffffff", v: "ctd" },
+    "Не найдена": { bg: "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", c: "#ffffff", v: "ctd" },
+  }),
+  StylingActions: "",
+};
+
+// main-задача ТНУ в работе — для неё в попапе должны быть «Найдена» / «Не найдена»
+const MAIN_THU_IN_PROGRESS = {
+  ...MAIN_TASK,
+  Id: 12,
+  Title: "Поиск ЕО (ТНУ)",
+  Status: "В работе",
+  PercentComplete: 0,
+  ContentTypeId: CT_THU,
+};
+
 // main-задача, уже взятая в работу (Editor = я) — в карточке у неё кнопки результатов
 // её типа контента (ООБ → «Исправлено» / «Не исправлено»)
 const MAIN_IN_PROGRESS = {
@@ -113,7 +142,7 @@ const MAIN_IN_PROGRESS = {
   ContentTypeId: CT_OOB,
 };
 
-const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS };
+const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS, 12: MAIN_THU_IN_PROGRESS };
 
 // Задача, назначенная на группу из DcEmail (Id 33 на сайте ДОБ)
 const DOB_GROUP_TASK = { ...DOB_TASK, Id: 2, Title: "Заявка ООБ (на группу)", AssignedTo: { results: [{ Id: 33, Title: "ООБ" }] }, Modified: "2026-10-02T00:00:00Z" };
@@ -164,14 +193,14 @@ vi.mock("../../../api", () => {
     // Типы контента списка — по FieldLinks определяем поле результата для задачи
     if (d.includes(`${MAIN_LIST}/contenttypes`)) return { data: { d: { results: CT_META } } };
     // Настройки поведения задач (TaskBehaviour) — как в тенанте, одним списком
-    if (u.includes("getbytitle('TaskBehaviour')")) return { data: { d: { results: [TASK_BEHAVIOUR_RECORD] } } };
+    if (u.includes("getbytitle('TaskBehaviour')")) return { data: { d: { results: [TASK_BEHAVIOUR_RECORD, TASK_BEHAVIOUR_THU] } } };
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
       const base = MAIN_TASKS_BY_ID[Number(single[1])] || MAIN_TASK;
       return { data: { d: { ...base, __metadata: { etag: '"1"', type: "SP.Data.TasksListItem" } } } };
     }
-    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS] } } };
+    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
     // TaskBehaviour / прочие списки — пусто
     return { data: { d: { results: [] } } };
@@ -349,7 +378,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(search.tagName).toBe("INPUT");
 
     const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
-    expect(countRows()).toBe(4);
+    expect(countRows()).toBe(5); // 3 main (в т.ч. ТНУ в работе) + dob-заявка + dob-группа
 
     // колонки шапки — для проверки сортировки по клику
     const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell")];
@@ -367,7 +396,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       .sort((a, b) => a.index - b.index)
       .map((r) => r.title);
     const titlesInitial = readTitles();
-    expect(titlesInitial.length).toBe(4);
+    expect(titlesInitial.length).toBe(5);
 
     // AG Grid вешает обработчик сортировки на .ag-header-cell-label внутри ячейки
     const titleLabel = headerCells[titleIdx].querySelector(".ag-header-cell-label");
@@ -622,6 +651,77 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(window.location.hash.startsWith("#tasks/11?action=")).toBe(true);
     expect(decodeURIComponent(window.location.hash.split("action=")[1])).toBe("Не исправлено");
   }, 30000);
+
+  it("«Найдена» (loc + aa): таблица открывает диалог местоположения, а не карточку", async () => {
+    // Регресс: таблица отправляла такой результат в карточку с prompt-формой и
+    // теряла местоположение. По Behaviour (loc: true, aa: true) должен открыться
+    // диалог местоположения TasksView — в нём же собираются доп. действия.
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .find((r) => /Поиск ЕО \(ТНУ\)/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 260 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    const found = [...(popup?.querySelectorAll("button") || [])].find((b) => /^Найдена$/.test(b.textContent.trim()));
+    expect(found).toBeTruthy();
+
+    const hashBefore = window.location.hash;
+    await act(async () => {
+      found.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    // Behaviour.anim: celebrate — карточка/таблица сначала проигрывает анимацию (1.6 с),
+    // и только потом открывается диалог местоположения.
+    await settle(2500);
+
+    // Никакого deep-link в карточку — работаем диалогом в таблице
+    expect(window.location.hash).toBe(hashBefore);
+    expect(window.location.hash.includes("12?action=")).toBe(false);
+    // …и никакой «слепой» записи результата до подтверждения в диалоге
+    expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultSearchTHU)).toBe(false);
+    const dialogTitles = [...document.body.querySelectorAll(".MuiDialog-root, [role=\"dialog\"]")]
+      .map((d) => d.textContent || "").join(" ");
+    expect(dialogTitles).toContain("Где найдена ЕО?");
+  }, 40000);
+
+  it("«Не найдена» (ic): таблица открывает карточку с подтверждением двумя кнопками", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .find((r) => /Поиск ЕО \(ТНУ\)/.test(r.textContent || ""));
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 260 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    const notFound = [...(popup?.querySelectorAll("button") || [])].find((b) => /^Не найдена$/.test(b.textContent.trim()));
+    await act(async () => {
+      notFound.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await settle(500);
+
+    // Behaviour.ic — своя форма подтверждения есть только в карточке
+    expect(window.location.hash.startsWith("#tasks/12?action=")).toBe(true);
+    expect(decodeURIComponent(window.location.hash.split("action=")[1])).toBe("Не найдена");
+    expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultSearchTHU)).toBe(false);
+  }, 40000);
 
   it("для main-задачи «в работе» попап даёт кнопки результатов — как карточка", async () => {
     const host = renderTasksView();

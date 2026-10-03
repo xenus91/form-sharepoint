@@ -10,6 +10,7 @@ import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
 import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title
 import { resolveBehaviour, resolveBehaviourCard } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
+import { resolveResultDispatch } from "../lib/resultDispatch"; // ⭐ единый диспетчер кнопок результата (карточка = таблица)
 import { parseRelatedRef, fetchRelatedFields } from "../../../tasks/relatedFields"; // ⭐ поля из связанного элемента (Behaviour.rf)
 import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
@@ -462,6 +463,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // ⭐ Behaviour.ic: подтверждение двумя кнопками В КАРТОЧКЕ («Создать заявку» / «Отмена»),
   // без диалога и без запроса дополнительных полей.
   const [inlineConfirmOnly, setInlineConfirmOnly] = React.useState(false);
+  // Ключ уже применённого deep-link «<taskId>|<значение>» — чтобы форма не открывалась
+  // повторно после «Отмена» и чтобы сброс при смене задачи не затирал её на монтировании.
+  const deepLinkKeyRef = React.useRef(null);
   // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice Fill-in)
   const [additionalActions, setAdditionalActions] = React.useState(() => {
     // Initial may not have taskConfig yet — use field fallback, will sync via effect when taskConfig loads
@@ -527,32 +531,58 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [task.Id, task.ContentTypeId, task.Status, isCompleted]);
   const displayedChoices = freshChoices || effectiveChoices;
   const displayedFieldMeta = freshField || dynamicFieldMeta;
-  // Deep-link (#tasks/id=…&action=found|notfound|<значение результата>): открываем
-  // inline-форму соответствующего результата. Никаких захардкоженных текстов — форма
-  // строится из Behaviour. Явное значение результата приходит из таблицы: там, где по
-  // Behaviour нужны prompt-поля/доп. действия, таблица открывает карточку с этим
-  // результатом (кнопка таблицы = кнопка карточки).
+  // Deep-link (#tasks/id=…&action=<значение результата> или found|notfound):
+  // открываем ТО ЖЕ, что открылось бы по клику на кнопку этого результата в карточке:
+  //   • Behaviour.p / aa → inline-форма ввода (её нет больше нигде);
+  //   • Behaviour.ic      → подтверждение двумя кнопками в карточке;
+  //   • всё остальное (loc/c/прямой результат) → onResultClick, т.е. диалог
+  //     местоположения / диалог подтверждения / запись результата — как по клику.
+  // ⚠️ Применяем РОВНО ОДИН РАЗ на пару (задача, значение): иначе «Отмена» тут же
+  // заново открывала бы форму. Сброс inline-состояния при смене задачи (ниже) этот
+  // deep-link не перетирает — см. deepLinkKeyRef.
   React.useEffect(() => {
     if (!initialAction || isCompleted || !isInProgressStatus(task.Status)) return;
     const list = displayedChoices || choices || [];
     if (!Array.isArray(list) || list.length === 0) return;
     const norm = (v) => String(v || "").trim().toLowerCase();
-    const explicit = list.find((ch) => norm(ch) === norm(initialAction));
-    if (explicit && initialAction !== "notfound") {
-      setInlineChoice(explicit);
-      // Behaviour.ic — подтверждение двумя кнопками в карточке (как при клике по кнопке).
-      setInlineConfirmOnly(getBehaviourRuleForChoice(explicit)?.inlineConfirm === true);
-      return;
-    }
-    const pick = initialAction === "notfound"
+    const explicit = initialAction === "notfound"
+      ? null
+      : list.find((ch) => norm(ch) === norm(initialAction));
+    // found/notfound — legacy-закладки: берём «положительный»/«подтверждающий» результат.
+    const choice = explicit || (initialAction === "notfound"
       ? (list.find((ch) => getBehaviourRuleForChoice(ch)?.requiresConfirmed === true) || list[list.length - 1])
       : (list.find((ch) => {
           const r = getBehaviourRuleForChoice(ch);
           return !!r && r.source !== "empty" && r.requiresConfirmed !== true && r.requiresLocation !== true;
-        }) || list[0]);
-    setInlineChoice(pick || null);
+        }) || list[0]));
+    if (!choice) return;
+    const key = `${task.Id}|${choice}`;
+    if (deepLinkKeyRef.current === key) return; // уже применили — повторно не открываем
+    deepLinkKeyRef.current = key;
+
+    const rule = getBehaviourRuleForChoice(choice);
+    // Тот же диспетчер, что и в таблице: одна настройка → одно поведение.
+    const dispatch = resolveResultDispatch(rule);
+    if (dispatch === "flow") {
+      // Своего UI у карточки нет — ведём себя ровно как клик по кнопке результата.
+      dbgClick(choice, "deep-link:flow", rule);
+      if (onResultClick) onResultClick(task, choice);
+      return;
+    }
+    if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
+      setAdditionalActions([...task.AdditionalActions]);
+    } else {
+      setAdditionalActions([...(getDefaultsForThisTask() || [])]);
+    }
+    setPromptFieldValues({});
+    setAdditionalError("");
+    setCustomActionInput("");
+    setInlineConfirmPending(null);
+    dbgClick(choice, dispatch === "card-buttons" ? "deep-link:inline-buttons" : "deep-link:form", rule);
+    setInlineConfirmOnly(dispatch === "card-buttons");
+    setInlineChoice(choice);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.Id, initialAction, isCompleted, displayedChoices, choices]);
+  }, [task.Id, initialAction, isCompleted, displayedChoices, choices, onResultClick]);
   const _displayedInternalName = displayedFieldMeta?.internalName || dynamicInternalName; // eslint-disable-line no-unused-vars
   // DEBUG: log taskConfig при изменении (moved after displayedChoices to avoid TDZ)
   React.useEffect(()=>{
@@ -608,10 +638,14 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       setAdditionalActions([...defReset]);
       setCustomActionInput("");
       setAdditionalError("");
+      deepLinkKeyRef.current = null; // задача вышла из «в работе» — deep-link больше не актуален
     }
   }, [task.Status, task.Id, fieldDefaultActions, taskConfig]);
   // Also reset when task changes id
   React.useEffect(() => {
+    // Если этой же парой (задача, значение) только что открылся deep-link — не
+    // закрываем поднятую им форму/подтверждение.
+    if (deepLinkKeyRef.current && deepLinkKeyRef.current.startsWith(`${task.Id}|`)) return;
     setInlineChoice(null);
     setInlineConfirmOnly(false);
     setPromptFieldValues({});
@@ -1598,16 +1632,24 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         disabled={isUpdating}
                         onClick={() => {
                           const rule = getBehaviourRuleForChoice(choice);
-                          const needsForm = (rule?.promptFields?.length || 0) > 0 || rule?.showAdditionalActions === true;
-                          if (rule?.inlineConfirm === true && !needsForm) {
-                            dbgClick(choice, "inline-buttons", rule);
-                            setInlineChoice(choice);
-                            setInlineConfirmPending(null);
-                            setInlineConfirmOnly(true);
+                          const dispatch = resolveResultDispatch(rule);
+                          if (dispatch === "flow") {
+                            dbgClick(choice, "direct-submit", rule);
+                            onResultClick(task, choice);
                             return;
                           }
-                          dbgClick(choice, "direct-submit", rule);
-                          onResultClick(task, choice);
+                          if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
+                            setAdditionalActions([...task.AdditionalActions]);
+                          } else {
+                            setAdditionalActions([...(getDefaultsForThisTask() || [])]);
+                          }
+                          setPromptFieldValues({});
+                          setAdditionalError("");
+                          setCustomActionInput("");
+                          setInlineConfirmPending(null);
+                          dbgClick(choice, dispatch === "card-buttons" ? "inline-buttons" : "form", rule);
+                          setInlineConfirmOnly(dispatch === "card-buttons");
+                          setInlineChoice(choice);
                         }}
                         sx={{
                           borderRadius: "12px",
