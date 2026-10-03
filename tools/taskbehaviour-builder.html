@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конструктор TaskBehaviour — задачи ООБ</title>
+<style>
+  :root{
+    --ink:#171c8f; --ink-2:#5a67d8; --bg:#f5f6fb; --panel:#fff; --line:#e3e6f0;
+    --muted:#6b7280; --ok:#2e7d32; --warn:#b26a00; --err:#c62828; --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:#111827;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  header{background:linear-gradient(180deg,#1b218f,#171c8f);color:#fff;padding:22px 26px}
+  header h1{margin:0 0 6px;font-size:20px;letter-spacing:.2px}
+  header p{margin:0;opacity:.85;max-width:900px}
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px}
+  .toolbar label{display:flex;gap:8px;align-items:center;opacity:.95}
+  select,input,textarea,button{font:inherit}
+  select,input[type=text],input[type=number],textarea{
+    border:1px solid var(--line);border-radius:10px;padding:7px 9px;background:#fff;color:#111827;width:100%
+  }
+  textarea{resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+  button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:7px 12px;cursor:pointer;font-weight:600;color:#111827}
+  button:hover{border-color:#c9cfe4}
+  button.primary{background:var(--ink);border-color:var(--ink);color:#fff}
+  button.ghost{background:transparent;border-color:rgba(255,255,255,.45);color:#fff}
+  button.mini{padding:3px 8px;font-size:12px;font-weight:600}
+  button.danger{color:var(--err);border-color:#f2c8c8}
+  .wrap{padding:20px 26px 60px}
+  .grid{display:grid;gap:18px;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}
+  @media (max-width:1150px){.grid{grid-template-columns:minmax(0,1fr)}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 16px 18px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .panel h2{margin:0 0 4px;font-size:15px;color:var(--ink)}
+  .panel h3{margin:16px 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .hint{color:var(--muted);font-size:12.5px;margin:0 0 12px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .field{display:grid;gap:4px;margin-bottom:8px}
+  .field > span{font-size:12px;color:var(--muted);font-weight:600}
+  .result{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;background:#fcfcff}
+  .result-head{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+  .result-head input{font-weight:700}
+  .toggles{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:10px}
+  .toggles label{display:flex;gap:6px;align-items:center;font-weight:600;color:#374151;background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 10px;cursor:pointer}
+  .sub{border-left:3px solid var(--line);padding-left:10px;margin:8px 0 10px}
+  .pfield{display:grid;grid-template-columns:1.1fr 1.1fr .8fr auto auto;gap:8px;align-items:center;margin-bottom:6px}
+  .pfield label{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);font-weight:600}
+  .rf-grid{display:grid;grid-template-columns:1.1fr 1.1fr .7fr auto;gap:8px;align-items:center;margin-bottom:6px}
+  .style-grid{display:grid;grid-template-columns:1fr 1.4fr 1fr .7fr 1fr auto;gap:8px;align-items:center;margin-bottom:6px}
+  .style-grid .head{font-size:11px;text-transform:uppercase;color:var(--muted);letter-spacing:.05em}
+  .swatch{width:100%;height:30px;border-radius:8px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:700;overflow:hidden;white-space:nowrap}
+  .json-block{position:relative;margin-bottom:14px}
+  .json-block .row{margin-bottom:6px;justify-content:space-between}
+  .json-block h3{margin:0}
+  .warn{background:#fff8e6;border:1px solid #f0dcae;color:#7a5300;border-radius:10px;padding:8px 10px;font-size:12.5px;margin:6px 0}
+  .warn.bad{background:#fdecec;border-color:#f3c9c9;color:#8c1f1f}
+  .ok-note{background:#eaf5ec;border:1px solid #c6e2cb;color:#1f5b28;border-radius:10px;padding:8px 10px;font-size:12.5px;margin:6px 0}
+  /* карточка-предпросмотр */
+  .card{border:1px solid var(--line);border-radius:16px;background:#fff;padding:14px;box-shadow:0 6px 18px rgba(16,24,40,.06)}
+  .card-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px}
+  .card-head b{color:var(--ink)}
+  .chip{background:#eef0ff;color:var(--ink);border-radius:999px;padding:2px 9px;font-size:11.5px;font-weight:700}
+  .task-title{font-weight:700;margin:0 0 2px}
+  .task-body{color:var(--muted);font-size:12.5px;margin:0 0 12px}
+  .res-buttons{display:flex;flex-wrap:wrap;gap:10px}
+  .res-btn{border:none;border-radius:12px;padding:10px 16px;font-weight:700;color:#fff;background:var(--ink);cursor:pointer;min-width:120px}
+  .res-btn:hover{filter:brightness(1.08)}
+  .flow{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
+  .flow h4{margin:0 0 8px;font-size:13px;color:var(--ink)}
+  .dlg{border:1px solid var(--line);border-radius:14px;padding:12px;background:#fdfdfe}
+  .dlg .dlg-title{font-weight:800;margin-bottom:6px}
+  .dlg .muted{color:var(--muted);font-size:12.5px}
+  .actions-row{display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap}
+  .btn-ctd{background:var(--ink);color:#fff;border-color:transparent}
+  .btn-out{background:#fff;border:2px solid currentColor;font-weight:800}
+  .btn-tx{background:transparent;border-color:transparent;color:#5f6368}
+  .aa-box{background:#F1F3F4;border-radius:12px;padding:12px;margin-top:10px}
+  .aa-box .lbl{font-weight:700;color:#374151;font-size:13px}
+  .aa-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .aa-chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .aa-chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .anim-banner{border-radius:12px;padding:12px;margin-top:10px;color:#fff;text-align:center}
+  .anim-celebrate{background:linear-gradient(180deg,#43a047,#2e7d32)}
+  .anim-sherlock{background:linear-gradient(180deg,#3949ab,#1f2a86)}
+  .payload{margin-top:10px;background:#0f172a;color:#d6e2ff;border-radius:12px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.3px;white-space:pre-wrap}
+  .cheat table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .cheat th,.cheat td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+  .cheat code{background:#f2f4fb;border-radius:6px;padding:1px 5px;font-size:12px}
+  .footer{color:var(--muted);font-size:12px;margin-top:14px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Конструктор TaskBehaviour</h1>
+  <p>Соберите настройку для списка <b>TaskBehaviour</b> (Behaviour, StylingResultButton, StylingActions) и сразу посмотрите, что увидит пользователь в карточке задачи. Страница автономная: ничего не отправляет и не требует приложения — просто откройте файл в браузере.</p>
+  <div class="toolbar">
+    <label>Пресет:
+      <select id="preset" style="width:auto">
+        <option value="current">Моя текущая настройка (диалог местоположения + aa)</option>
+        <option value="inline">Инлайн-форма без доп. действий (рекомендация)</option>
+        <option value="icOnly">Только две кнопки (ic)</option>
+        <option value="clean">Пусто (с нуля)</option>
+      </select>
+    </label>
+    <button class="ghost" id="btnCopyAll">Скопировать все три JSON</button>
+    <button class="ghost" id="btnDownload">Скачать .json</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+    <!-- ЛЕВАЯ КОЛОНКА -->
+    <div>
+      <section class="panel" id="panelBehaviour">
+        <h2>1. Behaviour — что происходит при нажатии результата</h2>
+        <p class="hint">Ключи: <code>loc</code> — диалог «Где найдена ЕО?», <code>p</code> — поля ввода, <code>ic</code> — две кнопки, <code>c</code> — подтверждение, <code>aa</code>/<code>aar</code> — доп. действия и их обязательность, <code>anim</code> — анимация.</p>
+        <h3>Поля заявки (rf) в шапке карточки</h3>
+        <div id="rfList"></div>
+        <div class="row"><button class="mini" data-action="add-rf">+ поле</button></div>
+
+        <h3>Результаты</h3>
+        <div id="resultsList"></div>
+        <div class="row"><button class="mini" data-action="add-result">+ результат</button></div>
+      </section>
+
+      <section class="panel" style="margin-top:18px" id="panelStyling">
+        <h2>2. StylingResultButton — цвета и иконки кнопок результата</h2>
+        <p class="hint"><code>bg</code> — фон (градиент или цвет), <code>c</code> — цвет текста, <code>v</code> — вариант (<code>ctd</code> заливка / <code>out</code> контур / <code>tx</code> текст), <code>i</code> — иконка.</p>
+        <div class="row" style="margin-bottom:10px"><label class="row" style="gap:6px"><input type="checkbox" data-path="iconsOff" id="iconsOff"> не показывать иконки (<code>"i": false</code>)</label></div>
+        <div id="stylingList"></div>
+      </section>
+
+      <section class="panel" style="margin-top:18px" id="panelActions">
+        <h2>3. StylingActions — кнопки действий и формы</h2>
+        <p class="hint"><code>takeInWork</code> — «Взять в работу», <code>confirm</code>/<code>cancel</code> — подтверждение (<code>ic</code> и диалоги), <code>promptSubmit</code>/<code>promptCancel</code> — кнопки формы ввода полей.</p>
+        <div id="actionsList"></div>
+      </section>
+    </div>
+
+    <!-- ПРАВАЯ КОЛОНКА -->
+    <div>
+      <section class="panel">
+        <h2>Предпросмотр карточки</h2>
+        <p class="hint">Нажмите кнопку результата — увидите ровно тот поток, который задаёт конфигурация слева.</p>
+        <div class="card" id="previewCard"></div>
+      </section>
+
+      <section class="panel cheat" style="margin-top:18px">
+        <h2>Шпаргалка</h2>
+        <table>
+          <tr><th>Ключ</th><th>Что делает</th></tr>
+          <tr><td><code>loc</code></td><td>диалог «Где найдена ЕО?» (имеет приоритет надо всем; поля собирает диалог)</td></tr>
+          <tr><td><code>ic</code></td><td>две кнопки подтверждения в карточке. Само по себе полей не показывает</td></tr>
+          <tr><td><code>c</code></td><td>диалог подтверждения. Если рядом есть <code>p</code> — диалог появится ПОСЛЕ формы</td></tr>
+          <tr><td><code>p</code></td><td>поля ввода в карточке: <code>f</code> имя, <code>ti</code> подпись, <code>t</code> тип, <code>r</code> обязательное</td></tr>
+          <tr><td><code>aa</code></td><td>блок «Дополнительные действия»</td></tr>
+          <tr><td><code>aar</code></td><td>доп. действия обязательны (иначе — с пометкой «необязательно»)</td></tr>
+          <tr><td><code>anim</code></td><td><code>celebrate</code> / <code>sherlock</code> / <code>none</code>; не задан — анимации нет</td></tr>
+          <tr><td><code>ok</code>/<code>no</code></td><td>подписи кнопок подтверждения (и кнопки отправки формы при <code>ic</code>)</td></tr>
+          <tr><td><code>ct</code>/<code>cm</code></td><td>заголовок и текст диалога подтверждения</td></tr>
+          <tr><td><code>_default.rf</code></td><td>плитки полей заявки в шапке карточки (<code>z: "body"</code> — перенести под описание)</td></tr>
+        </table>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel" style="margin-top:18px">
+    <h2>JSON для записи в TaskBehaviour</h2>
+    <p class="hint">Скопируйте и вставьте в соответствующее поле записи списка TaskBehaviour.</p>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+      <div class="json-block">
+        <div class="row"><h3>Behaviour</h3><button class="mini" data-copy="behaviour">Копировать</button></div>
+        <textarea id="outBehaviour" rows="14" spellcheck="false"></textarea>
+      </div>
+      <div class="json-block">
+        <div class="row"><h3>StylingResultButton</h3><button class="mini" data-copy="styling">Копировать</button></div>
+        <textarea id="outStyling" rows="14" spellcheck="false"></textarea>
+      </div>
+      <div class="json-block">
+        <div class="row"><h3>StylingActions</h3><button class="mini" data-copy="actions">Копировать</button></div>
+        <textarea id="outActions" rows="14" spellcheck="false"></textarea>
+      </div>
+    </div>
+    <h3>Загрузить готовый JSON (вставить и применить)</h3>
+    <div class="row" style="align-items:flex-start">
+      <textarea id="importBox" rows="5" spellcheck="false" placeholder='{"_default":{"rf":[…]},"Найдена":{…}}'></textarea>
+      <div style="display:grid;gap:8px;min-width:190px">
+        <button class="mini" data-import="behaviour">Это Behaviour</button>
+        <button class="mini" data-import="styling">Это StylingResultButton</button>
+        <button class="mini" data-import="actions">Это StylingActions</button>
+      </div>
+    </div>
+    <div id="importMsg"></div>
+    <p class="footer">Логика предпросмотра повторяет правила приложения: <code>loc</code> → диалог, <code>p</code>/<code>aa</code> → инлайн-форма, <code>ic</code> без полей → две кнопки, <code>c</code> без полей → диалог подтверждения, иначе — сразу завершение (+ <code>anim</code>, если задан).</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+
+  /* ── значения по умолчанию ─────────────────────────────────────────────── */
+  function newResult(name){
+    return { name: name || "Результат", loc:false, ic:false, c:false,
+             ok:"", no:"", ct:"", cm:"",
+             p:[], aa:false, aar:false,
+             anim:"none", animTitle:"", animText:"", animEmoji:"" };
+  }
+  function newStyle(){
+    return { bg:"", c:"#ffffff", v:"ctd", i:"" };
+  }
+  function newStyleAction(extra){
+    var s = newStyle(); if(extra){ for(var k in extra) s[k]=extra[k]; } return s;
+  }
+
+  var PRESETS = {
+    current: function(){
+      return {
+        rf:[ {f:"THU", ti:"ЕО"}, {f:"Recipient/SCNumberText", ti:"Получатель"} ],
+        iconsOff:true,
+        results:[
+          Object.assign(newResult("Найдена"), { loc:true, aa:true, aar:false, anim:"celebrate" }),
+          Object.assign(newResult("Не найдена"), { ic:true, ok:"Подтвердить «Не найдена»", no:"Отмена",
+            anim:"sherlock", animTitle:"Создаю заявку на ООБ", animText:"Отправляю запрос в ООБ...", animEmoji:"🕵️" })
+        ],
+        stylingDefault:{ bg:"linear-gradient(180deg, #5a67d8 0%, #434190 100%)", c:"#ffffff", v:"ctd", i:"" },
+        styling:{ "Найдена":{ bg:"linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c:"#ffffff", v:"ctd", i:"" },
+                  "Не найдена":{ bg:"linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", c:"#ffffff", v:"ctd", i:"" } },
+        actions:{
+          takeInWork:{ bg:"linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", c:"#ffffff", v:"ctd", i:"" },
+          confirm:{ bg:"linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", c:"#ffffff", v:"ctd", i:"" },
+          cancel:{ bg:"", c:"#5f6368", v:"tx", i:"" },
+          promptSubmit:{ bg:"linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c:"#ffffff", v:"ctd", i:"" },
+          promptCancel:{ bg:"", c:"#5f6368", v:"tx", i:"" }
+        }
+      };
+    },
+    inline: function(){
+      var s = PRESETS.current();
+      s.results[0] = Object.assign(newResult("Найдена"), {
+        ic:true, ok:"Сохранить", no:"Отмена",
+        p:[ {f:"Location1", ti:"Местоположение", t:"multiline", r:false} ],
+        anim:"celebrate"
+      });
+      return s;
+    },
+    icOnly: function(){
+      var s = PRESETS.current();
+      s.results[0] = Object.assign(newResult("Найдена"), { ic:true, ok:"Подтвердить «Найдена»", no:"Отмена" });
+      return s;
+    },
+    clean: function(){
+      return {
+        rf:[], iconsOff:true,
+        results:[ Object.assign(newResult("Результат"), {}) ],
+        stylingDefault:newStyle(), styling:{}, actions:{
+          takeInWork:newStyle(), confirm:newStyle(), cancel:newStyle(), promptSubmit:newStyle(), promptCancel:newStyle()
+        }
+      };
+    }
+  };
+
+  var state = PRESETS.current();
+  var preview = { active:null, step:"idle", values:{}, acts:[], payload:null };
+
+  /* ── утилиты ───────────────────────────────────────────────────────────── */
+  function esc(v){ return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  function compact(o){
+    var out={}; for(var k in o){ var v=o[k]; if(v===undefined||v===null||v==="") continue; out[k]=v; } return out;
+  }
+  function isGradient(bg){ return /gradient/i.test(String(bg||"")); }
+  function styleOf(name){
+    var s = name==="_default" ? state.stylingDefault : (state.styling[name] || newStyle());
+    return s;
+  }
+
+  /* ── редактор: рендер ──────────────────────────────────────────────────── */
+  function renderRf(){
+    var html = "";
+    state.rf.forEach(function(r,i){
+      html += '<div class="rf-grid">'
+        + '<input type="text" data-path="rf.'+i+'.f" value="'+esc(r.f)+'" placeholder="Внутреннее имя (THU)">'
+        + '<input type="text" data-path="rf.'+i+'.ti" value="'+esc(r.ti)+'" placeholder="Подпись (ЕО)">'
+        + '<select data-path="rf.'+i+'.z">'
+        +   '<option value=""'+(r.z!=="body"?" selected":"")+'>шапка</option>'
+        +   '<option value="body"'+(r.z==="body"?" selected":"")+'>перед описанием</option>'
+        + '</select>'
+        + '<button class="mini danger" data-action="del-rf" data-i="'+i+'">✕</button>'
+        + '</div>';
+    });
+    $("rfList").innerHTML = html || '<p class="hint">Плиток нет.</p>';
+  }
+
+  function renderResults(){
+    var html = "";
+    state.results.forEach(function(r,i){
+      html += '<div class="result">'
+        + '<div class="result-head">'
+        +   '<input type="text" data-path="results.'+i+'.name" value="'+esc(r.name)+'" placeholder="Значение результата">'
+        +   '<button class="mini danger" data-action="del-result" data-i="'+i+'">Удалить</button>'
+        + '</div>'
+        + '<div class="toggles">'
+        +   '<label><input type="checkbox" data-path="results.'+i+'.loc"'+(r.loc?" checked":"")+'> loc — диалог местоположения</label>'
+        +   '<label><input type="checkbox" data-path="results.'+i+'.ic"'+(r.ic?" checked":"")+'> ic — две кнопки</label>'
+        +   '<label><input type="checkbox" data-path="results.'+i+'.c"'+(r.c?" checked":"")+'> c — подтверждение</label>'
+        +   '<label><input type="checkbox" data-path="results.'+i+'.aa"'+(r.aa?" checked":"")+'> aa — доп. действия</label>'
+        +   '<label><input type="checkbox" data-path="results.'+i+'.aar"'+(r.aar?" checked":"")+'> aar — обязательные</label>'
+        + '</div>'
+        + '<div class="row" style="gap:12px">'
+        +   '<div class="field" style="flex:1;min-width:150px"><span>Подпись кнопки ok</span><input type="text" data-path="results.'+i+'.ok" value="'+esc(r.ok)+'" placeholder="Сохранить"></div>'
+        +   '<div class="field" style="flex:1;min-width:150px"><span>Подпись кнопки no</span><input type="text" data-path="results.'+i+'.no" value="'+esc(r.no)+'" placeholder="Отмена"></div>'
+        + '</div>'
+        + (r.c ? '<div class="sub"><div class="row" style="gap:12px">'
+            + '<div class="field" style="flex:1;min-width:180px"><span>Заголовок диалога (ct)</span><input type="text" data-path="results.'+i+'.ct" value="'+esc(r.ct)+'" placeholder="Подтверждение результата"></div>'
+            + '<div class="field" style="flex:2;min-width:220px"><span>Текст диалога (cm)</span><input type="text" data-path="results.'+i+'.cm" value="'+esc(r.cm)+'" placeholder="Вы уверены?"></div>'
+            + '</div></div>' : '')
+        + '<div class="field"><span>Поля ввода (p) — показываются в карточке, только если нет loc</span></div>'
+        + r.p.map(function(f,j){
+            return '<div class="pfield">'
+              + '<input type="text" data-path="results.'+i+'.p.'+j+'.f" value="'+esc(f.f)+'" placeholder="Поле (Location1)">'
+              + '<input type="text" data-path="results.'+i+'.p.'+j+'.ti" value="'+esc(f.ti)+'" placeholder="Подпись (Местоположение)">'
+              + '<select data-path="results.'+i+'.p.'+j+'.t">'
+              +   ["text","multiline","number","choice"].map(function(t){ return '<option value="'+t+'"'+((f.t||"text")===t?" selected":"")+'>'+t+'</option>'; }).join("")
+              + '</select>'
+              + '<label><input type="checkbox" data-path="results.'+i+'.p.'+j+'.r"'+(f.r?" checked":"")+'> обяз.</label>'
+              + '<button class="mini danger" data-action="del-field" data-i="'+i+'" data-j="'+j+'">✕</button>'
+              + '</div>';
+          }).join("")
+        + '<div class="row"><button class="mini" data-action="add-field" data-i="'+i+'">+ поле</button></div>'
+        + '<div class="row" style="gap:12px;margin-top:10px">'
+        +   '<div class="field" style="min-width:170px"><span>Анимация (anim)</span><select data-path="results.'+i+'.anim">'
+        +     ["none","celebrate","sherlock"].map(function(a){ return '<option value="'+a+'"'+((r.anim||"none")===a?" selected":"")+'>'+a+'</option>'; }).join("")
+        +   '</select></div>'
+        +   '<div class="field" style="flex:1;min-width:150px"><span>Заголовок анимации</span><input type="text" data-path="results.'+i+'.animTitle" value="'+esc(r.animTitle)+'" placeholder="Паллет исправлен"></div>'
+        +   '<div class="field" style="flex:1;min-width:150px"><span>Текст анимации</span><input type="text" data-path="results.'+i+'.animText" value="'+esc(r.animText)+'" placeholder="Отличная работа!"></div>'
+        +   '<div class="field" style="width:80px"><span>Emoji</span><input type="text" data-path="results.'+i+'.animEmoji" value="'+esc(r.animEmoji)+'" placeholder="🎉"></div>'
+        + '</div>'
+        + '</div>';
+    });
+    $("resultsList").innerHTML = html || '<p class="hint">Результатов нет.</p>';
+  }
+
+  function styleRow(label, path, s, opts){
+    opts = opts || {};
+    var previewStyle = isGradient(s.bg)
+      ? 'background-image:'+esc(s.bg)+';color:'+esc(s.c||"#fff")
+      : 'background:'+esc(s.bg||"#eef0ff")+';color:'+esc(s.bg ? (s.c||"#fff") : "#171c8f");
+    return '<div class="style-grid">'
+      + '<input type="text" data-path="'+path+'.bg" value="'+esc(s.bg)+'" placeholder="gradient / #цвет">'
+      + '<div class="swatch" style="'+previewStyle+'">'+esc(label)+'</div>'
+      + '<input type="text" data-path="'+path+'.c" value="'+esc(s.c)+'" placeholder="#ffffff">'
+      + '<select data-path="'+path+'.v">'
+      +   ["ctd","out","tx"].map(function(v){ return '<option value="'+v+'"'+((s.v||"ctd")===v?" selected":"")+'>'+v+'</option>'; }).join("")
+      + '</select>'
+      + '<input type="text" data-path="'+path+'.i" value="'+esc(s.i)+'" placeholder="иконка">'
+      + (opts.deletable ? '<button class="mini danger" data-action="del-style" data-name="'+esc(label)+'">✕</button>' : '<span></span>')
+      + '</div>';
+  }
+
+  function renderStyling(){
+    var html = '<div class="style-grid">'
+      + '<span class="head">bg</span><span class="head">предпросмотр</span><span class="head">текст</span>'
+      + '<span class="head">вариант</span><span class="head">иконка</span><span class="head"></span></div>';
+    html += styleRow("_default", "stylingDefault", state.stylingDefault);
+    state.results.forEach(function(r){
+      if(!state.styling[r.name]) state.styling[r.name] = newStyle();
+      html += styleRow(r.name, "styling."+JSON.stringify(r.name).slice(1,-1), state.styling[r.name], { deletable:true });
+    });
+    $("stylingList").innerHTML = html;
+  }
+
+  var ACTION_LABELS = {
+    takeInWork:"«Взять в работу»",
+    confirm:"Подтвердить (confirm)",
+    cancel:"Отмена (cancel)",
+    promptSubmit:"Сохранить в форме (promptSubmit)",
+    promptCancel:"Отмена формы (promptCancel)"
+  };
+
+  function renderActions(){
+    var html = "";
+    Object.keys(ACTION_LABELS).forEach(function(key){
+      if(!state.actions[key]) state.actions[key] = newStyle();
+      html += '<div class="field"><span>'+ACTION_LABELS[key]+'</span></div>';
+      html += styleRow(ACTION_LABELS[key], "actions."+key, state.actions[key]);
+    });
+    $("actionsList").innerHTML = html;
+  }
+
+  function renderEditor(){
+    renderRf(); renderResults(); renderStyling(); renderActions();
+    $("iconsOff").checked = !!state.iconsOff;
+  }
+
+  /* ── редактор: чтение DOM в state ──────────────────────────────────────── */
+  function setPath(path, value){
+    var parts = path.split("."), node = state;
+    for(var i=0;i<parts.length-1;i++){
+      var key = parts[i];
+      if(node[key]===undefined) node[key] = /^\d+$/.test(parts[i+1]) ? [] : {};
+      node = node[key];
+    }
+    node[parts[parts.length-1]] = value;
+  }
+  function readEditor(){
+    var nodes = document.querySelectorAll("[data-path]");
+    for(var i=0;i<nodes.length;i++){
+      var el = nodes[i], path = el.getAttribute("data-path");
+      var value = el.type === "checkbox" ? el.checked : el.value;
+      if(!el.type || el.tagName === "SELECT" || el.type === "checkbox" || el.type === "text") setPath(path, value);
+    }
+  }
+
+  /* ── JSON ──────────────────────────────────────────────────────────────── */
+  function behaviourJson(){
+    var out = {};
+    var def = {};
+    if(state.rf.length){
+      def.rf = state.rf.map(function(r){ return compact({ f:r.f, ti:r.ti, z:r.z||undefined }); });
+    }
+    if(Object.keys(def).length) out._default = def;
+    state.results.forEach(function(r){
+      var rule = {};
+      if(r.loc) rule.loc = true;
+      if(r.ic) rule.ic = true;
+      if(r.c) rule.c = true;
+      if(r.p && r.p.length){
+        rule.p = r.p.filter(function(f){ return f && f.f; }).map(function(f){
+          return compact({ f:f.f, ti:f.ti, t:f.t||undefined, r:f.r?true:undefined });
+        });
+      }
+      if(r.aa){ rule.aa = true; rule.aar = !!r.aar; }
+      if(r.ok) rule.ok = r.ok;
+      if(r.no) rule.no = r.no;
+      if(r.c && r.ct) rule.ct = r.ct;
+      if(r.c && r.cm) rule.cm = r.cm;
+      if(r.anim && r.anim !== "none"){
+        if(r.animTitle || r.animText || r.animEmoji){
+          rule.anim = compact({ type:r.anim, title:r.animTitle, text:r.animText, emoji:r.animEmoji });
+        } else {
+          rule.anim = r.anim;
+        }
+      } else if(r.anim === "none" && (r.animTitle || r.animText || r.animEmoji)){
+        rule.anim = "none";
+      }
+      out[r.name] = rule;
+    });
+    return out;
+  }
+
+  function stylingJson(){
+    var out = {};
+    if(state.iconsOff) out.i = false;
+    out._default = compact({ bg:state.stylingDefault.bg, c:state.stylingDefault.c, v:state.stylingDefault.v, i:state.stylingDefault.i });
+    state.results.forEach(function(r){
+      var s = state.styling[r.name] || newStyle();
+      out[r.name] = compact({ bg:s.bg, c:s.c, v:s.v, i:s.i });
+    });
+    return out;
+  }
+
+  function actionsJson(){
+    var out = {};
+    if(state.iconsOff) out.i = false;
+    out._default = compact({ v: (state.actions.takeInWork && state.actions.takeInWork.v) || "ctd" });
+    Object.keys(ACTION_LABELS).forEach(function(key){
+      var s = state.actions[key] || newStyle();
+      out[key] = compact({ bg:s.bg, c:s.c, v:s.v, i:s.i });
+    });
+    return out;
+  }
+
+  function pretty(obj){ return JSON.stringify(obj, null, 2); }
+
+  function syncOutput(){
+    $("outBehaviour").value = pretty(behaviourJson());
+    $("outStyling").value = pretty(stylingJson());
+    $("outActions").value = pretty(actionsJson());
+  }
+
+  /* ── предпросмотр ──────────────────────────────────────────────────────── */
+  function ruleOf(name){
+    for(var i=0;i<state.results.length;i++) if(state.results[i].name === name) return state.results[i];
+    return newResult(name);
+  }
+  function btnSx(s){
+    var sx = "";
+    if(isGradient(s.bg)) sx += "background-image:"+s.bg+";border-color:transparent;";
+    else if(s.bg) sx += "background:"+s.bg+";border-color:transparent;";
+    else sx += "background:#171c8f;border-color:transparent;";
+    if(s.c) sx += "color:"+s.c+";";
+    if(s.v === "out") sx += "background:#fff;border:2px solid "+((s.c)||"#171c8f")+";";
+    if(s.v === "tx") sx += "background:transparent;border-color:transparent;color:"+((s.c)||"#5f6368")+";";
+    return sx;
+  }
+  function actionBtn(key, label, extra){
+    var s = (state.actions && state.actions[key]) || newStyle();
+    var cls = s.v === "tx" ? "btn-tx" : (s.v === "out" ? "btn-out" : "btn-ctd");
+    return '<button class="'+cls+'" style="'+btnSx(s)+'" '+(extra||"")+'>'+esc(label)+'</button>';
+  }
+
+  function renderPreview(){
+    var card = $("previewCard");
+    var buttons = state.results.map(function(r){
+      var s = state.styling[r.name] || newStyle();
+      var filled = s.bg || s.v === "out" || s.v === "tx";
+      return '<button class="res-btn" data-result="'+esc(r.name)+'" style="'+(filled ? btnSx(s) : "")+'">'+esc(r.name)+'</button>';
+    }).join("");
+
+    var html = '<div class="card-head"><b>#651 «Найти ЕО»</b><span class="chip">В процессе</span></div>'
+      + '<p class="task-title">Найти ЕО</p>'
+      + '<p class="task-body">Зона отгрузки · РЦ-8117 · назначено: Поршаков Сергей</p>'
+      + '<div class="res-buttons">'+buttons+'</div>';
+
+    if(preview.active) html += '<div class="flow">'+flowHtml()+'</div>';
+    card.innerHTML = html;
+  }
+
+  function flowKind(r){
+    if(r.loc) return "location";
+    if((r.p && r.p.length) || r.aa) return "form";
+    if(r.ic) return "inline-buttons";
+    if(r.c) return "confirm";
+    return "direct";
+  }
+  function labelOf(r){
+    return r.ic ? (r.ok || "Подтвердить") : ("Сохранить — " + r.name);
+  }
+  function fieldHtml(f, i, value){
+    var tag = (f.t === "multiline") ? "textarea" : "input";
+    var label = f.ti || f.f;
+    if(tag === "textarea"){
+      return '<div class="field"><span>'+esc(label)+(f.r?" *":"")+'</span><textarea rows="2" data-value="'+i+'">'+esc(value||"")+'</textarea></div>';
+    }
+    return '<div class="field"><span>'+esc(label)+(f.r?" *":"")+'</span><input type="text" data-value="'+i+'" value="'+esc(value||"")+'"></div>';
+  }
+  function aaHtml(r){
+    if(!r.aa) return "";
+    var chips = ["Проверить ТМЦ","Просмотр видеоархива","Связаться с получателем"];
+    return '<div class="aa-box"><div class="lbl">Дополнительные действия'+(r.aar?"":" (необязательно)")+'</div>'
+      + '<div class="aa-chips">'+chips.map(function(c){
+          var on = preview.acts.indexOf(c) >= 0;
+          return '<span class="aa-chip'+(on?" on":"")+'" data-aa="'+esc(c)+'">'+esc(c)+'</span>';
+        }).join("")+'</div></div>';
+  }
+  function animHtml(r, note){
+    if(!r || !r.anim || r.anim === "none") return "";
+    var cls = r.anim === "sherlock" ? "anim-sherlock" : "anim-celebrate";
+    var title = r.animTitle || (r.anim === "sherlock" ? "Создаю заявку" : "Готово");
+    var text = r.animText || (r.anim === "sherlock" ? "Отправляю запрос..." : "Отличная работа!");
+    return '<div class="anim-banner '+cls+'">'+(note ? '<div style="font-size:11.5px;opacity:.85;text-transform:uppercase;letter-spacing:.06em">'+esc(note)+'</div>' : "")
+      + (r.animEmoji ? esc(r.animEmoji)+" " : "")+'<b>'+esc(title)+'</b>'
+      + (text ? '<div style="opacity:.9;font-size:12.5px">'+esc(text)+'</div>' : "")+'</div>';
+  }
+  function payloadHtml(r){
+    var body = {};
+    body["<поле результата>"] = r.name;
+    (r.p||[]).forEach(function(f){ if(f.f) body[f.f] = preview.values[f.f] || "(пусто)"; });
+    if(r.aa && preview.acts.length) body.AdditionalActions = preview.acts;
+    body.Status = "Завершена";
+    body.PercentComplete = 1;
+    return '<div class="payload">MERGE → {\n'
+      + Object.keys(body).map(function(k){ return '  "'+k+'": '+JSON.stringify(body[k]); }).join(",\n")
+      + '\n}</div>';
+  }
+
+  function flowHtml(){
+    var r = ruleOf(preview.active);
+    var kind = flowKind(r);
+    var out = "";
+
+    if(preview.step === "done"){
+      out += '<h4>Результат «'+esc(r.name)+'» — задача завершается</h4>';
+      out += animHtml(r);
+      out += payloadHtml(r);
+      out += '<div class="actions-row">'+actionBtn("promptCancel","← К кнопкам результата","data-flow=\"reset\"")+'</div>';
+      return out;
+    }
+    out += '<h4>Результат «'+esc(r.name)+'» — поток: '+esc(flowName(kind))+'</h4>';
+    out += warningsHtml(r);
+    if(kind === "location") out += animHtml(r, "анимация проиграна перед диалогом");
+
+    if(kind === "location"){
+      var first = (r.p && r.p[0]) || { f:"Location1", ti:"Местоположение (Location1)", t:"multiline" };
+      out += '<div class="dlg"><div class="dlg-title">Где найдена ЕО?</div>'
+        + '<p class="muted">Укажите местоположение, где была найдена ЕО для задачи #651. Вы можете пропустить этот шаг.</p>'
+        + fieldHtml(first, 0, preview.values[first.f])
+        + aaHtml(r)
+        + '<div class="actions-row">'
+        +   actionBtn("promptCancel","Пропустить",'data-flow="skip"')
+        +   actionBtn("promptSubmit","Отправить",'data-flow="submit"')
+        + '</div></div>';
+      return out;
+    }
+
+    if(kind === "form"){
+      out += '<div class="dlg"><div class="dlg-title">Форма результата в карточке (без диалога)</div>';
+      (r.p||[]).forEach(function(f,i){ out += fieldHtml(f, i, preview.values[f.f]); });
+      out += aaHtml(r);
+      out += '<div class="actions-row">'
+        +   actionBtn("promptCancel", r.no || "Отмена", 'data-flow="reset"')
+        +   actionBtn("promptSubmit", labelOf(r), 'data-flow="submit"')
+        + '</div></div>';
+      if(r.c) out += '<div class="warn">После нажатия «'+esc(labelOf(r))+'" откроется диалог подтверждения (<code>c: true</code>) — он появится <b>поверх</b> формы.</div>';
+      return out;
+    }
+
+    if(kind === "inline-buttons"){
+      out += '<div class="dlg"><div class="dlg-title">Подтверждение двумя кнопками (ic) — без полей</div>'
+        + '<div class="actions-row">'
+        +   actionBtn("cancel", r.no || "Отмена", 'data-flow="reset"')
+        +   actionBtn("confirm", r.ok || "Подтвердить", 'data-flow="submit"')
+        + '</div></div>';
+      if((r.p && r.p.length) || r.aa) out += '<div class="warn">Есть <code>p</code>/<code>aa</code> — будет показана форма, а не только кнопки.</div>';
+      return out;
+    }
+
+    if(kind === "confirm"){
+      out += '<div class="dlg"><div class="dlg-title">'+esc(r.ct || "Подтверждение результата")+'</div>'
+        + '<p class="muted">'+esc(r.cm || "Вы уверены, что хотите завершить задачу с этим результатом?")+'</p>'
+        + '<div class="actions-row">'
+        +   actionBtn("cancel", r.no || "Отмена", 'data-flow="reset"')
+        +   actionBtn("confirm", r.ok || "Подтвердить", 'data-flow="submit"')
+        + '</div></div>';
+      return out;
+    }
+
+    // direct: показываем, что произойдёт по клику
+    out += '<div class="dlg"><div class="dlg-title">Правил нет — завершаем сразу</div>'
+      + '<p class="muted">Задача завершится по нажатию кнопки результата'+(r.anim && r.anim!=="none" ? ", затем анимация" : "")+'.</p>'
+      + '<div class="actions-row">'+actionBtn("promptCancel","Отмена",'data-flow="reset"')+actionBtn("promptSubmit","Завершить",'data-flow="submit"')+'</div></div>';
+    return out;
+  }
+
+  function flowName(kind){
+    return { location:"диалог местоположения", form:"инлайн-форма", "inline-buttons":"две кнопки (ic)",
+             confirm:"диалог подтверждения", direct:"сразу завершение" }[kind] || kind;
+  }
+  function warningsHtml(r){
+    var out = "";
+    if(r.loc && r.p && r.p.length) out += '<div class="warn">Задан <code>loc</code>: поля из <code>p</code> в карточке не покажутся — их соберёт диалог.</div>';
+    if(r.loc && r.aa) out += '<div class="warn">Доп. действия (<code>aa</code>) попадут в диалог местоположения.</div>';
+    if(r.c && (r.p && r.p.length)) out += '<div class="warn">Задан <code>c</code> вместе с <code>p</code>: диалог подтверждения появится ПОСЛЕ формы. Нужна форма без диалога — снимите <code>c</code>.</div>';
+    if(r.ic && ((r.p && r.p.length) || r.aa)) out += '<div class="ok-note"><code>ic</code> вместе с полями: отдельного шага подтверждения не будет — <code>ic</code> задаёт только подпись кнопки (<code>ok</code>).</div>';
+    if(!r.loc && !r.ic && !r.c && !(r.p && r.p.length) && !r.aa) out += '<div class="warn bad">Правил нет: результат завершит задачу сразу, без полей и подтверждений.</div>';
+    return out;
+  }
+
+  /* ── события ───────────────────────────────────────────────────────────── */
+  function rerender(){ renderEditor(); syncOutput(); renderPreview(); }
+  function softUpdate(){ syncOutput(); renderPreview(); }
+
+  document.addEventListener("input", function(e){
+    if(!e.target.closest || !e.target.closest("#panelBehaviour, #panelStyling, #panelActions")) return;
+    readEditor();
+    if(e.target.id === "iconsOff") renderStyling();
+    softUpdate();
+  });
+  document.addEventListener("change", function(e){
+    if(!e.target.closest || !e.target.closest("#panelBehaviour, #panelStyling, #panelActions")) return;
+    readEditor();
+    rerender();
+  });
+
+  document.addEventListener("click", function(e){
+    var t = e.target;
+
+    // структурные кнопки редактора
+    var actBtn = t.closest && t.closest("[data-action]");
+    if(actBtn){
+      readEditor();
+      var action = actBtn.getAttribute("data-action");
+      var i = Number(actBtn.getAttribute("data-i"));
+      var j = Number(actBtn.getAttribute("data-j"));
+      if(action === "add-rf") state.rf.push({ f:"", ti:"", z:"" });
+      if(action === "del-rf") state.rf.splice(i,1);
+      if(action === "add-result") state.results.push(newResult("Новый результат"));
+      if(action === "del-result"){
+        var gone = state.results[i]; if(gone) delete state.styling[gone.name];
+        state.results.splice(i,1);
+      }
+      if(action === "add-field") state.results[i].p.push({ f:"", ti:"", t:"text", r:false });
+      if(action === "del-field") state.results[i].p.splice(j,1);
+      if(action === "del-style"){
+        var nm = actBtn.getAttribute("data-name"); delete state.styling[nm];
+      }
+      rerender();
+      return;
+    }
+
+    // кнопки предпросмотра результата
+    var resBtn = t.closest && t.closest("[data-result]");
+    if(resBtn){
+      preview = { active:resBtn.getAttribute("data-result"), step:"idle", values:{}, acts:[], payload:null };
+      var r = ruleOf(preview.active);
+      if(flowKind(r) === "direct"){ preview.step = "confirm-direct"; }
+      renderPreview(); return;
+    }
+
+    // клики внутри потока
+    var flowBtn = t.closest && t.closest("[data-flow]");
+    if(flowBtn){
+      var flow = flowBtn.getAttribute("data-flow");
+      if(flow === "reset"){ preview = { active:null, step:"idle", values:{}, acts:[], payload:null }; renderPreview(); return; }
+      if(flow === "skip"){ preview.values = {}; preview.step = "done"; renderPreview(); return; }
+      if(flow === "submit"){ preview.step = "done"; renderPreview(); return; }
+    }
+    var aaChip = t.closest && t.closest("[data-aa]");
+    if(aaChip){
+      var val = aaChip.getAttribute("data-aa");
+      var idx = preview.acts.indexOf(val);
+      if(idx >= 0) preview.acts.splice(idx,1); else preview.acts.push(val);
+      renderPreview(); return;
+    }
+
+    // ввод значений в поля формы
+    var valInput = t.closest && t.closest("[data-value]");
+    if(valInput) return;
+
+    // копирование
+    var copyBtn = t.closest && t.closest("[data-copy]");
+    if(copyBtn){
+      var which = copyBtn.getAttribute("data-copy");
+      var box = which === "behaviour" ? $("outBehaviour") : which === "styling" ? $("outStyling") : $("outActions");
+      copyText(box.value, copyBtn); return;
+    }
+    var copyAll = t.closest && t.closest("#btnCopyAll");
+    if(copyAll){
+      copyText([$("outBehaviour").value, $("outStyling").value, $("outActions").value].join("\n\n/////\n\n"), copyAll);
+      return;
+    }
+    var dl = t.closest && t.closest("#btnDownload");
+    if(dl){
+      var data = { Behaviour: behaviourJson(), StylingResultButton: stylingJson(), StylingActions: actionsJson() };
+      var blob = new Blob([pretty(data)], { type:"application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = "taskbehaviour-config.json";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      return;
+    }
+
+    // импорт
+    var impBtn = t.closest && t.closest("[data-import]");
+    if(impBtn){
+      var kind = impBtn.getAttribute("data-import");
+      var raw = $("importBox").value.trim();
+      var msg = $("importMsg");
+      try {
+        var obj = JSON.parse(raw);
+        if(kind === "behaviour") importBehaviour(obj);
+        if(kind === "styling") importStyling(obj);
+        if(kind === "actions") importActions(obj);
+        msg.innerHTML = '<div class="ok-note">Загружено: '+kind+'.</div>';
+        rerender();
+      } catch(err){
+        msg.innerHTML = '<div class="warn bad">Не разобрал JSON: '+esc(err.message)+'</div>';
+      }
+      return;
+    }
+  });
+
+  document.addEventListener("input", function(e){
+    if(e.target && e.target.hasAttribute && e.target.hasAttribute("data-value")){
+      var key = e.target.getAttribute("data-value");
+      var r = ruleOf(preview.active);
+      var f = (r.p||[])[Number(key)];
+      if(f) preview.values[f.f] = e.target.value;
+    }
+  });
+
+  function copyText(text, btn){
+    var done = function(){ var old = btn.textContent; btn.textContent = "Скопировано ✓"; setTimeout(function(){ btn.textContent = old; }, 1400); };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done, function(){ fallback(); });
+    } else fallback();
+    function fallback(){
+      var ta = document.createElement("textarea");
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try{ document.execCommand("copy"); done(); }catch(e){ /* noop */ }
+      document.body.removeChild(ta);
+    }
+  }
+
+  /* ── импорт ────────────────────────────────────────────────────────────── */
+  function importBehaviour(obj){
+    var results = [];
+    var def = obj._default || {};
+    state.rf = (def.rf || []).map(function(f){ return { f:f.f||"", ti:f.ti||"", z:f.z||"" }; });
+    Object.keys(obj).forEach(function(key){
+      if(key === "_default" || key === "*") return;
+      var rule = obj[key] || {};
+      var r = newResult(key);
+      r.loc = rule.loc === true;
+      r.ic = rule.ic === true;
+      r.c = (rule.c === true) || String(rule.c).toLowerCase() === "inline" ? (rule.c === true) : false;
+      r.ic = r.ic || String(rule.c).toLowerCase() === "inline";
+      r.aa = rule.aa === true;
+      r.aar = rule.aar === true;
+      r.ok = rule.ok || ""; r.no = rule.no || ""; r.ct = rule.ct || ""; r.cm = rule.cm || "";
+      r.p = (rule.p || []).map(function(f){ return { f:f.f||"", ti:f.ti||"", t:f.t||"text", r:f.r === true }; });
+      var anim = rule.anim;
+      if(typeof anim === "string"){ r.anim = anim; }
+      else if(anim && typeof anim === "object"){
+        r.anim = anim.type || anim.a || anim.name || "none";
+        r.animTitle = anim.title || ""; r.animText = anim.text || ""; r.animEmoji = anim.emoji || "";
+      } else r.anim = "none";
+      results.push(r);
+    });
+    state.results = results.length ? results : [newResult("Результат")];
+    state.styling = {}; state.results.forEach(function(r){ state.styling[r.name] = newStyle(); });
+  }
+
+  function importStyling(obj){
+    var def = obj._default || {};
+    if(obj.i === false) state.iconsOff = true;
+    state.stylingDefault = { bg:def.bg||"", c:def.c||"#ffffff", v:def.v||"ctd", i:def.i||"" };
+    state.styling = {};
+    state.results.forEach(function(r){
+      var s = obj[r.name] || {};
+      state.styling[r.name] = { bg:s.bg||"", c:s.c||"#ffffff", v:s.v||"ctd", i:s.i||"" };
+    });
+    // стили для результатов, которых нет в списке, создаём как новые
+    Object.keys(obj).forEach(function(k){
+      if(k === "_default" || k === "i") return;
+      if(state.styling[k]) return;
+      var s = obj[k] || {};
+      state.results.push(Object.assign(newResult(k), {}));
+      state.styling[k] = { bg:s.bg||"", c:s.c||"#ffffff", v:s.v||"ctd", i:s.i||"" };
+    });
+  }
+
+  function importActions(obj){
+    if(obj.i === false) state.iconsOff = true;
+    state.actions = {};
+    ["takeInWork","confirm","cancel","promptSubmit","promptCancel"].forEach(function(k){
+      var s = obj[k] || {};
+      state.actions[k] = { bg:s.bg||"", c:s.c||"#ffffff", v:s.v||"ctd", i:s.i||"" };
+    });
+  }
+
+  /* ── пресеты ───────────────────────────────────────────────────────────── */
+  $("preset").addEventListener("change", function(e){
+    var kind = e.target.value;
+    var next = (PRESETS[kind] || PRESETS.current)();
+    state = next; preview = { active:null, step:"idle", values:{}, acts:[], payload:null };
+    rerender();
+  });
+
+  // первичная отрисовка
+  rerender();
+})();
+</script>
+</body>
+</html>

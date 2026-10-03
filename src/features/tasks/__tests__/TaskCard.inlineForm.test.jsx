@@ -159,6 +159,16 @@ async function mountCard(behaviour, spies = {}) {
 // «ic» = подтверждение двумя кнопками: оно включает инлайн-режим, но САМО по себе
 // полей не показывает — поля берутся из p, доп. действия из aa.
 const BEHAVIOUR_IC_ONLY = behaviourOf({ ic: true, ok: "Подтвердить «Найдена»", no: "Отмена", anim: "none" });
+// ⭐ Целевая конфигурация пользователя: инлайн-форма с местоположением и БЕЗ доп. действий
+// («мне не нужны доп действия для этого шага»).
+const BEHAVIOUR_IC_P_NO_AA = behaviourOf({
+  ic: true,
+  ok: "Сохранить",
+  no: "Отмена",
+  p: [{ f: "Location1", ti: "Местоположение", t: "multiline" }],
+  anim: "celebrate",
+});
+
 const BEHAVIOUR_IC_P_AA = behaviourOf({
   ic: true,
   ok: "Подтвердить «Найдена»",
@@ -244,6 +254,39 @@ describe("TaskCard — результат инлайном (p + aa, без loc)"
     expect(buttons()).toContain("Подтвердить «Найдена»");
     expect(buttons()).toContain("Отмена");
     expect(buttons()).not.toContain("Сохранить — Найдена");
+  });
+
+  it("ic + p БЕЗ aa: инлайн-форма только с полем — блока доп. действий нет", async () => {
+    const onComplete = vi.fn();
+    const onResultClick = vi.fn();
+    const { host, buttons, inputs, click, dialogs } = await mountCard(BEHAVIOUR_IC_P_NO_AA, { onComplete, onResultClick });
+
+    await click([...host.querySelectorAll("button")].find((b) => b.textContent.trim() === "Найдена"));
+    expect(dialogs()).toBe(0);
+    // поле из Behaviour.p есть
+    expect(inputs().some((i) => (i.getAttribute("placeholder") || "").includes("Местоположение"))).toBe(true);
+    // блока доп. действий НЕТ (aa не задан)
+    expect(host.textContent).not.toMatch(/Дополнительные действия/);
+    expect(buttons()).toContain("Сохранить");
+    expect(buttons()).toContain("Отмена");
+
+    const area = inputs().find((i) => (i.getAttribute("placeholder") || "").includes("Местоположение"));
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(area, "Зона отгрузки");
+      area.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    await click([...host.querySelectorAll("button")].find((b) => b.textContent.trim() === "Сохранить"));
+    await settle(2000); // anim: celebrate
+
+    expect(onResultClick).not.toHaveBeenCalled();
+    const [task, choice, values, req, acts] = onComplete.mock.calls[0];
+    expect(task.Id).toBe(651);
+    expect(choice).toBe("Найдена");
+    expect(values).toMatchObject({ Location1: "Зона отгрузки" });
+    expect(req).toBe("Нет");
+    expect(acts).toEqual([]);
   });
 
   it("контраст: с ключом loc форма в карточке НЕ открывается — результат уходит в диалог TasksView", async () => {
