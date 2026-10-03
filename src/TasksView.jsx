@@ -515,7 +515,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       }, 1600);
     };
 
-    if (flow.action === "location") {
+    // 🛡 Страховка: правило требует полей/доп. действий, но форму никто не показал
+    // (клик пришёл не из карточки и не из поповера таблицы). «Молча» завершать нельзя:
+    // Location1 соберёт диалог местоположения, остальные поля — форма карточки.
+    const _promptFields = Array.isArray(rule?.promptFields) ? rule.promptFields : [];
+    const _needsForm = _promptFields.length > 0 || rule?.showAdditionalActions === true;
+    const _onlyLocationField = _promptFields.length === 1
+      && String(_promptFields[0]?.internalName || _promptFields[0]?.f || "").trim().toLowerCase() === "location1";
+
+    if (flow.action === "location" || (_needsForm && _onlyLocationField)) {
       runAfterAnimation(() => {
       setPendingTask(task);
       setPendingResult(resultValue);
@@ -551,9 +559,17 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       return;
     }
 
-    // complete: без доп. действий (анимация — если задана в Behaviour.anim)
-    runAfterAnimation(() => completeTask(task, resultValue, {}, "", []));
-  }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
+    if (_needsForm) {
+      notify(`Результат «${resultValue}» требует заполнить поля — открываю карточку задачи #${task.Id}`, { severity: "info" });
+      openTaskForm(task?.compositeId, tableData.sources);
+      return;
+    }
+
+    // complete: без доп. действий (анимация — если задана в Behaviour.anim).
+    // req = null → legacy-поля AdditionalsActionsRequired/AdditionalActions не отправляем
+    // (в Behaviour нет aa; поля могут отсутствовать в типе контента или быть Boolean).
+    runAfterAnimation(() => completeTask(task, resultValue, {}, null, []));
+  }, [fieldDefaultActions, taskConfiguration.data, completeTask, notify, tableData.sources]);
 
   // ── Действия по строке таблицы ─────────────────────────────────────────────
   // Набор действий повторяет КАРТОЧКУ задачи (те же кнопки для того же статуса и
@@ -721,6 +737,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       aaInitial: Array.isArray(row?.AdditionalActions) && row.AdditionalActions.length > 0
         ? [...row.AdditionalActions]
         : (Array.isArray(fieldDefaultActions) ? [...fieldDefaultActions] : []),
+      inlineConfirm: rule.inlineConfirm === true,
       icMode,
       okLabel: rule.confirmTexts?.okText || "",
       noLabel: rule.confirmTexts?.cancelText || "Отмена",

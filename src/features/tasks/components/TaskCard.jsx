@@ -614,6 +614,41 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     setCustomActionInput("");
     setAdditionalError("");
   }, [task.Id, initialAction, isCompleted]);
+  // ⭐ Единый вход для ЛЮБОЙ кнопки результата (и «Найдена», и дополнительных значений
+  // из списка результатов): решение принимает ТОЛЬКО Behaviour, ровно как в таблице.
+  //   • p (поля) / aa (доп. действия) → инлайн-форма в карточке;
+  //   • ic без полей и aa → две кнопки ok/no (тоже инлайн, без диалога);
+  //   • loc → диалог местоположения (его ведёт TasksView);
+  //   • правило без полей/aa/ic → отдаём в TasksView (он завершит, подтвердит или спросит).
+  // Возвращает true, если дальше действовать не нужно (форма/диалог уже показаны).
+  const beginResultChoice = React.useCallback((choice) => {
+    const rule = getBehaviourRuleForChoice(choice);
+    const fields = rule?.promptFields || [];
+    const showAA = rule?.showAdditionalActions === true;
+    const ic = rule?.inlineConfirm === true;
+    const needsForm = fields.length > 0 || showAA;
+    if (rule?.requiresLocation === true) {
+      dbgClick(choice, "location-dialog", rule);
+      onResultClick(task, choice);
+      return true;
+    }
+    if (!needsForm && !ic) return false;
+    dbgClick(choice, needsForm ? "form" : "inline-buttons", rule);
+    if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
+      setAdditionalActions([...task.AdditionalActions]);
+    } else {
+      setAdditionalActions([...(getDefaultsForThisTask() || [])]);
+    }
+    setPromptFieldValues({});
+    setAdditionalError("");
+    setCustomActionInput("");
+    setInlineConfirmPending(null);
+    // ic → подписи кнопок формы берутся из ok/no (Behaviour), поля при этом рендерятся
+    setInlineConfirmOnly(ic);
+    setInlineChoice(choice);
+    return true;
+  }, [getBehaviourRuleForChoice, getDefaultsForThisTask, onResultClick, task, dbgClick]);
+
   React.useEffect(() => {
     if (showCelebrate) {
       const t = setTimeout(() => { setShowCelebrate(false); setCelebrateConfig(null); }, 1600);
@@ -1194,12 +1229,23 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // TaskBehaviour: confirm-result is identified by Behaviour.c=true.
               // A direct result (including p=[] and c=false) is the found/completed choice.
               const foundChoice = (() => {
-                return choicesForButtons.find((ch) => {
-                  const rule = getBehaviourRuleForChoice(ch);
-                  if (!rule || rule.source === "empty") return false;
-                  if (rule.requiresLocation === true) return false; // ведёт TasksView (диалог местоположения)
-                  return rule.requiresConfirmed !== true;
-                }) || null;
+                // «Главная» кнопка — только результат, который завершает задачу БЕЗ формы:
+                // без prompt-полей, без доп. действий, без ic и без c/loc. Всё остальное
+                // (форма/подтверждение) обязано идти через тот же поток, что и «Найдена»
+                // (beginResultChoice): иначе порядок значений поля решал бы, где окажется
+                // кнопка, и результат с полями мог завершиться «молча».
+                const candidates = choicesForButtons
+                  .map((ch, idx) => ({ ch, idx, rule: getBehaviourRuleForChoice(ch) }))
+                  .filter(({ rule }) => !!rule && rule.source !== "empty"
+                    && rule.requiresLocation !== true
+                    && rule.requiresConfirmed !== true
+                    && (rule.promptFields?.length || 0) === 0
+                    && rule.showAdditionalActions !== true
+                    && rule.inlineConfirm !== true);
+                // приоритет: точное правило → «*» → «_default» (дальше — порядок поля)
+                const rank = (rule) => (rule.source === "exact" ? 0 : rule.source === "wildcard" ? 1 : 2);
+                candidates.sort((a, b) => (rank(a.rule) - rank(b.rule)) || (a.idx - b.idx));
+                return candidates.length > 0 ? candidates[0].ch : null;
               })();
               const notFoundChoice = (() => {
                 return choicesForButtons.find((ch) => {
@@ -1529,34 +1575,16 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         disabled={isUpdating}
                         onClick={() => {
                           const rule = getBehaviourRuleForChoice(foundChoice);
-                          // Для p=[] и c=false результат отправляется сразу; celebrate запускается
-                          // в runSubmit без промежуточного prompt-экрана.
-                          // Правил нет или они «прямые» (без prompt/AA/confirm) — завершаем сразу.
-                          // Никаких строковых спец-случаев: поток задаётся только Behaviour.
-                          const icRule = rule?.inlineConfirm === true;
-                          if (!rule || (rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true && !icRule)) {
-                            dbgClick(foundChoice, "direct-submit", rule);
-                            runSubmit(foundChoice, "found", () => {
-                              // доп. действий в правиле нет → поля AdditionalActions* не отправляем
-                              if (onComplete) onComplete(task, foundChoice, {}, null, []);
-                              else onResultClick(task, foundChoice);
-                            });
-                            return;
-                          }
-                          if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
-                            setAdditionalActions([...task.AdditionalActions]);
-                          } else {
-                            const def = getDefaultsForThisTask() || [];
-                            setAdditionalActions([...def]);
-                          }
-                          setPromptFieldValues({});
-                          setAdditionalError("");
-                          setCustomActionInput("");
-                          setInlineConfirmPending(null);
-                          // ⭐ Behaviour.ic: две кнопки в карточке, без диалога и без полей
-                          dbgClick(foundChoice, icRule ? "inline-buttons" : "form", rule);
-                          setInlineConfirmOnly(icRule);
-                          setInlineChoice(foundChoice);
+                          // Поля/доп. действия/ic → форма (или ok-no) прямо в карточке.
+                          if (beginResultChoice(foundChoice)) return;
+                          // Правило «прямое» (или его нет): без prompt-экрана, сразу submit —
+                          // celebrate при этом запускается в runSubmit по Behaviour.anim.
+                          dbgClick(foundChoice, "direct-submit", rule);
+                          runSubmit(foundChoice, "found", () => {
+                            // доп. действий в правиле нет → поля AdditionalActions* не отправляем
+                            if (onComplete) onComplete(task, foundChoice, {}, null, []);
+                            else onResultClick(task, foundChoice);
+                          });
                         }}
                         sx={{
                           borderRadius: "12px",
@@ -1591,14 +1619,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         disabled={isUpdating}
                         onClick={() => {
                           const rule = getBehaviourRuleForChoice(choice);
-                          const needsForm = (rule?.promptFields?.length || 0) > 0 || rule?.showAdditionalActions === true;
-                          if (rule?.inlineConfirm === true && !needsForm) {
-                            dbgClick(choice, "inline-buttons", rule);
-                            setInlineChoice(choice);
-                            setInlineConfirmPending(null);
-                            setInlineConfirmOnly(true);
-                            return;
-                          }
+                          // ⭐ Как и «Найдена»: если правило требует полей/доп. действий —
+                          // показываем ТУ ЖЕ форму в карточке, а не завершаем задачу «молча».
+                          if (beginResultChoice(choice)) return;
                           dbgClick(choice, "direct-submit", rule);
                           onResultClick(task, choice);
                         }}

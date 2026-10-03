@@ -24,7 +24,7 @@ const DOB_LIST = "/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')";
 const MAIN_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems", "ResultSearchTHU", "Location1", "OffDepKey", "AdditionalsActionsRequired", "AdditionalActions"];
 const DOB_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems"];
 
-const state = vi.hoisted(() => ({ requests: [], behaviourOverride: null }));
+const state = vi.hoisted(() => ({ requests: [], behaviourOverride: null, thuChoices: null }));
 
 const MAIN_TASK = {
   Id: 10,
@@ -78,6 +78,14 @@ const RESULT_FIELD_OOB = {
   Choices: { results: ["Исправлено", "Не исправлено"] },
 };
 const RESULT_FIELDS = [RESULT_FIELD_THU, RESULT_FIELD_OOB];
+
+// Значения поля ТНУ можно переставить/дополнить: поведение не должно зависеть
+// от порядка значений в поле (иначе кнопка «Найдена» могла уехать в «дополнительные»).
+const resultFieldsNow = () => RESULT_FIELDS.map((f) => (
+  f.InternalName === "ResultSearchTHU" && state.thuChoices
+    ? { ...f, Choices: { results: state.thuChoices } }
+    : f
+));
 
 // Типы контента задач: ТНУ-задача → поле ResultSearchTHU, задача ООБ → ResultOOB.
 const CT_THU = MAIN_TASK.ContentTypeId;
@@ -203,11 +211,11 @@ vi.mock("../../../api", () => {
     if (u.includes("/web/sitegroups/getbyid(33)")) return { data: { d: { Id: 33, Title: "ООБ" } } };
     if (d.includes(`${MAIN_LIST}/fields`)) {
       // $filter=TypeDisplayName — выборка полей результата
-      if (/TypeDisplayName eq/.test(d)) return { data: { d: { results: RESULT_FIELDS } } };
+      if (/TypeDisplayName eq/.test(d)) return { data: { d: { results: resultFieldsNow() } } };
       // $filter=InternalName eq 'X' — конкретное поле
       const byName = d.match(/InternalName eq '([^']+)'/);
       if (byName) {
-        const all = [...fieldDefs(MAIN_FIELDS), ...RESULT_FIELDS];
+        const all = [...fieldDefs(MAIN_FIELDS), ...resultFieldsNow()];
         return { data: { d: { results: all.filter((f) => f.InternalName === byName[1]) } } };
       }
       return { data: { d: { results: fieldDefs(MAIN_FIELDS) } } };
@@ -959,6 +967,100 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(dialog.textContent).toContain("Где найдена ЕО?");
     expect(dialog.textContent).toContain("Местоположение (Location1)");
     expect(dialog.textContent).toMatch(/Дополнительные действия/);
+  }, 40000);
+
+  it("карточка: конфиг ic + p (Location1) + anim — форма В КАРТОЧКЕ, запись только после «Сохранить», без AA-полей", async () => {
+    // Точный конфиг пользователя. Раньше при таком наборе клик по «Найдена» завершал
+    // задачу сразу (кнопка попадала в «дополнительные» значения и уходила в TasksView).
+    state.behaviourOverride = JSON.stringify({
+      _default: { rf: [{ f: "THU", ti: "ЕО" }, { f: "Recipient/SCNumberText", ti: "Получатель" }] },
+      "Найдена": {
+        ic: true,
+        ok: "Сохранить",
+        no: "Отмена",
+        p: [{ f: "Location1", ti: "Местоположение", t: "multiline" }],
+        anim: { type: "celebrate", title: "Паллет найден", text: "Отличная работа!", emoji: "\uD83C\uDF89" },
+      },
+      "Не найдена": {
+        ic: true,
+        ok: "Подтвердить «Не найдена»",
+        no: "Отмена",
+        anim: { type: "sherlock", title: "Создаю заявку на ООБ", text: "Отправляю запрос в ООБ...", emoji: "\uD83D\uDD75" },
+      },
+    });
+
+    const host = renderTasksView();
+    await settle(3000);
+
+    const card = cardByText(host, /Поиск ЕО \(ТНУ\)/);
+    expect(card).toBeTruthy();
+    expect([...card.querySelectorAll("button")].map((b) => b.textContent.trim()).filter(Boolean).sort())
+      .toEqual(["Найдена", "Не найдена"]);
+
+    const dialogsBefore = new Set(document.querySelectorAll('.MuiDialog-root, [role="dialog"]'));
+    await act(async () => { mouseClick(cardButton(card, "Найдена")); await wait200(); });
+    await settle(300);
+
+    // ни записи, ни диалогов — форма с полем прямо в карточке
+    expect(state.requests.some((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU)).toBe(false);
+    expect([...document.querySelectorAll('.MuiDialog-root, [role="dialog"]')].filter((d) => !dialogsBefore.has(d))).toHaveLength(0);
+    const cardWithForm = cardByText(host, /Поиск ЕО \(ТНУ\)/);
+    const area = [...cardWithForm.querySelectorAll("textarea")]
+      .find((el) => /Местоположение/.test(el.getAttribute("placeholder") || ""));
+    expect(area).toBeTruthy();
+    const formButtons = [...cardWithForm.querySelectorAll("button")].map((b) => b.textContent.trim());
+    // подпись кнопки отправки — из Behaviour.ok (как в карточке при ic)
+    expect(formButtons).toContain("Сохранить");
+    expect(formButtons).toContain("Отмена");
+
+    // заполняем и сохраняем
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(area, "Зона отгрузки, ряд 5");
+      area.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await wait200();
+    });
+    await act(async () => {
+      const save = [...cardWithForm.querySelectorAll("button")].find((b) => /Сохранить/.test(b.textContent || ""));
+      mouseClick(save);
+      await wait200();
+    });
+    await settle(1500);
+
+    const write = state.requests.filter((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Найдена").pop();
+    expect(write).toBeTruthy();
+    expect(String(write.body.Location1 || "")).toContain("Зона отгрузки");
+    expect(write.body.Status).toBe("Завершена");
+    // aa в правиле нет → legacy-поля доп. действий не отправляются (их может не быть в типе контента)
+    expect("AdditionalsActionsRequired" in write.body).toBe(false);
+    expect("AdditionalActions" in write.body).toBe(false);
+  }, 40000);
+
+  it("карточка: порядок значений поля не решает, будет ли форма (обратный порядок choices)", async () => {
+    // «Не найдена» стоит в поле ПЕРВОЙ: раньше она занимала «главную» кнопку, а «Найдена»
+    // уходила в дополнительные значения и завершала задачу без формы.
+    state.thuChoices = ["Не найдена", "Найдена"];
+    state.behaviourOverride = JSON.stringify({
+      _default: { rf: [{ f: "THU", ti: "ЕО" }] },
+      "Найдена": { p: [{ f: "Location1", ti: "Местоположение", t: "multiline" }], anim: "none" },
+      "Не найдена": { anim: "none" },
+    });
+
+    const host = renderTasksView();
+    await settle(3000);
+
+    const card = cardByText(host, /Поиск ЕО \(ТНУ\)/);
+    expect(card).toBeTruthy();
+    await act(async () => { mouseClick(cardButton(card, "Найдена")); await wait200(); });
+    await settle(300);
+
+    // результат с полем не завершается «молча» и не уходит в диалог: форма — в карточке
+    expect(state.requests.some((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU)).toBe(false);
+    const cardWithForm = cardByText(host, /Поиск ЕО \(ТНУ\)/);
+    expect([...cardWithForm.querySelectorAll("textarea")]
+      .some((el) => /Местоположение/.test(el.getAttribute("placeholder") || ""))).toBe(true);
+    // подпись — «Сохранить — <результат>» (у правила нет ic, значит нет и ok/no)
+    expect([...cardWithForm.querySelectorAll("button")].map((b) => b.textContent.trim()).some((t) => /^Сохранить/.test(t))).toBe(true);
   }, 40000);
 
 });

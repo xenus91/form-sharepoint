@@ -28,6 +28,7 @@ export default function ResultInlineEditor({
   aaChoices = [],
   aaAllowFillIn = true,
   aaInitial = [],
+  inlineConfirm = false,
   icMode = false,
   okLabel = "",
   noLabel = "Отмена",
@@ -63,7 +64,9 @@ export default function ResultInlineEditor({
     onSubmit?.({ ...values }, req, showAdditionalActions ? [...acts] : []);
   };
 
-  const submitLabel = icMode ? (okLabel || "Подтвердить") : `Сохранить — ${result}`;
+  // Подписи — как в карточке: при Behaviour.ic из ok/no, иначе «Сохранить — <результат>» / «Отмена»
+  const submitLabel = inlineConfirm ? (okLabel || "Подтвердить") : `Сохранить — ${result}`;
+  const cancelLabel = inlineConfirm ? (noLabel || "Отмена") : "Отмена";
 
   return (
     <Box sx={{ px: 0.5, pb: 0.5 }} data-testid="tasks-row-result-editor">
@@ -154,7 +157,7 @@ export default function ResultInlineEditor({
               ...(cancelSx || {}),
             }}
           >
-            {noLabel}
+            {cancelLabel}
           </Button>
         </Box>
       </Stack>
