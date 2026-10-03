@@ -476,8 +476,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
                   '&.Mui-disabled': { backgroundImage: 'none', color: 'rgba(0,0,0,.26)' },
                 }}
               >
-                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Просмотреть связанную заявку</Box>
-                <Box component="span" sx={{ display: { xs: 'inline', md: 'none' } }}>Связанная заявка</Box>
+                {/* на телефонах — только иконка (в шапке уже 3 кнопки) */}
+                <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>Просмотреть связанную заявку</Box>
               </Button>
             </span>
           </Tooltip>
