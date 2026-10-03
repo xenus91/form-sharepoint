@@ -156,6 +156,19 @@ async function mountCard(behaviour, spies = {}) {
   return { host, buttons, findButton, inputs, click, dialogs };
 }
 
+// «ic» = подтверждение двумя кнопками: оно включает инлайн-режим, но САМО по себе
+// полей не показывает — поля берутся из p, доп. действия из aa.
+const BEHAVIOUR_IC_ONLY = behaviourOf({ ic: true, ok: "Подтвердить «Найдена»", no: "Отмена", anim: "none" });
+const BEHAVIOUR_IC_P_AA = behaviourOf({
+  ic: true,
+  ok: "Подтвердить «Найдена»",
+  no: "Отмена",
+  p: [{ f: "Location1", ti: "Местоположение", t: "multiline" }],
+  aa: true,
+  aar: false,
+  anim: "none",
+});
+
 describe("TaskCard — результат инлайном (p + aa, без loc)", () => {
   it("клик по «Найдена» открывает форму В КАРТОЧКЕ: поле Location1 + доп. действия, без диалогов", async () => {
     const { host, buttons, inputs, click, dialogs } = await mountCard(BEHAVIOUR_INLINE);
@@ -211,6 +224,26 @@ describe("TaskCard — результат инлайном (p + aa, без loc)"
     expect(buttons()).toContain("Сохранить — Найдена");
     await click(findButton(/^Отмена$/));
     expect(buttons().sort()).toEqual(["Найдена", "Не найдена"]);
+  });
+
+  it("ic БЕЗ p: только две кнопки, полей ввода нет", async () => {
+    const { buttons, inputs, host, click, dialogs } = await mountCard(BEHAVIOUR_IC_ONLY);
+    await click([...host.querySelectorAll("button")].find((b) => b.textContent.trim() === "Найдена"));
+    expect(dialogs()).toBe(0);
+    expect(inputs()).toHaveLength(0); // ← ключевой момент: ic сам по себе полей не даёт
+    expect(buttons()).toEqual(["Подтвердить «Найдена»", "Отмена"]);
+  });
+
+  it("ic + p + aa: инлайн-форма с полем и доп. действиями, кнопка подписана из Behaviour.ok", async () => {
+    const { host, buttons, inputs, click, dialogs } = await mountCard(BEHAVIOUR_IC_P_AA);
+    await click([...host.querySelectorAll("button")].find((b) => b.textContent.trim() === "Найдена"));
+    expect(dialogs()).toBe(0);
+    expect(inputs().some((i) => (i.getAttribute("placeholder") || "").includes("Местоположение"))).toBe(true);
+    expect(host.textContent).toMatch(/Дополнительные действия/);
+    // ic задаёт подпись кнопки отправки (ok), стили — promptSubmit/promptCancel
+    expect(buttons()).toContain("Подтвердить «Найдена»");
+    expect(buttons()).toContain("Отмена");
+    expect(buttons()).not.toContain("Сохранить — Найдена");
   });
 
   it("контраст: с ключом loc форма в карточке НЕ открывается — результат уходит в диалог TasksView", async () => {

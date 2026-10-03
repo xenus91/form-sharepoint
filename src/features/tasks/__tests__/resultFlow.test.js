@@ -59,6 +59,17 @@ describe("resultFlow / Behaviour.ic", () => {
     expect(resolveResultFlow("Не найдена", r)).toEqual({ action: "location", reason: "behaviour.loc" });
   });
 
+  // ⚠️ Известное расхождение «карточка vs таблица»: resolveResultFlow смотрит только loc/ic/c,
+  // поэтому ic-результат с полями (p) и доп. действиями (aa) в попапе таблицы завершается сразу —
+  // поля собирает только карточка. Если таблица должна вести себя иначе, это решение по продукту,
+  // а не «попутная» правка (см. docs/decisions/dob-task-sources.md).
+  it("ic + p + aa: поток для таблицы всё равно complete — поля собирает только карточка", () => {
+    const r = rule('{"Найдена": { "ic": true, "p": [{ "f": "Location1", "ti": "Местоположение" }], "aa": true }}', "Найдена");
+    expect(r.promptFields).toHaveLength(1);
+    expect(r.showAdditionalActions).toBe(true);
+    expect(resolveResultFlow("Найдена", r)).toEqual({ action: "complete", reason: "behaviour.ic" });
+  });
+
   it("без Behaviour — complete, без диалогов", () => {
     expect(resolveResultFlow("Не найдена", rule("{}", "Не найдена"))).toEqual({
       action: "complete",
