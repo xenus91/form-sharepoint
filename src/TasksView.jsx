@@ -38,6 +38,11 @@ import { useHashPolling, useTasksFocusPolling } from "./features/tasks/hooks/use
 import TasksHeader from "./features/tasks/components/TasksHeader";
 import TasksTabs from "./features/tasks/components/TasksTabs";
 import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle";
+import TasksGrid from "./features/tasks/components/TasksGrid";
+import ViewModeToggle from "./features/tasks/components/ViewModeToggle";
+import { useViewMode } from "./features/nav/viewMode";
+import { useDepartment } from "./features/nav/useDepartment";
+import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
@@ -170,6 +175,19 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     scNumberField,
     resultFieldInternalNames,
     enabled: tasksQueryEnabled,
+  });
+
+  // ===== multi-source табличный режим (см. plan.md, этапы 7, 10) =====
+  const [viewModeView, setViewModeView] = useViewMode();
+  const dept = useDepartment(propUserProfile);
+  const tableData = useTasksTableData({
+    userProfile: propUserProfile,
+    distribution,
+    taskFieldNames,
+    recipientField,
+    scNumberField,
+    resultFieldInternalNames,
+    enabled: viewModeView === "table" && !!currentUserId && !fieldsLoading,
   });
 
   // enrich теперь внутри useTasksQuery (батч), здесь только expandedGroups для новых ТК
@@ -506,7 +524,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         <TasksHeader isHashMode={isHashMode} elementIdParam={elementIdParam} onClearElementHash={onClearElementHash} onRefresh={loadTasks} loading={loading} taskConfiguration={taskConfiguration} />
         {!isHashMode && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0 }}>
-            <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedTotal} completedCount={completedTotal} hashMode={isHashMode} isTabPending={isTabPending} />
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
+              <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedTotal} completedCount={completedTotal} hashMode={isHashMode} isTabPending={isTabPending} />
+              <ViewModeToggle value={viewModeView} onChange={setViewModeView} />
+            </Box>
             <TasksGroupingToggle groupingEnabled={groupingEnabled} onToggle={setGroupingEnabled} countGroups={groupedTasks.length} isHashMode={isHashMode} tab={tab} />
           </Box>
         )}
@@ -537,6 +558,44 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             currentUserTitle={currentUserTitle}
             onClearElementHash={onClearElementHash}
           />
+        </Box>
+      ) : viewModeView === "table" ? (
+        <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1, py: 0.5, borderBottom: "1px solid rgba(23,28,143,0.08)" }}>
+            <Typography variant="caption" sx={{ color: "text.secondary", flex: 1 }}>
+              Таблица задач · {tableData.rows.length} шт.
+              {tableData.sources.length > 1 && (
+                <Box component="span" sx={{ ml: 1 }}>
+                  ({tableData.sources.map((s) => s.label).join(" + ")})
+                </Box>
+              )}
+            </Typography>
+            {tableData.perSourceStats && Object.values(tableData.perSourceStats).some((s) => s?.error) && (
+              <Typography variant="caption" sx={{ color: "warning.main" }}>
+                часть источников недоступна
+              </Typography>
+            )}
+            {dept?.status === "error" && (
+              <Typography variant="caption" sx={{ color: "warning.main" }}>
+                данные подразделения недоступны
+              </Typography>
+            )}
+          </Box>
+          <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+            <TasksGrid
+              rows={tableData.rows}
+              fields={[]}
+              resultFieldInternalNames={resultFieldInternalNames}
+              loading={tableData.isLoading}
+              error={tableData.error?.message || null}
+              onRowClick={(compositeId) => {
+                if (!compositeId) return;
+                const parsed = String(compositeId).split(":");
+                const id = parsed.slice(1).join(":");
+                try { window.location.hash = `#tasks/${id}`; } catch (_e) { void _e; }
+              }}
+            />
+          </Box>
         </Box>
       ) : (
       <>

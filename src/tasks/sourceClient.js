@@ -54,13 +54,24 @@ export function makeSourceClient(source) {
   if (source.clientKind === "dob") {
     // dobAxios НЕ имеет baseURL (см. src/features/dob/api/dobClient.js),
     // поэтому apiBase берётся из dobApiBase() и URL префиксуется в fetchTasksForSource.
+    const dobClientApiBase = dobApiBase();
     return {
       name: source.id,
-      apiBase: dobApiBase(),
+      apiBase: dobClientApiBase,
       listApi: async () => {
         if (source.listApi) return source.listApi;
         if (source.resolveListApi) return await source.resolveListApi();
-        throw new Error(`[sourceClient:${source.id}] no listApi / resolveListApi`);
+        // Fallback: резолв по Title (см. sources.js — пока GUID неизвестен)
+        try {
+          const { resolveSourceListApi } = await import("./sources");
+          const api = await resolveSourceListApi(source, {
+            apiBase: dobClientApiBase,
+            get: dobAxios.get.bind(dobAxios),
+          });
+          return api;
+        } catch (e) {
+          throw new Error(`[sourceClient:${source.id}] no listApi / resolveListApi: ${e?.message || e}`);
+        }
       },
       get: (url, opts) => dobAxios.get(url, opts),
       post: (url, body, opts) => dobAxios.post(url, body, opts),
