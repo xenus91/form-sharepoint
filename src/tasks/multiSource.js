@@ -192,11 +192,13 @@ export async function fetchTasksMultiSource(opts) {
   }
 
   if (all.length === 0 && errors.length === sources.length) {
-    const err = new Error(`All ${sources.length} task sources failed`);
-    err.code = "MultiSourceError";
-    err.errors = errors;
-    err.perSourceStats = perSourceStats;
-    throw err;
+    // Все источники упали — лог в консоль для отладки, но НЕ throw,
+    // чтобы UI мог показать частичные данные (errors) и пустую таблицу,
+    // а не "All N task sources failed" поверх.
+    if (typeof window !== "undefined" && window.localStorage?.getItem("dbg_tasks") === "1") {
+      // eslint-disable-next-line no-console
+      console.warn(`[multiSource] all ${sources.length} sources failed`, errors.map((e) => ({sourceId: e.sourceId, status: e.status, msg: e.message?.slice(0, 200)})));
+    }
   }
 
   return {
