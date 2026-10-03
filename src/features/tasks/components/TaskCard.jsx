@@ -1309,7 +1309,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                               if (!validatePromptFields()) return;
                               if (!validateAdditional()) return;
                               const acts = showAAInline ? additionalActions : [];
-                              const req = showAAInline ? additionalRequired : "Нет";
+                              // null = доп. действия в этом результате не участвуют (нет Behaviour.aa):
+                              // completeTask не отправляет legacy-поля AdditionalActions* вообще.
+                              const req = showAAInline ? additionalRequired : null;
                               // ⭐ v8+: requiresConfirmed строго из Behaviour.c. Никаких legacy-фолбэков.
                               if (behaviourRuleForFound?.requiresConfirmed === true) {
                                 setInlineConfirmPending({ req, acts });
@@ -1368,7 +1370,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           if (!validatePromptFields()) return;
                           if (!validateAdditional()) return;
                           const acts = showAAInline ? additionalActions : [];
-                          const req = showAAInline ? (additionalActions.length > 0 ? "Да" : "Нет") : "Нет";
+                          // null = без Behaviour.aa legacy-поля доп. действий не отправляются вовсе
+                          const req = showAAInline ? (additionalActions.length > 0 ? "Да" : "Нет") : null;
                           // ⭐ v8+: requiresConfirmed строго из Behaviour.c.
                           if (behaviourRuleForFound?.requiresConfirmed === true) {
                             setInlineConfirmPending({ req, acts });
@@ -1459,7 +1462,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         const p = inlineConfirmPending;
                         setInlineConfirmPending(null);
                         runSubmit(inlineChoice, "inline", () => {
-                          if (onComplete) onComplete(t, r, promptFieldValues, p?.req || "Нет", p?.acts || []);
+                          if (onComplete) onComplete(t, r, promptFieldValues, p?.req !== undefined ? p.req : null, p?.acts || []);
                           else onResultClick(t, r);
                         });
                       }}
@@ -1534,7 +1537,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           if (!rule || (rule.promptFields.length === 0 && rule.requiresConfirmed !== true && rule.showAdditionalActions !== true && !icRule)) {
                             dbgClick(foundChoice, "direct-submit", rule);
                             runSubmit(foundChoice, "found", () => {
-                              if (onComplete) onComplete(task, foundChoice, {}, "Нет", []);
+                              // доп. действий в правиле нет → поля AdditionalActions* не отправляем
+                              if (onComplete) onComplete(task, foundChoice, {}, null, []);
                               else onResultClick(task, foundChoice);
                             });
                             return;

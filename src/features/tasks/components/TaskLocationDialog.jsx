@@ -21,6 +21,9 @@ export default function TaskLocationDialog({
   setPendingCustomAction,
   updatingId,
   taskConfiguration,
+  // Behaviour.aa для текущего результата: true/false — решает правило,
+  // null/undefined — нет правила (legacy-поведение по определениям результатов).
+  showAdditionalActions = null,
   onSubmit,
 }) {
   const handleSubmit = (skip) => onSubmit?.(skip);
@@ -46,7 +49,13 @@ export default function TaskLocationDialog({
         {(() => {
           const ctForDialog = String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim();
           const defForDialog = taskConfiguration?.data?.taskResultDefinitions ? resolveTaskResultDefinition(pendingResult, ctForDialog, taskConfiguration.data.taskResultDefinitions) : null;
-          const showForDialog = defForDialog ? !!defForDialog.showAdditionalActions : true;
+          // ⭐ v8+: если правило Behaviour есть, доп. действия включаются ТОЛЬКО его aa: true
+          // (как в карточке). Legacy-определения результатов — лишь когда правила нет вовсе.
+          const showForDialog = showAdditionalActions === true
+            ? true
+            : showAdditionalActions === false
+              ? false
+              : (defForDialog ? !!defForDialog.showAdditionalActions : true);
           if (!showForDialog) return null;
           return (
             <Box sx={{ width: "100%", mt: 2 }}>

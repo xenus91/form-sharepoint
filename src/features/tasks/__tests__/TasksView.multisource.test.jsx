@@ -24,7 +24,7 @@ const DOB_LIST = "/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')";
 const MAIN_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems", "ResultSearchTHU", "Location1", "OffDepKey", "AdditionalsActionsRequired", "AdditionalActions"];
 const DOB_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems"];
 
-const state = vi.hoisted(() => ({ requests: [] }));
+const state = vi.hoisted(() => ({ requests: [], behaviourOverride: null }));
 
 const MAIN_TASK = {
   Id: 10,
@@ -215,7 +215,12 @@ vi.mock("../../../api", () => {
     // Типы контента списка — по FieldLinks определяем поле результата для задачи
     if (d.includes(`${MAIN_LIST}/contenttypes`)) return { data: { d: { results: CT_META } } };
     // Настройки поведения задач (TaskBehaviour) — как в тенанте, одним списком
-    if (u.includes("getbytitle('TaskBehaviour')")) return { data: { d: { results: [TASK_BEHAVIOUR_RECORD, TASK_BEHAVIOUR_SEARCH_RECORD] } } };
+    if (u.includes("getbytitle('TaskBehaviour')")) {
+      const searchRecord = state.behaviourOverride
+        ? { ...TASK_BEHAVIOUR_SEARCH_RECORD, Behaviour: state.behaviourOverride }
+        : TASK_BEHAVIOUR_SEARCH_RECORD;
+      return { data: { d: { results: [TASK_BEHAVIOUR_RECORD, searchRecord] } } };
+    }
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
@@ -234,6 +239,23 @@ vi.mock("../../../api", () => {
       body,
       merge: /merge/i.test(String(config?.headers?.["X-HTTP-Method"] || "")),
     });
+    // Как настоящий SharePoint: в Boolean-колонку строку не принимает.
+    const reqVal = body?.AdditionalsActionsRequired ?? body?.AdditionalActionsRequired;
+    if (reqVal !== undefined && typeof reqVal !== "boolean") {
+      const err = new Error("Request failed with status code 400");
+      err.response = {
+        status: 400,
+        data: {
+          error: {
+            message: {
+              value:
+                'Не удается преобразовать значение-примитив в ожидаемый тип "Edm.Boolean". Дополнительные сведения см. во внутреннем исключении.',
+            },
+          },
+        },
+      };
+      throw err;
+    }
     return { data: { d: {} } };
   };
   return {
@@ -284,6 +306,9 @@ vi.mock("../../dob/api/dobClient", () => {
 
 const { default: TasksView } = await import("../../../TasksView");
 const NotificationsProvider = (await import("../../../NotificationsProvider")).default;
+// Кэш TaskBehaviour модульный (30 мин) и переживает тесты внутри файла: без сброса
+// тест с другим Behaviour получил бы запись, закэшированную предыдущими тестами.
+const { clearTaskBehaviourCache } = await import("../../../services/taskBehaviour");
 
 class RO {
   observe() {}
@@ -348,8 +373,10 @@ async function clickByText(host, re) {
 describe("TasksView — multi-source (#tasks)", () => {
   beforeEach(() => {
     state.requests = [];
+    state.behaviourOverride = null;
     localStorage.clear();
     sessionStorage.clear();
+    clearTaskBehaviourCache();
   });
 
   it("карточный режим: заявка из dob-списка отрисована рядом с main-задачей", async () => {
@@ -655,10 +682,10 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(window.location.hash).toBe("#tasks/10");
   }, 30000);
 
-  it("результат уходит в общий поток TasksView: диалог подтверждения, без «слепой» записи", async () => {
-    // Поведение поповера = поведение карточки (документация TaskBehaviour §4):
-    // loc → диалог местоположения, c → диалог подтверждения, иначе — запись.
-    // Таблица ничего не додумывает и никуда не уводит пользователя.
+  it("результат с полем и подтверждением (p + c) открывает карточку, а не пишется «молча»", async () => {
+    // Поля карточки (кроме одиночного Location1) и обязательное подтверждение диалог
+    // местоположения воспроизвести не может — результат не пишем, а открываем карточку
+    // тем же роутом, что и «Изменить»: пользователь заполнит поля и подтвердит там.
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -686,12 +713,10 @@ describe("TasksView — multi-source (#tasks)", () => {
     });
     await settle(600);
 
-    // Никаких переходов и «слепых» записей — сначала диалог подтверждения
-    expect(window.location.hash).toBe(hashBefore);
+    // Никакой «слепой» записи: открылась карточка задачи (роут как у «Изменить»)
+    expect(window.location.hash).not.toBe(hashBefore);
+    expect(window.location.hash).toBe("#tasks/11");
     expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultOOB === "Не исправлено")).toBe(false);
-    const dialogText = [...document.body.querySelectorAll(".MuiDialog-root, [role=\"dialog\"]")]
-      .map((d) => d.textContent || "").join(" ");
-    expect(dialogText).toContain("Вы уверены?");
   }, 40000);
 
   it("для main-задачи «в работе» попап даёт кнопки результатов — как карточка", async () => {
@@ -773,6 +798,13 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(write).toBeTruthy();
     expect(write.url).toContain("items(12)");
     expect(String(write.body.Location1 || "")).toContain("Зона отгрузки");
+    // aa: true → поле обязательности уходит. В этом списке колонка Boolean, а метаданные
+    // приходят как «Text», поэтому первая попытка со строкой падает (400 Edm.Boolean),
+    // а авто-повтор отправляет boolean — успешная запись последняя.
+    const attempts = state.requests.filter((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Найдена");
+    expect(attempts.length).toBeGreaterThanOrEqual(1);
+    expect(typeof attempts[attempts.length - 1].body.AdditionalsActionsRequired).toBe("boolean");
+    void write;
   }, 40000);
 
   it("Behaviour «Не найдена» (ic): подтверждение двумя кнопками В КАРТОЧКЕ, без диалога и записи до подтверждения", async () => {
@@ -803,6 +835,81 @@ describe("TasksView — multi-source (#tasks)", () => {
     const write = state.requests.find((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Не найдена");
     expect(write).toBeTruthy();
     expect(write.url).toContain("items(12)");
+  }, 40000);
+
+  it("таблица + конфиг инлайном (p:[Location1], без aa): местоположение запрашивается, БД не пишется «молча»", async () => {
+    // 1:1 настройка пользователя: у результата «Найдена» нет loc — только prompt-поле
+    // Location1 и подпись кнопки из ok. Раньше таблица завершала задачу сразу (и падала
+    // на Boolean-колонке); теперь должен открыться диалог «Где найдена ЕО?».
+    state.behaviourOverride = JSON.stringify({
+      _default: { rf: [{ f: "THU", ti: "ЕО" }, { f: "Recipient/SCNumberText", ti: "Получатель" }] },
+      "Найдена": {
+        ic: true,
+        ok: "Сохранить",
+        no: "Отмена",
+        p: [{ f: "Location1", ti: "Местоположение", t: "multiline" }],
+        anim: "none",
+      },
+      "Не найдена": { ic: true, ok: "Подтвердить «Не найдена»", no: "Отмена", anim: "none" },
+    });
+
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+      .find((r) => /Поиск ЕО/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 220, clientY: 300 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    // jsdom оставляет попапы прошлых тестов — берём видимый и именно по нашей строке (#12)
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')]
+      .filter((el) => el.style.opacity !== "0" && /#12\b/.test(el.textContent || "")).pop();
+    expect(popup).toBeTruthy();
+    const found = [...popup.querySelectorAll("button")].find((b) => b.textContent.trim() === "Найдена");
+    expect(found).toBeTruthy();
+
+    // jsdom не размонтирует закрытые модалки, поэтому ищем ИМЕННО новый диалог
+    const locationDialogs = () => [...document.querySelectorAll('.MuiDialog-root, [role="dialog"]')]
+      .filter((d) => /Где найдена ЕО/.test(d.textContent || ""));
+    await act(async () => { mouseClick(found); await wait200(); });
+    await settle(600);
+
+    // Никакой «молчаливой» записи: пока полей нет — запросов на запись быть не должно
+    expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultSearchTHU === "Найдена")).toBe(false);
+
+    // Диалог ищем по задаче #12: jsdom не размонтирует модалки прошлых тестов
+    const dialog = locationDialogs().filter((d) => /задачи #12/.test(d.textContent || "")).pop();
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain("Местоположение (Location1)");
+    // aa у результата нет → блока доп. действий в диалоге быть не должно
+    expect(dialog.textContent).not.toMatch(/Дополнительные действия/);
+
+    const area = dialog.querySelector("textarea");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(area, "Зона отгрузки, стеллаж 3");
+      area.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await wait200();
+    });
+    const send = [...dialog.querySelectorAll("button")].find((b) => /Отправить/.test(b.textContent || ""));
+    await act(async () => { mouseClick(send); await wait200(); });
+    await settle(1200);
+
+    // MERGE: результат + Location1, и НИКАКИХ legacy-полей доп. действий (в Behaviour нет aa)
+    const attempted = state.requests.filter((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Найдена");
+    expect(attempted).toHaveLength(1);
+    const last = attempted[attempted.length - 1];
+    expect(last.body.Location1).toContain("Зона отгрузки");
+    expect("AdditionalsActionsRequired" in last.body).toBe(false);
+    expect("AdditionalActions" in last.body).toBe(false);
+    expect("AdditionalActionsRequired" in last.body).toBe(false);
   }, 40000);
 
   it("таблица: «Найдена» в попапе открывает тот же диалог местоположения, что и карточка", async () => {

@@ -97,6 +97,7 @@ export function useTaskMutations({
   completedStatusValue,
   inProgressStatusValue,
   additionalRequiredIsBoolean,
+  setAdditionalRequiredIsBoolean,
   resultFieldsMeta,
   ctResultMap,
   taskConfiguration,
@@ -238,9 +239,14 @@ export function useTaskMutations({
     const _norm = String(resultValue || "").trim().toLowerCase();
     const _isNotFound = _norm === "не найдена" || _norm === "не найден" || _norm === "не найдено";
     const _isFound = _norm === "найден" || _norm === "найдена";
+    // ⭐ null = «доп. действия в этом результате не участвуют» (в Behaviour нет aa: true).
+    // Тогда legacy-поля AdditionalsActionsRequired/AdditionalActions НЕ отправляются вовсе:
+    // в разных списках они то Boolean, то текст, а иногда их нет в типе контента — раньше
+    // из-за этого падал запрос («Не удается преобразовать значение-примитив в Edm.Boolean»).
+    const _noAdditionalActions = additionalRequired === null;
     // Оверлей «Сохранение...» — один для любого результата (как при «Взять в работу»).
     setUpdatingAction("complete");
-    if (_isFound) {
+    if (_isFound && !_noAdditionalActions) {
       const reqNorm = String(additionalRequired || "Нет").trim();
       const acts = Array.isArray(additionalActions) ? additionalActions.filter(Boolean).map((v) => String(v).trim()).filter(Boolean) : [];
       if (reqNorm === "Да" && acts.length === 0) {
@@ -251,7 +257,7 @@ export function useTaskMutations({
       }
       additionalRequired = reqNorm;
       additionalActions = reqNorm === "Да" ? acts : [];
-    } else if (_isNotFound) {
+    } else if (_isNotFound || _noAdditionalActions) {
       additionalRequired = "";
       additionalActions = [];
     } else {
@@ -268,8 +274,8 @@ export function useTaskMutations({
       Location1: locationValue !== undefined && locationValue !== null ? locationValue : task.Location1,
       // ⭐ NEW: spread остальных promptable-полей в optimistic state (не Location1)
       ...Object.fromEntries(Object.entries(normalizedPromptValues).filter(([k]) => k !== "Location1").map(([k, v]) => [k, v])),
-      AdditionalsActionsRequired: _isNotFound ? "" : (_isFound ? (additionalRequired || "Нет") : (task.AdditionalsActionsRequired || "")),
-      AdditionalActions: _isNotFound ? [] : (_isFound ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
+      AdditionalsActionsRequired: _isNotFound ? "" : (_isFound && !_noAdditionalActions ? (additionalRequired || "Нет") : (task.AdditionalsActionsRequired || "")),
+      AdditionalActions: _isNotFound ? [] : (_isFound && !_noAdditionalActions ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
       // ⭐ НЕ выставляем Status/PercentComplete оптимистично: иначе задача сразу
       // отфильтровывается из вкладки «В работе» и карточка исчезает до ответа сервера,
       // из-за чего оверлей «Сохранение...» не виден. Статус применится после refresh.
@@ -329,7 +335,7 @@ export function useTaskMutations({
       if (_isNotFound) {
         // Behaviour.aa=false: не отправляем legacy AdditionalActions-поля.
         // Они могут отсутствовать в конкретном Tasks-листе и не нужны для результата «Не исправлено».
-      } else if (_isFound) {
+      } else if (_isFound && !_noAdditionalActions) {
         const reqToSave = additionalRequired || "Нет";
         const actsToSave = reqToSave === "Да" ? (additionalActions || []) : [];
         // Поля доп. действий есть не во всех списках Tasks. Отправляем только существующие:
@@ -375,6 +381,32 @@ export function useTaskMutations({
       // ⭐ Отправка с авто-очисткой: если SharePoint говорит «свойство X не существует» —
       // убираем X из payload и повторяем (до 6 полей за раз). Раньше такие ошибки
       // глушили весь request (например, удалённое поле AdditionalsActionsRequired).
+      // ⭐ SharePoint хранит «Доп. действия обязательны» как Boolean в одних списках и как
+      // текст/выбор «Да»/«Нет» — в других. Определить по метаданным удаётся не всегда
+      // (запрос поля может не пройти), и тогда уходит строка в Boolean-колонку:
+      // «Не удается преобразовать значение-примитив в ожидаемый тип Edm.Boolean» (400).
+      // Поэтому по такой ошибке один раз переотправляем значение в другом представлении
+      // и запоминаем верный тип на будущее.
+      const boolRequiredValue = String(additionalRequired || "").trim() === "Да";
+      const withRequiredAs = (base, asBoolean) => {
+        const next = { ...base };
+        let touched = false;
+        for (const name of ["AdditionalsActionsRequired", "AdditionalActionsRequired"]) {
+          if (Object.prototype.hasOwnProperty.call(next, name)) {
+            next[name] = asBoolean ? boolRequiredValue : (boolRequiredValue ? "Да" : "Нет");
+            touched = true;
+          }
+        }
+        return touched ? next : null;
+      };
+      const retryRequiredAs = async (base, asBoolean) => {
+        const next = withRequiredAs(base, asBoolean);
+        if (!next) return false;
+        await postUpdateSafe(next, "*");
+        if (typeof setAdditionalRequiredIsBoolean === "function") setAdditionalRequiredIsBoolean(asBoolean);
+        return true;
+      };
+
       const postUpdateSafe = async (body, etagOverride) => {
         let current = { ...body };
         let lastErr = null;
@@ -451,6 +483,22 @@ export function useTaskMutations({
           const statusCode = e?.response?.status;
           if (statusCode === 412) { notify(`Задача #${task.Id} уже изменена другим пользователем. Обновите список.`, { severity: "warning" }); await loadTasks(); throw e; }
           const msg = String(e?.response?.data?.error?.message?.value || e?.response?.data || e?.message || "").toLowerCase();
+          // Edm.Boolean: тип Required-поля не угадали — переотправляем значением true/false.
+          if (msg.includes("edm.boolean")) {
+            try {
+              if (await retryRequiredAs(payloadWithStatus, true)) {
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
+              }
+            } catch {}
+          }
+          // Edm.String: наоборот, в списке текстовая колонка «Да»/«Нет».
+          if (msg.includes("edm.string")) {
+            try {
+              if (await retryRequiredAs(payloadWithStatus, false)) {
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
+              }
+            } catch {}
+          }
           if (msg.includes("additionalactions")) {
             try {
               const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
@@ -486,7 +534,7 @@ export function useTaskMutations({
       setUpdatingId(null);
       setUpdatingAction(null);
     }
-  }, [entityType, completedStatusValue, additionalRequiredIsBoolean, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult, finishSuccess]);
+  }, [entityType, completedStatusValue, additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult, finishSuccess]);
 
   return { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask };
 }

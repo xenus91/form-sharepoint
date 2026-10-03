@@ -285,7 +285,8 @@ describe("TaskCard — результат инлайном (p + aa, без loc)"
     expect(task.Id).toBe(651);
     expect(choice).toBe("Найдена");
     expect(values).toMatchObject({ Location1: "Зона отгрузки" });
-    expect(req).toBe("Нет");
+    // null = «доп. действия не участвуют» → completeTask не отправляет legacy-поля
+    expect(req).toBeNull();
     expect(acts).toEqual([]);
   });
 

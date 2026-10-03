@@ -254,6 +254,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [tab, setTab] = useState(0); // 0 = active, 1 = completed
 
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  // Behaviour.aa текущего результата для диалога местоположения:
+  // true — показывать, false — скрыть (правило есть, aa не включён),
+  // undefined — правила нет вовсе (legacy: решают определения результатов).
+  const [pendingShowAdditionalActions, setPendingShowAdditionalActions] = useState(undefined);
   // Выделенная строка таблицы (compositeId). Клик по строке только выделяет,
   // переход в форму — кнопкой «Изменить» или двойным кликом (как в «Заявки ДОБ»).
   const [selectedTableRow, setSelectedTableRow] = useState(null);
@@ -383,6 +387,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     completedStatusValue,
     inProgressStatusValue,
     additionalRequiredIsBoolean,
+    setAdditionalRequiredIsBoolean,
     resultFieldsMeta,
     ctResultMap,
     taskConfiguration,
@@ -483,15 +488,16 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // ⭐ Поток результата определяется ТОЛЬКО Behaviour (см. docs/feature-taskbehaviour.md).
   // Нет правил для задачи/результата — задача завершается сразу по нажатию кнопки:
   // никаких диалогов «Где найдена ЕО?» и подтверждений, никаких строковых хардкодов.
-  const handleResultClick = useCallback((task, resultValue) => {
+  const handleResultClick = useCallback((task, resultValue, opts = {}) => {
     const rule = resolveTaskRule(task, resultValue, taskConfiguration.data);
-    const flow = resolveResultFlow(resultValue, rule);
+    const flow = resolveResultFlow(resultValue, rule, opts);
     if (__DBG_ENABLED__) {
       __dlog("[TasksView:resultClick]", {
         taskId: task?.Id,
         result: resultValue,
         ct: String(task?.contentTypeId || task?.ContentTypeId || "").slice(-12),
         rule: rule ? { source: rule.source, c: rule.requiresConfirmed, loc: rule.requiresLocation, p: rule.promptFields?.length || 0 } : null,
+        fromTable: opts.fromTable === true,
         flow,
       });
     }
@@ -511,6 +517,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       runAfterAnimation(() => {
       setPendingTask(task);
       setPendingResult(resultValue);
+      // aa правила решает, показывать ли в диалоге блок доп. действий (как в карточке:
+      // показываем ТОЛЬКО при aa: true; если правила нет — legacy-определения результатов)
+      setPendingShowAdditionalActions(rule ? rule.showAdditionalActions === true : undefined);
       setLocationComment("");
       {
         const ctIdForPending = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
@@ -539,9 +548,17 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       return;
     }
 
+    // Таблица: результат требует полей карточки (кроме местоположения) — не пишем «молча»,
+    // открываем карточку задачи, чтобы пользователь заполнил поле и нажал кнопку там.
+    if (flow.action === "open-card") {
+      notify(`Результат «${resultValue}» заполняется в карточке задачи #${task.Id}`, { severity: "info" });
+      openTaskForm(task?.compositeId, tableData.sources);
+      return;
+    }
+
     // complete: без доп. действий (анимация — если задана в Behaviour.anim)
     runAfterAnimation(() => completeTask(task, resultValue, {}, "", []));
-  }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
+  }, [fieldDefaultActions, taskConfiguration.data, completeTask, notify, tableData.sources]);
 
   // ── Действия по строке таблицы ─────────────────────────────────────────────
   // Набор действий повторяет КАРТОЧКУ задачи (те же кнопки для того же статуса и
@@ -679,7 +696,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       takeStyling: resolveRowTakeStyling(row),
       takeIcon: () => resolveRowTakeIcon(row),
       onTake: () => handleTakeTableRow(row),
-      onResult: (choice) => handleResultClick(row, choice),
+      onResult: (choice) => handleResultClick(row, choice, { fromTable: true }),
       onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
     });
     if (__DBG_ENABLED__) {
@@ -715,12 +732,18 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     if (!pendingTask) return;
     setPendingAdditionalError("");
     const comment = locationComment.trim();
-    // Уважать ShowAdditionalActions из TaskResultDefinitions (Show=Нет → доп скрыты)
+    // Доп. действия: приоритет у Behaviour.aa (как в диалоге и карточке);
+    // определения результатов — только когда правила нет вовсе.
     const ctForSubmit = String(pendingTask?.contentTypeId || pendingTask?.ContentTypeId || "").trim();
     const defForSubmit = taskConfiguration.data?.taskResultDefinitions ? resolveTaskResultDefinition(pendingResult, ctForSubmit, taskConfiguration.data.taskResultDefinitions) : null;
-    const showForSubmit = defForSubmit ? !!defForSubmit.showAdditionalActions : true;
+    const showForSubmit = pendingShowAdditionalActions === true
+      ? true
+      : pendingShowAdditionalActions === false
+        ? false
+        : (defForSubmit ? !!defForSubmit.showAdditionalActions : true);
     const actsToSaveRaw = showForSubmit ? pendingAdditionalActions : [];
-    const reqToSave = showForSubmit ? (pendingAdditionalActions.length > 0 ? "Да" : "Нет") : "Нет";
+    // null = доп. действия не участвуют (Behaviour.aa не true) → legacy-поля не отправляем
+    const reqToSave = showForSubmit ? (pendingAdditionalActions.length > 0 ? "Да" : "Нет") : null;
     // ⭐ NEW: promptFieldValues — object map. В этой модалке legacy single-field = Location1.
     const promptValues = skip ? {} : { Location1: comment || undefined };
     completeTask(pendingTask, pendingResult, promptValues, reqToSave, actsToSaveRaw);
@@ -940,6 +963,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         setPendingCustomAction={setPendingCustomAction}
         updatingId={updatingId}
         taskConfiguration={taskConfiguration}
+        showAdditionalActions={pendingShowAdditionalActions}
         onSubmit={handleLocationSubmit}
       />
 

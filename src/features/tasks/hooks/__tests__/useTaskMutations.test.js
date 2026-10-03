@@ -39,7 +39,15 @@ function makeQueryClient(setQueryDataSpy) {
   };
 }
 
-async function mountAndComplete({ resultValue = "Найдена", promptValues = {}, apiImpl } = {}) {
+async function mountAndComplete({
+  resultValue = "Найдена",
+  promptValues = {},
+  additionalRequired = "",
+  additionalActions = [],
+  additionalRequiredIsBoolean,
+  onFlagChange,
+  apiImpl,
+} = {}) {
   const notify = vi.fn();
   const loadTasks = vi.fn(async () => {});
   const setQueryData = vi.fn();
@@ -70,7 +78,8 @@ async function mountAndComplete({ resultValue = "Найдена", promptValues =
       entityType: "SP.Data.TasksListItem",
       completedStatusValue: "Завершена",
       inProgressStatusValue: "В процессе",
-      additionalRequiredIsBoolean: undefined,
+      additionalRequiredIsBoolean,
+      setAdditionalRequiredIsBoolean: onFlagChange || vi.fn(),
       resultFieldsMeta: new Map(),
       ctResultMap: new Map(),
       taskConfiguration: null,
@@ -101,7 +110,7 @@ async function mountAndComplete({ resultValue = "Найдена", promptValues =
 
   const startedAt = Date.now();
   await act(async () => {
-    await captured.mutations.completeTask(TASK, resultValue, promptValues, "", []);
+    await captured.mutations.completeTask(TASK, resultValue, promptValues, additionalRequired, additionalActions);
   });
   const elapsed = Date.now() - startedAt;
 
@@ -163,6 +172,71 @@ describe("useTaskMutations.completeTask", () => {
     const body = api.post.mock.calls.at(-1)[1];
     expect(body.CommentResult).toBe("Паллет не перемотан");
     expect(body.Status).toBe("Завершена"); // системное поле не перезаписано
+  });
+
+  it("Boolean-колонка не распознана: повторяем запрос со true/false и запоминаем тип", async () => {
+    // Регрессия пользователя: «Не удается преобразовать значение-примитив в ожидаемый тип Edm.Boolean».
+    const accepted = [];
+    const flagChanges = [];
+    const booleanError = () => {
+      const err = new Error("Request failed with status code 400");
+      err.response = {
+        status: 400,
+        data: {
+          error: {
+            message: {
+              value:
+                'Не удается преобразовать значение-примитив в ожидаемый тип "Edm.Boolean". Дополнительные сведения см. во внутреннем исключении.',
+            },
+          },
+        },
+      };
+      return err;
+    };
+    const { notify, apiState: api } = await mountAndComplete({
+      additionalRequired: "Нет",
+      additionalRequiredIsBoolean: false, // метаданные не распознали Boolean-колонку
+      onFlagChange: (v) => flagChanges.push(v),
+      apiImpl: {
+        post: async (url, body) => {
+          const req = body.AdditionalsActionsRequired ?? body.AdditionalActionsRequired;
+          if (typeof req === "string") throw booleanError(); // строка в Edm.Boolean → 400
+          accepted.push(body);
+          return { data: { d: {} } };
+        },
+      },
+    });
+
+    // первая попытка — строкой (упала), вторая — boolean (успех), тип запомнен
+    expect(api.post).toHaveBeenCalledTimes(2);
+    expect(typeof api.post.mock.calls[0][1].AdditionalsActionsRequired).toBe("string");
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0].AdditionalsActionsRequired).toBe(false);
+    expect(flagChanges).toEqual([true]);
+    expect(notify.mock.calls.at(-1)[0]).toContain("завершена: Найдена");
+  });
+
+  it("текстовая колонка («Да»/«Нет») тоже не теряет результат: Edm.String → строкой", async () => {
+    const accepted = [];
+    const { apiState: api } = await mountAndComplete({
+      additionalRequired: "Да",
+      additionalActions: ["Проверить ТМЦ"],
+      additionalRequiredIsBoolean: true, // метаданные сказали Boolean, но колонка текстовая
+      apiImpl: {
+        post: async (url, body) => {
+          const req = body.AdditionalsActionsRequired ?? body.AdditionalActionsRequired;
+          if (typeof req === "boolean") {
+            const err = new Error("Request failed with status code 400");
+            err.response = { status: 400, data: { error: { message: { value: 'Не удается преобразовать значение-примитив в ожидаемый тип "Edm.String".' } } } };
+            throw err;
+          }
+          accepted.push(body);
+          return { data: { d: {} } };
+        },
+      },
+    });
+    expect(api.post).toHaveBeenCalledTimes(2);
+    expect(accepted[0].AdditionalsActionsRequired).toBe("Да");
   });
 
   it("на ошибке сервера показывает уведомление об ошибке", async () => {
