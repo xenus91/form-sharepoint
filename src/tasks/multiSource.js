@@ -124,14 +124,25 @@ export async function fetchTasksMultiSource(opts) {
     // Per-source fields: prefer pre-fetched, fallback to opts.taskFieldNames
     const fieldsForSource = sourceFieldsById[source.id] || opts.taskFieldNames || [];
 
+    // Per-source recipientField / scNumberField / resultFieldInternalNames.
+    // Для источника main используем opts (там поля могут существовать).
+    // Для dob (или любого другого) — обнуляем расширенные поля, чтобы не
+    // запрашивать несуществующие (ResultSearchTHU, AdditionalsActionsRequired, ...)
+    // и не ловить 400. Если они есть на этом источнике — caller должен передать
+    // их через opts.sourceExtraFieldsById[sourceId].
+    const isMain = source.id === "main";
+    const recipientField = isMain ? opts.recipientField : null;
+    const scNumberField = isMain ? opts.scNumberField : null;
+    const resultFieldInternalNames = isMain ? opts.resultFieldInternalNames : [];
+
     try {
       const rows = await fetchTasksForSource(source, client, {
         currentUserId: identity?.userId ?? null,
         distribution: opts.distribution,
         taskFieldNames: fieldsForSource,
-        recipientField: opts.recipientField,
-        scNumberField: opts.scNumberField,
-        resultFieldInternalNames: opts.resultFieldInternalNames,
+        recipientField,
+        scNumberField,
+        resultFieldInternalNames,
         assignedIds,
       });
       // К каждой строке приклеиваем compositeId + sourceId
