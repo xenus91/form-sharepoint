@@ -109,6 +109,50 @@ const TASK_BEHAVIOUR_RECORD = {
   StylingActions: "",
 };
 
+// ⭐ РОВНО настройка пользователя из списка TaskBehaviour («Результат поиска ЕО»):
+//   «Найдена» → loc + aa (диалог «Где найдена ЕО?» с блоком доп. действий) + celebrate;
+//   «Не найдена» → ic (подтверждение двумя кнопками в карточке) + sherlock.
+const TASK_BEHAVIOUR_SEARCH_RECORD = {
+  Id: 2,
+  Title: "Задача ТНУ",
+  Enabled: true,
+  Behaviour: JSON.stringify({
+    "_default": { rf: [{ f: "THU", ti: "ЕО" }, { f: "Recipient/SCNumberText", ti: "Получатель" }] },
+    "Найдена": { loc: true, aa: true, aar: false, anim: "celebrate" },
+    "Не найдена": {
+      ic: true,
+      ok: "Подтвердить «Не найдена»",
+      no: "Отмена",
+      anim: { type: "sherlock", title: "Создаю заявку на ООБ", text: "Отправляю запрос в ООБ...", emoji: "\uD83D\uDD75" },
+    },
+  }),
+  StylingResultButton: JSON.stringify({
+    i: false,
+    "_default": { bg: "linear-gradient(180deg, #5a67d8 0%, #434190 100%)", c: "#ffffff", v: "ctd" },
+    "Найдена": { bg: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c: "#ffffff", v: "ctd" },
+    "Не найдена": { bg: "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", c: "#ffffff", v: "ctd" },
+  }),
+  StylingActions: JSON.stringify({
+    i: false,
+    "_default": { v: "ctd" },
+    takeInWork: { bg: "linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", c: "#ffffff", v: "ctd" },
+    confirm: { bg: "linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", c: "#ffffff", v: "ctd" },
+    cancel: { c: "#5f6368", v: "tx" },
+    promptSubmit: { bg: "linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c: "#ffffff", v: "ctd" },
+    promptCancel: { c: "#5f6368", v: "tx" },
+  }),
+};
+
+// ТНУ-задача «в работе» (Editor = я): в карточке — кнопки результата её типа контента.
+const MAIN_THU_IN_PROGRESS = {
+  ...MAIN_TASK,
+  Id: 12,
+  Title: "Поиск ЕО (ТНУ)",
+  Body: "Найти ЕО 808117004021471765",
+  Status: "В работе",
+  PercentComplete: 0,
+};
+
 // main-задача, уже взятая в работу (Editor = я) — в карточке у неё кнопки результатов
 // её типа контента (ООБ → «Исправлено» / «Не исправлено»)
 const MAIN_IN_PROGRESS = {
@@ -120,7 +164,7 @@ const MAIN_IN_PROGRESS = {
   ContentTypeId: CT_OOB,
 };
 
-const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS };
+const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS, 12: MAIN_THU_IN_PROGRESS };
 
 // Задача, назначенная на группу из DcEmail (Id 33 на сайте ДОБ)
 const DOB_GROUP_TASK = { ...DOB_TASK, Id: 2, Title: "Заявка ООБ (на группу)", AssignedTo: { results: [{ Id: 33, Title: "ООБ" }] }, Modified: "2026-10-02T00:00:00Z" };
@@ -171,14 +215,14 @@ vi.mock("../../../api", () => {
     // Типы контента списка — по FieldLinks определяем поле результата для задачи
     if (d.includes(`${MAIN_LIST}/contenttypes`)) return { data: { d: { results: CT_META } } };
     // Настройки поведения задач (TaskBehaviour) — как в тенанте, одним списком
-    if (u.includes("getbytitle('TaskBehaviour')")) return { data: { d: { results: [TASK_BEHAVIOUR_RECORD] } } };
+    if (u.includes("getbytitle('TaskBehaviour')")) return { data: { d: { results: [TASK_BEHAVIOUR_RECORD, TASK_BEHAVIOUR_SEARCH_RECORD] } } };
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
       const base = MAIN_TASKS_BY_ID[Number(single[1])] || MAIN_TASK;
       return { data: { d: { ...base, __metadata: { etag: '"1"', type: "SP.Data.TasksListItem" } } } };
     }
-    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS] } } };
+    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
     // TaskBehaviour / прочие списки — пусто
     return { data: { d: { results: [] } } };
@@ -279,6 +323,21 @@ function renderTasksView(props = {}) {
   return host;
 }
 
+// Карточка задачи: наименьший MUI-Paper, в котором есть её заголовок.
+function cardByText(host, re) {
+  return [...host.querySelectorAll(".MuiPaper-root")]
+    .filter((el) => re.test(el.textContent || ""))
+    .sort((a, b) => (a.textContent || "").length - (b.textContent || "").length)[0] || null;
+}
+function cardButton(card, text) {
+  return [...(card?.querySelectorAll("button") || [])].find((b) => b.textContent.trim() === text) || null;
+}
+function dialogEl() {
+  return [...document.querySelectorAll('[role="dialog"], .MuiDialog-root')].pop() || null;
+}
+const mouseClick = (el) => el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+const wait200 = () => new Promise((r) => setTimeout(r, 200));
+
 async function clickByText(host, re) {
   const el = [...host.querySelectorAll("button,[role=tab]")].find((b) => re.test(b.textContent || ""));
   if (!el) return false;
@@ -356,7 +415,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(search.tagName).toBe("INPUT");
 
     const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
-    expect(countRows()).toBe(4);
+    expect(countRows()).toBe(5);
 
     // колонки шапки — для проверки сортировки по клику
     const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell")];
@@ -374,7 +433,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       .sort((a, b) => a.index - b.index)
       .map((r) => r.title);
     const titlesInitial = readTitles();
-    expect(titlesInitial.length).toBe(4);
+    expect(titlesInitial.length).toBe(5);
 
     // AG Grid вешает обработчик сортировки на .ag-header-cell-label внутри ячейки
     const titleLabel = headerCells[titleIdx].querySelector(".ag-header-cell-label");
@@ -673,4 +732,104 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(write).toBeTruthy();
     expect(write.url).toContain("items(11)");
   }, 30000);
+
+  it("Behaviour «Результат поиска ЕО»: «Найдена» → диалог «Где найдена ЕО?» с доп. действиями, запись — после «Отправить»", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+
+    const card = cardByText(host, /Поиск ЕО \(ТНУ\)/);
+    expect(card).toBeTruthy();
+    const found = cardButton(card, "Найдена");
+    expect(found).toBeTruthy();
+
+    await act(async () => { mouseClick(found); await wait200(); });
+    // Behaviour.anim = celebrate: диалог открывается после анимации (1.6 с)
+    await settle(2200);
+
+    const dialog = dialogEl();
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain("Где найдена ЕО?");
+    expect(dialog.textContent).toContain("Местоположение (Location1)");
+    // aa: true → в диалоге есть блок доп. действий; aar: false → он необязательный
+    expect(dialog.textContent).toMatch(/Дополнительные действия/);
+    expect(dialog.textContent).toMatch(/необязательно/i);
+    // до «Отправить» задача НЕ завершается
+    expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultSearchTHU === "Найдена")).toBe(false);
+
+    const area = dialog.querySelector("textarea");
+    expect(area).toBeTruthy();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(area, "Зона отгрузки, ряд 5");
+      area.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await wait200();
+    });
+    const send = [...dialog.querySelectorAll("button")].find((b) => /Отправить/.test(b.textContent || ""));
+    expect(send).toBeTruthy();
+    await act(async () => { mouseClick(send); await wait200(); });
+    await settle(900);
+
+    const write = state.requests.find((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Найдена");
+    expect(write).toBeTruthy();
+    expect(write.url).toContain("items(12)");
+    expect(String(write.body.Location1 || "")).toContain("Зона отгрузки");
+  }, 40000);
+
+  it("Behaviour «Не найдена» (ic): подтверждение двумя кнопками В КАРТОЧКЕ, без диалога и записи до подтверждения", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+
+    const labelsOf = () => [...(cardByText(host, /Поиск ЕО \(ТНУ\)/)?.querySelectorAll("button") || [])]
+      .map((b) => b.textContent.trim()).filter(Boolean);
+
+    const dialogsBefore = document.querySelectorAll('[role="dialog"], .MuiDialog-root').length;
+    await act(async () => { mouseClick(cardButton(cardByText(host, /Поиск ЕО \(ТНУ\)/), "Не найдена")); await wait200(); });
+    expect(labelsOf()).toContain("Подтвердить «Не найдена»");
+    expect(labelsOf()).toContain("Отмена");
+    // ic — это UI карточки: НИКАКИХ новых диалогов и никакой записи до подтверждения
+    expect(document.querySelectorAll('[role="dialog"], .MuiDialog-root').length).toBe(dialogsBefore);
+    expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultSearchTHU)).toBe(false);
+
+    // «Отмена» возвращает кнопки результата
+    await act(async () => { mouseClick(cardButton(cardByText(host, /Поиск ЕО \(ТНУ\)/), "Отмена")); await wait200(); });
+    expect(labelsOf()).toEqual(expect.arrayContaining(["Найдена", "Не найдена"]));
+
+    // подтверждение → анимация sherlock (тексты из Behaviour.anim) → MERGE
+    await act(async () => { mouseClick(cardButton(cardByText(host, /Поиск ЕО \(ТНУ\)/), "Не найдена")); await wait200(); });
+    await act(async () => { mouseClick(cardButton(cardByText(host, /Поиск ЕО \(ТНУ\)/), "Подтвердить «Не найдена»")); await wait200(); });
+    expect(host.textContent + document.body.textContent).toMatch(/Создаю заявку на ООБ|Отправляю запрос/);
+    await settle(2000);
+
+    const write = state.requests.find((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Не найдена");
+    expect(write).toBeTruthy();
+    expect(write.url).toContain("items(12)");
+  }, 40000);
+
+  it("таблица: «Найдена» в попапе открывает тот же диалог местоположения, что и карточка", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+      .find((r) => /Поиск ЕО/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 260 }));
+      await wait200();
+    });
+
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    const found = [...(popup?.querySelectorAll("button") || [])].find((b) => b.textContent.trim() === "Найдена");
+    expect(found).toBeTruthy();
+    await act(async () => { mouseClick(found); await wait200(); });
+    await settle(2200);
+
+    const dialog = dialogEl();
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain("Где найдена ЕО?");
+    expect(dialog.textContent).toContain("Местоположение (Location1)");
+    expect(dialog.textContent).toMatch(/Дополнительные действия/);
+  }, 40000);
+
 });
