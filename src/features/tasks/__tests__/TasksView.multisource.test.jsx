@@ -367,46 +367,92 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(state.requests.some((r) => /ProblemsPallet/i.test(r.url))).toBe(false);
   }, 30000);
 
-  it("клик по строке только выделяет, а кнопка «Изменить» открывает форму задачи источника", async () => {
+  it("кнопки «Взять в работу» и «Изменить» появляются НА строке при её выделении", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
     await settle(3000);
 
-    // кнопка в тулбаре есть, но без выделения недоступна
-    const editBtn = [...host.querySelectorAll("button")].find((b) => /Изменить/.test(b.textContent || ""));
-    expect(editBtn).toBeTruthy();
-    expect(editBtn.disabled).toBe(true);
+    // Колонка действий закреплена справа, поэтому AG Grid рендерит её в своём
+    // контейнере, но с тем же row-id — кнопки ищем по row-id строки.
+    const actionsForRow = (rowId) =>
+      host.querySelector(`.ag-row[row-id="${rowId}"] .tasks-row-actions`);
+    const buttonsForRow = (rowId) => [...(actionsForRow(rowId)?.querySelectorAll("button") || [])];
+    const findButton = (rowId, re) => buttonsForRow(rowId).find((b) => re.test(b.textContent || ""));
+    const clickRow = async (row) => {
+      await act(async () => {
+        row.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+        await new Promise((r) => setTimeout(r, 250));
+      });
+    };
+    const centerRows = () => [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
+    const rowByText = (re) => centerRows().find((r) => re.test(r.textContent || ""));
 
-    // одиночный клик по строке dob-задачи = выделение (без перехода)
+    // пока ничего не выделено — кнопок действий нет ни в одной строке
+    expect(host.querySelectorAll(".tasks-row-actions button").length).toBe(0);
+    expect(host.textContent).toContain("Кликните строку");
+
+    // одиночный клик по строке dob-задачи = только выделение (без перехода)
     const hashBefore = window.location.hash;
-    const row = [...host.querySelectorAll(".ag-row")].find((r) => r.getAttribute("row-id") === "dob:1" || /Заявка ООБ/.test(r.textContent || ""));
-    expect(row).toBeTruthy();
-    await act(async () => {
-      row.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 50));
-    });
+    const dobRow = rowByText(/Заявка ООБ/);
+    expect(dobRow).toBeTruthy();
+    const dobRowId = dobRow.getAttribute("row-id");
+    expect(dobRowId).toBeTruthy();
+    await clickRow(dobRow);
     expect(window.location.hash).toBe(hashBefore);
 
-    // для выделенной dob-строки доступно и взятие в работу (как в «Заявки ДОБ»)
-    const takeBtn = [...host.querySelectorAll("button")].find((b) => /Взять в работу/.test(b.textContent || ""));
-    expect(takeBtn).toBeTruthy();
+    // кнопки появились именно на выделенной строке — их ровно две
+    expect(buttonsForRow(dobRowId).length).toBe(2);
+    expect(findButton(dobRowId, /Взять в работу/)).toBeTruthy();
+    expect(findButton(dobRowId, /Изменить/)).toBeTruthy();
+    // у остальных строк кнопок нет
+    for (const r of centerRows()) {
+      const otherId = r.getAttribute("row-id");
+      if (otherId === dobRowId) continue;
+      expect(buttonsForRow(otherId).length).toBe(0);
+    }
+    expect(host.querySelectorAll(".tasks-row-actions button").length).toBe(2);
+
+    // «Взять в работу» на строке шлёт MERGE статуса в список источника
     await act(async () => {
-      takeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 100));
+      findButton(dobRowId, /Взять в работу/)
+        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
     });
     const merge = state.requests.find((r) => r.source === "dob" && r.method === "MERGE");
     expect(merge).toBeTruthy();
     expect(merge.body).toEqual({ Status: "В работе" });
 
-    const editBtn2 = [...host.querySelectorAll("button")].find((b) => /Изменить/.test(b.textContent || ""));
-    expect(editBtn2.disabled).toBe(false);
+    // «Изменить» на строке открывает форму задачи источника (её же роут из карточки)
+    const hashBeforeEdit = window.location.hash;
     await act(async () => {
-      editBtn2.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 50));
+      findButton(dobRowId, /Изменить/)
+        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    expect(window.location.hash).not.toBe(hashBeforeEdit);
+    expect(window.location.hash.toLowerCase()).toBe(`#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3`);
+  }, 30000);
+
+  it("кнопки действий видны и на выделенной main-строке (только «Изменить»)", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const mainRow = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .find((r) => /Основная задача ООБ/.test(r.textContent || ""));
+    expect(mainRow).toBeTruthy();
+    await act(async () => {
+      mainRow.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 250));
     });
 
-    // форма — та же, что dob_tasks/[id], но по списку задачи источника
-    expect(window.location.hash.toLowerCase()).toBe(`#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3`);
+    const mainRowId = mainRow.getAttribute("row-id");
+    const buttons = [...host.querySelectorAll(`.ag-row[row-id="${mainRowId}"] .tasks-row-actions button`)]
+      .map((b) => b.textContent || "");
+    expect(buttons.some((t) => /Изменить/.test(t))).toBe(true);
+    // main-задачу «взять в работу» из таблицы нельзя — кнопки нет
+    expect(buttons.some((t) => /Взять в работу/.test(t))).toBe(false);
   }, 30000);
 });

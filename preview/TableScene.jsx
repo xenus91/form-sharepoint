@@ -7,7 +7,7 @@
 // Запуск: npm run preview:cards -- --open   →   http://localhost:5180/?scene=table
 
 import { useMemo, useState } from "react";
-import { Box, Button, Paper, Typography } from "@mui/material";
+import { Box, Paper, Typography } from "@mui/material";
 import TasksGrid from "../src/features/tasks/components/TasksGrid";
 
 const TITLES = [
@@ -70,24 +70,17 @@ export default function TableScene() {
       </Typography>
       <Typography variant="body2" color="text.secondary">
         Шапка закреплена: прокрутите список — заголовки останутся на месте.
-        Поиск над таблицей ищет по всем полям сразу, клик по заголовку — сортировка,
-        клик по строке — выделение, двойной клик — «изменить».
+        Поиск над таблицей ищет по всем полям сразу, клик по заголовку — сортировка.
+        Клик по строке — выделение, и на самой строке появляются кнопки
+        «Взять в работу» (для внешних задач) и «Изменить»; двойной клик — тоже «изменить».
       </Typography>
 
       <Paper variant="outlined" sx={{ p: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
         <Typography variant="body2" color="text.secondary">
           {selectedRow
-            ? `Выделена задача #${selectedRow.Id} — ${selectedRow.Title}`
-            : "Строка не выделена"}
+            ? `Выделена задача #${selectedRow.Id} — кнопки действий на строке`
+            : "Кликните строку — появятся кнопки «Взять в работу» и «Изменить»"}
         </Typography>
-        <Button
-          size="small"
-          variant="contained"
-          disabled={!selectedRow}
-          onClick={() => setMessage(`Открытие формы задачи #${selectedRow?.Id} (в приложении — #dob_tasks/<id>?list=… или карточка задачи)`)}
-        >
-          Изменить
-        </Button>
         {message && (
           <Typography variant="caption" color="primary">
             {message}
@@ -104,6 +97,10 @@ export default function TableScene() {
             const row = rows.find((r) => r.compositeId === compositeId);
             setMessage(`Открытие формы задачи #${row?.Id}`);
           }}
+          onEditRow={(row) => setMessage(`Изменить задачу #${row?.Id} (в приложении — форма задачи источника)`)}
+          onTakeRow={(row) => setMessage(`Взять в работу задачу #${row?.Id} (в приложении — MERGE статуса на сайте источника)`)}
+          canTakeRow={(row) => row.sourceId !== "main" && row.Status === "Не начата"}
+          takingId={null}
         />
       </Box>
     </Box>

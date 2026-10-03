@@ -3,19 +3,21 @@
 //
 // Поведение (по требованиям 2026-10-03):
 //   • клик по строке — только ВЫДЕЛЯЕТ задачу (как в разделе «Заявки ДОБ»);
-//   • переход в форму редактирования — кнопкой «Изменить» или двойным кликом
-//     (для задачи dob форма та же, что dob_tasks/[id], но по списку источника);
+//   • кнопки «Взять в работу» и «Изменить» показываются НА САМОЙ СТРОКЕ
+//     (в закреплённой справа колонке действий), когда строка выделена;
+//   • двойной клик по строке — тоже открывает форму задачи;
 //   • поля результата в таблице не показываются;
-//   • «Кому назначено» = AssignedTo, «Исполнитель» = Editor (кто взял в работу),
-//     с фолбэком на AssignedTo.
+//   • «Кому назначено» = AssignedTo, «Исполнитель» = Editor (кто взял в работу).
 //
-// Полностью read-only: не делает MERGE/PUT.
+// Сама таблица read-only: MERGE/PUT делает TasksView по колбэкам.
 
 import { AgGridReact } from "ag-grid-react";
-import { useMemo, useRef, useEffect, useState } from "react";
-import { Box, IconButton, InputAdornment, TextField, Tooltip, Typography } from "@mui/material";
+import { memo, useMemo, useRef, useEffect, useState } from "react";
+import { Box, Button, IconButton, InputAdornment, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
+import EditIcon from "@mui/icons-material/Edit";
+import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
 
@@ -24,10 +26,96 @@ import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableCol
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 /**
+ * Ячейка действий в закреплённой справа колонке: кнопки «Взять в работу» и
+ * «Изменить» видны только у ВЫДЕЛЕННОЙ строки (клик по строке — выделение).
+ *
+ * Выделение спрашиваем у самой строки (`params.node.isSelected()`), а колбэки и
+ * состояние берём из `params.context` — это тот же объект, что передан в
+ * `context` у AgGridReact (AG Grid не копирует его, в отличие от
+ * cellRendererParams, которые он deep-merge'ит и тем самым «замораживает»).
+ */
+const RowActionsCell = memo(function RowActionsCell(params) {
+  const actions = params.context || {};
+  const data = params.data;
+  const isSelected = !!params.node?.isSelected?.();
+  if (!data || !isSelected) return null;
+
+  const canTake = typeof actions.canTakeRow === "function" && actions.canTakeRow(data);
+  const busy = !!actions.takingId && actions.takingId === data.compositeId;
+
+  const stop = (fn) => (event) => {
+    // не даём клику по кнопке «дойти» до строки (выделение/двойной клик)
+    event.stopPropagation();
+    event.preventDefault();
+    fn?.();
+  };
+
+  return (
+    <Stack
+      direction="row"
+      spacing={0.5}
+      className="tasks-row-actions"
+      sx={{ alignItems: "center", justifyContent: "flex-end", width: "100%", height: "100%", pr: 0.5 }}
+    >
+      {canTake && (
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<PlayArrowIcon fontSize="small" />}
+          disabled={busy}
+          onMouseDown={stop()}
+          onClick={stop(() => actions.onTakeRow?.(data))}
+          sx={{
+            borderRadius: 1.5,
+            textTransform: "none",
+            fontWeight: 700,
+            minWidth: 0,
+            px: 1,
+            height: 28,
+            fontSize: 12,
+            borderColor: "rgba(23,28,143,0.35)",
+            color: "#171c8f",
+            bgcolor: "#fff",
+            "&:hover": { borderColor: "#171c8f", bgcolor: "rgba(23,28,143,0.04)" },
+          }}
+        >
+          Взять в работу
+        </Button>
+      )}
+      <Button
+        size="small"
+        variant="contained"
+        startIcon={<EditIcon fontSize="small" />}
+        onMouseDown={stop()}
+        onClick={stop(() => actions.onEditRow?.(data))}
+        sx={{
+          borderRadius: 1.5,
+          textTransform: "none",
+          fontWeight: 700,
+          minWidth: 0,
+          px: 1,
+          height: 28,
+          fontSize: 12,
+          bgcolor: "#171c8f",
+          color: "#fff",
+          "&:hover": { bgcolor: "#10146a" },
+        }}
+      >
+        Изменить
+      </Button>
+    </Stack>
+  );
+});
+
+/**
  * @param {object} props
  * @param {Array<any>} props.rows — задачи с compositeId
  * @param {(compositeId:string|null) => void} [props.onSelectRow] — выделение строки
  * @param {(compositeId:string) => void} [props.onRowOpen] — открыть форму (двойной клик)
+ * @param {(row:object) => void} [props.onEditRow] — «Изменить» на выделенной строке
+ * @param {(row:object) => void} [props.onTakeRow] — «Взять в работу» на выделенной строке
+ * @param {(row:object) => boolean} [props.canTakeRow] — можно ли взять строку в работу
+ * @param {string|null} [props.takingId] — compositeId строки, которая берётся в работу
  * @param {boolean} [props.showSourceColumn=false] — колонка источника (debug)
  * @param {boolean} [props.loading]
  * @param {string} [props.error]
@@ -39,6 +127,10 @@ export default function TasksGrid({
   rows = [],
   onSelectRow,
   onRowOpen,
+  onEditRow,
+  onTakeRow,
+  canTakeRow,
+  takingId = null,
   showSourceColumn = false,
   loading = false,
   error = null,
@@ -48,6 +140,12 @@ export default function TasksGrid({
   const [quickFilter, setQuickFilter] = useState("");
   // Сколько строк осталось после поиска/фильтров — показываем рядом с полем.
   const [shownCount, setShownCount] = useState(null);
+  // Выделенная строка (compositeId) — кнопки действий видны только у неё.
+  const [selectedId, setSelectedId] = useState(null);
+  // Стабильная ссылка на колбэки/состояние для ячейки действий (см. RowActionsCell).
+  // Колбэки/состояние для ячейки действий. Объект НЕ пересоздаём: он уходит в
+  // `context` грида, а ячейка читает из него свежие значения при перерисовке.
+  const actionsRef = useRef({ takingId: null, onEditRow: null, onTakeRow: null, canTakeRow: null });
 
   const showDbg = useMemo(() => {
     try {
@@ -60,10 +158,31 @@ export default function TasksGrid({
     return false;
   }, []);
 
-  const columnDefs = useMemo(
-    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg }),
-    [showSourceColumn, showDbg],
-  );
+  // Всегда актуальные значения для ячейки действий (объект не пересоздаём).
+  actionsRef.current.takingId = takingId;
+  actionsRef.current.onEditRow = onEditRow;
+  actionsRef.current.onTakeRow = onTakeRow;
+  actionsRef.current.canTakeRow = canTakeRow;
+
+  const columnDefs = useMemo(() => {
+    const cols = buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg });
+    // Колонка действий — закреплена справа, вне сортировки/фильтров/поиска.
+    cols.push({
+      colId: "rowActions",
+      headerName: "",
+      width: 232,
+      minWidth: 210,
+      pinned: "right",
+      sortable: false,
+      filter: false,
+      floatingFilter: false,
+      resizable: false,
+      suppressMovable: true,
+      suppressHeaderMenuButton: true,
+      cellRenderer: RowActionsCell,
+    });
+    return cols;
+  }, [showSourceColumn, showDbg]);
 
   const defaultColDef = useMemo(() => ({ ...TASK_GRID_DEFAULT_COL_DEF }), []);
 
@@ -88,14 +207,18 @@ export default function TasksGrid({
   }, []);
 
   const onSelectionChanged = useMemo(() => () => {
-    if (typeof onSelectRow !== "function") return;
     const api = gridRef.current?.api;
     const selected = api?.getSelectedNodes?.() || [];
-    onSelectRow(selected.length > 0 ? (selected[0].data?.compositeId ?? null) : null);
+    const id = selected.length > 0 ? (selected[0].data?.compositeId ?? null) : null;
+    setSelectedId(id);
+    if (typeof onSelectRow === "function") onSelectRow(id);
   }, [onSelectRow]);
 
   const onRowDoubleClicked = useMemo(() => (event) => {
     if (typeof onRowOpen !== "function") return;
+    // двойной клик по кнопкам действий не открывает форму
+    const target = event?.event?.target;
+    if (target && typeof target.closest === "function" && target.closest(".tasks-row-actions")) return;
     const id = event?.data?.compositeId;
     if (id) onRowOpen(id);
   }, [onRowOpen]);
@@ -103,8 +226,19 @@ export default function TasksGrid({
   // При смене данных выделение живёт в AG Grid; если строк больше нет — сбрасываем.
   useEffect(() => {
     if (rows.length > 0) return;
+    setSelectedId(null);
     if (typeof onSelectRow === "function") onSelectRow(null);
   }, [rows.length, onSelectRow]);
+
+  // Кнопки действий живут в ячейке: после смены выделения (или начала взятия
+  // в работу) перерисовываем ячейки — так кнопки появляются/исчезают на строке.
+  useEffect(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    // force: ячейка перерисовывается, даже если её значение не изменилось —
+    // иначе кнопки не появятся/не исчезнут на строке.
+    api.refreshCells({ force: true });
+  }, [selectedId, takingId]);
 
   if (loading && rows.length === 0) {
     return (
@@ -181,6 +315,7 @@ export default function TasksGrid({
           getRowId={getRowId}
           gridOptions={gridOptions}
           quickFilterText={quickFilter}
+          context={actionsRef.current}
           onModelUpdated={onModelUpdated}
           onSelectionChanged={onSelectionChanged}
           onRowDoubleClicked={onRowDoubleClicked}

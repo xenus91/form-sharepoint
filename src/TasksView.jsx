@@ -92,8 +92,6 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchOffIcon from "@mui/icons-material/SearchOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import EditIcon from "@mui/icons-material/Edit";
-import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { useNotifications } from "./NotificationsProvider";
 
 
@@ -265,10 +263,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     () => (tableData.rows || []).find((r) => r.compositeId === selectedTableRow) || null,
     [tableData.rows, selectedTableRow]
   );
-  const canTakeSelectedRow = !!selectedTableRowObj
-    && selectedTableRowObj.sourceId !== "main"
-    && !isCompletedStatus(selectedTableRowObj.Status, selectedTableRowObj.PercentComplete)
-    && !isInProgressStatus(selectedTableRowObj.Status);
+  // «Взять в работу» доступно для незавершённых внешних задач (dob): сама кнопка
+  // рисуется на выделенной строке таблицы (см. TasksGrid → RowActionsCell).
+  const canTakeTableRow = useCallback(
+    (row) => !!row
+      && row.sourceId !== "main"
+      && !isCompletedStatus(row.Status, row.PercentComplete)
+      && !isInProgressStatus(row.Status),
+    []
+  );
   const [confirmNotFoundOpen, setConfirmNotFoundOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(null);
   const [pendingResult, setPendingResult] = useState("");
@@ -644,43 +647,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 данные подразделения недоступны
               </Typography>
             )}
-            {canTakeSelectedRow && (
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<PlayArrowIcon />}
-                disabled={!!externalTakingId}
-                onClick={() => handleTakeExternalTask(selectedTableRowObj)}
-                sx={{
-                  borderRadius: 1.5,
-                  textTransform: "none",
-                  fontWeight: 700,
-                  borderColor: "rgba(23,28,143,0.35)",
-                  color: "#171c8f",
-                  "&:hover": { borderColor: "#171c8f", bgcolor: "rgba(23,28,143,0.04)" },
-                }}
-              >
-                Взять в работу
-              </Button>
-            )}
-            <Button
-              size="small"
-              variant="contained"
-              startIcon={<EditIcon />}
-              disabled={!selectedTableRow}
-              onClick={() => openTaskForm(selectedTableRow, tableData.sources)}
-              sx={{
-                borderRadius: 1.5,
-                textTransform: "none",
-                fontWeight: 700,
-                bgcolor: "#171c8f",
-                color: "#fff",
-                "&:hover": { bgcolor: "#10146a" },
-                "&.Mui-disabled": { bgcolor: "#e6e9f5", color: "#9aa0b4" },
-              }}
-            >
-              Изменить
-            </Button>
+            {/* Кнопки действий рисуются на самой строке (TasksGrid → RowActionsCell),
+                здесь только подсказка, что именно выбрано. */}
+            <Typography variant="caption" sx={{ color: selectedTableRowObj ? "text.primary" : "text.secondary" }}>
+              {selectedTableRowObj
+                ? `Выбрана задача #${selectedTableRowObj.Id} — кнопки на строке`
+                : "Кликните строку — появятся кнопки «Взять в работу» и «Изменить»"}
+            </Typography>
           </Box>
           {/* Скролл — внутри AG Grid (шапка с фильтрами закреплена), поэтому
               внешний контейнер не скроллит. */}
@@ -691,6 +664,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               error={tableData.error?.message || null}
               onSelectRow={setSelectedTableRow}
               onRowOpen={(compositeId) => openTaskForm(compositeId, tableData.sources)}
+              // «Взять в работу» и «Изменить» — прямо на выделенной строке
+              onEditRow={(row) => openTaskForm(row?.compositeId, tableData.sources)}
+              onTakeRow={handleTakeExternalTask}
+              canTakeRow={canTakeTableRow}
+              takingId={externalTakingId}
             />
           </Box>
         </Box>
