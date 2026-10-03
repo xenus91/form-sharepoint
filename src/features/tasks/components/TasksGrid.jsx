@@ -10,7 +10,11 @@
 import { AgGridReact } from "ag-grid-react";
 import { useMemo, useEffect, useState } from "react";
 import { Box, Typography } from "@mui/material";
-import { themeQuartz } from "ag-grid-community";
+import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
+
+// Регистрируем все community-модули AG Grid (иначе AG Grid error #272
+// "No AG Grid modules are registered" при первом рендере таблицы).
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 const STATUS_BG = {
   "В работе": "#e3f2fd",

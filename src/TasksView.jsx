@@ -516,7 +516,18 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }
 
   return (
-    <Box sx={{ p: { xs: 1, sm: 2 }, pt: { xs: 0.5, sm: 0.5 }, pb: { xs: 1, sm: 2 }, maxWidth: 720, width: { xs: "100%", sm: "calc(100vw - 32px)" }, minWidth: { xs: 0, sm: 280 }, mx: "auto", boxSizing: "border-box", display: "flex", flexDirection: "column", height: "calc(100vh - 8px)", minHeight: "calc(100vh - 8px)", maxHeight: "calc(100vh - 8px)", "@supports (height:100dvh)": { height: "calc(100dvh - 8px)", minHeight: "calc(100dvh - 8px)", maxHeight: "calc(100dvh - 8px)" }, overflowX: 'hidden', overflowY: 'hidden' }}>
+    <Box sx={{ p: { xs: 1, sm: 2 }, pt: { xs: 0.5, sm: 0.5 }, pb: { xs: 1, sm: 2 },
+      // В cards режиме — узкая колонка maxWidth 720 (как раньше),
+      // в table режиме — на всю ширину окна, чтобы таблица использовала место.
+      maxWidth: viewModeView === "table" ? "100%" : 720,
+      width: "100%",
+      minWidth: { xs: 0, sm: 280 },
+      mx: "auto",
+      boxSizing: "border-box",
+      display: "flex", flexDirection: "column",
+      height: "calc(100vh - 8px)", minHeight: "calc(100vh - 8px)", maxHeight: "calc(100vh - 8px)",
+      "@supports (height:100dvh)": { height: "calc(100dvh - 8px)", minHeight: "calc(100dvh - 8px)", maxHeight: "calc(100dvh - 8px)" },
+      overflowX: 'hidden', overflowY: 'hidden' }}>
       {isLocalRcActive && localRcValue && (
         <LocalRcBanner isLocalRcActive={isLocalRcActive} localRcValue={localRcValue} localRcOffice={localRcOffice} onClearLocalRc={onClearLocalRc} />
       )}
