@@ -709,7 +709,6 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         open={relatedOpen}
         onClose={() => setRelatedOpen(false)}
         relatedRef={relatedRef}
-        taskId={id}
       />
     </Box>
   );

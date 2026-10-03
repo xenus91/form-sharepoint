@@ -263,15 +263,18 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     () => (tableData.rows || []).find((r) => r.compositeId === selectedTableRow) || null,
     [tableData.rows, selectedTableRow]
   );
-  // «Взять в работу» доступно для незавершённых внешних задач (dob): сама кнопка
-  // рисуется на выделенной строке таблицы (см. TasksGrid → RowActionsCell).
-  const canTakeTableRow = useCallback(
-    (row) => !!row
-      && row.sourceId !== "main"
-      && !isCompletedStatus(row.Status, row.PercentComplete)
-      && !isInProgressStatus(row.Status),
-    []
-  );
+  // «Взять в работу» доступно для незавершённых задач; сама кнопка рисуется на
+  // выделенной строке таблицы (см. TasksGrid → RowActionsCell).
+  // main-задачи берём только из «Не начата» (как карточка), внешние — любые
+  // незавершённые: взятие всё равно перепроверяет свежий статус в источнике.
+  const canTakeTableRow = useCallback((row) => {
+    if (!row) return false;
+    if (isCompletedStatus(row.Status, row.PercentComplete)) return false;
+    if (isInProgressStatus(row.Status)) return false;
+    if (row.sourceId === "main") return isNotStartedStatus(row.Status);
+    return true;
+  }, []);
+
   const [confirmNotFoundOpen, setConfirmNotFoundOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(null);
   const [pendingResult, setPendingResult] = useState("");
@@ -395,6 +398,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     pendingResult,
   });
 
+  // Кнопка «Взять в работу» на строке таблицы: main → обычная мутация задачи,
+  // внешний источник (dob) → MERGE статуса на сайте-владельце.
+  const handleTakeTableRow = useCallback(
+    (row) => (row?.sourceId === "main" ? handleTakeInWork(row) : handleTakeExternalTask(row)),
+    [handleTakeInWork, handleTakeExternalTask]
+  );
 
   // initial load — handled by TanStack Query (tasksQueryEnabled); loadTasks is now invalidate+refetch
 
@@ -666,7 +675,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               onRowOpen={(compositeId) => openTaskForm(compositeId, tableData.sources)}
               // «Взять в работу» и «Изменить» — прямо на выделенной строке
               onEditRow={(row) => openTaskForm(row?.compositeId, tableData.sources)}
-              onTakeRow={handleTakeExternalTask}
+              onTakeRow={handleTakeTableRow}
               canTakeRow={canTakeTableRow}
               takingId={externalTakingId}
             />

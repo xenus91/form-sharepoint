@@ -73,19 +73,25 @@ describe("RelatedItemDialog — просмотр связанной заявки
 
   it("показывает заполненные поля связанного элемента только для чтения", async () => {
     // MUI Dialog рендерится в портал на document.body
-    render(<RelatedItemDialog open onClose={() => {}} relatedRef={{ listId: LIST_ID, itemId: 2 }} taskId={1} />);
+    render(<RelatedItemDialog open onClose={() => {}} relatedRef={{ listId: LIST_ID, itemId: 2 }} />);
     await settle();
 
     expect(getDobItemForView).toHaveBeenCalledWith(2, LIST_ID);
     const text = document.body.textContent || "";
     expect(text).toContain("Связанная заявка #2");
-    // тип контента элемента — в чипе
-    expect(text).toContain("Тип контента: Заявка ДОБ");
-    expect(text).toContain("Только просмотр");
     // значения полей
     expect(text).toContain("Просмотр видеоархива");
     expect(text).toContain("Поршаков Сергей");
     expect(text).toContain("Не начата");
+
+    // Требование 2026-10-03: никаких чипов и поясняющих подписей над полями
+    expect(text).not.toContain("Только просмотр");
+    expect(text).not.toContain("Тип контента:");
+    expect(text).not.toContain("Заполнено полей:");
+    expect(text).not.toMatch(/данные связанной заявки/i);
+    // и кнопки «Открыть форму заявки» в диалоге нет
+    expect([...document.body.querySelectorAll("button")].some((b) => /Открыть форму заявки/.test(b.textContent || ""))).toBe(false);
+    expect([...document.body.querySelectorAll("button")].map((b) => (b.textContent || "").trim())).toContain("Закрыть");
 
     // пустое и служебное поля не показываем
     expect(text).not.toContain("Пустое поле");
@@ -102,7 +108,7 @@ describe("RelatedItemDialog — просмотр связанной заявки
   });
 
   it("переключатель «Показать пустые поля» добавляет незаполненные поля", async () => {
-    render(<RelatedItemDialog open onClose={() => {}} relatedRef={{ listId: LIST_ID, itemId: 2 }} taskId={1} />);
+    render(<RelatedItemDialog open onClose={() => {}} relatedRef={{ listId: LIST_ID, itemId: 2 }} />);
     await settle();
     expect(document.body.textContent).not.toContain("Пустое поле");
 
@@ -118,7 +124,7 @@ describe("RelatedItemDialog — просмотр связанной заявки
   });
 
   it("если связи нет — сообщает об этом и не запрашивает элемент", async () => {
-    render(<RelatedItemDialog open onClose={() => {}} relatedRef={null} taskId={1} />);
+    render(<RelatedItemDialog open onClose={() => {}} relatedRef={null} />);
     await settle();
     expect(getDobItemForView).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("У задачи нет связанной заявки");

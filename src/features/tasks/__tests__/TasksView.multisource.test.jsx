@@ -93,12 +93,23 @@ vi.mock("../../../api", () => {
     }
     if (u.includes("/web/sitegroups/getbyid(33)")) return { data: { d: { Id: 33, Title: "ООБ" } } };
     if (d.includes(`${MAIN_LIST}/fields`)) return { data: { d: { results: fieldDefs(MAIN_FIELDS) } } };
+    // взятие в работу перечитывает СВЕЖИЙ статус элемента перед MERGE
+    const single = d.match(/\/items\((\d+)\)/);
+    if (single) return { data: { d: { ...MAIN_TASK, Id: Number(single[1]), __metadata: { etag: '"1"' } } } };
     if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
     // TaskBehaviour / прочие списки — пусто
     return { data: { d: { results: [] } } };
   };
-  const post = async () => ({ data: { d: {} } });
+  const post = async (url, body, config) => {
+    state.requests.push({
+      source: "main",
+      url: String(url),
+      body,
+      merge: /merge/i.test(String(config?.headers?.["X-HTTP-Method"] || "")),
+    });
+    return { data: { d: {} } };
+  };
   return {
     default: { get, post, defaults: { headers: {} }, interceptors: { request: { use() {} }, response: { use() {} } } },
     invalidate: vi.fn(),
@@ -434,7 +445,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(window.location.hash.toLowerCase()).toBe(`#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3`);
   }, 30000);
 
-  it("кнопки действий видны и на выделенной main-строке (только «Изменить»)", async () => {
+  it("на выделенной main-строке тоже есть обе кнопки, «Взять в работу» шлёт MERGE в основной список", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -449,10 +460,24 @@ describe("TasksView — multi-source (#tasks)", () => {
     });
 
     const mainRowId = mainRow.getAttribute("row-id");
-    const buttons = [...host.querySelectorAll(`.ag-row[row-id="${mainRowId}"] .tasks-row-actions button`)]
-      .map((b) => b.textContent || "");
-    expect(buttons.some((t) => /Изменить/.test(t))).toBe(true);
-    // main-задачу «взять в работу» из таблицы нельзя — кнопки нет
-    expect(buttons.some((t) => /Взять в работу/.test(t))).toBe(false);
+    const rowButtons = () => [...host.querySelectorAll(`.ag-row[row-id="${mainRowId}"] .tasks-row-actions button`)];
+    const texts = rowButtons().map((b) => b.textContent || "");
+    // «Не начата» → можно взять в работу; «Изменить» есть всегда
+    expect(texts.some((t) => /Взять в работу/.test(t))).toBe(true);
+    expect(texts.some((t) => /Изменить/.test(t))).toBe(true);
+
+    const takeBtn = rowButtons().find((b) => /Взять в работу/.test(b.textContent || ""));
+    await act(async () => {
+      takeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    await settle(500);
+
+    // MERGE статуса ушёл в ОСНОВНОЙ список (main), а не в dob
+    const merge = state.requests.find((r) => r.source === "main" && r.merge);
+    expect(merge).toBeTruthy();
+    expect(merge.url).toContain("items(10)");
+    expect(String(merge.body?.Status || "").length).toBeGreaterThan(0);
+    expect(state.requests.some((r) => r.source === "dob" && r.method === "MERGE")).toBe(false);
   }, 30000);
 });

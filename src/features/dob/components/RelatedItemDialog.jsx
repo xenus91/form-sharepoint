@@ -15,7 +15,6 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -25,18 +24,15 @@ import {
   FormControlLabel,
   IconButton,
   Link,
-  Stack,
   Switch,
   Typography,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useQuery } from "@tanstack/react-query";
 import { getDobFields, getDobItemForView } from "../api/dobApi";
 import { DOB_LIST_GUID } from "../api/dobClient";
-import { buildViewFields, contentTypeNameOf, formatDateTime } from "../lib/dobFormFields";
-import { relatedItemRoute } from "../lib/relatedItem";
+import { buildViewFields, formatDateTime } from "../lib/dobFormFields";
 
 /** Одно поле элемента — только чтение. */
 function FieldBox({ field }) {
@@ -92,9 +88,8 @@ function FieldBox({ field }) {
  * @param {boolean} props.open
  * @param {() => void} props.onClose
  * @param {{listId:string,itemId:number}|null} props.relatedRef — ссылка на связанный элемент
- * @param {string|number} [props.taskId] — Id задачи, из которой открыли (для заголовка)
  */
-export default function RelatedItemDialog({ open, onClose, relatedRef = null, taskId = null }) {
+export default function RelatedItemDialog({ open, onClose, relatedRef = null }) {
   const listId = relatedRef?.listId || DOB_LIST_GUID;
   const itemId = relatedRef?.itemId || null;
   const [showEmpty, setShowEmpty] = useState(false);
@@ -128,53 +123,22 @@ export default function RelatedItemDialog({ open, onClose, relatedRef = null, ta
     [fields, item, showEmpty]
   );
 
-  const contentType = contentTypeNameOf(item);
   const loading = (fieldsLoading || itemLoading) && !item;
   const error = itemError || fieldsError;
   const errorMessage = error?.response?.data?.error?.message?.value || error?.message || String(error || "");
-  const filledCount = useMemo(
-    () => buildViewFields(fields || [], item || {}, { showEmpty: false }).length,
-    [fields, item]
-  );
-
-  const openForm = () => {
-    const route = relatedItemRoute({ listId, itemId });
-    if (route) {
-      try {
-        window.location.hash = route;
-      } catch (_e) {
-        void _e;
-      }
-    }
-  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth scroll="paper">
-      <DialogTitle sx={{ display: "flex", alignItems: "flex-start", gap: 1, pr: 6, pb: 1 }}>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>
-            Связанная заявка #{itemId ?? "—"}
-          </Typography>
-          <Stack direction="row" spacing={0.75} sx={{ mt: 0.75, flexWrap: "wrap", rowGap: 0.75 }}>
-            <Chip size="small" color="primary" variant="outlined" label="Только просмотр" />
-            {contentType && <Chip size="small" variant="outlined" label={`Тип контента: ${contentType}`} />}
-            {item?.Title && <Chip size="small" variant="outlined" label={String(item.Title)} />}
-            {item && <Chip size="small" variant="outlined" label={`Заполнено полей: ${filledCount}`} />}
-          </Stack>
-        </Box>
+      <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pr: 6, py: 1.25 }}>
+        <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f", flex: 1, minWidth: 0 }}>
+          Связанная заявка #{itemId ?? "—"}
+        </Typography>
         <IconButton onClick={onClose} aria-label="Закрыть" size="small">
           <CloseIcon />
         </IconButton>
       </DialogTitle>
 
       <DialogContent dividers>
-        {taskId !== null && taskId !== undefined && (
-          <Alert severity="info" sx={{ mb: 1.5 }}>
-            Данные связанной заявки (связь с записью #{taskId}). Поля показаны по типу контента
-            элемента и недоступны для изменения — форма только для просмотра.
-          </Alert>
-        )}
-
         {!itemId && (
           <Alert severity="warning">У задачи нет связанной заявки (поле RelatedItems пустое).</Alert>
         )}
@@ -242,16 +206,6 @@ export default function RelatedItemDialog({ open, onClose, relatedRef = null, ta
 
       <DialogActions sx={{ px: 3, py: 1.5 }}>
         <Button onClick={onClose} variant="outlined" sx={{ borderRadius: 0.5 }}>Закрыть</Button>
-        {!!itemId && (
-          <Button
-            onClick={openForm}
-            variant="contained"
-            startIcon={<OpenInNewIcon />}
-            sx={{ borderRadius: 0.5, backgroundImage: "linear-gradient(180deg,#171c8f 0%,#10146a 100%)" }}
-          >
-            Открыть форму заявки
-          </Button>
-        )}
       </DialogActions>
     </Dialog>
   );

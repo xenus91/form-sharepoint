@@ -72,7 +72,7 @@ export default function TableScene() {
         Шапка закреплена: прокрутите список — заголовки останутся на месте.
         Поиск над таблицей ищет по всем полям сразу, клик по заголовку — сортировка.
         Клик по строке — выделение, и на самой строке появляются кнопки
-        «Взять в работу» (для внешних задач) и «Изменить»; двойной клик — тоже «изменить».
+        «Взять в работу» (для незавершённых задач) и «Изменить»; двойной клик — тоже «изменить».
       </Typography>
 
       <Paper variant="outlined" sx={{ p: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
@@ -98,8 +98,8 @@ export default function TableScene() {
             setMessage(`Открытие формы задачи #${row?.Id}`);
           }}
           onEditRow={(row) => setMessage(`Изменить задачу #${row?.Id} (в приложении — форма задачи источника)`)}
-          onTakeRow={(row) => setMessage(`Взять в работу задачу #${row?.Id} (в приложении — MERGE статуса на сайте источника)`)}
-          canTakeRow={(row) => row.sourceId !== "main" && row.Status === "Не начата"}
+          onTakeRow={(row) => setMessage(`Взять в работу задачу #${row?.Id} (в приложении — MERGE статуса: main-список или сайт источника)`)}
+          canTakeRow={(row) => row.Status === "Не начата"}
           takingId={null}
         />
       </Box>
