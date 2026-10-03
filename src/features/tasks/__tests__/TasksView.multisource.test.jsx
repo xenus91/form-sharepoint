@@ -201,7 +201,13 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(external.length).toBeGreaterThanOrEqual(1);
     const dobCard = [...external].find((el) => /Заявка ООБ/.test(el.textContent || ""));
     expect(dobCard).toBeTruthy();
-    expect(dobCard.textContent).toContain("DOB Logistic");
+    // карточка выглядит как обычная задача: исполнитель/статус/номер, кнопка действия;
+    // и НИЧЕГО не говорит про «другой источник»
+    expect(dobCard.textContent).toMatch(/Исполнитель:.*Поршаков Сергей.*Статус: Не начата/);
+    expect(dobCard.textContent).toContain("#1");
+    expect(dobCard.textContent).not.toContain("DOB Logistic");
+    expect(dobCard.textContent).not.toMatch(/другого (сайта|источника)/i);
+    expect([...dobCard.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(true);
 
     // main-задача тоже на месте
     expect(host.textContent).toContain("Основная задача ООБ");
@@ -224,9 +230,17 @@ describe("TasksView — multi-source (#tasks)", () => {
     await clickByText(host, /Таблица/);
     await settle(3000);
 
-    // в шапке таблицы — оба источника
     expect(host.textContent).toMatch(/Таблица задач · \d+ шт\./);
-    expect(host.textContent).toContain("DOB Logistic");
+    // строки обоих источников в таблице
+    expect(host.textContent).toContain("Заявка ООБ");
+    expect(host.textContent).toContain("Основная задача ООБ");
+    // колонки: «Кому назначено» — заполнена, «Исполнитель» — заполнен
+    expect(host.textContent).toContain("Кому назначено");
+    expect(host.textContent).toContain("Исполнитель");
+    expect(host.textContent).toMatch(/Поршаков Сергей/);
+    // в таблице нет ни колонки источника, ни бейджей «другого источника»
+    expect(host.textContent).not.toContain("DOB Logistic");
+    expect(host.textContent).not.toMatch(/другого (сайта|источника)/i);
 
     // ни один мульти-источниковый запрос не просит поля результата
     for (const req of state.requests) {
@@ -238,5 +252,37 @@ describe("TasksView — multi-source (#tasks)", () => {
     }
     // колонок результата в таблице нет
     expect(host.textContent).not.toContain("ResultSearchTHU");
+  }, 30000);
+
+  it("клик по строке только выделяет, а кнопка «Изменить» открывает форму задачи источника", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    // кнопка в тулбаре есть, но без выделения недоступна
+    const editBtn = [...host.querySelectorAll("button")].find((b) => /Изменить/.test(b.textContent || ""));
+    expect(editBtn).toBeTruthy();
+    expect(editBtn.disabled).toBe(true);
+
+    // одиночный клик по строке dob-задачи = выделение (без перехода)
+    const hashBefore = window.location.hash;
+    const row = [...host.querySelectorAll(".ag-row")].find((r) => r.getAttribute("row-id") === "dob:1" || /Заявка ООБ/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(window.location.hash).toBe(hashBefore);
+
+    const editBtn2 = [...host.querySelectorAll("button")].find((b) => /Изменить/.test(b.textContent || ""));
+    expect(editBtn2.disabled).toBe(false);
+    await act(async () => {
+      editBtn2.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // форма — та же, что dob_tasks/[id], но по списку задачи источника
+    expect(window.location.hash.toLowerCase()).toBe(`#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3`);
   }, 30000);
 });

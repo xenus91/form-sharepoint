@@ -5,7 +5,7 @@ import { getDobFields } from '../api/dobApi';
 export function useDobFields(enabled = true) {
   return useQuery({
     queryKey: ['dob', 'fields'],
-    queryFn: getDobFields,
+    queryFn: () => getDobFields(),
     enabled,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,

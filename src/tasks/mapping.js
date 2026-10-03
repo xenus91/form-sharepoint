@@ -116,11 +116,15 @@ export function mapRawTask(r, opts = {}) {
     Title: r.Title || "",
     Body: stripHtml(r.Body) || r.Body || "",
     BodyRaw: r.Body || "",
-    AssignedTo: r.AssignedTo?.Title || "",
-    AssignedToId: r.AssignedTo?.Id || r.AssignedToId || null,
-    EditorTitle: r.Editor?.Title || "",
-    Editor: r.Editor?.Title || "",
-    EditorId: r.Editor?.Id || r.EditorId || null,
+    // Внешние списки (например, RequestsTask на сайте ДОБ) отдают lookup-поля
+    // в verbose-формате { results: [{ Id, Title }] }, а основной сайт — как
+    // { Id, Title }. Раньше фолбэка на results[0] не было, поэтому у задач dob
+    // «Исполнитель»/«Кому назначено» оставались пустыми в таблице и карточке.
+    AssignedTo: r.AssignedTo?.Title || r.AssignedTo?.results?.[0]?.Title || (typeof r.AssignedTo === "string" ? r.AssignedTo : "") || "",
+    AssignedToId: r.AssignedTo?.Id || r.AssignedTo?.results?.[0]?.Id || r.AssignedToId || null,
+    EditorTitle: r.Editor?.Title || r.Editor?.results?.[0]?.Title || (typeof r.Editor === "string" ? r.Editor : "") || "",
+    Editor: r.Editor?.Title || r.Editor?.results?.[0]?.Title || (typeof r.Editor === "string" ? r.Editor : "") || "",
+    EditorId: r.Editor?.Id || r.Editor?.results?.[0]?.Id || r.EditorId || null,
     Status: r.Status || "",
     ResultSearchTHU: dynamicResultVal || "",
     // Сохраняем также динамическое значение под универсальным ключом для новой логики

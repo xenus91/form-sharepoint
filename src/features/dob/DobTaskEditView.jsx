@@ -10,6 +10,7 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment } from './api/dobApi';
+import { DOB_LIST_GUID } from './api/dobClient';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
 
@@ -67,7 +68,12 @@ function toEditorHtml(value) {
   return String(value);
 }
 
-export default function DobTaskEditView({ id, onOpenMenu }) {
+// listGuid — какой список редактируем. По умолчанию — список заявок ДОБ
+// (раздел «Заявки ДОБ»). #tasks передаёт сюда GUID списка задач источника
+// (например, RequestsTask ООБ), чтобы форма работала как dob_tasks/[id],
+// но с полями и сохранением именно в список задачи.
+// onBackHash — куда возвращает кнопка «Назад» (по умолчанию #dob_tasks).
+export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = '#dob_tasks' }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
   const [form, setForm] = useState({});
@@ -90,14 +96,14 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
   }, []);
 
   const { data: fields, isLoading: fieldsLoading, error: fieldsError } = useQuery({
-    queryKey: ['dob-fields'],
-    queryFn: getDobFields,
+    queryKey: ['dob-fields', listGuid],
+    queryFn: () => getDobFields(listGuid),
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: item, isLoading: itemLoading, error: itemError, isFetching, refetch } = useQuery({
-    queryKey: ['dob-item', id],
-    queryFn: () => getDobItem(id),
+    queryKey: ['dob-item', listGuid, id],
+    queryFn: () => getDobItem(id, listGuid),
     enabled: !!id,
     staleTime: 30 * 1000,
   });
@@ -105,10 +111,10 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
   // Load attachments separately for display
   useEffect(() => {
     if (!id) return;
-    getDobAttachments(id).then(setAttachments).catch(()=> setAttachments([]));
+    getDobAttachments(id, listGuid).then(setAttachments).catch(()=> setAttachments([]));
     // also if item has AttachmentFiles results
     if (item?.AttachmentFiles?.results) setAttachments(item.AttachmentFiles.results);
-  }, [id, item]);
+  }, [id, item, listGuid]);
 
   // Init form from item + fields
   useEffect(() => {
@@ -249,7 +255,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
       console.log('[DobEdit][save] payload keys', Object.keys(payload), 'chekInternal', chekInternal, 'odataChek', toODataKey(chekInternal), 'payload', payload);
       // Ensure boolean/null handling
       try {
-        await updateDobItem(id, payload);
+        await updateDobItem(id, payload, listGuid);
       } catch (e) {
         const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
         const lower = String(rawMsg).toLowerCase();
@@ -261,15 +267,15 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
           if (payload.Title) minimal.Title = payload.Title;
           if (payload['OData_Title']) minimal['OData_Title'] = payload['OData_Title'];
           console.log('[DobEdit][save] minimal keys', Object.keys(minimal));
-          await updateDobItem(id, minimal);
+          await updateDobItem(id, minimal, listGuid);
           // успех — не кидаем дальше, обновляем baseline для ChekResult и чистим dirty
           if (initialFormRef.current) initialFormRef.current[chekInternal] = form[chekInternal];
           else initialFormRef.current = { [chekInternal]: form[chekInternal] };
           dirtySetRef.current.delete(chekInternal);
           notify(`Заявка ${id} сохранена (только ${chekKey})`, { severity: 'success' });
           qc.invalidateQueries({ queryKey: ['dob-items'] });
-          qc.invalidateQueries({ queryKey: ['dob-item', id] });
-          getDobAttachments(id).then(setAttachments).catch(()=>{});
+          qc.invalidateQueries({ queryKey: ['dob-item', listGuid, id] });
+          getDobAttachments(id, listGuid).then(setAttachments).catch(()=>{});
           return;
         }
         throw e;
@@ -280,9 +286,9 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
       dirtySetRef.current.clear();
       // Invalidate list and item
       qc.invalidateQueries({ queryKey: ['dob-items'] });
-      qc.invalidateQueries({ queryKey: ['dob-item', id] });
+      qc.invalidateQueries({ queryKey: ['dob-item', listGuid, id] });
       // Refresh attachments
-      getDobAttachments(id).then(setAttachments).catch(()=>{});
+      getDobAttachments(id, listGuid).then(setAttachments).catch(()=>{});
     } catch (e) {
       const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка сохранения';
       setSaveError(String(msg).slice(0, 800));
@@ -290,7 +296,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
     } finally {
       setSaving(false);
     }
-  }, [id, form, fields, notify, qc]);
+  }, [id, listGuid, form, fields, notify, qc]);
 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const handleUploadImage = useCallback(async (file) => {
@@ -298,10 +304,10 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
     setIsUploadingImage(true);
     console.log('[DobEdit][upload] start', file.name, file.size, file.type);
     try {
-      const res = await uploadDobAttachment(id, file);
+      const res = await uploadDobAttachment(id, file, listGuid);
       console.log('[DobEdit][upload] res', res);
       // Refresh attachments
-      getDobAttachments(id).then(a=> { console.log('[DobEdit][upload] attachments after', a); setAttachments(a); }).catch(()=>{});
+      getDobAttachments(id, listGuid).then(a=> { console.log('[DobEdit][upload] attachments after', a); setAttachments(a); }).catch(()=>{});
       notify(`Изображение ${file.name} загружено`, { severity: 'success' });
       // Для сохранения в SharePoint нужен ServerRelativeUrl без /dob-api (иначе на проде 404). На проде это https://portal.lenta.com/sites/..., в dev — /sites/...
       const serverRelative = res?.ServerRelativeUrl || res?.ServerRelativePath?.DecodedUrl || null;
@@ -323,11 +329,12 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
     } finally {
       setIsUploadingImage(false);
     }
-  }, [id, notify]);
+  }, [id, listGuid, notify]);
 
 
+  const isDefaultList = listGuid === DOB_LIST_GUID;
   const handleBack = () => {
-    window.location.hash = '#dob_tasks';
+    window.location.hash = onBackHash || '#dob_tasks';
   };
 
   const loading = fieldsLoading || itemLoading;
@@ -376,7 +383,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
     pendingDeleteRef.current.add(fileName);
     console.log('[DobEdit][delete] fileName', fileName);
     try {
-      await deleteDobAttachment(id, fileName);
+      await deleteDobAttachment(id, fileName, listGuid);
       notify(`Вложение ${fileName} удалено`, { severity: 'success' });
       // Remove from attachments state
       setAttachments(prev => prev.filter(a => a.FileName !== fileName && a.ServerRelativeUrl !== fileName));
@@ -394,14 +401,14 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
         return prev;
       });
       // Refresh from server
-      getDobAttachments(id).then(setAttachments).catch(()=>{});
+      getDobAttachments(id, listGuid).then(setAttachments).catch(()=>{});
     } catch (e) {
       const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка удаления';
       notify(`Не удалось удалить: ${String(msg).slice(0,200)}`, { severity: 'error' });
     } finally {
       pendingDeleteRef.current.delete(fileName);
     }
-  }, [id, notify, chekInternal]);
+  }, [id, listGuid, notify, chekInternal]);
 
   // Синхрон: если картинка удалена из ChekResult (в редакторе) — удалить вложение
   useEffect(() => {
@@ -468,7 +475,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
     const msg = itemError?.response?.data?.error?.message?.value || itemError?.message || String(itemError);
     return (
       <Box sx={{ p: 2 }}>
-        <Button startIcon={<ArrowBackIcon />} onClick={handleBack} sx={{ mb: 2 }}>К списку</Button>
+        <Button startIcon={<ArrowBackIcon />} onClick={handleBack} sx={{ mb: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
         <Alert severity="error">Не удалось загрузить заявку {id}: {String(msg).slice(0, 800)}</Alert>
         <Button startIcon={<RefreshIcon />} onClick={()=> refetch()} sx={{ mt: 1 }}>Повторить</Button>
       </Box>
@@ -480,8 +487,8 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
       <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1100, bgcolor: '#fff', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
         <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
           <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
-          <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="К списку"><ArrowBackIcon fontSize="small" /></IconButton>
-          <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>Заявка ДОБ #{id}</Typography>
+          <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label={isDefaultList ? 'К списку' : 'К задачам'}><ArrowBackIcon fontSize="small" /></IconButton>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>{isDefaultList ? 'Заявка ДОБ' : 'Задача'} #{id}</Typography>
           {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
           <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={{ borderRadius: .5 }}>Обновить</Button>
           <Button size="small" variant="contained" onClick={handleSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={{ borderRadius: .5, minWidth: 120, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)', color: '#fff' }}>
@@ -702,7 +709,7 @@ export default function DobTaskEditView({ id, onOpenMenu }) {
       </Box>
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
-        <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>К списку</Button>
+        <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
         <Button onClick={handleSave} variant="contained" disabled={saving} startIcon={<SaveIcon />} sx={{ borderRadius: 2, minWidth: 160 }}>Сохранить</Button>
       </Box>
     </Box>

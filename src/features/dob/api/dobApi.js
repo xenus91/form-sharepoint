@@ -1,23 +1,34 @@
 // src/features/dob/api/dobApi.js
 // High-level DOB list operations — fields, items, update
-import { dobApiBase, dobListApi, dobAxios } from './dobClient';
+import { dobApiBase, dobListApi, dobAxios, DOB_LIST_GUID } from './dobClient';
 
-// Fetch ListItemEntityTypeFullName for MERGE payloads
-let cachedEntityType = null;
-export async function getDobEntityType() {
-  if (cachedEntityType) return cachedEntityType;
-  const url = `${dobListApi()}?$select=ListItemEntityTypeFullName`;
+// Fetch ListItemEntityTypeFullName for MERGE payloads (кэш по списку)
+const entityTypeCache = new Map();
+export async function getDobEntityType(listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
+  if (entityTypeCache.has(listGuid)) return entityTypeCache.get(listGuid);
+  const url = `${dobListApi(listGuid)}?$select=ListItemEntityTypeFullName`;
   const { data } = await dobAxios.get(url);
-  cachedEntityType = data?.d?.ListItemEntityTypeFullName || 'SP.Data.DoblogisticListItem';
-  return cachedEntityType;
+  const type = data?.d?.ListItemEntityTypeFullName
+    || (listGuid === DOB_LIST_GUID ? 'SP.Data.DoblogisticListItem' : 'SP.Data.RequestsTaskListItem');
+  entityTypeCache.set(listGuid, type);
+  return type;
 }
 
 // Fetch fields metadata for the DOB list (filtered)
-export async function getDobFields() {
-  const url = `${dobListApi()}/fields?$select=InternalName,Title,TypeAsString,TypeDisplayName,Required,Hidden,ReadOnlyField,Description,DefaultValue,Choices,FillInChoice,AllowMultipleValues,LookupList,LookupField,Formula,SchemaXml&$top=200`;
+export async function getDobFields(listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
+  const url = `${dobListApi(listGuid)}/fields?$select=InternalName,Title,TypeAsString,TypeDisplayName,Required,Hidden,ReadOnlyField,Description,DefaultValue,Choices,FillInChoice,AllowMultipleValues,LookupList,LookupField,Formula,SchemaXml&$top=200`;
   const { data } = await dobAxios.get(url);
   const raw = data?.d?.results || data?.value || [];
   return raw;
+}
+
+// Защита от вызова функции напрямую как queryFn (react-query передаёт объект-контекст):
+// любой не-GUID аргумент → дефолтный список заявок ДОБ.
+const LIST_GUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+function normalizeListGuid(listGuid) {
+  return typeof listGuid === 'string' && LIST_GUID_RE.test(listGuid.trim()) ? listGuid.trim() : DOB_LIST_GUID;
 }
 
 function extractBadField(msg = '') {
@@ -44,7 +55,8 @@ function extractBadField(msg = '') {
 
 // Items with OData — supports pagination via $top &$skiptoken or flat fetch
 // По просьбе — без $select, просто items + expand, SP вернёт всё сам
-export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = true, filter = '', fields = null } = {}) {
+export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = true, filter = '', fields = null, listGuid = DOB_LIST_GUID } = {}) {
+  listGuid = normalizeListGuid(listGuid);
   // expands: Author/Editor всегда, + динамические User поля из fields
   let expands = ['Author','Editor','AttachmentFiles'].join(',');
   if (Array.isArray(fields) && fields.length) {
@@ -68,7 +80,7 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
   let attempt = 0;
   while (attempt < 5) {
     const selectForExpand = buildSelectForExpands(currentExpands);
-    let url = `${dobListApi()}/items?$select=${selectForExpand}&$expand=${currentExpands}&$top=${top}`;
+    let url = `${dobListApi(listGuid)}/items?$select=${selectForExpand}&$expand=${currentExpands}&$top=${top}`;
     if (orderBy) url += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
     if (currentFilter) url += `&$filter=${encodeURIComponent(currentFilter)}`;
     try {
@@ -117,14 +129,15 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
 }
 
 // Paginated fetch helper — respects SharePoint __next
-export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = '' } = {}) {
+export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = '', listGuid = DOB_LIST_GUID } = {}) {
+  listGuid = normalizeListGuid(listGuid);
   const all = [];
   let nextUrl = null;
   let first = true;
   while (first || nextUrl) {
     let url;
     if (first) {
-      const { results, next } = await getDobItems({ top: pageSize, fields, filter });
+      const { results, next } = await getDobItems({ top: pageSize, fields, filter, listGuid });
       all.push(...results);
       nextUrl = next;
       first = false;
@@ -149,13 +162,14 @@ export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = 
 }
 
 // Update single item — payload is flat { InternalName: value } — resilient to bad fields
-export async function updateDobItem(id, payload) {
+export async function updateDobItem(id, payload, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
   let currentPayload = { ...payload };
   let attempt = 0;
   while (attempt < 6) {
-    const entity = await getDobEntityType();
+    const entity = await getDobEntityType(listGuid);
     const body = { __metadata: { type: entity }, ...currentPayload };
-    const url = `${dobListApi()}/items(${id})`;
+    const url = `${dobListApi(listGuid)}/items(${id})`;
     try {
       const { data } = await dobAxios.post(url, body, {
         headers: {
@@ -212,26 +226,29 @@ export async function updateDobItem(id, payload) {
   throw new Error('updateDobItem failed after retries');
 }
 
-export async function bulkUpdateDobItems(updates) {
+export async function bulkUpdateDobItems(updates, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
   const results = [];
   for (const u of updates) {
-    const r = await updateDobItem(u.id, u.payload);
+    const r = await updateDobItem(u.id, u.payload, listGuid);
     results.push(r);
   }
   return results;
 }
 
-export async function createDobItem(payload) {
-  const entity = await getDobEntityType();
+export async function createDobItem(payload, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
+  const entity = await getDobEntityType(listGuid);
   const body = { __metadata: { type: entity }, ...payload };
-  const url = `${dobListApi()}/items`;
+  const url = `${dobListApi(listGuid)}/items`;
   const { data } = await dobAxios.post(url, body);
   return data?.d || data;
 }
 
-export async function getDobItem(id) {
+export async function getDobItem(id, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
   if (!id) throw new Error('getDobItem: id required');
-  const fields = await getDobFields().catch(()=>[]);
+  const fields = await getDobFields(listGuid).catch(()=>[]);
   let expands = ['Author','Editor','AttachmentFiles'].join(',');
   if (Array.isArray(fields) && fields.length) {
     const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && !['Author','Editor'].includes(f.InternalName) && !f.Hidden).map(f=>f.InternalName);
@@ -246,20 +263,22 @@ export async function getDobItem(id) {
     return parts.join(',');
   }
   const selectForExpand = buildSelectForExpands(expands);
-  const url = `${dobListApi()}/items(${id})?$select=${selectForExpand}&$expand=${expands}`;
+  const url = `${dobListApi(listGuid)}/items(${id})?$select=${selectForExpand}&$expand=${expands}`;
   const { data } = await dobAxios.get(url);
   const item = data?.d || data;
   return item;
 }
 
-export async function getDobAttachments(id) {
-  const url = `${dobListApi()}/items(${id})/AttachmentFiles`;
+export async function getDobAttachments(id, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
+  const url = `${dobListApi(listGuid)}/items(${id})/AttachmentFiles`;
   const { data } = await dobAxios.get(url);
   const results = data?.d?.results || data?.value || [];
   return results;
 }
 
-export async function uploadDobAttachment(id, file) {
+export async function uploadDobAttachment(id, file, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
   if (!id || !file) throw new Error('uploadDobAttachment: id and file required');
   let fileName = file.name || `image_${Date.now()}.png`;
   // Для clipboard image.png / image.jpg делаем сразу уникальным, иначе параллельные вставки падают "имя уже используется"
@@ -273,7 +292,7 @@ export async function uploadDobAttachment(id, file) {
   while (attempt < 4) {
     try {
       const buffer = await file.arrayBuffer();
-      const url = `${dobListApi()}/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
+      const url = `${dobListApi(listGuid)}/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
       const { data } = await dobAxios.post(url, buffer, {
         headers: { 'Content-Type': 'application/octet-stream' },
         transformRequest: (d) => d,
@@ -316,8 +335,9 @@ export async function uploadDobAttachment(id, file) {
   throw lastError;
 }
 
-export async function deleteDobAttachment(id, fileName) {
-  const url = `${dobListApi()}/items(${id})/AttachmentFiles/getByFileName('${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
+export async function deleteDobAttachment(id, fileName, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
+  const url = `${dobListApi(listGuid)}/items(${id})/AttachmentFiles/getByFileName('${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
   const { data } = await dobAxios.post(url, null, { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
   return data;
 }

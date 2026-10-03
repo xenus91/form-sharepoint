@@ -44,6 +44,7 @@ import { useViewMode } from "./features/nav/viewMode";
 import { useDepartment } from "./features/nav/useDepartment";
 import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
+import { openTaskForm } from "./features/tasks/lib/openTaskForm";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
@@ -53,7 +54,6 @@ import { useTaskMutations } from "./features/tasks/hooks/useTaskMutations"; // P
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
 import TaskList from "./features/tasks/components/TaskList";
-import ExternalTaskCard from "./features/tasks/components/ExternalTaskCard";
 import {
   formatDueLeft,
   formatDueDateFull,
@@ -73,11 +73,7 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Dialog,
-  DialogTitle,
-  DialogContent,
   DialogContentText,
-  DialogActions,
   TextField,
   IconButton,
   Tabs,
@@ -95,6 +91,7 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchOffIcon from "@mui/icons-material/SearchOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import EditIcon from "@mui/icons-material/Edit";
 import { useNotifications } from "./NotificationsProvider";
 
 
@@ -226,9 +223,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [tab, setTab] = useState(0); // 0 = active, 1 = completed
 
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
-  // Задача внешнего источника (dob): в карточном режиме рендерится в списке,
-  // в табличном — открывается read-only диалогом (hash-роут умеет только main).
-  const [externalTaskDialog, setExternalTaskDialog] = useState(null);
+  // Выделенная строка таблицы (compositeId). Клик по строке только выделяет,
+  // переход в форму — кнопкой «Изменить» или двойным кликом (как в «Заявки ДОБ»).
+  const [selectedTableRow, setSelectedTableRow] = useState(null);
   const [confirmNotFoundOpen, setConfirmNotFoundOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(null);
   const [pendingResult, setPendingResult] = useState("");
@@ -591,11 +588,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1, py: 0.5, borderBottom: "1px solid rgba(23,28,143,0.08)" }}>
             <Typography variant="caption" sx={{ color: "text.secondary", flex: 1 }}>
               Таблица задач · {tableData.rows.length} шт.
-              {tableData.sources.length > 1 && (
-                <Box component="span" sx={{ ml: 1 }}>
-                  ({tableData.sources.map((s) => s.label).join(" + ")})
-                </Box>
-              )}
             </Typography>
             {tableData.perSourceStats && Object.values(tableData.perSourceStats).some((s) => s?.error) && (
               <Typography variant="caption" sx={{ color: "warning.main" }}>
@@ -607,27 +599,32 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 данные подразделения недоступны
               </Typography>
             )}
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<EditIcon />}
+              disabled={!selectedTableRow}
+              onClick={() => openTaskForm(selectedTableRow, tableData.sources)}
+              sx={{
+                borderRadius: 1.5,
+                textTransform: "none",
+                fontWeight: 700,
+                bgcolor: "#171c8f",
+                color: "#fff",
+                "&:hover": { bgcolor: "#10146a" },
+                "&.Mui-disabled": { bgcolor: "#e6e9f5", color: "#9aa0b4" },
+              }}
+            >
+              Изменить
+            </Button>
           </Box>
           <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
             <TasksGrid
               rows={tableData.rows}
-              fields={[]}
-              showSourceColumn={tableData.sources.length > 1}
               loading={tableData.isLoading}
               error={tableData.error?.message || null}
-              onRowClick={(compositeId) => {
-                if (!compositeId) return;
-                const key = String(compositeId);
-                // Внешний источник (dob:1) — hash-роут #tasks/<id> ищет по main-списку,
-                // поэтому открываем read-only диалог, а не «задача не найдена».
-                if (!key.startsWith("main:")) {
-                  const row = (tableData.rows || []).find((r) => r.compositeId === key);
-                  if (row) { setExternalTaskDialog(row); return; }
-                }
-                const parsed = key.split(":");
-                const id = parsed.slice(1).join(":");
-                try { window.location.hash = `#tasks/${id}`; } catch (_e) { void _e; }
-              }}
+              onSelectRow={setSelectedTableRow}
+              onRowOpen={(compositeId) => openTaskForm(compositeId, tableData.sources)}
             />
           </Box>
         </Box>
@@ -678,6 +675,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         currentUserId={currentUserId}
         currentUserTitle={currentUserTitle}
         onRetry={loadTasks}
+        onOpenExternalTask={(task) => openTaskForm(task?.compositeId, tableData.sources)}
       />
       {tab === 1 && !isHashMode && completedTasks.length > 0 && (
         <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.75, pt: 1, pb: 2 }}>
@@ -766,19 +764,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onConfirm={(task, result) => completeTask(task, result, {}, "", [])}
       />
 
-      <Dialog open={!!externalTaskDialog} onClose={() => setExternalTaskDialog(null)} fullWidth maxWidth="sm">
-        <DialogTitle sx={{ fontWeight: 700, color: "#171c8f" }}>
-          Задача из другого источника
-        </DialogTitle>
-        <DialogContent>
-          {externalTaskDialog ? <ExternalTaskCard task={externalTaskDialog} /> : null}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setExternalTaskDialog(null)} sx={{ textTransform: "none", fontWeight: 700 }}>
-            Закрыть
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }

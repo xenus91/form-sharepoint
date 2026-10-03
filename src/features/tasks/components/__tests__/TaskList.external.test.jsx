@@ -52,7 +52,7 @@ function render(node) {
 }
 
 describe("TaskList — карточки из нескольких источников", () => {
-  it("рисует карточку внешнего источника рядом с main-задачей", () => {
+  it("рисует карточку внешнего источника как обычную задачу (без пометок об источнике)", () => {
     const tasks = [MAIN_TASK, DOB_TASK];
     const host = render(
       <TaskList
@@ -67,9 +67,35 @@ describe("TaskList — карточки из нескольких источни
     expect(external).toHaveLength(1);
     expect(external[0].getAttribute("data-composite-id")).toBe("dob:1");
     expect(external[0].textContent).toContain("Заявка ООБ");
-    expect(external[0].textContent).toContain("DOB Logistic");
+    expect(external[0].textContent).toContain("Просмотр видеоархива");
+    // исполнитель и номер — как у обычной карточки
+    expect(external[0].textContent).toMatch(/Исполнитель:.*Поршаков Сергей.*Статус: Не начата/);
+    expect(external[0].textContent).toContain("#1");
+    // никаких подписей про «другой сайт»/бейджа источника
+    expect(external[0].textContent).not.toContain("DOB Logistic");
+    expect(external[0].textContent).not.toMatch(/другого (сайта|источника)/i);
     // main-задача отрисована обычной карточкой без read-only пометки
     expect(external[0].textContent).not.toContain("Основная задача");
+  });
+
+  it("кнопка «Изменить» вызывает onOpen с задачей (переход в форму источника)", () => {
+    const tasks = [DOB_TASK];
+    let opened = null;
+    const host = render(
+      <TaskList
+        tasks={tasks}
+        tab={0}
+        groupedTasks={[["Все", tasks]]}
+        filteredTasks={tasks}
+        groupingEnabled={false}
+        onOpenExternalTask={(t) => { opened = t; }}
+      />
+    );
+    const btn = [...host.querySelectorAll("button")].find((b) => /Изменить/.test(b.textContent || ""));
+    expect(btn).toBeTruthy();
+    act(() => { btn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true })); });
+    expect(opened).toBeTruthy();
+    expect(opened.compositeId).toBe("dob:1");
   });
 
   it("без внешних задач карточек внешнего источника нет", () => {

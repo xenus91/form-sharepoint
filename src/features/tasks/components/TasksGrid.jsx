@@ -1,68 +1,45 @@
 // src/features/tasks/components/TasksGrid.jsx
-// Read-only AG Grid Community wrapper для табличного режима #tasks.
-// План: см. artifacts/plan.md (этап 7).
+// AG Grid Community wrapper для табличного режима #tasks (multi-source).
 //
-// Не использует DobListStateContext — полностью read-only. Не делает MERGE/PUT.
-// Универсален: получает rows (уже смерженные или нет) и fields (per-source).
+// Поведение (по требованиям 2026-10-03):
+//   • клик по строке — только ВЫДЕЛЯЕТ задачу (как в разделе «Заявки ДОБ»);
+//   • переход в форму редактирования — кнопкой «Изменить» или двойным кликом
+//     (для задачи dob форма та же, что dob_tasks/[id], но по списку источника);
+//   • поля результата в таблице не показываются;
+//   • «Кому назначено» = AssignedTo, «Исполнитель» = Editor (кто взял в работу),
+//     с фолбэком на AssignedTo.
 //
-// Клик по строке → вызывает onRowClick(compositeId), выше — переход в карточку.
+// Полностью read-only: не делает MERGE/PUT.
 
 import { AgGridReact } from "ag-grid-react";
-import { useMemo, useEffect, useState } from "react";
+import { useMemo, useRef, useEffect } from "react";
 import { Box, Typography } from "@mui/material";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
+import { buildTaskColumns } from "../lib/taskTableColumns";
 
 // Регистрируем все community-модули AG Grid (иначе AG Grid error #272
 // "No AG Grid modules are registered" при первом рендере таблицы).
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-const STATUS_BG = {
-  "В работе": "#e3f2fd",
-  "Завершена": "#e8f5e9",
-  "Отменена": "#ffebee",
-  "На паузе": "#fff8e1",
-};
-
-function statusCellStyle(params) {
-  const v = params.value;
-  const bg = STATUS_BG[v];
-  if (!bg) return null;
-  return {
-    backgroundColor: bg,
-    color: "rgba(0,0,0,0.87)",
-    fontWeight: 500,
-  };
-}
-
-function formatDate(value) {
-  if (!value) return "";
-  try {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
-  } catch (_e) {
-    void _e;
-    return String(value);
-  }
-}
-
 /**
  * @param {object} props
  * @param {Array<any>} props.rows — задачи с compositeId
- * @param {Array<{InternalName:string,Title:string,TypeAsString:string}>} [props.fields]
- * @param {(compositeId:string) => void} [props.onRowClick]
- * @param {boolean} [props.showSourceColumn=false] — показать колонку "Сайт" (под ?dbg=1)
+ * @param {(compositeId:string|null) => void} [props.onSelectRow] — выделение строки
+ * @param {(compositeId:string) => void} [props.onRowOpen] — открыть форму (двойной клик)
+ * @param {boolean} [props.showSourceColumn=false] — колонка источника (debug)
  * @param {boolean} [props.loading]
  * @param {string} [props.error]
  */
 export default function TasksGrid({
   rows = [],
-  fields = [],
-  onRowClick,
+  onSelectRow,
+  onRowOpen,
   showSourceColumn = false,
   loading = false,
   error = null,
 }) {
+  const gridRef = useRef(null);
+
   const showDbg = useMemo(() => {
     try {
       if (typeof window === "undefined") return false;
@@ -74,61 +51,10 @@ export default function TasksGrid({
     return false;
   }, []);
 
-  const columnDefs = useMemo(() => {
-    const cols = [];
-    cols.push({
-      headerName: "Id",
-      field: "Id",
-      width: 80,
-      pinned: "left",
-      sortable: true,
-    });
-    cols.push({
-      headerName: "Заголовок",
-      field: "Title",
-      flex: 2,
-      minWidth: 220,
-      sortable: true,
-    });
-    cols.push({
-      headerName: "Статус",
-      field: "Status",
-      width: 130,
-      sortable: true,
-      cellStyle: statusCellStyle,
-    });
-    cols.push({
-      headerName: "Исполнитель",
-      valueGetter: (p) => p.data?.AssignedTo?.Title || "",
-      width: 160,
-      sortable: true,
-    });
-    cols.push({
-      headerName: "Срок",
-      field: "DueDate",
-      width: 120,
-      sortable: true,
-      valueFormatter: (p) => formatDate(p.value),
-    });
-    cols.push({
-      headerName: "Изменён",
-      field: "Modified",
-      width: 130,
-      sortable: true,
-      valueFormatter: (p) => formatDate(p.value),
-    });
-    // Таблица #tasks — обзорная: поля результата здесь НЕ показываем
-    // (требование 2026-10-03). Результаты живут в карточках.
-    if (showSourceColumn || showDbg) {
-      cols.push({
-        headerName: "Источник",
-        valueGetter: (p) => p.data?.sourceLabel || p.data?.sourceId || "",
-        width: 130,
-        sortable: true,
-      });
-    }
-    return cols;
-  }, [showSourceColumn, showDbg]);
+  const columnDefs = useMemo(
+    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg }),
+    [showSourceColumn, showDbg],
+  );
 
   const defaultColDef = useMemo(() => ({
     resizable: true,
@@ -137,11 +63,31 @@ export default function TasksGrid({
 
   const getRowId = useMemo(() => (params) => params.data?.compositeId ?? String(params.data?.Id ?? Math.random()), []);
 
-  const onRowClicked = useMemo(() => (event) => {
-    if (typeof onRowClick !== "function") return;
+  const gridOptions = useMemo(() => ({
+    animateRows: false,
+    // Клик по строке — выделение (переход в форму отдельным действием).
+    rowSelection: { mode: "singleRow", enableClickSelection: true, checkboxes: false },
+    suppressMenuHide: true,
+  }), []);
+
+  const onSelectionChanged = useMemo(() => () => {
+    if (typeof onSelectRow !== "function") return;
+    const api = gridRef.current?.api;
+    const selected = api?.getSelectedNodes?.() || [];
+    onSelectRow(selected.length > 0 ? (selected[0].data?.compositeId ?? null) : null);
+  }, [onSelectRow]);
+
+  const onRowDoubleClicked = useMemo(() => (event) => {
+    if (typeof onRowOpen !== "function") return;
     const id = event?.data?.compositeId;
-    if (id) onRowClick(id);
-  }, [onRowClick]);
+    if (id) onRowOpen(id);
+  }, [onRowOpen]);
+
+  // При смене данных выделение живёт в AG Grid; если строк больше нет — сбрасываем.
+  useEffect(() => {
+    if (rows.length > 0) return;
+    if (typeof onSelectRow === "function") onSelectRow(null);
+  }, [rows.length, onSelectRow]);
 
   if (loading && rows.length === 0) {
     return (
@@ -177,14 +123,15 @@ export default function TasksGrid({
       }}
     >
       <AgGridReact
+        ref={gridRef}
         theme={themeQuartz}
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}
         getRowId={getRowId}
-        onRowClicked={onRowClicked}
-        rowSelection={undefined}
-        animateRows={false}
+        gridOptions={gridOptions}
+        onSelectionChanged={onSelectionChanged}
+        onRowDoubleClicked={onRowDoubleClicked}
         suppressCellFocus
         domLayout="autoHeight"
       />

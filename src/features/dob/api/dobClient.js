@@ -45,8 +45,10 @@ export async function getDobDigest() {
   return value;
 }
 
-export function dobListApi() {
-  return `${dobApiBase()}/web/lists(guid'${DOB_LIST_GUID}')`;
+// listGuid позволяет открывать форму/читать элементы не только списка заявок
+// (DOB_LIST_GUID), но и, например, списка задач ООБ (RequestsTask, 03FC1B92-…).
+export function dobListApi(listGuid = DOB_LIST_GUID) {
+  return `${dobApiBase()}/web/lists(guid'${listGuid}')`;
 }
 
 // Raw axios instance for DOB (no global base, no cache interceptor)

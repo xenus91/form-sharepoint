@@ -1492,6 +1492,12 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         }
       }
     }
+    // list=<guid> — какой список открывать в форме (#dob_tasks/<id>?list=<guid>).
+    // Нужно, чтобы из #tasks открыть задачу источника (например, RequestsTask ООБ),
+    // а не заявку из списка раздела «Заявки ДОБ».
+    let elementListGuid = null;
+    const mList = raw.match(/[?&#]list=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
+    if (mList) elementListGuid = mList[1];
     // SearchResult для имитации первого нажатия Найдена/Не найдена
     const mSearch = low.match(/searchresult\s*=\s*([a-z_]+)/);
     if (mSearch) {
@@ -1509,12 +1515,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       else elementAction = v;
     } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
     else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
-    return { view, elementId, elementAction };
+    return { view, elementId, elementAction, elementListGuid };
   };
   const getViewFromHash = () => parseHash().view;
   const [currentView, setCurrentView] = useState(() => getViewFromHash());
   const [hashElementId, setHashElementId] = useState(() => parseHash().elementId);
   const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
+  const [hashElementListGuid, setHashElementListGuid] = useState(() => parseHash().elementListGuid);
   const [tasksActiveCount, setTasksActiveCount] = useState(0);
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
@@ -1527,6 +1534,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setCurrentView(p.view);
       setHashElementId(p.elementId);
       setHashElementAction(p.elementAction);
+      setHashElementListGuid(p.elementListGuid);
     };
     window.addEventListener("hashchange", onHash);
     onHash();
@@ -1540,7 +1548,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       return;
     }
     if (currentView === "dob" && parsed.elementId) {
-      const want = `${desired}/${parsed.elementId}`;
+      const want = `${desired}/${parsed.elementId}` + (parsed.elementListGuid ? `?list=${parsed.elementListGuid}` : "");
       if (!window.location.hash.toLowerCase().startsWith(want.toLowerCase())) {
         window.location.hash = want;
       }
@@ -1803,7 +1811,12 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: { xs: 'auto', md: 'calc(100vh - 0px)' }, overflowX: 'hidden' }}>
           <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
             {isDobEdit
-              ? <DobTaskEditView id={String(hashElementId)} onOpenMenu={() => setDrawerOpen(true)} />
+              ? <DobTaskEditView
+                  id={String(hashElementId)}
+                  listGuid={hashElementListGuid || undefined}
+                  onBackHash={hashElementListGuid ? "#tasks" : "#dob_tasks"}
+                  onOpenMenu={() => setDrawerOpen(true)}
+                />
               : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} />}
           </React.Suspense>
         </Box>
