@@ -3,6 +3,11 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { ThemeProvider, createTheme } from "@mui/material";
 import CardsScene from "./CardsScene";
+import TableScene from "./TableScene";
+
+// ?scene=table — предпросмотр табличного режима #tasks (закреплённая шапка,
+// фильтры, сортировка) на мок-данных; по умолчанию — карточки.
+const scene = new URLSearchParams(window.location.search).get("scene");
 
 const theme = createTheme({
   palette: {
@@ -20,6 +25,6 @@ const theme = createTheme({
 
 createRoot(document.getElementById("root")).render(
   <ThemeProvider theme={theme}>
-    <CardsScene />
+    {scene === "table" ? <TableScene /> : <CardsScene />}
   </ThemeProvider>
 );
