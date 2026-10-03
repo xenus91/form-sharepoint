@@ -24,6 +24,8 @@ import { useFieldsForSource } from "./useFieldsForSource";
  *   enabled?: boolean,
  *   staleTimeMs?: number,
  *   refetchIntervalMs?: number,
+ *   sitePrincipalIds?: {[sourceId:string]:{userId:number|null, principalIds:number[], ok:boolean}}
+ *     — предварительно резолвленные per-source ID (см. useEnrichDistributionForSources)
  * }} opts
  * @returns {import('@tanstack/react-query').UseQueryResult<{items:Array, errors:Array, perSourceStats:object}>}
  */
@@ -37,6 +39,7 @@ export function useTasksForSources({
   enabled = true,
   staleTimeMs = 5 * 60_000,
   refetchIntervalMs = 5 * 60_000,
+  sitePrincipalIds = null,
 }) {
   const enabledSources = (sources || []).filter((s) => s && s.enabled !== false);
   const sourceIds = enabledSources.map((s) => s.id).join("+") || "none";
@@ -107,6 +110,7 @@ export function useTasksForSources({
       scNumberField,
       resultFieldInternalNames,
       sourceFieldsById,
+      sitePrincipalIds,
     }),
     enabled: fetchEnabled,
     staleTime: staleTimeMs,

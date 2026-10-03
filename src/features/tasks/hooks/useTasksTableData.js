@@ -5,6 +5,7 @@
 import { useMemo } from "react";
 import { useTasksSources } from "./useTasksSources";
 import { useTasksForSources } from "../../../tasks/useTasksForSources";
+import { useEnrichDistributionForSources } from "../../../tasks/enrichDistributionForSources";
 
 /**
  * @param {{
@@ -45,6 +46,12 @@ export function useTasksTableData(opts = {}) {
     }
   } catch (_e) { void _e; }
 
+  // Предварительная резолвация ID групп/пользователей на каждом сайте.
+  // Параллельно с /fields — не блокирует tasks fetch.
+  const siteIdsQuery = useEnrichDistributionForSources(sources, distribution, {
+    enabled: enabled && !!distribution && sources.length > 0,
+  });
+
   const query = useTasksForSources({
     sources,
     distribution,
@@ -53,6 +60,7 @@ export function useTasksTableData(opts = {}) {
     scNumberField,
     resultFieldInternalNames,
     enabled,
+    sitePrincipalIds: siteIdsQuery.data,
   });
 
   const filtered = useMemo(() => {
@@ -65,6 +73,7 @@ export function useTasksTableData(opts = {}) {
     rows: filtered,
     errors: query.data?.errors || [],
     perSourceStats: query.data?.perSourceStats || {},
+    sitePrincipalIds: siteIdsQuery.data || {},
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error || null,

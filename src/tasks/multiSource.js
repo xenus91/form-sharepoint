@@ -76,6 +76,11 @@ export function mergeSort(items, orderByField = "Modified", dir = "desc") {
  *   distribution?: any,
  *   currentUserId?: number|null,
  *   assignedIds?: number[]|null,
+ *   sourceFieldsById?: {[sourceId:string]:string[]}    — per-source fields
+ *   sitePrincipalIds?: {[sourceId:string]:{userId:number|null, principalIds:number[], ok:boolean}}
+ *     — per-source identity, предварительно резолвлено
+ *     (useEnrichDistributionForSources). Если передано — используется
+ *     вместо resolveSourceIdentity() на лету.
  * }} opts
  * @returns {Promise<{items:Array<any>, errors:Array<{sourceId:string,status:number|string,message:string}>, perSourceStats:object}>}
  */
@@ -94,11 +99,28 @@ export async function fetchTasksMultiSource(opts) {
     return { items: [], errors, perSourceStats };
   }
 
-  // Шаг 1: per-source resolve identity (параллельно, source-независимо)
+  // Шаг 1: per-source resolve identity. Используем opts.sitePrincipalIds если есть
+  // (предварительно резолвлено через useEnrichDistributionForSources), иначе —
+  // резолвим на лету через resolveSourceIdentity().
+  const preResolved = opts.sitePrincipalIds || {};
+
   const identityTasks = sources.map(async (source) => {
-    const id = await resolveSourceIdentity(source, principals);
-    perSourceStats[source.id] = { identity: id };
-    return { source, id };
+    if (preResolved[source.id]) {
+      const r = preResolved[source.id];
+      // Приводим к формату resolveSourceIdentity
+      const identity = {
+        userId: r.userId,
+        principalIds: r.principalIds || [],
+        unresolved: r.unresolved || [],
+        ok: !!r.ok,
+        reason: r.reason || null,
+      };
+      perSourceStats[source.id] = { identity };
+      return { source, identity };
+    }
+    const identity = await resolveSourceIdentity(source, principals);
+    perSourceStats[source.id] = { identity };
+    return { source, identity };
   });
   const identityResults = await Promise.allSettled(identityTasks);
 
@@ -109,7 +131,7 @@ export async function fetchTasksMultiSource(opts) {
       const reason = ident.reason;
       throw { sourceId: source.id, status: reason?.response?.status || "identity-rejected", message: String(reason?.message || reason) };
     }
-    const identity = ident.value.id;
+    const identity = ident.value.identity;
     const client = makeSourceClient(source);
     const assignedIds = identity?.principalIds?.length
       ? [...new Set([...(identity.principalIds || []), identity.userId].filter(Number.isFinite))]
