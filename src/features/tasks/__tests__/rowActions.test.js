@@ -203,4 +203,19 @@ describe("buildRowActions — паритет с карточкой", () => {
       expect(actions.filter((a) => a.key === "edit")).toHaveLength(1);
     }
   });
+
+  it("resolveEditor: кнопка результата получает инлайн-форму для поповера", () => {
+    const row = { sourceId: "main", Id: 5, Status: "В работе", compositeId: "main:5" };
+    const editor = { result: "Найдена", fields: [{ internalName: "Location1", title: "Местоположение", required: false }] };
+    const [found] = buildRowActions(row, {
+      choices: ["Найдена"],
+      resolveEditor: (choice) => (choice === "Найдена" ? editor : null),
+      onResult: () => {},
+    });
+    expect(found.key).toBe("result:Найдена");
+    expect(found.editor).toBe(editor);
+    // если форма не нужна — editor null, клик идёт обычным путём
+    const [plain] = buildRowActions(row, { choices: ["Найдена"], resolveEditor: () => null, onResult: () => {} });
+    expect(plain.editor).toBeNull();
+  });
 });

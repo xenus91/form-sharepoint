@@ -47,7 +47,7 @@ import { useDepartment } from "./features/nav/useDepartment";
 import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import { openTaskForm } from "./features/tasks/lib/openTaskForm";
-import { buildRowActions } from "./features/tasks/lib/rowActions";
+import { buildRowActions, stylingToSx } from "./features/tasks/lib/rowActions";
 import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
@@ -258,6 +258,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // true — показывать, false — скрыть (правило есть, aa не включён),
   // undefined — правила нет вовсе (legacy: решают определения результатов).
   const [pendingShowAdditionalActions, setPendingShowAdditionalActions] = useState(undefined);
+  // Значения инлайн-формы (поповер таблицы), если у результата ещё и Behaviour.c:
+  // подтверждаем ПОСЛЕ формы и завершаем задачу уже с этими значениями.
+  const [pendingInlineSubmit, setPendingInlineSubmit] = useState(null);
   // Выделенная строка таблицы (compositeId). Клик по строке только выделяет,
   // переход в форму — кнопкой «Изменить» или двойным кликом (как в «Заявки ДОБ»).
   const [selectedTableRow, setSelectedTableRow] = useState(null);
@@ -488,16 +491,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // ⭐ Поток результата определяется ТОЛЬКО Behaviour (см. docs/feature-taskbehaviour.md).
   // Нет правил для задачи/результата — задача завершается сразу по нажатию кнопки:
   // никаких диалогов «Где найдена ЕО?» и подтверждений, никаких строковых хардкодов.
-  const handleResultClick = useCallback((task, resultValue, opts = {}) => {
+  const handleResultClick = useCallback((task, resultValue) => {
     const rule = resolveTaskRule(task, resultValue, taskConfiguration.data);
-    const flow = resolveResultFlow(resultValue, rule, opts);
+    const flow = resolveResultFlow(resultValue, rule);
     if (__DBG_ENABLED__) {
       __dlog("[TasksView:resultClick]", {
         taskId: task?.Id,
         result: resultValue,
         ct: String(task?.contentTypeId || task?.ContentTypeId || "").slice(-12),
         rule: rule ? { source: rule.source, c: rule.requiresConfirmed, loc: rule.requiresLocation, p: rule.promptFields?.length || 0 } : null,
-        fromTable: opts.fromTable === true,
         flow,
       });
     }
@@ -520,6 +522,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       // aa правила решает, показывать ли в диалоге блок доп. действий (как в карточке:
       // показываем ТОЛЬКО при aa: true; если правила нет — legacy-определения результатов)
       setPendingShowAdditionalActions(rule ? rule.showAdditionalActions === true : undefined);
+      setPendingInlineSubmit(null);
       setLocationComment("");
       {
         const ctIdForPending = String(task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "").trim();
@@ -548,17 +551,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       return;
     }
 
-    // Таблица: результат требует полей карточки (кроме местоположения) — не пишем «молча»,
-    // открываем карточку задачи, чтобы пользователь заполнил поле и нажал кнопку там.
-    if (flow.action === "open-card") {
-      notify(`Результат «${resultValue}» заполняется в карточке задачи #${task.Id}`, { severity: "info" });
-      openTaskForm(task?.compositeId, tableData.sources);
-      return;
-    }
-
     // complete: без доп. действий (анимация — если задана в Behaviour.anim)
     runAfterAnimation(() => completeTask(task, resultValue, {}, "", []));
-  }, [fieldDefaultActions, taskConfiguration.data, completeTask, notify, tableData.sources]);
+  }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
   // ── Действия по строке таблицы ─────────────────────────────────────────────
   // Набор действий повторяет КАРТОЧКУ задачи (те же кнопки для того же статуса и
@@ -662,6 +657,86 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return renderStylingIcon(resolveStylingIcon("takeInWork", tb.stylingActions.value), React.createElement);
   }, [rowTaskBehaviour]);
 
+  // Вид/иконка кнопки действия из Behaviour.stylingActions (promptSubmit, confirm, cancel…).
+  const resolveRowActionStyling = useCallback((row, key) => {
+    const tb = rowTaskBehaviour(row);
+    if (!tb?.stylingActions?.ok) return null;
+    return resolveStylingForChoice(key, tb.stylingActions.value);
+  }, [rowTaskBehaviour]);
+
+  const resolveRowActionIcon = useCallback((row, key) => {
+    const tb = rowTaskBehaviour(row);
+    if (!tb?.stylingActions?.ok) return null;
+    return renderStylingIcon(resolveStylingIcon(key, tb.stylingActions.value), React.createElement);
+  }, [rowTaskBehaviour]);
+
+  // Отправка инлайн-формы из поповера таблицы. Полностью повторяет карточку:
+  //   • нет Behaviour.c  → сразу completeTask со значениями формы;
+  //   • есть Behaviour.c → сначала диалог подтверждения (как TaskConfirmNotFoundDialog
+  //     в карточке), и только после него completeTask — но уже со значениями формы.
+  const submitInlineResult = useCallback((row, choice, rule, values, req, acts) => {
+    if (rule?.requiresConfirmed === true) {
+      setPendingInlineSubmit({ values, req, acts });
+      setPendingTask(row);
+      setPendingResult(choice);
+      setConfirmNotFoundOpen(true);
+      return;
+    }
+    completeTask(row, choice, values, req, acts);
+  }, [completeTask]);
+
+  /**
+   * Описание инлайн-формы результата для поповера таблицы — 1:1 с карточкой:
+   * prompt-поля, доп. действия, кнопки и подписи из Behaviour.
+   * Возвращает null, если результат не требует формы/подтверждения в месте
+   * (тогда работает обычный поток: диалог местоположения / подтверждения / запись).
+   */
+  const buildResultEditor = useCallback((row, choice) => {
+    const tb = rowTaskBehaviour(row);
+    const rule = tb?.behaviour?.ok ? resolveBehaviour(choice, tb.behaviour.value) : null;
+    if (!rule || rule.source === "empty") return null;
+    const fields = Array.isArray(rule.promptFields) ? rule.promptFields : [];
+    const showAA = rule.showAdditionalActions === true;
+    // ic без полей/AA → две кнопки ok/no (как в карточке); с полями ic лишь подписывает submit
+    const icMode = rule.inlineConfirm === true && fields.length === 0 && !showAA;
+    if (fields.length === 0 && !showAA && !icMode) return null; // loc / c / прямое завершение
+
+    const ctId = String(row?.contentTypeId || row?.ContentTypeId || row?.raw?.ContentTypeId?.StringValue || "").trim();
+    const ctCfg = taskConfiguration?.data?.ctConfigMap?.get(ctId) || taskConfiguration?.data?.ctConfigMap?.get("__default") || null;
+    const choiceStyling = resolveRowChoiceStyling(row, choice);
+    const key = (name) => ({ sx: resolveRowActionStyling(row, name) || null, icon: resolveRowActionIcon(row, name) || null });
+
+    return {
+      result: choice,
+      fields: fields.map((f) => ({
+        internalName: f.internalName,
+        title: f.title || f.internalName,
+        type: f.type || "text",
+        required: f.required === true,
+      })),
+      showAdditionalActions: showAA,
+      aaFieldInternalName: ctCfg?.additionalActionsField?.internalName || "AdditionalActions",
+      aaChoices: ctCfg?.additionalActionsField?.choices || ADDITIONAL_ACTIONS_STANDARD,
+      aaAllowFillIn: ctCfg?.additionalActionsField?.allowFillIn ?? true,
+      aaInitial: Array.isArray(row?.AdditionalActions) && row.AdditionalActions.length > 0
+        ? [...row.AdditionalActions]
+        : (Array.isArray(fieldDefaultActions) ? [...fieldDefaultActions] : []),
+      icMode,
+      okLabel: rule.confirmTexts?.okText || "",
+      noLabel: rule.confirmTexts?.cancelText || "Отмена",
+      // ic-режим: база кнопки — цвет самой кнопки результата (как в карточке)
+      baseSubmitSx: icMode && choiceStyling ? stylingToSx(choiceStyling) : null,
+      submitSx: (icMode ? key("confirm") : key("promptSubmit")).sx,
+      submitIcon: (icMode ? key("confirm") : key("promptSubmit")).icon,
+      cancelSx: (icMode ? key("cancel") : key("promptCancel")).sx,
+      cancelIcon: (icMode ? key("cancel") : key("promptCancel")).icon,
+      onSubmit: (values, req, acts) => submitInlineResult(row, choice, rule, values, req, acts),
+    };
+  }, [
+    rowTaskBehaviour, taskConfiguration?.data, fieldDefaultActions, resolveRowChoiceStyling,
+    resolveRowActionStyling, resolveRowActionIcon, submitInlineResult,
+  ]);
+
   // Задачу уже взял кто-то другой (та же проверка, что в TaskCard).
   const isRowTakenByOther = useCallback((row) => {
     if (!currentUserId && !currentUserTitle) return false;
@@ -696,7 +771,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       takeStyling: resolveRowTakeStyling(row),
       takeIcon: () => resolveRowTakeIcon(row),
       onTake: () => handleTakeTableRow(row),
-      onResult: (choice) => handleResultClick(row, choice, { fromTable: true }),
+      onResult: (choice) => handleResultClick(row, choice),
+      resolveEditor: (choice) => buildResultEditor(row, choice),
       onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
     });
     if (__DBG_ENABLED__) {
@@ -711,7 +787,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [
     canTakeTableRow, externalTakingId, updatingId, isRowTakenByOther, choicesForRow,
     resolveRowChoiceStyling, resolveRowChoiceIcon, resolveRowTakeStyling, resolveRowTakeIcon,
-    handleTakeTableRow, handleResultClick, tableData.sources,
+    buildResultEditor, handleTakeTableRow, handleResultClick, tableData.sources,
   ]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
@@ -1002,7 +1078,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         pendingResult={pendingResult}
         updatingId={updatingId}
         confirmTexts={confirmTextsForPending}
-        onConfirm={(task, result) => completeTask(task, result, {}, "", [])}
+        onConfirm={(task, result) => {
+          // p + c: значения собирает инлайн-форма (карточка/поповер), подтверждение — здесь
+          const pending = pendingInlineSubmit;
+          setPendingInlineSubmit(null);
+          completeTask(task, result, pending?.values || {}, pending?.req ?? null, pending?.acts || []);
+        }}
       />
 
     </Box>

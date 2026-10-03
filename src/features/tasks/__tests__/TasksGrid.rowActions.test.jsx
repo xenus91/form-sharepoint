@@ -269,4 +269,98 @@ describe("TasksGrid — действия в точке клика", () => {
     });
     expect(onRowOpen).toHaveBeenCalledWith("dob:1");
   });
+
+  it("результат с полями показывает инлайн-форму В ПОПОВЕРЕ (как карточка), без завершения сразу", async () => {
+    const onResult = vi.fn();
+    const onSubmit = vi.fn();
+    const { host } = renderGrid({
+      getRowActions: (row) => [{
+        key: "result:Найдена",
+        label: "Найдена",
+        icon: "result",
+        variant: "contained",
+        sx: { background: "linear-gradient(180deg,#2e7d32,#1b5e20)", color: "#fff" },
+        onClick: () => onResult("Найдена"),
+        editor: {
+          result: "Найдена",
+          fields: [{ internalName: "Location1", title: "Местоположение", type: "multiline", required: false }],
+          showAdditionalActions: false,
+          icMode: false,
+          noLabel: "Отмена",
+          onSubmit,
+        },
+      }],
+    });
+    await settle(400);
+    await clickCell(rowByText(host, /Заявка ООБ/), 210, 320);
+
+    // в списке действий — кнопка результата
+    expect(popupButtons().map((b) => b.textContent)).toEqual(["Найдена"]);
+    await act(async () => {
+      popupButtons()[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
+    });
+
+    // попап НЕ закрылся и завершения не было: открылась форма
+    expect(onResult).not.toHaveBeenCalled();
+    const editor = document.body.querySelector('[data-testid="tasks-row-result-editor"]');
+    expect(editor).toBeTruthy();
+    const area = editor.querySelector("textarea");
+    expect(area).toBeTruthy();
+    expect(editor.textContent).toContain("Сохранить — Найдена");
+    expect(editor.textContent).toContain("Отмена");
+
+    // заполняем и сохраняем — onSubmit получает значения формы
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(area, "Зона отгрузки");
+      area.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 120));
+    });
+    const save = [...editor.querySelectorAll("button")].find((b) => /Сохранить/.test(b.textContent || ""));
+    await act(async () => {
+      save.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ Location1: "Зона отгрузки" });
+    // форма закрылась вместе с попапом, «слепого» onResult нет
+    expect(document.body.querySelector('[data-testid="tasks-row-result-editor"]')).toBeFalsy();
+    expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it("«Отмена» в инлайн-форме возвращает список действий строки", async () => {
+    const onResult = vi.fn();
+    const { host } = renderGrid({
+      getRowActions: () => [{
+        key: "result:Найдена",
+        label: "Найдена",
+        icon: "result",
+        onClick: () => onResult("Найдена"),
+        editor: {
+          result: "Найдена",
+          fields: [{ internalName: "Location1", title: "Местоположение", type: "text", required: false }],
+          icMode: false,
+          noLabel: "Отмена",
+          onSubmit: vi.fn(),
+        },
+      }],
+    });
+    await settle(400);
+    await clickCell(rowByText(host, /Заявка ООБ/), 200, 300);
+    await act(async () => {
+      popupButtons()[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    const editor = document.body.querySelector('[data-testid="tasks-row-result-editor"]');
+    const cancel = [...editor.querySelectorAll("button")].find((b) => b.textContent.trim() === "Отмена");
+    await act(async () => {
+      cancel.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    // форма закрылась, снова виден список действий, ничего не отправлено
+    expect(document.body.querySelector('[data-testid="tasks-row-result-editor"]')).toBeFalsy();
+    expect(popupButtons().map((b) => b.textContent)).toEqual(["Найдена"]);
+    expect(onResult).not.toHaveBeenCalled();
+  });
 });

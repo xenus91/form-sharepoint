@@ -86,6 +86,7 @@ export function primaryActionSx(styling, fallback = DEFAULT_TAKE_SX) {
  * @property {boolean} [disabled]
  * @property {object} [sx]
  * @property {boolean} [sticky] — закреплённая строка меню (не скроллится со списком)
+ * @property {object|null} [editor] — инлайн-форма результата (поля/AA/подтверждение)
  * @property {Function} [onClick]
  */
 
@@ -106,6 +107,9 @@ export function primaryActionSx(styling, fallback = DEFAULT_TAKE_SX) {
  * @param {() => any} [opts.takeIcon] — иконка кнопки «Взять в работу»
  * @param {Function} [opts.onTake]
  * @param {(choice:string) => void} [opts.onResult]
+ * @param {(choice:string) => object|null} [opts.resolveEditor] — инлайн-форма результата
+ *   (поля/подтверждение) для поповера: если вернула описание, клик открывает форму В ПОПОВЕРЕ,
+ *   как в карточке, а не завершает задачу сразу
  * @param {Function} [opts.onEdit]
  * @returns {RowAction[]}
  */
@@ -125,6 +129,7 @@ export function buildRowActions(row, opts = {}) {
     onTake,
     onResult,
     onEdit,
+    resolveEditor = null,
   } = opts;
 
   const takeAction = (disabled) => ({
@@ -174,6 +179,7 @@ export function buildRowActions(row, opts = {}) {
       for (const choice of choices) {
         const styling = resolveStyling ? resolveStyling(choice) : null;
         const variant = styling?.variant || "contained";
+        const editor = resolveEditor ? resolveEditor(choice) : null;
         actions.push({
           key: `result:${choice}`,
           label: choice,
@@ -182,6 +188,8 @@ export function buildRowActions(row, opts = {}) {
           variant,
           disabled: updating,
           sx: resultActionSx(styling, variant),
+          // есть инлайн-форма → попап покажет её (поля/подтверждение как в карточке)
+          editor: editor || null,
           onClick: () => onResult?.(choice),
         });
       }

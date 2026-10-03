@@ -34,6 +34,7 @@ import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
+import ResultInlineEditor from "./ResultInlineEditor";
 
 // Регистрируем все community-модули AG Grid (иначе AG Grid error #272
 // "No AG Grid modules are registered" при первом рендере таблицы).
@@ -60,6 +61,11 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
   const list = Array.isArray(actions) ? actions : [];
   const sticky = list.filter((a) => a.sticky);
   const scrollable = list.filter((a) => !a.sticky);
+  // Инлайн-форма результата прямо в поповере: ровно то же, что карточка показывает у себя
+  // (prompt-поля, доп. действия, «Сохранить — X» / ok-no). Никаких диалогов и переходов.
+  const [editorAction, setEditorAction] = useState(null);
+  const closeAll = () => { setEditorAction(null); onClose?.(); };
+  useEffect(() => { if (!open) setEditorAction(null); }, [open]);
 
   /** Кнопка действия или информационная плашка (без обработчика). */
   const renderAction = (action) => (action.kind === "info" ? (
@@ -95,7 +101,12 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
       onClick={(event) => {
         event.stopPropagation();
         event.preventDefault();
-        onClose?.();
+        if (action.editor) {
+          // как в карточке: клик по результату с полями/подтверждением открывает форму
+          setEditorAction(action);
+          return;
+        }
+        closeAll();
         action.onClick?.();
       }}
       sx={{
@@ -118,7 +129,7 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
       open={!!open && !!anchorPosition && !!row}
       anchorReference="anchorPosition"
       anchorPosition={anchorPosition || undefined}
-      onClose={onClose}
+      onClose={closeAll}
       marginThreshold={12}
       disableAutoFocus
       disableRestoreFocus
@@ -156,19 +167,34 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
         </Typography>
       </Box>
       <Divider sx={{ mb: 0.5 }} />
-      {/* Прокручиваемая часть: кнопок результата может быть много — меню не должно
-          вылезать за экран. «Изменить» (sticky) закреплена ниже и видна всегда. */}
-      <Stack
-        spacing={0.5}
-        data-testid="tasks-row-actions-list"
-        sx={{ maxHeight: "min(52vh, 380px)", overflowY: "auto", overflowX: "hidden", pr: scrollable.length > 0 ? 0.25 : 0 }}
-      >
-        {scrollable.map((action) => renderAction(action))}
-      </Stack>
-      {sticky.length > 0 && (
+      {editorAction?.editor ? (
+        // Форма результата — та же, что в карточке: поля, доп. действия, «Сохранить»/«Отмена»
+        <ResultInlineEditor
+          {...editorAction.editor}
+          onCancel={() => setEditorAction(null)}
+          onSubmit={(values, req, acts) => {
+            const submit = editorAction.editor?.onSubmit;
+            closeAll();
+            submit?.(values, req, acts);
+          }}
+        />
+      ) : (
         <>
-          <Divider sx={{ my: 0.5 }} />
-          {sticky.map((action) => renderAction(action))}
+          {/* Прокручиваемая часть: кнопок результата может быть много — меню не должно
+              вылезать за экран. «Изменить» (sticky) закреплена ниже и видна всегда. */}
+          <Stack
+            spacing={0.5}
+            data-testid="tasks-row-actions-list"
+            sx={{ maxHeight: "min(52vh, 380px)", overflowY: "auto", overflowX: "hidden", pr: scrollable.length > 0 ? 0.25 : 0 }}
+          >
+            {scrollable.map((action) => renderAction(action))}
+          </Stack>
+          {sticky.length > 0 && (
+            <>
+              <Divider sx={{ my: 0.5 }} />
+              {sticky.map((action) => renderAction(action))}
+            </>
+          )}
         </>
       )}
     </Popover>

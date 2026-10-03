@@ -682,10 +682,9 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(window.location.hash).toBe("#tasks/10");
   }, 30000);
 
-  it("результат с полем и подтверждением (p + c) открывает карточку, а не пишется «молча»", async () => {
-    // Поля карточки (кроме одиночного Location1) и обязательное подтверждение диалог
-    // местоположения воспроизвести не может — результат не пишем, а открываем карточку
-    // тем же роутом, что и «Изменить»: пользователь заполнит поля и подтвердит там.
+  it("таблица: результат с полем и подтверждением (p + c) — форма В ПОПОВЕРЕ, затем диалог подтверждения", async () => {
+    // Как в карточке: клик по результату открывает форму (поле из Behaviour.p) прямо в месте,
+    // «Сохранить» → диалог подтверждения (Behaviour.c) → и только потом запись результата.
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -701,22 +700,49 @@ describe("TasksView — multi-source (#tasks)", () => {
       await new Promise((r) => setTimeout(r, 250));
     });
 
-    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
-    const buttons = [...(popup?.querySelectorAll("button") || [])].map((b) => b.textContent);
-    expect(buttons).toContain("Не исправлено");
-
-    const hashBefore = window.location.hash;
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')]
+      .filter((el) => el.style.opacity !== "0" && /#11\b/.test(el.textContent || "")).pop();
+    expect(popup).toBeTruthy();
     const notFixed = [...popup.querySelectorAll("button")].find((b) => /Не исправлено/.test(b.textContent || ""));
-    await act(async () => {
-      notFixed.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 300));
-    });
-    await settle(600);
+    expect(notFixed).toBeTruthy();
 
-    // Никакой «слепой» записи: открылась карточка задачи (роут как у «Изменить»)
-    expect(window.location.hash).not.toBe(hashBefore);
-    expect(window.location.hash).toBe("#tasks/11");
+    await act(async () => { mouseClick(notFixed); await wait200(); });
+
+    // никакого «слепого» завершения: открылась форма с полем из Behaviour.p
     expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultOOB === "Не исправлено")).toBe(false);
+    const editor = document.body.querySelector('[data-testid="tasks-row-result-editor"]');
+    expect(editor).toBeTruthy();
+    expect(editor.textContent).toContain("Где найдено");
+    const area = editor.querySelector("textarea, input");
+    expect(area).toBeTruthy();
+    await act(async () => {
+      const proto = area.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+      setter.call(area, "Зона отгрузки, ряд 5");
+      area.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await wait200();
+    });
+
+    const save = [...editor.querySelectorAll("button")].find((b) => /Сохранить/.test(b.textContent || ""));
+    await act(async () => { mouseClick(save); await wait200(); });
+
+    // форма ушла, но запись ещё не сделана: сначала подтверждение (c: true)
+    expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultOOB === "Не исправлено")).toBe(false);
+    const confirmDialog = [...document.querySelectorAll('.MuiDialog-root, [role="dialog"]')]
+      .filter((d) => /Вы уверены/.test(d.textContent || "")).pop();
+    expect(confirmDialog).toBeTruthy();
+    const confirmBtn = [...confirmDialog.querySelectorAll("button")]
+      .find((b) => /Подтвердить/.test(b.textContent || ""));
+    await act(async () => { mouseClick(confirmBtn); await wait200(); });
+    await settle(900);
+
+    // MERGE: результат + значение поля, собранное формой
+    const write = state.requests
+      .filter((r) => r.source === "main" && r.merge && r.body && r.body.ResultOOB === "Не исправлено")
+      .pop();
+    expect(write).toBeTruthy();
+    expect(write.url).toContain("items(11)");
+    expect(String(write.body.Location1 || "")).toContain("Зона отгрузки");
   }, 40000);
 
   it("для main-задачи «в работе» попап даёт кнопки результатов — как карточка", async () => {
@@ -837,10 +863,9 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(write.url).toContain("items(12)");
   }, 40000);
 
-  it("таблица + конфиг инлайном (p:[Location1], без aa): местоположение запрашивается, БД не пишется «молча»", async () => {
-    // 1:1 настройка пользователя: у результата «Найдена» нет loc — только prompt-поле
-    // Location1 и подпись кнопки из ok. Раньше таблица завершала задачу сразу (и падала
-    // на Boolean-колонке); теперь должен открыться диалог «Где найдена ЕО?».
+  it("таблица + конфиг инлайном (p:[Location1], без aa): форма в поповере, как в карточке, без диалогов", async () => {
+    // 1:1 настройка пользователя: у «Найдена» нет loc — только prompt-поле Location1
+    // и подпись кнопки. Поведение обязано совпадать с карточкой: форма в месте, без диалога.
     state.behaviourOverride = JSON.stringify({
       _default: { rf: [{ f: "THU", ti: "ЕО" }, { f: "Recipient/SCNumberText", ti: "Получатель" }] },
       "Найдена": {
@@ -868,48 +893,45 @@ describe("TasksView — multi-source (#tasks)", () => {
       await new Promise((r) => setTimeout(r, 250));
     });
 
-    // jsdom оставляет попапы прошлых тестов — берём видимый и именно по нашей строке (#12)
     const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')]
       .filter((el) => el.style.opacity !== "0" && /#12\b/.test(el.textContent || "")).pop();
     expect(popup).toBeTruthy();
     const found = [...popup.querySelectorAll("button")].find((b) => b.textContent.trim() === "Найдена");
     expect(found).toBeTruthy();
 
-    // jsdom не размонтирует закрытые модалки, поэтому ищем ИМЕННО новый диалог
-    const locationDialogs = () => [...document.querySelectorAll('.MuiDialog-root, [role="dialog"]')]
-      .filter((d) => /Где найдена ЕО/.test(d.textContent || ""));
+    // jsdom не размонтирует модалки прошлых тестов — считаем только НОВЫЕ диалоги
+    const dialogsBefore = new Set(document.querySelectorAll('.MuiDialog-root, [role="dialog"]'));
     await act(async () => { mouseClick(found); await wait200(); });
-    await settle(600);
 
-    // Никакой «молчаливой» записи: пока полей нет — запросов на запись быть не должно
+    // Никакой записи и НИКАКОГО диалога местоположения — форма прямо в поповере
     expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultSearchTHU === "Найдена")).toBe(false);
+    const newDialogs = [...document.querySelectorAll('.MuiDialog-root, [role="dialog"]')].filter((d) => !dialogsBefore.has(d));
+    expect(newDialogs).toHaveLength(0);
+    const editor = document.body.querySelector('[data-testid="tasks-row-result-editor"]');
+    expect(editor).toBeTruthy();
+    expect(editor.textContent).toContain("Местоположение");
+    // aa у результата нет → блока доп. действий нет
+    expect(editor.textContent).not.toMatch(/Дополнительные действия/);
 
-    // Диалог ищем по задаче #12: jsdom не размонтирует модалки прошлых тестов
-    const dialog = locationDialogs().filter((d) => /задачи #12/.test(d.textContent || "")).pop();
-    expect(dialog).toBeTruthy();
-    expect(dialog.textContent).toContain("Местоположение (Location1)");
-    // aa у результата нет → блока доп. действий в диалоге быть не должно
-    expect(dialog.textContent).not.toMatch(/Дополнительные действия/);
-
-    const area = dialog.querySelector("textarea");
+    const area = editor.querySelector("textarea");
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
       setter.call(area, "Зона отгрузки, стеллаж 3");
       area.dispatchEvent(new window.Event("input", { bubbles: true }));
       await wait200();
     });
-    const send = [...dialog.querySelectorAll("button")].find((b) => /Отправить/.test(b.textContent || ""));
-    await act(async () => { mouseClick(send); await wait200(); });
-    await settle(1200);
+    const save = [...editor.querySelectorAll("button")].find((b) => /Сохранить/.test(b.textContent || ""));
+    expect(save).toBeTruthy();
+    await act(async () => { mouseClick(save); await wait200(); });
+    await settle(900);
 
-    // MERGE: результат + Location1, и НИКАКИХ legacy-полей доп. действий (в Behaviour нет aa)
+    // MERGE: результат + Location1, без legacy-полей доп. действий (aa нет)
     const attempted = state.requests.filter((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Найдена");
     expect(attempted).toHaveLength(1);
-    const last = attempted[attempted.length - 1];
+    const last = attempted[0];
     expect(last.body.Location1).toContain("Зона отгрузки");
     expect("AdditionalsActionsRequired" in last.body).toBe(false);
     expect("AdditionalActions" in last.body).toBe(false);
-    expect("AdditionalActionsRequired" in last.body).toBe(false);
   }, 40000);
 
   it("таблица: «Найдена» в попапе открывает тот же диалог местоположения, что и карточка", async () => {

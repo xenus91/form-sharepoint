@@ -70,47 +70,6 @@ describe("resultFlow / Behaviour.ic", () => {
     expect(resolveResultFlow("Найдена", r)).toEqual({ action: "complete", reason: "behaviour.ic" });
   });
 
-  // ── Клик из ТАБЛИЦЫ (попап по строке) ───────────────────────────────────────
-  it("таблица + p:[Location1] → диалог местоположения (поля карточки собрать негде)", () => {
-    const r = rule('{"Найдена": { "ic": true, "p": [{ "f": "Location1", "ti": "Местоположение" }] }}', "Найдена");
-    expect(resolveResultFlow("Найдена", r, { fromTable: true })).toEqual({
-      action: "location",
-      reason: "behaviour.p.Location1",
-    });
-    // в карточке форма рисуется инлайн (поток не запускается), поэтому — complete
-    expect(resolveResultFlow("Найдена", r, {})).toEqual({ action: "complete", reason: "behaviour.ic" });
-    const onlyP = rule('{"Найдена": { "p": [{ "f": "Location1", "ti": "Местоположение" }] }}', "Найдена");
-    expect(resolveResultFlow("Найдена", onlyP, {})).toEqual({ action: "complete", reason: "behaviour-direct" });
-  });
-
-  it("таблица + другие prompt-поля, подтверждение или aa → открываем карточку, а не пишем «молча»", () => {
-    const byField = rule('{"X": { "p": [{ "f": "CommentResult", "ti": "Причина" }] }}', "X");
-    expect(resolveResultFlow("X", byField, { fromTable: true })).toEqual({
-      action: "open-card",
-      reason: "behaviour.needs-form",
-    });
-    const byAA = rule('{"X": { "aa": true }}', "X");
-    expect(resolveResultFlow("X", byAA, { fromTable: true })).toEqual({
-      action: "open-card",
-      reason: "behaviour.needs-form",
-    });
-    // одиночное поле Location1 + обязательное подтверждение (c) — тоже в карточку:
-    // диалог местоположения подтвердить результат не может
-    const locationAndConfirm = rule('{"X": { "p": [{ "f": "Location1" }], "c": true }}', "X");
-    expect(resolveResultFlow("X", locationAndConfirm, { fromTable: true })).toEqual({
-      action: "open-card",
-      reason: "behaviour.needs-form",
-    });
-  });
-
-  it("таблица + ic без полей → complete (подтверждения в таблице нет)", () => {
-    const r = rule('{"Не найдена": { "ic": true }}', "Не найдена");
-    expect(resolveResultFlow("Не найдена", r, { fromTable: true })).toEqual({
-      action: "complete",
-      reason: "behaviour.ic",
-    });
-  });
-
   it("без Behaviour — complete, без диалогов", () => {
     expect(resolveResultFlow("Не найдена", rule("{}", "Не найдена"))).toEqual({
       action: "complete",
