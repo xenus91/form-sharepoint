@@ -15,7 +15,7 @@ import { AgGridReact } from "ag-grid-react";
 import { useMemo, useRef, useEffect } from "react";
 import { Box, Typography } from "@mui/material";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
-import { buildTaskColumns } from "../lib/taskTableColumns";
+import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
 
 // Регистрируем все community-модули AG Grid (иначе AG Grid error #272
 // "No AG Grid modules are registered" при первом рендере таблицы).
@@ -56,10 +56,7 @@ export default function TasksGrid({
     [showSourceColumn, showDbg],
   );
 
-  const defaultColDef = useMemo(() => ({
-    resizable: true,
-    suppressMovable: true,
-  }), []);
+  const defaultColDef = useMemo(() => ({ ...TASK_GRID_DEFAULT_COL_DEF }), []);
 
   const getRowId = useMemo(() => (params) => params.data?.compositeId ?? String(params.data?.Id ?? Math.random()), []);
 
@@ -68,6 +65,12 @@ export default function TasksGrid({
     // Клик по строке — выделение (переход в форму отдельным действием).
     rowSelection: { mode: "singleRow", enableClickSelection: true, checkboxes: false },
     suppressMenuHide: true,
+    // Шапка (вместе со строкой фильтров) закреплена, строки скроллятся внутри
+    // грида: убираем autoHeight, иначе таблица растёт целиком и шапка уезжает
+    // вместе со скроллом страницы.
+    domLayout: "normal",
+    headerHeight: 44,
+    floatingFiltersHeight: 38,
   }), []);
 
   const onSelectionChanged = useMemo(() => () => {
@@ -111,6 +114,8 @@ export default function TasksGrid({
         height: "100%",
         minHeight: 320,
         width: "100%",
+        display: "flex",
+        flexDirection: "column",
         // Минимальные стили — основная тема в themeQuartz
         ["--ag-font-family"]: "Roboto, Arial, sans-serif",
         ["--ag-font-size"]: "13px",
@@ -133,7 +138,6 @@ export default function TasksGrid({
         onSelectionChanged={onSelectionChanged}
         onRowDoubleClicked={onRowDoubleClicked}
         suppressCellFocus
-        domLayout="autoHeight"
       />
     </Box>
   );

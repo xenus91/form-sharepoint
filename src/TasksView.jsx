@@ -682,7 +682,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               Изменить
             </Button>
           </Box>
-          <Box sx={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          {/* Скролл — внутри AG Grid (шапка с фильтрами закреплена), поэтому
+              внешний контейнер не скроллит. */}
+          <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <TasksGrid
               rows={tableData.rows}
               loading={tableData.isLoading}

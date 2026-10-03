@@ -251,6 +251,75 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.textContent).toContain("Описание задачи");
     expect(host.textContent.indexOf("Описание задачи")).toBeLessThan(host.textContent.indexOf("Статус"));
     expect(host.textContent).toContain("Просмотр видеоархива");
+
+    // ── шапка закреплена + фильтры/сортировка ──────────────────────────────
+    // domLayout=normal → строки скроллятся внутри грида, шапка остаётся на месте
+    expect(host.querySelector(".ag-layout-normal")).toBeTruthy();
+    expect(host.querySelector(".ag-layout-auto-height")).toBeNull();
+    // строка фильтров (floating filter) есть под каждым заголовком и входит в шапку
+    const floatInputs = host.querySelectorAll(".ag-header .ag-floating-filter-input");
+    expect(floatInputs.length).toBeGreaterThanOrEqual(8);
+
+    // фильтрация реально сужает список: «Основная» → только main-задача
+    const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
+    const rowsBefore = countRows();
+    expect(rowsBefore).toBe(3);
+    // колонки и их floating-фильтры — параллельные ряды шапки, сопоставляем по индексу
+    const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell:not(.ag-floating-filter)")];
+    const filterCells = [...host.querySelectorAll(".ag-header .ag-header-cell.ag-floating-filter")];
+    const titleIdx = headerCells.findIndex((h) => /Заголовок/.test(h.textContent || ""));
+    expect(titleIdx).toBeGreaterThanOrEqual(0);
+    expect(filterCells.length).toBe(headerCells.length);
+    const titleFilter = filterCells[titleIdx]?.querySelector("input");
+    expect(titleFilter).toBeTruthy();
+    expect(titleFilter.tagName).toBe("INPUT");
+
+    // ── сортировка по клику на заголовок ──────────────────────────────────
+    // AG Grid позиционирует строки абсолютно, поэтому порядок в DOM не равен
+    // визуальному: читаем строки центрального контейнера и сортируем по row-index.
+    const readTitles = () => [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .map((row) => ({
+        index: Number(row.getAttribute("row-index")),
+        title: (row.querySelector('.ag-cell[col-id="Title"]')?.textContent || "").trim(),
+      }))
+      .sort((a, b) => a.index - b.index)
+      .map((r) => r.title);
+    const titlesInitial = readTitles();
+    expect(titlesInitial.length).toBe(3);
+
+    // AG Grid вешает обработчик сортировки на .ag-header-cell-label внутри ячейки
+    const titleLabel = headerCells[titleIdx].querySelector(".ag-header-cell-label");
+    expect(titleLabel).toBeTruthy();
+    const clickHeader = async () => {
+      await act(async () => {
+        titleLabel.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+        await new Promise((r) => setTimeout(r, 400));
+      });
+      return readTitles();
+    };
+
+    // 1-й клик — по возрастанию, 2-й — по убыванию
+    const asc = await clickHeader();
+    expect(headerCells[titleIdx].getAttribute("aria-sort")).toBe("ascending");
+    expect([...asc]).toEqual([...titlesInitial].sort());
+
+    const desc = await clickHeader();
+    expect(headerCells[titleIdx].getAttribute("aria-sort")).toBe("descending");
+    expect([...desc]).toEqual([...titlesInitial].sort().reverse());
+    expect(desc).not.toEqual(asc);
+
+    // ввод в floating-фильтр применяется с дебаунсом; ставим value через нативный
+    // setter, иначе React value-tracker не увидит изменение
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      setter.call(titleFilter, "Основная");
+      titleFilter.dispatchEvent(new window.Event("input", { bubbles: true }));
+      titleFilter.dispatchEvent(new window.Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    const rowsAfter = countRows();
+    expect(rowsAfter).toBe(1);
+    expect(host.textContent).toContain("Основная задача ООБ");
     // в таблице нет ни колонки источника, ни бейджей «другого источника»
     expect(host.textContent).not.toContain("DOB Logistic");
     expect(host.textContent).not.toMatch(/другого (сайта|источника)/i);

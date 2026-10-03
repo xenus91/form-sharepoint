@@ -6,7 +6,7 @@
 //   • колонка источника — только в debug-режиме.
 
 import { describe, it, expect } from "vitest";
-import { buildTaskColumns, statusCellStyle } from "../../lib/taskTableColumns";
+import { buildTaskColumns, statusCellStyle, TASK_GRID_DEFAULT_COL_DEF } from "../../lib/taskTableColumns";
 
 function colByHeader(cols, header) {
   return cols.find((c) => c.headerName === header);
@@ -72,6 +72,27 @@ describe("TasksGrid.buildTaskColumns", () => {
     const src = colByHeader(withSource, "Источник");
     expect(src.valueGetter({ data: { sourceLabel: "DOB Logistic", sourceId: "dob" } })).toBe("DOB Logistic");
     expect(src.valueGetter({ data: { sourceId: "dob" } })).toBe("dob");
+  });
+
+  it("у всех колонок включены сортировка и фильтрация (типы по данным)", () => {
+    // базовые настройки: сортировка + фильтр + строка floating-фильтра
+    expect(TASK_GRID_DEFAULT_COL_DEF.sortable).toBe(true);
+    expect(TASK_GRID_DEFAULT_COL_DEF.filter).toBe(true);
+    expect(TASK_GRID_DEFAULT_COL_DEF.floatingFilter).toBe(true);
+
+    const cols = buildTaskColumns();
+    for (const c of cols) {
+      expect(c.sortable).toBe(true);
+      expect(typeof c.filter === "string" || c.filter === true || c.filter === undefined).toBe(true);
+    }
+    // Id — числовой фильтр, даты — календарь, текстовые — текст
+    expect(colByHeader(cols, "Id").filter).toBe("agNumberColumnFilter");
+    expect(colByHeader(cols, "Срок").filter).toBe("agDateColumnFilter");
+    expect(colByHeader(cols, "Изменён").filter).toBe("agDateColumnFilter");
+    expect(colByHeader(cols, "Заголовок").filter).toBe("agTextColumnFilter");
+    expect(colByHeader(cols, "Описание задачи").filter).toBe("agTextColumnFilter");
+    expect(colByHeader(cols, "Кому назначено").filter).toBe("agTextColumnFilter");
+    expect(colByHeader(cols, "Исполнитель").filter).toBe("agTextColumnFilter");
   });
 
   it("статус подсвечивается только для известных значений", () => {

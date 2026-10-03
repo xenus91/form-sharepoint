@@ -70,6 +70,7 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     width: 80,
     pinned: "left",
     sortable: true,
+    filter: "agNumberColumnFilter",
   });
   cols.push({
     headerName: "Заголовок",
@@ -77,6 +78,7 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     flex: 2,
     minWidth: 220,
     sortable: true,
+    filter: "agTextColumnFilter",
   });
   cols.push({
     headerName: "Описание задачи",
@@ -84,6 +86,7 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     flex: 1.5,
     minWidth: 220,
     sortable: true,
+    filter: "agTextColumnFilter",
     valueGetter: (p) => stripHtmlText(p.data?.Body),
     cellStyle: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
     tooltipValueGetter: (p) => stripHtmlText(p.data?.Body) || undefined,
@@ -93,6 +96,7 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     field: "Status",
     width: 130,
     sortable: true,
+    filter: "agTextColumnFilter",
     cellStyle: statusCellStyle,
   });
   cols.push({
@@ -101,6 +105,7 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     valueGetter: (p) => p.data?.AssignedTo || p.data?.assignedTo?.title || "",
     width: 190,
     sortable: true,
+    filter: "agTextColumnFilter",
   });
   cols.push({
     headerName: "Исполнитель",
@@ -109,12 +114,14 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     valueGetter: (p) => resolveTaker(p.data),
     width: 170,
     sortable: true,
+    filter: "agTextColumnFilter",
   });
   cols.push({
     headerName: "Срок",
     field: "DueDate",
     width: 120,
     sortable: true,
+    filter: "agDateColumnFilter",
     valueFormatter: (p) => formatDate(p.value),
   });
   cols.push({
@@ -122,6 +129,7 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     field: "Modified",
     width: 130,
     sortable: true,
+    filter: "agDateColumnFilter",
     valueFormatter: (p) => formatDate(p.value),
   });
   // Таблица #tasks — обзорная: поля результата здесь НЕ показываем.
@@ -132,7 +140,22 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
       valueGetter: (p) => p.data?.sourceLabel || p.data?.sourceId || "",
       width: 130,
       sortable: true,
+      filter: "agTextColumnFilter",
     });
   }
   return cols;
 }
+
+/**
+ * Базовые настройки колонок таблицы #tasks: сортировка + фильтрация по всем
+ * колонкам, строки фильтров (floating filter) закреплены вместе с шапкой.
+ */
+export const TASK_GRID_DEFAULT_COL_DEF = {
+  sortable: true,
+  filter: true,
+  floatingFilter: true,
+  resizable: true,
+  suppressMovable: true,
+  // Без кнопок apply/reset floating-фильтр применяется сразу при вводе (с дебаунсом)
+  filterParams: { debounceMs: 300 },
+};

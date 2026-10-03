@@ -179,6 +179,35 @@ Id задачи и Id элемента — разные сущности, отс
 
 ---
 
+## Шапка таблицы: закрепление, фильтры, сортировка (фикс 2026-10-03)
+
+**Симптом:** шапка AG Grid уезжала вместе со скроллом страницы, фильтровать и
+сортировать строки было нельзя.
+
+**Решение:**
+1. `domLayout="autoHeight"` → `domLayout: "normal"`. Таблица больше не растёт по
+   содержимому: у грида `height: 100%`, `minHeight: 320`, а внешний контейнер в
+   `TasksView` перестал скроллить (`overflow: "hidden"` + flex-колонка) — скролл
+   теперь внутри грида, поэтому шапка и строка фильтров закреплены.
+2. `TASK_GRID_DEFAULT_COL_DEF` (`features/tasks/lib/taskTableColumns.js`) —
+   единые настройки всех колонок: `sortable`, `filter`, `floatingFilter`
+   (строка ввода под каждой колонкой), `resizable`, `suppressMovable`.
+   Типы фильтров: `Id` → `agNumberColumnFilter`, `Срок`/`Изменён` →
+   `agDateColumnFilter`, остальные → `agTextColumnFilter`.
+3. `filterParams: { debounceMs: 300 }` — **без** кнопок `apply/reset`. Это важно:
+   при `buttons: ["apply", "reset"]` AG Grid (`applyActive`) применяет фильтр из
+   floating-строки только по Enter, с дебаунсом — только по мере ввода.
+4. Сортировка — по клику на заголовок; AG Grid вешает обработчик на
+   `.ag-header-cell-label` (не на всю ячейку) — учитывается в тестах.
+
+**Тесты:** `TasksGrid.columns.test.js` (типы фильтров + сортируемость),
+`TasksView.multisource.test.jsx` (`.ag-layout-normal` вместо `ag-layout-auto-height`,
+≥8 floating-фильтров, ввод «Основная» → одна строка, клик по заголовку меняет
+`aria-sort` и порядок строк). Тонкость jsdom: строки позиционируются абсолютно,
+поэтому визуальный порядок читается по атрибуту `row-index`, а не по порядку в DOM.
+
+---
+
 ## Структура файлов
 
 ```
