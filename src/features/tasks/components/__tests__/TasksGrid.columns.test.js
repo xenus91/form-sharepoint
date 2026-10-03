@@ -74,11 +74,27 @@ describe("TasksGrid.buildTaskColumns", () => {
     expect(src.valueGetter({ data: { sourceId: "dob" } })).toBe("dob");
   });
 
+  it("поиск общий над таблицей: строк фильтров под заголовками нет", () => {
+    // Требование 2026-10-03: вместо floating-фильтров — один поиск над таблицей
+    // (см. TasksGrid → quickFilterText), поэтому floatingFilter выключен.
+    expect(TASK_GRID_DEFAULT_COL_DEF.floatingFilter).toBe(false);
+  });
+
+  it("«Заголовок» — узкий, «Описание задачи» — самая широкая колонка", () => {
+    const cols = buildTaskColumns();
+    const title = colByHeader(cols, "Заголовок");
+    const desc = colByHeader(cols, "Описание задачи");
+    expect(title.width).toBeLessThanOrEqual(180);
+    expect(title.flex).toBeUndefined();
+    // описание забирает всё свободное место таблицы
+    expect(desc.flex).toBeGreaterThanOrEqual(1);
+    expect(desc.minWidth).toBeGreaterThanOrEqual(300);
+    expect(desc.minWidth).toBeGreaterThan(title.width);
+  });
+
   it("у всех колонок включены сортировка и фильтрация (типы по данным)", () => {
-    // базовые настройки: сортировка + фильтр + строка floating-фильтра
     expect(TASK_GRID_DEFAULT_COL_DEF.sortable).toBe(true);
     expect(TASK_GRID_DEFAULT_COL_DEF.filter).toBe(true);
-    expect(TASK_GRID_DEFAULT_COL_DEF.floatingFilter).toBe(true);
 
     const cols = buildTaskColumns();
     for (const c of cols) {

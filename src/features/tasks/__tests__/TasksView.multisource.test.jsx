@@ -252,27 +252,23 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.textContent.indexOf("Описание задачи")).toBeLessThan(host.textContent.indexOf("Статус"));
     expect(host.textContent).toContain("Просмотр видеоархива");
 
-    // ── шапка закреплена + фильтры/сортировка ──────────────────────────────
+    // ── шапка закреплена + поиск/сортировка ────────────────────────────────
     // domLayout=normal → строки скроллятся внутри грида, шапка остаётся на месте
     expect(host.querySelector(".ag-layout-normal")).toBeTruthy();
     expect(host.querySelector(".ag-layout-auto-height")).toBeNull();
-    // строка фильтров (floating filter) есть под каждым заголовком и входит в шапку
-    const floatInputs = host.querySelectorAll(".ag-header .ag-floating-filter-input");
-    expect(floatInputs.length).toBeGreaterThanOrEqual(8);
+    // под заголовками НЕТ строк фильтров — поиск один, над таблицей
+    expect(host.querySelectorAll(".ag-header .ag-floating-filter").length).toBe(0);
+    const search = host.querySelector('[data-testid="tasks-grid-search"]');
+    expect(search).toBeTruthy();
+    expect(search.tagName).toBe("INPUT");
 
-    // фильтрация реально сужает список: «Основная» → только main-задача
     const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
-    const rowsBefore = countRows();
-    expect(rowsBefore).toBe(3);
-    // колонки и их floating-фильтры — параллельные ряды шапки, сопоставляем по индексу
-    const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell:not(.ag-floating-filter)")];
-    const filterCells = [...host.querySelectorAll(".ag-header .ag-header-cell.ag-floating-filter")];
+    expect(countRows()).toBe(3);
+
+    // колонки шапки — для проверки сортировки по клику
+    const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell")];
     const titleIdx = headerCells.findIndex((h) => /Заголовок/.test(h.textContent || ""));
     expect(titleIdx).toBeGreaterThanOrEqual(0);
-    expect(filterCells.length).toBe(headerCells.length);
-    const titleFilter = filterCells[titleIdx]?.querySelector("input");
-    expect(titleFilter).toBeTruthy();
-    expect(titleFilter.tagName).toBe("INPUT");
 
     // ── сортировка по клику на заголовок ──────────────────────────────────
     // AG Grid позиционирует строки абсолютно, поэтому порядок в DOM не равен
@@ -308,14 +304,13 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect([...desc]).toEqual([...titlesInitial].sort().reverse());
     expect(desc).not.toEqual(asc);
 
-    // ввод в floating-фильтр применяется с дебаунсом; ставим value через нативный
-    // setter, иначе React value-tracker не увидит изменение
+    // поиск над таблицей фильтрует по всем полям: «Основная» → только main-задача.
+    // Ставим value через нативный setter, иначе React value-tracker не увидит изменение.
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(titleFilter, "Основная");
-      titleFilter.dispatchEvent(new window.Event("input", { bubbles: true }));
-      titleFilter.dispatchEvent(new window.Event("change", { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 900));
+      setter.call(search, "Основная");
+      search.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 600));
     });
     const rowsAfter = countRows();
     expect(rowsAfter).toBe(1);

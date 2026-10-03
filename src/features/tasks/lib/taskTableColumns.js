@@ -74,17 +74,19 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
   });
   cols.push({
     headerName: "Заголовок",
+    // Требование 2026-10-03: «Заголовок» — узкий (значительно уже «Описания»).
     field: "Title",
-    flex: 2,
-    minWidth: 220,
+    width: 170,
+    minWidth: 120,
     sortable: true,
     filter: "agTextColumnFilter",
   });
   cols.push({
     headerName: "Описание задачи",
+    // Самая широкая колонка: забирает всё свободное место таблицы.
     field: "Body",
-    flex: 1.5,
-    minWidth: 220,
+    flex: 1,
+    minWidth: 360,
     sortable: true,
     filter: "agTextColumnFilter",
     valueGetter: (p) => stripHtmlText(p.data?.Body),
@@ -147,15 +149,16 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
 }
 
 /**
- * Базовые настройки колонок таблицы #tasks: сортировка + фильтрация по всем
- * колонкам, строки фильтров (floating filter) закреплены вместе с шапкой.
+ * Базовые настройки колонок таблицы #tasks: сортировка (по клику на заголовок)
+ * и фильтрация — через меню фильтра в шапке. Строки фильтров под заголовками
+ * (floating filter) отключены: поиск общий, один на всю таблицу — см. TasksGrid.
  */
 export const TASK_GRID_DEFAULT_COL_DEF = {
   sortable: true,
   filter: true,
-  floatingFilter: true,
+  floatingFilter: false,
   resizable: true,
   suppressMovable: true,
-  // Без кнопок apply/reset floating-фильтр применяется сразу при вводе (с дебаунсом)
+  // Фильтр в меню применяется сразу при вводе (дебаунс вместо кнопки «Применить»)
   filterParams: { debounceMs: 300 },
 };

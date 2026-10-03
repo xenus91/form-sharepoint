@@ -12,8 +12,10 @@
 // Полностью read-only: не делает MERGE/PUT.
 
 import { AgGridReact } from "ag-grid-react";
-import { useMemo, useRef, useEffect } from "react";
-import { Box, Typography } from "@mui/material";
+import { useMemo, useRef, useEffect, useState } from "react";
+import { Box, IconButton, InputAdornment, TextField, Tooltip, Typography } from "@mui/material";
+import SearchIcon from "@mui/icons-material/Search";
+import ClearIcon from "@mui/icons-material/Clear";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
 
@@ -29,6 +31,9 @@ ModuleRegistry.registerModules([AllCommunityModule]);
  * @param {boolean} [props.showSourceColumn=false] — колонка источника (debug)
  * @param {boolean} [props.loading]
  * @param {string} [props.error]
+ *
+ * Поиск: одно поле над таблицей ищет по ВСЕМ колонкам сразу (AG Grid quick filter).
+ * Строк фильтров под каждым заголовком (floating filter) нет — по требованию 2026-10-03.
  */
 export default function TasksGrid({
   rows = [],
@@ -39,6 +44,10 @@ export default function TasksGrid({
   error = null,
 }) {
   const gridRef = useRef(null);
+  // Общий поиск по всем полям таблицы (AG Grid quick filter).
+  const [quickFilter, setQuickFilter] = useState("");
+  // Сколько строк осталось после поиска/фильтров — показываем рядом с полем.
+  const [shownCount, setShownCount] = useState(null);
 
   const showDbg = useMemo(() => {
     try {
@@ -65,13 +74,18 @@ export default function TasksGrid({
     // Клик по строке — выделение (переход в форму отдельным действием).
     rowSelection: { mode: "singleRow", enableClickSelection: true, checkboxes: false },
     suppressMenuHide: true,
-    // Шапка (вместе со строкой фильтров) закреплена, строки скроллятся внутри
-    // грида: убираем autoHeight, иначе таблица растёт целиком и шапка уезжает
-    // вместе со скроллом страницы.
+    // Шапка закреплена, строки скроллятся внутри грида: убираем autoHeight,
+    // иначе таблица растёт целиком и шапка уезжает вместе со скроллом страницы.
     domLayout: "normal",
     headerHeight: 44,
-    floatingFiltersHeight: 38,
   }), []);
+
+  // Пересчёт счётчика строк при любом изменении модели (поиск/фильтр/данные).
+  const onModelUpdated = useMemo(() => (event) => {
+    const api = event?.api || gridRef.current?.api;
+    const count = api?.getDisplayedRowCount?.();
+    setShownCount(typeof count === "number" ? count : null);
+  }, []);
 
   const onSelectionChanged = useMemo(() => () => {
     if (typeof onSelectRow !== "function") return;
@@ -127,18 +141,52 @@ export default function TasksGrid({
         ["--ag-cell-horizontal-border"]: "1px solid #f0f0f0",
       }}
     >
-      <AgGridReact
-        ref={gridRef}
-        theme={themeQuartz}
-        rowData={rows}
-        columnDefs={columnDefs}
-        defaultColDef={defaultColDef}
-        getRowId={getRowId}
-        gridOptions={gridOptions}
-        onSelectionChanged={onSelectionChanged}
-        onRowDoubleClicked={onRowDoubleClicked}
-        suppressCellFocus
-      />
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, pb: 1, width: "100%" }}>
+        <TextField
+          size="small"
+          fullWidth
+          value={quickFilter}
+          onChange={(e) => setQuickFilter(e.target.value)}
+          placeholder="Поиск по всем полям: заголовок, описание, статус, исполнитель…"
+          inputProps={{ "data-testid": "tasks-grid-search", "aria-label": "Поиск по всем полям" }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" />
+              </InputAdornment>
+            ),
+            endAdornment: quickFilter ? (
+              <InputAdornment position="end">
+                <Tooltip title="Очистить поиск">
+                  <IconButton size="small" aria-label="Очистить поиск" onClick={() => setQuickFilter("")}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </InputAdornment>
+            ) : null,
+          }}
+          sx={{ "& .MuiInputBase-root": { height: 36, borderRadius: 0.5, fontSize: 13 } }}
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+          {shownCount === null ? "" : `Найдено: ${shownCount} из ${rows.length}`}
+        </Typography>
+      </Box>
+      <Box sx={{ flex: 1, minHeight: 0, width: "100%" }}>
+        <AgGridReact
+          ref={gridRef}
+          theme={themeQuartz}
+          rowData={rows}
+          columnDefs={columnDefs}
+          defaultColDef={defaultColDef}
+          getRowId={getRowId}
+          gridOptions={gridOptions}
+          quickFilterText={quickFilter}
+          onModelUpdated={onModelUpdated}
+          onSelectionChanged={onSelectionChanged}
+          onRowDoubleClicked={onRowDoubleClicked}
+          suppressCellFocus
+        />
+      </Box>
     </Box>
   );
 }
