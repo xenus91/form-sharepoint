@@ -630,6 +630,23 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     } catch (_e) { return null; }
   }, [taskConfiguration?.data]);
 
+  // Правило Behaviour для конкретного результата строки — по нему решаем, можно ли
+  // завершить задачу «одним кликом» из таблицы или нужен inline-экран карточки
+  // (prompt-поля/доп. действия/подтверждение кнопками).
+  const resolveRowChoiceRule = useCallback((row, choice) => {
+    try {
+      const data = taskConfiguration?.data;
+      if (!data?.taskBehaviour || !data?.ctMetaMap) return null;
+      const ctId = String(row?.contentTypeId || row?.ContentTypeId || row?.raw?.ContentTypeId?.StringValue || "").trim();
+      if (!ctId) return null;
+      const ctMeta = findContentTypeMeta(ctId, data.ctMetaMap);
+      if (!ctMeta?.name) return null;
+      const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
+      if (!tb?.behaviour?.ok) return null;
+      return resolveBehaviour(choice, tb.behaviour.value);
+    } catch (_e) { return null; }
+  }, [taskConfiguration?.data]);
+
   // Задачу уже взял кто-то другой (та же проверка, что в TaskCard).
   const isRowTakenByOther = useCallback((row) => {
     if (!currentUserId && !currentUserTitle) return false;
@@ -661,11 +678,27 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     resolveStyling: (choice) => resolveRowChoiceStyling(row, choice),
     takeStyling: resolveRowTakeStyling(row),
     onTake: () => handleTakeTableRow(row),
-    onResult: (choice) => handleResultClick(row, choice),
+    onResult: (choice) => {
+      // Как в карточке: если по Behaviour результат требует формы (prompt-поля,
+      // доп. действия) или подтверждения кнопками — открываем карточку сразу с этим
+      // результатом, чтобы пользователь заполнил всё там же, где и обычно.
+      const rule = resolveRowChoiceRule(row, choice);
+      const needsCardForm = !!rule && (
+        (rule.promptFields?.length || 0) > 0
+        || rule.showAdditionalActions === true
+        || rule.inlineConfirm === true
+      );
+      if (needsCardForm) {
+        openTaskForm(row?.compositeId, tableData.sources, { action: choice });
+        return;
+      }
+      handleResultClick(row, choice);
+    },
     onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
   }), [
     canTakeTableRow, externalTakingId, updatingId, isRowTakenByOther, choicesForRow,
-    resolveRowChoiceStyling, resolveRowTakeStyling, handleTakeTableRow, handleResultClick, tableData.sources,
+    resolveRowChoiceStyling, resolveRowTakeStyling, resolveRowChoiceRule,
+    handleTakeTableRow, handleResultClick, tableData.sources,
   ]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.

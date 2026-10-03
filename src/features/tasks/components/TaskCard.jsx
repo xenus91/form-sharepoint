@@ -527,12 +527,23 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   }, [task.Id, task.ContentTypeId, task.Status, isCompleted]);
   const displayedChoices = freshChoices || effectiveChoices;
   const displayedFieldMeta = freshField || dynamicFieldMeta;
-  // Deep-link (#tasks/id=…&action=found|notfound): открываем inline-форму соответствующего
-  // результата. Никаких захардкоженных текстов — форма строится из Behaviour.
+  // Deep-link (#tasks/id=…&action=found|notfound|<значение результата>): открываем
+  // inline-форму соответствующего результата. Никаких захардкоженных текстов — форма
+  // строится из Behaviour. Явное значение результата приходит из таблицы: там, где по
+  // Behaviour нужны prompt-поля/доп. действия, таблица открывает карточку с этим
+  // результатом (кнопка таблицы = кнопка карточки).
   React.useEffect(() => {
     if (!initialAction || isCompleted || !isInProgressStatus(task.Status)) return;
     const list = displayedChoices || choices || [];
     if (!Array.isArray(list) || list.length === 0) return;
+    const norm = (v) => String(v || "").trim().toLowerCase();
+    const explicit = list.find((ch) => norm(ch) === norm(initialAction));
+    if (explicit && initialAction !== "notfound") {
+      setInlineChoice(explicit);
+      // Behaviour.ic — подтверждение двумя кнопками в карточке (как при клике по кнопке).
+      setInlineConfirmOnly(getBehaviourRuleForChoice(explicit)?.inlineConfirm === true);
+      return;
+    }
     const pick = initialAction === "notfound"
       ? (list.find((ch) => getBehaviourRuleForChoice(ch)?.requiresConfirmed === true) || list[list.length - 1])
       : (list.find((ch) => {

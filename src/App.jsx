@@ -1509,10 +1509,12 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       else if (v === "searchfail" || v === "fail" || v === "notfound" || v === "not_found") elementAction = "notfound";
       else elementAction = v;
     }
-    // action для следующего этапа (found/notfound)
-    const mAct = low.match(/action\s*=\s*([a-zа-я_]+)/);
+    // action для следующего этапа: found/notfound или конкретное значение результата
+    // (значение приходит URL-кодированным: #tasks/11?action=%D0%98%D1%81%D0%BF...).
+    const mAct = low.match(/action\s*=\s*([^&#]+)/);
     if (!elementAction && mAct) {
-      const v = mAct[1].trim();
+      let v = mAct[1].trim();
+      try { v = decodeURIComponent(v); } catch (_e) { void _e; }
       if (v === "found" || v === "найдена" || v === "найден") elementAction = "found";
       else if (v === "notfound" || v === "not_found" || v === "не_найдена" || v === "не-найдена" || v === "не найдена" || v === "не найден") elementAction = "notfound";
       else elementAction = v;

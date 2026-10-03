@@ -26,6 +26,20 @@ describe("buildTaskFormHash", () => {
     expect(buildTaskFormHash("other:5", [MAIN, DOB])).toBeNull();
   });
 
+  it("main-задача с action → #tasks/<id>?action=<значение результата>", () => {
+    // Таблица переводит в карточку с выбранным результатом, когда по Behaviour
+    // его нельзя завершить одним кликом (prompt-поля/доп. действия).
+    expect(buildTaskFormHash("main:11", [], { action: "Не исправлено" })).toBe(
+      `#tasks/11?action=${encodeURIComponent("Не исправлено")}`,
+    );
+    // без action — прежний роут
+    expect(buildTaskFormHash("main:11", [])).toBe("#tasks/11");
+    // внешние источники action не поддерживают — только форма источника
+    expect(buildTaskFormHash("dob:1", [MAIN, DOB], { action: "Найдена" })).toBe(
+      "#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3",
+    );
+  });
+
   it("невалидный compositeId → null", () => {
     expect(buildTaskFormHash("", [MAIN, DOB])).toBeNull();
     expect(buildTaskFormHash("dob", [MAIN, DOB])).toBeNull();

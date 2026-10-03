@@ -14,12 +14,19 @@ import { parseCompositeId } from "../../../tasks/multiSource";
 /**
  * @param {string} compositeId — "<sourceId>:<id>"
  * @param {Array<{id:string, listGuid?:string|null}>} [sources]
+ * @param {{action?:string|null}} [opts] — action=<значение результата>: форма задачи
+ *   открывается сразу с выбранным результатом (как будто в карточке нажали кнопку).
+ *   Нужно, когда по Behaviour у результата есть prompt-поля/доп. действия — их
+ *   заполняет КАРТОЧКА, а таблица только переводит пользователя в неё.
  * @returns {string|null} hash роута или null, если перейти некуда
  */
-export function buildTaskFormHash(compositeId, sources = []) {
+export function buildTaskFormHash(compositeId, sources = [], opts = {}) {
   const parsed = parseCompositeId(compositeId);
   if (!parsed) return null;
-  if (parsed.sourceId === "main") return `#tasks/${parsed.id}`;
+  if (parsed.sourceId === "main") {
+    const action = opts.action ? `?action=${encodeURIComponent(String(opts.action))}` : "";
+    return `#tasks/${parsed.id}${action}`;
+  }
   const source = (sources || []).find((s) => s && s.id === parsed.sourceId);
   const listGuid = source?.listGuid ? String(source.listGuid).toLowerCase() : null;
   if (!listGuid) return null;
@@ -30,10 +37,11 @@ export function buildTaskFormHash(compositeId, sources = []) {
  * Открывает форму задачи. Возвращает true, если навигация произошла.
  * @param {string} compositeId
  * @param {Array<any>} [sources]
+ * @param {{action?:string|null}} [opts]
  * @returns {boolean}
  */
-export function openTaskForm(compositeId, sources = []) {
-  const hash = buildTaskFormHash(compositeId, sources);
+export function openTaskForm(compositeId, sources = [], opts = {}) {
+  const hash = buildTaskFormHash(compositeId, sources, opts);
   if (!hash) return false;
   try {
     window.location.hash = hash;

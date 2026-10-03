@@ -87,6 +87,21 @@ const CT_META = [
   { StringId: CT_OOB, Name: "Задача ООБ", Id: { StringValue: CT_OOB }, FieldLinks: { results: [{ Id: RESULT_FIELD_OOB.Id }] } },
 ];
 
+// TaskBehaviour (список настроек): у результата «Не исправлено» есть prompt-поле,
+// поэтому такой результат нельзя завершить «одним кликом» из таблицы — карточка
+// должна открыться с этим результатом (как будто нажали кнопку в карточке).
+const TASK_BEHAVIOUR_RECORD = {
+  Id: 1,
+  Title: "Задача ООБ",
+  Enabled: true,
+  Behaviour: JSON.stringify({
+    "исправлено": { c: false },
+    "не исправлено": { p: [{ f: "Location1", ti: "Где найдено", r: true }] },
+  }),
+  StylingResultButton: "",
+  StylingActions: "",
+};
+
 // main-задача, уже взятая в работу (Editor = я) — в карточке у неё кнопки результатов
 // её типа контента (ООБ → «Исправлено» / «Не исправлено»)
 const MAIN_IN_PROGRESS = {
@@ -148,6 +163,8 @@ vi.mock("../../../api", () => {
     }
     // Типы контента списка — по FieldLinks определяем поле результата для задачи
     if (d.includes(`${MAIN_LIST}/contenttypes`)) return { data: { d: { results: CT_META } } };
+    // Настройки поведения задач (TaskBehaviour) — как в тенанте, одним списком
+    if (u.includes("getbytitle('TaskBehaviour')")) return { data: { d: { results: [TASK_BEHAVIOUR_RECORD] } } };
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
@@ -570,6 +587,40 @@ describe("TasksView — multi-source (#tasks)", () => {
     });
     // main-задача открывается своей формой (Id), а не формой dob-списка
     expect(window.location.hash).toBe("#tasks/10");
+  }, 30000);
+
+  it("результат, требующий формы по Behaviour, открывает карточку с этим результатом", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .find((r) => /Задача в работе ООБ/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 260 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    const buttons = [...(popup?.querySelectorAll("button") || [])].map((b) => b.textContent);
+    expect(buttons).toContain("Не исправлено");
+
+    const needsForm = [...popup.querySelectorAll("button")].find((b) => /Не исправлено/.test(b.textContent || ""));
+    await act(async () => {
+      needsForm.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    await settle(500);
+
+    // Никакой «слепой» записи результата: открывается карточка задачи с этим результатом
+    // (deep-link как из карточки), там пользователь заполнит prompt-поля.
+    expect(state.requests.some((r) => r.source === "main" && r.body && r.body.ResultOOB === "Не исправлено")).toBe(false);
+    expect(window.location.hash.startsWith("#tasks/11?action=")).toBe(true);
+    expect(decodeURIComponent(window.location.hash.split("action=")[1])).toBe("Не исправлено");
   }, 30000);
 
   it("для main-задачи «в работе» попап даёт кнопки результатов — как карточка", async () => {
