@@ -27,7 +27,7 @@ import { resolveTaskRule } from "./services/taskBehaviour";
 import { resolveResultFlow } from "./features/tasks/resultFlow";
 import { resolveBehaviour } from "./services/behaviourParser";
 import { resolveTaskBehaviourByName, findContentTypeMeta } from "./services/taskBehaviour";
-import { resolveStylingForChoice, isGradient } from "./services/stylingConfig";
+import { resolveStylingForChoice } from "./services/stylingConfig";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
 import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
 import { useDistribution } from "./features/tasks/hooks/useDistribution";
@@ -46,6 +46,7 @@ import { useDepartment } from "./features/nav/useDepartment";
 import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import { openTaskForm } from "./features/tasks/lib/openTaskForm";
+import { buildRowActions } from "./features/tasks/lib/rowActions";
 import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
@@ -542,13 +543,63 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
   // ── Действия по строке таблицы ─────────────────────────────────────────────
-  // Набор действий = тот же, что у карточки задачи:
-  //   • «Взять в работу» — если задачу можно взять (main «Не начата» / внешняя незавершённая);
-  //   • кнопки результатов (найден/не найден/… из Behaviour.styling) — для main-задачи «в работе»;
-  //   • если задачу уже взял другой пользователь — карточка показывает «В работе у …»
-  //     (повторяем это информационной плашкой вместо кнопок);
-  //   • «Изменить» — открыть форму задачи (для внешних — форма источника).
-  // Показывает их TasksGrid в popup В ТОЧКЕ КЛИКА по строке.
+  // Набор действий повторяет КАРТОЧКУ задачи (те же кнопки для того же статуса и
+  // типа контента) — сама сборка живёт в features/tasks/lib/rowActions.js,
+  // здесь только данные: свежие choices по ContentType и styling из Behaviour.
+  // Показывает действия TasksGrid в popup В ТОЧКЕ КЛИКА по строке.
+
+  // Свежие choices для main-строки «в работе» (как в карточке: getResultChoicesForTask
+  // с forceRefresh). Кэшируем по compositeId, чтобы не дёргать SharePoint на каждый рендер.
+  const [rowChoices, setRowChoices] = useState(() => ({}));
+  const freshChoicesRequestedRef = React.useRef(new Set());
+
+  const resultFieldMetaForRow = useCallback((row) => {
+    if (!row) return null;
+    try {
+      return getResultFieldForTask(row, ctResultMap, resultFieldsMeta);
+    } catch (_e) {
+      return null;
+    }
+  }, [ctResultMap, resultFieldsMeta]);
+
+  const isMainInProgressRow = useCallback((row) => (
+    !!row
+    && row.sourceId === "main"
+    && isInProgressStatus(row.Status)
+    && !isCompletedStatus(row.Status, row.PercentComplete)
+  ), []);
+
+  useEffect(() => {
+    const targets = (tableData.rows || []).filter(
+      (r) => isMainInProgressRow(r) && !freshChoicesRequestedRef.current.has(r.compositeId)
+    );
+    if (targets.length === 0) return undefined;
+    for (const row of targets) freshChoicesRequestedRef.current.add(row.compositeId);
+    let cancelled = false;
+    (async () => {
+      const updates = {};
+      await Promise.all(targets.map(async (row) => {
+        try {
+          const meta = resultFieldMetaForRow(row);
+          const { choices: fresh, field } = await getResultChoicesForTask(apiClient, row, { forceRefresh: true });
+          if (fresh && fresh.length > 0) {
+            updates[row.compositeId] = {
+              choices: fresh.map(String),
+              internalName: field?.internalName || meta?.internalName || "ResultSearchTHU",
+            };
+          }
+        } catch (_e) { void _e; /* останутся синхронные choices */ }
+      }));
+      if (cancelled) return;
+      if (Object.keys(updates).length > 0) {
+        setRowChoices((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tableData.rows, isMainInProgressRow, resultFieldMetaForRow]);
+
+  // Вид кнопки результата — из Behaviour.stylingResultButton для типа контента задачи
+  // (тот же резолвер, что в карточке).
   const resolveRowChoiceStyling = useCallback((row, choice) => {
     try {
       const data = taskConfiguration?.data;
@@ -560,6 +611,22 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
       if (!tb?.styling?.ok) return null;
       return resolveStylingForChoice(choice, tb.styling.value);
+    } catch (_e) { return null; }
+  }, [taskConfiguration?.data]);
+
+  // Вид кнопки «Взять в работу» — Behaviour.stylingActions (ключ «takeInWork»),
+  // тот же резолвер, что в карточке; если не задан — вид по умолчанию.
+  const resolveRowTakeStyling = useCallback((row) => {
+    try {
+      const data = taskConfiguration?.data;
+      if (!data?.taskBehaviour || !data?.ctMetaMap) return null;
+      const ctId = String(row?.contentTypeId || row?.ContentTypeId || row?.raw?.ContentTypeId?.StringValue || "").trim();
+      if (!ctId) return null;
+      const ctMeta = findContentTypeMeta(ctId, data.ctMetaMap);
+      if (!ctMeta?.name) return null;
+      const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
+      if (!tb?.stylingActions?.ok) return null;
+      return resolveStylingForChoice("takeInWork", tb.stylingActions.value);
     } catch (_e) { return null; }
   }, [taskConfiguration?.data]);
 
@@ -575,67 +642,30 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return !mineById && !mineByTitle;
   }, [currentUserId, currentUserTitle]);
 
-  const getTableRowActions = useCallback((row) => {
-    if (!row) return [];
-    const actions = [];
-    if (canTakeTableRow(row)) {
-      actions.push({
-        key: "take",
-        label: "Взять в работу",
-        icon: "take",
-        variant: "outlined",
-        disabled: !!externalTakingId && externalTakingId === row.compositeId,
-        onClick: () => handleTakeTableRow(row),
-      });
-    }
-    if (row.sourceId === "main" && isInProgressStatus(row.Status) && !isCompletedStatus(row.Status, row.PercentComplete)) {
-      if (isRowTakenByOther(row)) {
-        actions.push({
-          key: "taken-by-other",
-          kind: "info",
-          label: `В работе у ${row.EditorTitle || row.Editor || "другого пользователя"}`,
-          hint: "Задача уже взята другим пользователем. Возьмите другую задачу.",
-        });
-      } else {
-        // Choices — как в карточке: по ContentType задачи, иначе глобальный список.
-        let choicesForRow = [];
-        try {
-          const meta = getResultFieldForTask(row, ctResultMap, resultFieldsMeta);
-          if (meta?.choices?.length) choicesForRow = meta.choices.map(String);
-        } catch (_e) { /* ниже — глобальные choices */ }
-        if (choicesForRow.length === 0 && Array.isArray(choices)) choicesForRow = choices.map(String);
-        for (const choice of choicesForRow) {
-          const st = resolveRowChoiceStyling(row, choice);
-          const bg = st?.bg || null;
-          const gradient = bg && isGradient(bg) ? bg : null;
-          actions.push({
-            key: `result:${choice}`,
-            label: choice,
-            icon: "result",
-            variant: st?.variant || "outlined",
-            disabled: !!updatingId && updatingId === row.Id,
-            sx: {
-              ...(gradient ? { backgroundImage: gradient, color: st?.color || "#fff", borderColor: "transparent" } : {}),
-              ...(bg && !gradient ? { backgroundColor: bg, color: st?.color || "#fff", borderColor: "transparent" } : {}),
-            },
-            onClick: () => handleResultClick(row, choice),
-          });
-        }
-      }
-    }
-    actions.push({
-      key: "edit",
-      label: "Изменить",
-      icon: "edit",
-      variant: "contained",
-      disabled: !!updatingId && updatingId === row.Id,
-      onClick: () => openTaskForm(row.compositeId, tableData.sources),
-    });
-    return actions;
-  }, [
-    canTakeTableRow, externalTakingId, handleTakeTableRow, isRowTakenByOther,
-    resolveRowChoiceStyling, ctResultMap, resultFieldsMeta, choices, updatingId,
-    handleResultClick, tableData.sources,
+  // Choices для строки — как в карточке: свежие по ContentType → кэш полей → общий список.
+  const choicesForRow = useCallback((row) => {
+    const fresh = rowChoices[row?.compositeId];
+    if (Array.isArray(fresh?.choices) && fresh.choices.length > 0) return fresh.choices.map(String);
+    const meta = resultFieldMetaForRow(row);
+    if (meta?.choices?.length) return meta.choices.map(String);
+    return Array.isArray(choices) ? choices.map(String) : [];
+  }, [rowChoices, resultFieldMetaForRow, choices]);
+
+  const getTableRowActions = useCallback((row) => buildRowActions(row, {
+    canTake: canTakeTableRow(row),
+    taking: !!externalTakingId && externalTakingId === row?.compositeId,
+    updating: !!updatingId && updatingId === row?.Id,
+    takenByOther: isRowTakenByOther(row),
+    takerLabel: row?.EditorTitle || row?.Editor || "",
+    choices: choicesForRow(row),
+    resolveStyling: (choice) => resolveRowChoiceStyling(row, choice),
+    takeStyling: resolveRowTakeStyling(row),
+    onTake: () => handleTakeTableRow(row),
+    onResult: (choice) => handleResultClick(row, choice),
+    onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
+  }), [
+    canTakeTableRow, externalTakingId, updatingId, isRowTakenByOther, choicesForRow,
+    resolveRowChoiceStyling, resolveRowTakeStyling, handleTakeTableRow, handleResultClick, tableData.sources,
   ]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.

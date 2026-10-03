@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 import { Box, Paper, Typography } from "@mui/material";
 import TasksGrid from "../src/features/tasks/components/TasksGrid";
+import { buildRowActions } from "../src/features/tasks/lib/rowActions";
 
 const TITLES = [
   "Заявка ООБ",
@@ -27,6 +28,9 @@ const DESCRIPTIONS = [
   "<p>Проверить комплектность и отсканировать ШК получателя</p>",
   "<p>Сверить остатки по ТКН и передать данные в смену</p>",
 ];
+
+// Значения поля результата для main-задач «в работе» (в приложении — по типу контента).
+const CHOICES_BY_CT = { main: ["Найдена", "Не найдена"] };
 
 const STATUSES = ["Не начата", "В работе", "Завершена", "Отменена"];
 const ASSIGNEES = ["Поршаков Сергей", "Иванов Пётр", "Смирнова Анна", "Группа ООБ"];
@@ -98,36 +102,18 @@ export default function TableScene() {
             const row = rows.find((r) => r.compositeId === compositeId);
             setMessage(`Открытие формы задачи #${row?.Id}`);
           }}
-          // Полный набор действий как в карточке: «Взять в работу» / результаты / «Изменить»
-          getRowActions={(row) => {
-            const actions = [];
-            if (row.Status === "Не начата") {
-              actions.push({
-                key: "take",
-                label: "Взять в работу",
-                icon: "take",
-                onClick: () => setMessage(`Взять в работу задачу #${row.Id} (в приложении — MERGE статуса: main-список или сайт источника)`),
-              });
-            }
-            if (row.Status === "В работе") {
-              for (const choice of ["Найдена", "Не найдена"]) {
-                actions.push({
-                  key: `result:${choice}`,
-                  label: choice,
-                  icon: "result",
-                  onClick: () => setMessage(`Результат «${choice}» по задаче #${row.Id} (в приложении — тот же поток, что в карточке)`),
-                });
-              }
-            }
-            actions.push({
-              key: "edit",
-              label: "Изменить",
-              icon: "edit",
-              variant: "contained",
-              onClick: () => setMessage(`Изменить задачу #${row.Id} (в приложении — форма задачи источника)`),
-            });
-            return actions;
-          }}
+          // Набор действий — тем же сборщиком, что и в приложении (rowActions.js):
+          // для «в работе» это кнопки результатов по типу контента задачи.
+          getRowActions={(row) => buildRowActions(row, {
+            canTake: row.Status === "Не начата",
+            choices: row.Status === "В работе"
+              ? (row.sourceId === "main" ? CHOICES_BY_CT.main : [])
+              : [],
+            resolveStyling: () => null,
+            onTake: () => setMessage(`Взять в работу задачу #${row.Id} (в приложении — MERGE статуса: main-список или сайт источника)`),
+            onResult: (choice) => setMessage(`Результат «${choice}» по задаче #${row.Id} (в приложении — тот же поток, что в карточке)`),
+            onEdit: () => setMessage(`Изменить задачу #${row.Id} (в приложении — форма задачи: #tasks/<Id> или форма источника)`),
+          })}
           takingId={null}
         />
       </Box>

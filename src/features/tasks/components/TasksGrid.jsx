@@ -64,35 +64,39 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
       anchorReference="anchorPosition"
       anchorPosition={anchorPosition || undefined}
       onClose={onClose}
-      marginThreshold={8}
+      marginThreshold={12}
       disableAutoFocus
       disableRestoreFocus
       slotProps={{
         paper: {
           className: "tasks-row-actions",
           "data-testid": "tasks-row-actions",
-          elevation: 8,
+          elevation: 6,
           sx: {
-            borderRadius: 2.5,
-            border: "1px solid rgba(23,28,143,0.16)",
-            p: 1,
-            minWidth: 250,
-            maxWidth: 340,
+            // Аккуратные скругления: в теме shape.borderRadius = 28 (карточки),
+            // но для компактного меню такие углы выглядели «гигантскими».
+            borderRadius: "10px",
+            border: "1px solid rgba(23,28,143,0.14)",
+            boxShadow: "0 8px 22px rgba(15,18,61,0.16)",
+            p: 0.75,
+            minWidth: 224,
+            maxWidth: 320,
+            overflow: "visible",
           },
         },
       }}
     >
-      <Box sx={{ px: 0.75, pt: 0.25, pb: 0.75 }}>
-        <Typography variant="caption" sx={{ display: "block", fontWeight: 800, color: "#171c8f" }}>
+      <Box sx={{ px: 0.5, pt: 0.25, pb: 0.5 }}>
+        <Typography variant="caption" sx={{ display: "block", fontWeight: 800, color: "#171c8f", fontSize: "0.72rem" }}>
           Задача #{row?.Id}
         </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.7rem", lineHeight: 1.3 }}>
           {row?.Status || "—"}
           {row?.AssignedTo ? ` • ${row.AssignedTo}` : ""}
         </Typography>
       </Box>
-      <Divider sx={{ mb: 0.75 }} />
-      <Stack spacing={0.75} data-testid="tasks-row-actions-list">
+      <Divider sx={{ mb: 0.5 }} />
+      <Stack spacing={0.5} data-testid="tasks-row-actions-list">
         {list.map((action) => action.kind === "info" ? (
           <Box
             key={action.key}
@@ -133,9 +137,10 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
               justifyContent: "flex-start",
               textTransform: "none",
               fontWeight: 700,
-              borderRadius: 1.5,
-              minHeight: 34,
-              fontSize: 13,
+              borderRadius: "7px",
+              minHeight: 32,
+              fontSize: 12.5,
+              px: 1.25,
               ...(action.sx || {}),
             }}
           >

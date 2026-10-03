@@ -57,8 +57,10 @@ const DOB_TASK = {
   Created: "2026-10-03T00:29:41Z",
 };
 
-// Поле результата основного списка (для кнопок результатов, как в карточке)
-const RESULT_FIELD_DEF = {
+// Поля результата основного списка: у КАЖДОГО типа контента — своё поле
+// со своими choices (требование: в таблице те же кнопки, что в карточке по CT).
+const RESULT_FIELD_THU = {
+  Id: "aaaaaaaa-0000-0000-0000-000000000001",
   InternalName: "ResultSearchTHU",
   Title: "Результат поиска ТНУ",
   TypeAsString: "Choice",
@@ -66,14 +68,34 @@ const RESULT_FIELD_DEF = {
   TypeShortDescription: "Результат задачи",
   Choices: { results: ["Найдена", "Не найдена"] },
 };
+const RESULT_FIELD_OOB = {
+  Id: "bbbbbbbb-0000-0000-0000-000000000002",
+  InternalName: "ResultOOB",
+  Title: "Результат заявки ООБ",
+  TypeAsString: "Choice",
+  TypeDisplayName: "Результирующий выбор",
+  TypeShortDescription: "Результат задачи",
+  Choices: { results: ["Исправлено", "Не исправлено"] },
+};
+const RESULT_FIELDS = [RESULT_FIELD_THU, RESULT_FIELD_OOB];
+
+// Типы контента задач: ТНУ-задача → поле ResultSearchTHU, задача ООБ → ResultOOB.
+const CT_THU = MAIN_TASK.ContentTypeId;
+const CT_OOB = "0x0108003365C4474CAE8C42BCE396314E88E51F0001A4ABEEA9CB93478EEBA71D023E4D0700E86894FD720BCD49A61B7F23B3CFB37F";
+const CT_META = [
+  { StringId: CT_THU, Name: "Задача ТНУ", Id: { StringValue: CT_THU }, FieldLinks: { results: [{ Id: RESULT_FIELD_THU.Id }] } },
+  { StringId: CT_OOB, Name: "Задача ООБ", Id: { StringValue: CT_OOB }, FieldLinks: { results: [{ Id: RESULT_FIELD_OOB.Id }] } },
+];
 
 // main-задача, уже взятая в работу (Editor = я) — в карточке у неё кнопки результатов
+// её типа контента (ООБ → «Исправлено» / «Не исправлено»)
 const MAIN_IN_PROGRESS = {
   ...MAIN_TASK,
   Id: 11,
   Title: "Задача в работе ООБ",
   Status: "В работе",
   PercentComplete: 0,
+  ContentTypeId: CT_OOB,
 };
 
 const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS };
@@ -115,15 +137,17 @@ vi.mock("../../../api", () => {
     if (u.includes("/web/sitegroups/getbyid(33)")) return { data: { d: { Id: 33, Title: "ООБ" } } };
     if (d.includes(`${MAIN_LIST}/fields`)) {
       // $filter=TypeDisplayName — выборка полей результата
-      if (/TypeDisplayName eq/.test(d)) return { data: { d: { results: [RESULT_FIELD_DEF] } } };
+      if (/TypeDisplayName eq/.test(d)) return { data: { d: { results: RESULT_FIELDS } } };
       // $filter=InternalName eq 'X' — конкретное поле
       const byName = d.match(/InternalName eq '([^']+)'/);
       if (byName) {
-        const all = [...fieldDefs(MAIN_FIELDS), RESULT_FIELD_DEF];
+        const all = [...fieldDefs(MAIN_FIELDS), ...RESULT_FIELDS];
         return { data: { d: { results: all.filter((f) => f.InternalName === byName[1]) } } };
       }
       return { data: { d: { results: fieldDefs(MAIN_FIELDS) } } };
     }
+    // Типы контента списка — по FieldLinks определяем поле результата для задачи
+    if (d.includes(`${MAIN_LIST}/contenttypes`)) return { data: { d: { results: CT_META } } };
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
@@ -521,6 +545,33 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(state.requests.some((r) => r.source === "dob" && r.method === "MERGE")).toBe(false);
   }, 30000);
 
+  it("«Изменить» в попапе main-строки открывает форму задачи (#tasks/<Id>)", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .find((r) => /Основная задача ООБ/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 260 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    const edit = [...(popup?.querySelectorAll("button") || [])].find((b) => /Изменить/.test(b.textContent || ""));
+    expect(edit).toBeTruthy();
+    await act(async () => {
+      edit.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    // main-задача открывается своей формой (Id), а не формой dob-списка
+    expect(window.location.hash).toBe("#tasks/10");
+  }, 30000);
+
   it("для main-задачи «в работе» попап даёт кнопки результатов — как карточка", async () => {
     const host = renderTasksView();
     await settle(3000);
@@ -542,20 +593,20 @@ describe("TasksView — multi-source (#tasks)", () => {
       return el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
     };
     const findButton = (re) => buttons().find((b) => re.test(b.textContent || ""));
-    // кнопок результата в таблице нет — но действия по ним доступны из попапа
-    expect(findButton(/Найдена/)).toBeTruthy();
-    expect(findButton(/Не найдена/)).toBeTruthy();
-    expect(findButton(/Изменить/)).toBeTruthy();
+    // Кнопки — из поля результата ЭТОГО типа контента (ООБ), а не из общего списка
+    // ТНУ-поля: ровно как в карточке по Behaviour/CT.
+    expect(buttons().map((b) => b.textContent)).toEqual(["Исправлено", "Не исправлено", "Изменить"]);
+    expect(findButton(/Найдена/)).toBeFalsy();
     // задача уже в работе — «Взять в работу» не предлагается
     expect(findButton(/Взять в работу/)).toBeFalsy();
 
-    // результат из попапа уходит в основной список (тот же поток, что в карточке)
+    // результат из попапа уходит в основной список в поле результата этого CT
     await act(async () => {
-      findButton(/Найдена/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      findButton(/Исправлено/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
       await new Promise((r) => setTimeout(r, 300));
     });
     await settle(800);
-    const write = state.requests.find((r) => r.source === "main" && r.body && r.body.ResultSearchTHU === "Найдена");
+    const write = state.requests.find((r) => r.source === "main" && r.body && r.body.ResultOOB === "Исправлено");
     expect(write).toBeTruthy();
     expect(write.url).toContain("items(11)");
   }, 30000);

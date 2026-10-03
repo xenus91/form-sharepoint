@@ -191,6 +191,23 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
   });
 
+  it("информационный пункт («В работе у X») рисуется плашкой без кнопки", async () => {
+    const { host } = renderGrid({
+      getRowActions: () => [
+        { key: "taken-by-other", kind: "info", label: "В работе у Иванов Пётр", hint: "Задача уже взята другим пользователем." },
+        { key: "edit", label: "Изменить", icon: "edit" },
+      ],
+    });
+    await settle(400);
+    await clickCell(rowByText(host, /Основная задача ООБ/), 200, 300);
+
+    const paper = openPopup();
+    expect(paper.textContent).toContain("В работе у Иванов Пётр");
+    expect(paper.textContent).toContain("Задача уже взята другим пользователем.");
+    // плашка — не кнопка: единственная кнопка в меню — «Изменить»
+    expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
+  });
+
   it("двойной клик по строке открывает форму (onRowOpen)", async () => {
     const onRowOpen = vi.fn();
     const { host } = renderGrid({ onRowOpen });

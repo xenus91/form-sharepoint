@@ -51,7 +51,7 @@ npx vite-node --config preview/vite.config.js preview/take-check.mjs      # вз
 | `RelatedScene.jsx` | диалог «Связанная заявка» (read-only) на мок-данных (`?scene=related`) |
 | `mockDob.js` | заглушка DOB-API (`dobApi`/`dobClient`) для сцен предпросмотра + мини-эмуляция SharePoint для dob-списка задач (MERGE/`__metadata.type`) |
 | `related-check.mjs` | jsdom-проверка диалога «Связанная заявка»: печатает текст/поля и ловит лишние чипы, подписи и кнопки |
-| `table-check.mjs` | jsdom-проверка таблицы: действия открываются в точке клика, состав как в карточке |
+| `table-check.mjs` | jsdom-проверка таблицы: действия открываются в точке клика, состав как в карточке (собирает тот же `rowActions.js`) |
 | `take-check.mjs` | jsdom-проверка взятия dob-задачи: мок SharePoint отвергает MERGE без `__metadata.type`, реальный `takeTaskInWork` проходит |
 | `main.jsx` | точка входа для браузера |
 | `jsdom-setup.mjs` | окружение jsdom (глобали для React/MUI) |
