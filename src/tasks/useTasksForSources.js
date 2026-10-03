@@ -91,8 +91,8 @@ export function useTasksForSources({
     principalsHash,
     fieldsHash,
     JSON.stringify({
-      main: (map.main || []).length,
-      dob: (map.dob || []).length,
+      main: (sourceFieldsById.main || []).length,
+      dob: (sourceFieldsById.dob || []).length,
     }),
   ];
 
