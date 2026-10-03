@@ -9,44 +9,78 @@ const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollap
 const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch(_e){ void _e;} };
 
 import { normalizeNextUrl } from "../api";
-import { buildTaskListQuery } from "./listQuery";
+import { buildTaskListQuery, baseFieldName, readSelectFields } from "./listQuery";
 // eslint-disable-next-line no-unused-vars
 import { mapRawTask } from "./mapping";
 import { toDomainTask } from "../domain/tasks/taskModel";
 import { getSourceById } from "./sources";
 import { makeSourceClient } from "./sourceClient";
+import { extractMissingField, extractSpErrorMessage, isMissingFieldError } from "./spError";
 
 /**
  * Чистая fetch-функция для одного источника задач (multi-source).
- * @param {{id:string, clientKind:"main"|"dob", listApi?:string|null, resolveListApi?:(()=>string|Promise<string>)|null}} source
- * @param {{apiBase:string, listApi:()=>string|Promise<string>, get:(url:string, opts?:any)=>Promise<{data:any}>}} client
- * @param {{ currentUserId?:number|null, distribution?:any, taskFieldNames?:string[], recipientField?:string|null, scNumberField?:string|null, resultFieldInternalNames?:string[], assignedIds?:number[]|null, listApi?:string|null, excludeCompleted?:boolean }} [opts]
+ * @param {{id:string, clientKind:"main"|"dob", listApi?:string|null, resolveListApi?:(() => string|Promise<string>)|null}} source
+ * @param {{apiBase:string, listApi:()=>string|Promise<string>, get:(url:string, opts?:any)=>Promise<{data:any}>, toRequestUrl?:(url:string)=>string}} client
+ * @param {{ currentUserId?:number|null, distribution?:any, taskFieldNames?:string[], recipientField?:string|null, scNumberField?:string|null, resultFieldInternalNames?:string[], assignedIds?:number[]|null, listApi?:string|null, excludeCompleted?:boolean, selectProfile?:"main"|"external", omittedFields?:string[] }} [opts]
  * @returns {Promise<Array>}
  */
 export async function fetchTasksForSource(source, client, opts = {}) {
   if (!source || !client) throw new Error("[fetchTasksForSource] source & client required");
+  const initialOpts = {
+    currentUserId: null,
+    distribution: null,
+    taskFieldNames: [],
+    recipientField: null,
+    scNumberField: null,
+    resultFieldInternalNames: [],
+    assignedIds: null,
+    listApi: null,
+    excludeCompleted: true,
+    selectProfile: "main",
+    ...opts,
+  };
   const {
-    currentUserId = null,
-    distribution = null,
-    taskFieldNames = [],
-    recipientField = null,
-    scNumberField = null,
-    resultFieldInternalNames = [],
-    assignedIds = null,
-    listApi = null,
-    excludeCompleted = true,
-  } = opts;
-  __dlog("[DBG:fetchTasksForSource] start", { sourceId: source.id, currentUserId, distributionId: distribution?.Id||null, assignedIdsLen: Array.isArray(assignedIds) ? assignedIds.length : null });
+    currentUserId,
+    distribution,
+    recipientField: initialRecipientField,
+    scNumberField,
+    assignedIds,
+    excludeCompleted,
+    selectProfile,
+  } = initialOpts;
+  __dlog("[DBG:fetchTasksForSource] start", { sourceId: source.id, currentUserId, distributionId: distribution?.Id||null, assignedIdsLen: Array.isArray(assignedIds) ? assignedIds.length : null, selectProfile });
   if (!currentUserId && !(Array.isArray(assignedIds) && assignedIds.length > 0)) return [];
+
+  let taskFieldNames = Array.isArray(initialOpts.taskFieldNames) ? [...initialOpts.taskFieldNames] : [];
+  let resultFieldInternalNames = Array.isArray(initialOpts.resultFieldInternalNames) ? [...initialOpts.resultFieldInternalNames] : [];
+  let recipientField = initialRecipientField || null;
+  const omittedFields = new Set((initialOpts.omittedFields || []).map((f) => String(f).toLowerCase()));
   let useDueDate = true;
   let useAdditionalActions = true;
   let useRecipient = !!recipientField;
   let effectiveRecipientField = recipientField || null;
-  const effectiveListApi = listApi || (typeof client.listApi === "function" ? await client.listApi() : "");
+  const effectiveListApi = initialOpts.listApi || (typeof client.listApi === "function" ? await client.listApi() : "");
+  const toRequestUrl = typeof client.toRequestUrl === "function"
+    ? client.toRequestUrl
+    : (url) => {
+        if (typeof client.apiBase === "string" && client.apiBase && !/^https?:\/\//.test(url) && !url.startsWith("/api/") && !url.startsWith("/dob-api/")) {
+          return `${client.apiBase}${url.startsWith("/") ? url : `/${url}`}`;
+        }
+        if (/^https?:\/\//.test(url) && client.apiBase && client.apiBase.startsWith("/")) {
+          try {
+            const u = new URL(url);
+            return u.pathname + u.search;
+          } catch (_e) { void _e; }
+        }
+        return url;
+      };
+
   const buildUrl = () =>
     buildTaskListQuery({
       listApi: effectiveListApi,
       taskFieldNames,
+      selectProfile,
+      omittedFields: [...omittedFields],
       useDueDate,
       useAdditionalActions,
       recipientField: effectiveRecipientField,
@@ -62,17 +96,10 @@ export async function fetchTasksForSource(source, client, opts = {}) {
   __dlog("[DBG:fetchTasksForSource] buildUrl", nextUrl.slice(0,1200));
   let all = [];
   let safety = 0;
+  let recoveries = 0;
   while (nextUrl && safety < 20) {
     try {
-      let urlForClient = nextUrl;
-      if (typeof client.apiBase === "string" && client.apiBase && !/^https?:\/\//.test(nextUrl) && !nextUrl.startsWith("/api/") && !nextUrl.startsWith("/dob-api/")) {
-        urlForClient = `${client.apiBase}${nextUrl.startsWith("/") ? nextUrl : `/${nextUrl}`}`;
-      } else if (/^https?:\/\//.test(nextUrl) && client.apiBase && client.apiBase.startsWith("/")) {
-        try {
-          const u = new URL(nextUrl);
-          urlForClient = u.pathname + u.search;
-        } catch (_e) { void _e; }
-      }
+      const urlForClient = toRequestUrl(nextUrl);
       const resp = await client.get(urlForClient, {
         headers: { Accept: "application/json;odata=verbose" },
         __noCache: true,
@@ -82,7 +109,9 @@ export async function fetchTasksForSource(source, client, opts = {}) {
       all = all.concat(results);
       nextUrl = data?.d?.__next ? normalizeNextUrl(data.d.__next) : null;
     } catch (e) {
-      const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
+      const rawMsg = extractSpErrorMessage(e);
+      const msg = String(rawMsg).toLowerCase();
+      // ── точечные, исторические ретраи ──────────────────────────────────────
       if (msg.includes("endjob")) {
         console.warn(`[fetchTasksForSource:${source.id}] EndJob field missing, retry without it`);
         taskFieldNames = taskFieldNames.filter((f) => f.toLowerCase() !== "endjob");
@@ -111,9 +140,57 @@ export async function fetchTasksForSource(source, client, opts = {}) {
         nextUrl = buildUrl();
         continue;
       }
-      if (nextUrl.includes("AssignedToId")) {
-        nextUrl = nextUrl.replace(/AssignedToId/g, "AssignedTo/Id");
+      // Legacy-фикс: в $select lookup-поле должно быть "AssignedTo/Id", а не "AssignedToId".
+      // ВАЖНО: раньше проверка была по всему URL и срабатывала на ЛЮБУЮ ошибку —
+      // в том числе на закодированный $filter (где AssignedToId — правильная форма),
+      // из-за чего ретраи «пинг-понговали» между двумя видами URL и тратились впустую.
+      if (/\$select=[^&]*\bAssignedToId\b/.test(nextUrl)) {
+        nextUrl = nextUrl.replace(/(\$select=[^&]*?)\bAssignedToId\b/, "$1AssignedTo/Id");
         continue;
+      }
+      // ── универсальное восстановление: SharePoint назвал отсутствующее поле ──
+      // Раньше незнакомое поле (например ResultSearchTHU на сайте ДОБ) роняло
+      // весь источник → в таблице не было ни одной задачи. Теперь поле исключаем
+      // и повторяем запрос (не более 8 раз на источник).
+      if (recoveries < 8 && isMissingFieldError(rawMsg)) {
+        const bad = extractMissingField(rawMsg);
+        if (bad) {
+          const badLower = bad.toLowerCase();
+          let changed = false;
+          // 1) поле в $select (могло прийти из ядра, result-полей, extras)
+          const selected = readSelectFields(nextUrl);
+          const hit = selected.find((f) => baseFieldName(f) === badLower || f.toLowerCase() === badLower);
+          if (hit) {
+            omittedFields.add(baseFieldName(hit));
+            changed = true;
+          }
+          // 2) поле в taskFieldNames / resultFieldInternalNames
+          if (taskFieldNames.some((f) => String(f).toLowerCase() === badLower)) {
+            taskFieldNames = taskFieldNames.filter((f) => String(f).toLowerCase() !== badLower);
+            omittedFields.add(badLower);
+            changed = true;
+          }
+          if (resultFieldInternalNames.some((f) => String(f).toLowerCase() === badLower)) {
+            resultFieldInternalNames = resultFieldInternalNames.filter((f) => String(f).toLowerCase() !== badLower);
+            omittedFields.add(badLower);
+            changed = true;
+          }
+          // 3) recipient-поле
+          if (effectiveRecipientField && effectiveRecipientField.toLowerCase() === badLower) {
+            useRecipient = false;
+            effectiveRecipientField = null;
+            changed = true;
+          }
+          if (changed) {
+            recoveries += 1;
+            console.warn(`[fetchTasksForSource:${source.id}] поле "${bad}" отсутствует в списке — исключаю и повторяю запрос`);
+            nextUrl = buildUrl();
+            continue;
+          }
+          // Поле названо, но мы его не запрашивали (например, $orderby/$expand) —
+          // повторять бессмысленно.
+          console.warn(`[fetchTasksForSource:${source.id}] SharePoint сообщил о поле "${bad}", но оно не в select — пробрасываю ошибку`);
+        }
       }
       throw e;
     }
@@ -133,7 +210,7 @@ export async function fetchTasks(opts = {}) {
   const source = getSourceById("main");
   if (!source) throw new Error("[fetchTasks] main source not configured");
   const client = makeSourceClient(source);
-  const mapped = await fetchTasksForSource(source, client, opts);
+  const mapped = await fetchTasksForSource(source, client, { ...opts, selectProfile: opts.selectProfile || "main" });
   // Совместимость с прежним логированием
   try {
     const byType = {};

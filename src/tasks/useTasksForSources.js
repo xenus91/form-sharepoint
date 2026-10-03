@@ -45,6 +45,9 @@ export function useTasksForSources({
   const sourceIds = enabledSources.map((s) => s.id).join("+") || "none";
   const principals = distribution ? listDistributionPrincipals(distribution) : [];
   const principalsHash = principals.map((p) => `${p.kind}:${p.id}:${(p.title||"").slice(0,20)}`).sort().join("|");
+  // «Родные» Id принципалов DcEmail (основной сайт). Для main идут в AssignedToId
+  // напрямую — гарантия, что задачи групп найдутся даже без резолва по email/Title.
+  const nativePrincipalIds = principals.map((p) => p.id).filter((n) => Number.isFinite(n));
   const fieldsHash = (taskFieldNames || []).join(",") + "|" + (recipientField || "") + "|" + (scNumberField || "") + "|" + (resultFieldInternalNames || []).join(",");
   const distributionKey = distribution?.Id ?? distribution?.OffDepKey ?? null;
 
@@ -81,10 +84,27 @@ export function useTasksForSources({
     taskFieldNames.length,
   ]);
 
-  // Если dob активен, но его поля ещё не подгружены — НЕ запускаем fetch (иначе 400)
-  const dobActive = enabledSources.find((s) => s.id === "dob");
-  const dobReady = !dobActive || dobFields.isSuccess || dobFields.data !== undefined;
-  const fetchEnabled = enabled && !!sources && sources.length > 0 && dobReady;
+  // Раньше fetch блокировался, пока не загрузятся поля dob («иначе 400»).
+  // Теперь select строится консервативно (selectProfile: "external" + авто-ретрай
+  // по имени отсутствующего поля в fetchTasksForSource), поэтому ждать не нужно:
+  // блокировка лишь задерживала появление задач в таблице.
+  const fetchEnabled = enabled && !!sources && sources.length > 0;
+
+  // sitePrincipalIds приходят асинхронно (useEnrichDistributionForSources) и несут
+  // Id групп/пользователей DcEmail, срезолвленные НА КОНКРЕТНОМ сайте-источнике.
+  // Если не включить их в ключ, react-query переиспользует результат первого запроса,
+  // где группа ещё не была срезолвлена (unknown → unresolved), и задачи группы из
+  // DcEmail на внешнем сайте (dob) не находятся до ручного обновления.
+  // Требование: в #tasks должны находиться ВСЕ задачи пользователя И групп из DcEmail.
+  const siteIdsHash = sitePrincipalIds
+    ? Object.keys(sitePrincipalIds)
+        .sort()
+        .map((id) => {
+          const v = sitePrincipalIds[id] || {};
+          return `${id}:${v.userId ?? ""}:${(v.principalIds || []).join(".")}`;
+        })
+        .join("|")
+    : "none";
 
   const queryKey = [
     "tasks",
@@ -93,6 +113,7 @@ export function useTasksForSources({
     distributionKey,
     principalsHash,
     fieldsHash,
+    siteIdsHash,
     JSON.stringify({
       main: (sourceFieldsById.main || []).length,
       dob: (sourceFieldsById.dob || []).length,
@@ -111,6 +132,10 @@ export function useTasksForSources({
       resultFieldInternalNames,
       sourceFieldsById,
       sitePrincipalIds,
+      nativePrincipalIds,
+      // Таблица не показывает результат-поля (требование пользователя 2026-10-03),
+      // а на сайте ДОБ их нет — запрашивать их в multi-source выборке нельзя.
+      omitResultFields: true,
     }),
     enabled: fetchEnabled,
     staleTime: staleTimeMs,

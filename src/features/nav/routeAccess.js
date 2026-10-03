@@ -24,10 +24,12 @@ export function normalizeDepartment(value) {
   if (value == null) return "";
   return String(value)
     .replace(/\u00A0/g, " ")   // NBSP → space
+    // ВАЖНО: нижний регистр ДО замены ё→е, иначе «Ёлка»/«ООБ Ё» не нормализуются
+    // (replace(/ё/g) не матчит заглавную Ё) — тест routeAccess это ловил.
+    .toLowerCase()
     .replace(/ё/g, "е")
     .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+    .trim();
 }
 
 /**

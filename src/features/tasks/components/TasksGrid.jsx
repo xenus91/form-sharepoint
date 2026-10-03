@@ -50,7 +50,6 @@ function formatDate(value) {
  * @param {object} props
  * @param {Array<any>} props.rows — задачи с compositeId
  * @param {Array<{InternalName:string,Title:string,TypeAsString:string}>} [props.fields]
- * @param {string[]} [props.resultFieldInternalNames=[]]
  * @param {(compositeId:string) => void} [props.onRowClick]
  * @param {boolean} [props.showSourceColumn=false] — показать колонку "Сайт" (под ?dbg=1)
  * @param {boolean} [props.loading]
@@ -59,7 +58,6 @@ function formatDate(value) {
 export default function TasksGrid({
   rows = [],
   fields = [],
-  resultFieldInternalNames = [],
   onRowClick,
   showSourceColumn = false,
   loading = false,
@@ -119,27 +117,18 @@ export default function TasksGrid({
       sortable: true,
       valueFormatter: (p) => formatDate(p.value),
     });
-    // ResultSearchTHU (динамический — может отличаться на разных сайтах)
-    if (resultFieldInternalNames && resultFieldInternalNames.length > 0) {
-      for (const fn of resultFieldInternalNames) {
-        cols.push({
-          headerName: fn,
-          field: fn,
-          width: 140,
-          sortable: true,
-        });
-      }
-    }
+    // Таблица #tasks — обзорная: поля результата здесь НЕ показываем
+    // (требование 2026-10-03). Результаты живут в карточках.
     if (showSourceColumn || showDbg) {
       cols.push({
-        headerName: "Сайт",
-        field: "sourceId",
-        width: 110,
+        headerName: "Источник",
+        valueGetter: (p) => p.data?.sourceLabel || p.data?.sourceId || "",
+        width: 130,
         sortable: true,
       });
     }
     return cols;
-  }, [resultFieldInternalNames, showSourceColumn, showDbg]);
+  }, [showSourceColumn, showDbg]);
 
   const defaultColDef = useMemo(() => ({
     resizable: true,
@@ -174,6 +163,7 @@ export default function TasksGrid({
       className="ag-theme-quartz"
       sx={{
         height: "100%",
+        minHeight: 320,
         width: "100%",
         // Минимальные стили — основная тема в themeQuartz
         ["--ag-font-family"]: "Roboto, Arial, sans-serif",
@@ -187,6 +177,7 @@ export default function TasksGrid({
       }}
     >
       <AgGridReact
+        theme={themeQuartz}
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={defaultColDef}

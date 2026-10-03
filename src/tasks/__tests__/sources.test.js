@@ -1,9 +1,9 @@
+// @vitest-environment jsdom
 // src/tasks/__tests__/sources.test.js
 // vitest тесты для sources.js (см. план, этап 1).
-// Запускается через `npm test` (vitest) — недоступен в offline-окружении.
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { DEFAULT_TASK_SOURCES, getTaskSources, getSourceById, resolveSourceListApi } from "../sources";
+import { DEFAULT_TASK_SOURCES, getTaskSources, getSourceById, resolveSourceListApi, DOB_TASKS_LIST_GUID } from "../sources";
 
 describe("sources.js", () => {
   beforeEach(() => {
@@ -15,10 +15,10 @@ describe("sources.js", () => {
     expect(src.map((s) => s.id).sort()).toEqual(["dob", "main"]);
   });
 
-  it("main enabled=true, dob enabled=false (до получения GUID)", () => {
+  it("main enabled=true, dob enabled=true", () => {
     const src = getTaskSources();
     expect(src.find((s) => s.id === "main").enabled).toBe(true);
-    expect(src.find((s) => s.id === "dob").enabled).toBe(false);
+    expect(src.find((s) => s.id === "dob").enabled).toBe(true);
   });
 
   it("getSourceById возвращает корректный источник", () => {
@@ -28,9 +28,9 @@ describe("sources.js", () => {
   });
 
   it("override из localStorage мёржится поверх дефолта", () => {
-    localStorage.setItem("tasks.sources", JSON.stringify({ dob: { enabled: true } }));
+    localStorage.setItem("tasks.sources", JSON.stringify({ dob: { enabled: false } }));
     const src = getTaskSources();
-    expect(src.find((s) => s.id === "dob").enabled).toBe(true);
+    expect(src.find((s) => s.id === "dob").enabled).toBe(false);
     expect(src.find((s) => s.id === "main").enabled).toBe(true);
   });
 
@@ -40,12 +40,24 @@ describe("sources.js", () => {
     expect(api).toMatch(/^\/web\/lists\(guid'[A-F0-9-]+'\)$/);
   });
 
-  it("listGuid vs listTitle — main имеет оба", () => {
+  it("main имеет listGuid и listTitle, dob — подтверждённый GUID списка RequestsTask", () => {
     const main = getSourceById("main");
     expect(main.listGuid).toBeTruthy();
     expect(main.listTitle).toBe("Tasks");
+
     const dob = getSourceById("dob");
-    expect(dob.listGuid).toBeNull(); // TODO Этап 0
-    expect(dob.listTitle).toBe("RequestsTask");
+    // GUID подтверждён рабочим запросом пользователя (см. ADR/доработку):
+    //   /dob-api/sites/dob/doblogistic/_api/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')/items
+    expect(dob.listGuid).toBe(DOB_TASKS_LIST_GUID);
+    expect(dob.listGuid.toLowerCase()).toBe("03fc1b92-baff-44dc-b8a3-d04acbe329d3");
+    expect(dob.listApi).toBe(`/web/lists(guid'${DOB_TASKS_LIST_GUID.toLowerCase()}')`);
+    expect(dob.listTitle).toBe("RequestsTask"); // fallback-резолв, если GUID отличается
+  });
+
+  it("listApi источника — путь ОТНОСИТЕЛЬНО api-base (без /dob-api и без origin)", () => {
+    const dob = getSourceById("dob");
+    expect(dob.listApi.startsWith("/web/lists")).toBe(true);
+    expect(dob.listApi).not.toContain("/dob-api");
+    expect(dob.listApi).not.toContain("http");
   });
 });

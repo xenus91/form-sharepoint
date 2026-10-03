@@ -30,7 +30,11 @@ export async function updateTaskResult(compositeKey, payload = {}) {
   if (!source) throw new Error(`[updateTaskResult] unknown source: ${parsed.sourceId}`);
   const client = makeSourceClient(source);
   const listApi = typeof client.listApi === "function" ? await client.listApi() : "";
-  const url = `${listApi}/items(${parsed.id})`;
+  // listApi — путь относительно api-base источника; приводим к request-ready виду
+  // (main: без префикса — его добавит axios; dob: /dob-api/sites/dob/doblogistic/_api/…)
+  const url = typeof client.toRequestUrl === "function"
+    ? client.toRequestUrl(`${listApi}/items(${parsed.id})`)
+    : `${listApi}/items(${parsed.id})`;
 
   const body = {
     Status: payload.Status || "Завершена",

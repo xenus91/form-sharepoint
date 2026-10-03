@@ -2,19 +2,44 @@
 // Чистый билдер URL для REST-запроса списка задач.
 // Раньше жило inline в TasksView.jsx как closure-функция buildUrl() внутри loadTasks —
 // вынесено в Tier 3 (Q11) для упрощения loadTasks и переиспользования в других местах.
+//
+// Multi-source: у каждого источника свой набор полей, поэтому select строится
+// из «профиля» (main | external) и списка доступных полей (taskFieldNames):
+//   • main     — историческое поведение (Location1, ResultSearchTHU, OffDepKey,
+//                AdditionalActions, результат-поля) с ретраями в fetchTasksForSource;
+//   • external — только безопасное ядро + те поля, которые реально есть в списке.
+//                ResultSearchTHU/Location1 на сайтах-источниках обычно отсутствуют,
+//                и запрос падал с 400 «Столбец … не существует» — таблица была пустой.
 
 import { TASKS_LIST_API } from "./config";
 import { getGroupIdsFromDistribution } from "./distribution";
 
-const SELECT_BASE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,ContentTypeId";
-const SELECT_BASE_NO_DUE = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,Editor/Id,Editor/Title,ContentTypeId";
-// eslint-disable-next-line no-unused-vars
-const SELECT_ADDITIONAL = "AdditionalsActionsRequired,AdditionalActions";
+// Ядро, которое есть практически в любом списке задач.
+const CORE_FIELDS = [
+  "Id",
+  "Title",
+  "Body",
+  "AssignedTo/Id",
+  "AssignedTo/Title",
+  "Status",
+  "Created",
+  "Modified",
+  "PercentComplete",
+  "Editor/Id",
+  "Editor/Title",
+  "ContentTypeId",
+];
+const SELECT_BASE_NO_DUE = CORE_FIELDS.join(",");
+const SELECT_BASE = [...CORE_FIELDS, "DueDate"].join(",");
+// Поля, которые добавляются только для основного сайта (профиль "main").
+const MAIN_ONLY_FIELDS = ["Location1", "ResultSearchTHU"];
 
 /**
  * @typedef {object} BuildTaskListQueryOpts
  * @property {string} [listApi=TASKS_LIST_API] — путь к списку (например, "/web/lists(guid'…')"). По умолчанию — основной список задач.
- * @property {string[]} [taskFieldNames=[]] — доступные поля в списке (OffDepKey, RelatedItems)
+ * @property {string[]} [taskFieldNames=[]] — доступные поля в списке (OffDepKey, RelatedItems), [] = неизвестны
+ * @property {"main"|"external"} [selectProfile="main"] — профиль select (см. выше)
+ * @property {string[]} [omittedFields=[]] — поля, которых заведомо нет в списке (после 400-ретраев)
  * @property {boolean} [useDueDate=true] — выбирать ли поле DueDate
  * @property {boolean} [useAdditionalActions=true] — включать ли AdditionalActions поля
  * @property {string|null} [recipientField=null] — InternalName поля Recipient (Lookup)
@@ -24,15 +49,59 @@ const SELECT_ADDITIONAL = "AdditionalsActionsRequired,AdditionalActions";
  * @property {number[]} [assignedIds=null] — массив Id для AssignedToId OR-фильтра. Если передан — игнорирует distribution/currentUserId-логику.
  * @property {number} [top=100] — page size
  * @property {string} [orderBy="Created asc"]
+ * @property {boolean} [excludeCompleted=false] — добавить фильтр «PercentComplete ne 1»
  */
+
+/**
+ * Нормализует список «пропущенных» полей в Set в нижнем регистре.
+ * @param {string[]} omitted
+ * @returns {Set<string>}
+ */
+function toOmittedSet(omitted) {
+  const set = new Set();
+  for (const f of omitted || []) {
+    if (!f) continue;
+    set.add(String(f).trim().toLowerCase());
+  }
+  return set;
+}
+
+/**
+ * Достаёт список запрошенных полей из $select в URL запроса.
+ * Нужно для авто-восстановления после 400 «поле не существует»:
+ * по имени из ошибки находим поле в select и исключаем его.
+ * @param {string} url
+ * @returns {string[]}
+ */
+export function readSelectFields(url) {
+  const m = String(url || "").match(/[?&]\$select=([^&]*)/);
+  if (!m) return [];
+  try {
+    return decodeURIComponent(m[1]).split(",").map((s) => s.trim()).filter(Boolean);
+  } catch (_e) {
+    void _e;
+    return m[1].split(",").map((s) => s.trim()).filter(Boolean);
+  }
+}
+
+/**
+ * Достаёт базовое имя поля из select-записи ("AssignedTo/Id" → "assignedto").
+ * @param {string} field
+ * @returns {string}
+ */
+export function baseFieldName(field) {
+  const trimmed = String(field || "").trim();
+  if (!trimmed) return "";
+  return trimmed.split("/")[0].toLowerCase();
+}
 
 /**
  * Строит абсолютный URL (относительно API base) для получения списка задач.
  * Возвращает строку типа "/web/lists(guid'…')/items?$select=…&$expand=…&$filter=…&$orderby=Created asc&$top=100".
  *
  * Логика фильтра AssignedToId:
- *   - если есть distribution с Email.Id → фильтр по этим Id групп
- *   - иначе fallback на OffDepKey (если поле есть)
+ *   - если передан assignedIds → OR-фильтр по этим Id (multi-source: пользователь + группы из DcEmail)
+ *   - иначе распределение: группы DcEmail + текущий пользователь
  *   - иначе AssignedToId eq currentUserId
  *
  * @param {BuildTaskListQueryOpts} [opts]
@@ -42,106 +111,129 @@ export function buildTaskListQuery(opts = {}) {
   let {
     listApi = TASKS_LIST_API, // legacy: если не передан — основной список
     taskFieldNames = [],
+    selectProfile = "main",
+    omittedFields = [],
     useDueDate = true,
     useAdditionalActions = true,
     recipientField = null,
     useRecipient = null,
     distribution = null,
     currentUserId = null,
-    assignedIds = null, // новый: массив Id для OR-фильтра
+    assignedIds = null, // массив Id для OR-фильтра
     top = 100,
     orderBy = "Created asc",
     excludeCompleted = false,
   } = opts;
 
+  const isExternal = selectProfile === "external";
+  const omitted = toOmittedSet(omittedFields);
+  const omit = (field) => omitted.has(baseFieldName(field));
+
   // Защита: удалённое поле EndJob фильтруем из всех входных массивов
   if (Array.isArray(taskFieldNames) && taskFieldNames.some((f) => String(f).toLowerCase() === "endjob")) {
     taskFieldNames = taskFieldNames.filter((f) => String(f).toLowerCase() !== "endjob");
   }
-  // Extra select fields (OffDepKey, RelatedItems, AdditionalActions, Result fields)
-  const extraFields = [];
-  // Динамические поля результата — фильтруем удалённые поля (EndJob был удалён)
-  if (opts.resultFieldInternalNames && Array.isArray(opts.resultFieldInternalNames)) {
-    for (const fn of opts.resultFieldInternalNames) {
-      if (fn && typeof fn === "string" && fn.trim() && fn.trim().toLowerCase() !== "endjob" && !extraFields.includes(fn.trim())) {
-        extraFields.push(fn.trim());
-      }
-    }
+
+  // taskFieldNames непустой → поля списка известны, лишнее выкидываем.
+  // Пустой массив → поля неизвестны, доверяемся профилю + авто-ретраям.
+  const fieldsKnown = Array.isArray(taskFieldNames) && taskFieldNames.length > 0;
+  const knownSet = new Set(
+    (taskFieldNames || [])
+      .filter(Boolean)
+      .map((f) => String(f).trim().toLowerCase())
+  );
+  const has = (field) => knownSet.has(baseFieldName(field)) || knownSet.has(String(field).toLowerCase());
+  /** Поле допустимо для этого списка: известно И присутствует, либо список полей ещё не подгружен. */
+  const allowed = (field) => !omit(field) && (!fieldsKnown || has(field));
+
+  // ---- базовый select ----
+  const baseFields = [];
+  for (const f of CORE_FIELDS) {
+    if (omit(f)) continue;
+    // Если поля списка известны — не запрашиваем отсутствующие (иначе 400).
+    // Если неизвестны — берём ядро целиком, лишнее уберёт авто-ретрай.
+    if (fieldsKnown && !has(f)) continue;
+    baseFields.push(f);
   }
-  if (taskFieldNames.length === 0 || taskFieldNames.includes("OffDepKey")) extraFields.push("OffDepKey");
-  // Recipient в Tasks отсутствует — не используем дефолт "Recipient" на первом рендере.
-  // Раньше делали fallback "Recipient" при taskFieldNames.length===0, что давало 400 "Recipient не существует" и кучу ретраев.
-  // Теперь Recipient берём только если он явно определён (recipientField !== null) или useRecipient === true.
-  const shouldUseRecipient = useRecipient !== null ? useRecipient : !!recipientField;
-  const effectiveRecipientFieldRaw = shouldUseRecipient ? (recipientField || null) : null;
-  const effectiveRecipientField = effectiveRecipientFieldRaw && effectiveRecipientFieldRaw.toLowerCase() === "endjob" ? null : effectiveRecipientFieldRaw;
-  if (effectiveRecipientField && shouldUseRecipient) {
-    if (effectiveRecipientField.toLowerCase() === "endjob" || effectiveRecipientField.toLowerCase() === "recipient" && !shouldUseRecipient) {
-    } else {
-      extraFields.push(`${effectiveRecipientField}/Id`);
-      extraFields.push(`${effectiveRecipientField}/Title`);
-    }
+  if (useDueDate && allowed("DueDate") && !baseFields.includes("DueDate")) baseFields.push("DueDate");
+  if (!useDueDate) {
+    const idx = baseFields.indexOf("DueDate");
+    if (idx >= 0) baseFields.splice(idx, 1);
   }
-  // RelatedItems — критично для enrich (там лежит ListId/ItemId → оттуда тянем Recipient/THU), поэтому всегда берём на первом рендере
-  if (taskFieldNames.length === 0 || taskFieldNames.includes("RelatedItems")) extraFields.push("RelatedItems");
-  // AdditionalActions поля — включаем если useAdditionalActions и поле есть в списке или ещё не загружен список полей (для первой загрузки)
-  // Это безопасно для старых списков без этих полей — при 400 ошибке loadTasks сделает retry без них.
-  const hasAdditionalFields = taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions") || taskFieldNames.includes("AdditionalsActionsRequired") || taskFieldNames.includes("AdditionalActionsRequired");
-  if (useAdditionalActions && hasAdditionalFields) {
-    // Добавляем оба поля разом, если хотя бы одно есть — сервер вернёт только существующие, но лучше проверить оба
-    // Поддержка обоих написаний: AdditionalsActionsRequired (typo в проде) и AdditionalActionsRequired (правильно) — пушим то, что есть в списке
-    const hasNew = taskFieldNames.includes("AdditionalsActionsRequired");
-    const hasOld = taskFieldNames.includes("AdditionalActionsRequired");
-    if (taskFieldNames.length === 0) {
-      extraFields.push("AdditionalsActionsRequired");
-    } else if (hasNew) {
-      extraFields.push("AdditionalsActionsRequired");
-    } else if (hasOld) {
-      extraFields.push("AdditionalActionsRequired");
-    }
-    if (taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions")) extraFields.push("AdditionalActions");
-    // Fallback: если taskFieldNames пустой, добавим оба — если одного нет, retry без них сработает
-    if (taskFieldNames.length === 0 && !extraFields.includes("AdditionalsActionsRequired")) {
-      extraFields.push("AdditionalsActionsRequired", "AdditionalActions");
+  if (selectProfile === "main") {
+    // Историческое поведение основного сайта: Location1/ResultSearchTHU берём
+    // даже когда список полей не загрузился (ретраи в fetchTasksForSource).
+    for (const f of MAIN_ONLY_FIELDS) {
+      if (!omit(f) && (!fieldsKnown || has(f)) && !baseFields.includes(f)) baseFields.push(f);
     }
   }
 
-  const selectFieldsBaseRaw = useDueDate ? SELECT_BASE : SELECT_BASE_NO_DUE;
-  // Per-source filter: если taskFieldNames известны (новые per-source хуки),
-  // убираем из базы поля, которых нет в списке. Иначе — SharePoint вернёт 400.
-  // SELECT_BASE_NO_DUE/SELECT_BASE — захардкоженный минимальный набор + ResultSearchTHU;
-  // для dob ResultSearchTHU не существует — нужно фильтровать.
-  const selectFieldsBase = (Array.isArray(taskFieldNames) && taskFieldNames.length > 0)
-    ? selectFieldsBaseRaw.split(",").filter((f) => {
-        const trimmed = f.trim();
-        // Если в списке нет поля — выкидываем (для дочерних типа ResultSearchTHU/Id)
-        if (trimmed.includes("/")) {
-          const base = trimmed.split("/")[0];
-          return taskFieldNames.includes(base) || taskFieldNames.includes(trimmed);
-        }
-        return taskFieldNames.includes(trimmed);
-      }).join(",")
-    : selectFieldsBaseRaw;
-  // Если useAdditionalActions false — не добавляем AdditionalActions даже если они есть в extraFields (для retry)
-  let finalExtra = extraFields;
-  if (!useAdditionalActions) {
-    finalExtra = extraFields.filter((f) => f !== "AdditionalsActionsRequired" && f !== "AdditionalActionsRequired" && f !== "AdditionalActions");
+  // ---- extra select fields (OffDepKey, RelatedItems, AdditionalActions, Result fields) ----
+  const extraFields = [];
+  const pushExtra = (field) => {
+    if (!field) return;
+    const trimmed = String(field).trim();
+    if (!trimmed || trimmed.toLowerCase() === "endjob") return;
+    if (omit(trimmed)) return;
+    if (extraFields.some((f) => f.toLowerCase() === trimmed.toLowerCase())) return;
+    extraFields.push(trimmed);
+  };
+
+  // Динамические поля результата — только для того профиля, который их запросил.
+  // В табличном режиме resultFieldInternalNames === [] — результат-поля не нужны.
+  if (Array.isArray(opts.resultFieldInternalNames)) {
+    for (const fn of opts.resultFieldInternalNames) {
+      if (!fn || typeof fn !== "string" || !fn.trim()) continue;
+      const f = fn.trim();
+      if (f.toLowerCase() === "endjob") continue;
+      // Внешним источникам результат-поля не навязываем: берём только если они
+      // реально есть в списке (ResultSearchTHU на dob отсутствует → 400).
+      if (isExternal && !has(f)) continue;
+      pushExtra(f);
+    }
   }
+  if (!isExternal && (taskFieldNames.length === 0 || has("OffDepKey"))) pushExtra("OffDepKey");
+  // Recipient в Tasks отсутствует — не используем дефолт "Recipient" на первом рендере.
+  const shouldUseRecipient = useRecipient !== null ? useRecipient : !!recipientField;
+  const effectiveRecipientFieldRaw = shouldUseRecipient ? (recipientField || null) : null;
+  const effectiveRecipientField = effectiveRecipientFieldRaw && effectiveRecipientFieldRaw.toLowerCase() === "endjob" ? null : effectiveRecipientFieldRaw;
+  if (effectiveRecipientField && shouldUseRecipient && allowed(effectiveRecipientField)) {
+    pushExtra(`${effectiveRecipientField}/Id`);
+    pushExtra(`${effectiveRecipientField}/Title`);
+  }
+  // RelatedItems — критично для enrich (там лежит ListId/ItemId → оттуда тянем Recipient/THU)
+  if (allowed("RelatedItems")) pushExtra("RelatedItems");
+  // AdditionalActions поля — только основной сайт (на dob их обычно нет).
+  const hasAdditionalFields = !isExternal && (
+    taskFieldNames.length === 0 ||
+    taskFieldNames.includes("AdditionalActions") ||
+    taskFieldNames.includes("AdditionalsActionsRequired") ||
+    taskFieldNames.includes("AdditionalActionsRequired")
+  );
+  if (useAdditionalActions && hasAdditionalFields) {
+    const hasNew = taskFieldNames.includes("AdditionalsActionsRequired");
+    const hasOld = taskFieldNames.includes("AdditionalActionsRequired");
+    if (taskFieldNames.length === 0 || hasNew) pushExtra("AdditionalsActionsRequired");
+    else if (hasOld) pushExtra("AdditionalActionsRequired");
+    if (taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions")) pushExtra("AdditionalActions");
+  }
+  const finalExtra = extraFields;
   const selectFields = finalExtra.length
-    ? `${selectFieldsBase},${finalExtra.join(",")}`
-    : selectFieldsBase;
+    ? `${baseFields.join(",")},${finalExtra.join(",")}`
+    : baseFields.join(",");
 
   // Expand
   const expands = ["AssignedTo", "Editor"];
   const effectiveExpandRecipient = shouldUseRecipient ? (recipientField || null) : null;
-  if (effectiveExpandRecipient && shouldUseRecipient) expands.push(effectiveExpandRecipient);
+  if (effectiveExpandRecipient && shouldUseRecipient && allowed(effectiveExpandRecipient)) expands.push(effectiveExpandRecipient);
 
   // Filter по AssignedToId:
-  //   - если передан assignedIds (массив) → OR-фильтр по этим Id (multi-source)
+  //   - assignedIds (массив) → OR-фильтр по этим Id (multi-source: пользователь + группы из DcEmail)
   //   - иначе legacy: distribution → группа + currentUserId, fallback на currentUserId
   let assignedFilter;
   if (Array.isArray(assignedIds) && assignedIds.length > 0) {
-    const ids = [...new Set(assignedIds.map(Number).filter((n) => Number.isFinite(n)))];
+    // ВАЖНО: Number(null) === 0 → без фильтра «> 0» в фильтр попадал AssignedToId eq 0
+    const ids = [...new Set(assignedIds.map(Number).filter((n) => Number.isFinite(n) && n > 0))];
     if (ids.length === 0) {
       // нет ни одного валидного Id — пустой фильтр (на источнике ничего не вернётся)
       assignedFilter = "AssignedToId eq -1";
@@ -162,25 +254,15 @@ export function buildTaskListQuery(opts = {}) {
       } else {
         assignedFilter = `(${allIds.map((id) => `AssignedToId eq ${id}`).join(" or ")})`;
       }
-      // Лог для отладки фолбэка
-      if (allIds.length !== groupIds.length) {
-
-      }
     } else {
       assignedFilter = `AssignedToId eq ${currentUserId}`;
-      if (distribution.OffDepKey) {
-      }
     }
   } else {
     assignedFilter = `AssignedToId eq ${currentUserId}`;
   }
-  if (!currentUserId) {
-  }
 
   // Завершённые задачи в основной запрос не попадают: их считает и грузит
   // отдельный ленивый источник (tasks/completedTasks.js — RenderListDataAsStream).
-  // Исключаем на сервере по PercentComplete = 1 (остальные признаки завершённости
-  // отсекает клиентский isCompletedStatus в useTasksFiltering).
   const finalFilter = excludeCompleted
     ? `${assignedFilter} and (PercentComplete eq null or PercentComplete ne 1)`
     : assignedFilter;
@@ -191,3 +273,5 @@ export function buildTaskListQuery(opts = {}) {
     `&$filter=${encodeURIComponent(finalFilter)}` +
     `&$orderby=${orderBy}&$top=${top}`;
 }
+
+export { CORE_FIELDS, MAIN_ONLY_FIELDS, SELECT_BASE, SELECT_BASE_NO_DUE };

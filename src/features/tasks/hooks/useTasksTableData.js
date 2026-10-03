@@ -16,6 +16,8 @@ import { useEnrichDistributionForSources } from "../../../tasks/enrichDistributi
  *   scNumberField?: string|null,
  *   resultFieldInternalNames?: string[],
  *   enabled?: boolean,
+ *   mode?: "cards"|"table" — в табличном режиме грузим всегда; в карточном —
+ *     только если активен более одного источника (чтобы смёржить задачи dob в список).
  *   filterFn?: (rows: any[]) => any[],
  * }} [opts]
  */
@@ -28,10 +30,16 @@ export function useTasksTableData(opts = {}) {
     scNumberField = null,
     resultFieldInternalNames = [],
     enabled = true,
+    mode = "table",
     filterFn = null,
   } = opts;
 
   const sources = useTasksSources(userProfile);
+  const activeSources = sources.filter((s) => s && s.enabled !== false);
+  // Карточкам нужны только «внешние» строки (main уже загружен useTasksQuery),
+  // поэтому в карточном режиме не дублируем загрузку основного списка.
+  const querySources = mode === "cards" ? activeSources.filter((s) => s.id !== "main") : activeSources;
+  const shouldFetch = enabled && querySources.length > 0;
 
   // DBG: фиксируем вход в хук и какие источники активны
   try {
@@ -39,6 +47,9 @@ export function useTasksTableData(opts = {}) {
       // eslint-disable-next-line no-console
       console.log("[DBG:useTasksTableData]", {
         enabled,
+        mode,
+        shouldFetch,
+        querySourcesIds: querySources.map((s) => s.id),
         sourcesIds: sources.map((s) => s.id),
         sourcesKind: sources.map((s) => s.clientKind),
         sourcesEnabled: sources.map((s) => s.enabled),
@@ -48,18 +59,18 @@ export function useTasksTableData(opts = {}) {
 
   // Предварительная резолвация ID групп/пользователей на каждом сайте.
   // Параллельно с /fields — не блокирует tasks fetch.
-  const siteIdsQuery = useEnrichDistributionForSources(sources, distribution, {
-    enabled: enabled && !!distribution && sources.length > 0,
+  const siteIdsQuery = useEnrichDistributionForSources(querySources, distribution, {
+    enabled: shouldFetch && !!distribution && querySources.length > 0,
   });
 
   const query = useTasksForSources({
-    sources,
+    sources: querySources,
     distribution,
     taskFieldNames,
     recipientField,
     scNumberField,
     resultFieldInternalNames,
-    enabled,
+    enabled: shouldFetch,
     sitePrincipalIds: siteIdsQuery.data,
   });
 
@@ -70,6 +81,9 @@ export function useTasksTableData(opts = {}) {
   }, [query.data, filterFn]);
 
   return {
+    mode,
+    shouldFetch,
+    querySources,
     rows: filtered,
     errors: query.data?.errors || [],
     perSourceStats: query.data?.perSourceStats || {},

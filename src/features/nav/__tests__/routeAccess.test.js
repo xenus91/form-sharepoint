@@ -32,7 +32,10 @@ describe("routeAccess.js", () => {
       expect(matchDepartment("отдел обеспечения бизнеса")).toBe(true);
     });
     it("учитывает ё/е", () => {
-      expect(matchDepartment("Отдел обеспeчения бизнеса".replace("е", "ё"))).toBe(true);
+      // «Отдёл …» — заглавная Ё/ё в начале слова
+      expect(matchDepartment("Отдел обеспечения бизнеса".replace("е", "ё"))).toBe(true);
+      // «обёспечения» — ё внутри слова
+      expect(matchDepartment("Отдел обеспечения бизнеса".replace("обеспечения", "обёспечения"))).toBe(true);
     });
     it("не матчит другие подразделения", () => {
       expect(matchDepartment("Группа отгрузки РЦ")).toBe(false);

@@ -27,6 +27,40 @@ import {
 const MERGE_HEADERS = { "X-HTTP-Method": "MERGE", "If-Match": "*" };
 
 /**
+ * Приводит путь к виду, пригодному для передачи в axios-инстанс источника.
+ *
+ * Правила (см. ADR docs/decisions/dob-task-sources.md, «Lesson learned»):
+ *   1. Абсолютный http(s)-URL оставляем как есть, если apiBase абсолютный.
+ *      Если apiBase относительный (прокси в dev: "/api", "/dob-api/…") —
+ *      отрезаем origin, чтобы запрос ушёл через прокси, а не напрямую.
+ *   2. Путь уже с префиксом прокси ("/api/…", "/dob-api/…") — не трогаем.
+ *   3. Иначе — префиксуем apiBase источника ("" для main, dobApiBase() для dob).
+ *
+ * @param {string} apiBase
+ * @param {string} url
+ * @returns {string}
+ */
+export function toRequestUrl(apiBase, url) {
+  if (!url || typeof url !== "string") return url;
+  const isAbsolute = /^https?:\/\//i.test(url);
+  if (isAbsolute) {
+    if (apiBase && apiBase.startsWith("/")) {
+      try {
+        const u = new URL(url);
+        return `${u.pathname}${u.search}`;
+      } catch {
+        return url;
+      }
+    }
+    return url;
+  }
+  if (url.startsWith("/api/") || url.startsWith("/dob-api/")) return url;
+  if (!apiBase) return url;
+  if (url.startsWith(apiBase)) return url; // защита от двойного префикса
+  return `${apiBase}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
+/**
  * @param {{id:string, clientKind:"main"|"dob", listApi?:string|null, resolveListApi?:(() => string|Promise<string>)|null}} source
  * @returns {SourceClient}
  */
@@ -41,6 +75,7 @@ export function makeSourceClient(source) {
     return {
       name: source.id,
       apiBase: "",
+      toRequestUrl: (url) => toRequestUrl("", url),
       listApi: () => source.listApi || "",
       get: (url, opts) => apiClient.get(url, opts),
       post: (url, body, opts) => apiClient.post(url, body, opts),
@@ -53,25 +88,22 @@ export function makeSourceClient(source) {
   }
   if (source.clientKind === "dob") {
     // dobAxios НЕ имеет baseURL (см. src/features/dob/api/dobClient.js),
-    // поэтому apiBase берётся из dobApiBase() и URL префиксуется в fetchTasksForSource.
+    // поэтому apiBase берётся из dobApiBase() и URL префиксуется через toRequestUrl.
     const dobClientApiBase = dobApiBase();
     return {
       name: source.id,
       apiBase: dobClientApiBase,
+      toRequestUrl: (url) => toRequestUrl(dobClientApiBase, url),
       listApi: async () => {
         if (source.listApi) return source.listApi;
-        if (source.resolveListApi) return await source.resolveListApi();
-        // Fallback: резолв по Title (см. sources.js — пока GUID неизвестен)
-        try {
-          const { resolveSourceListApi } = await import("./sources");
-          const api = await resolveSourceListApi(source, {
-            apiBase: dobClientApiBase,
-            get: dobAxios.get.bind(dobAxios),
-          });
-          return api;
-        } catch (e) {
-          throw new Error(`[sourceClient:${source.id}] no listApi / resolveListApi: ${e?.message || e}`);
-        }
+        // Fallback: резолв по Title (см. sources.js — если GUID в тенанте другой)
+        const { resolveSourceListApi } = await import("./sources");
+        const api = await resolveSourceListApi(source, {
+          apiBase: dobClientApiBase,
+          get: dobAxios.get.bind(dobAxios),
+          toRequestUrl: (url) => toRequestUrl(dobClientApiBase, url),
+        });
+        return api;
       },
       get: (url, opts) => dobAxios.get(url, opts),
       post: (url, body, opts) => dobAxios.post(url, body, opts),

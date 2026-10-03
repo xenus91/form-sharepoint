@@ -83,7 +83,7 @@ export async function resolveSourceUser(source) {
   return _singleFlight(key, async () => {
     const client = makeSourceClient(source);
     try {
-      const url = `${client.apiBase}/web/currentuser?$select=Id`;
+      const url = requestUrl(client, "/web/currentuser?$select=Id");
       const resp = await client.get(url, { headers: { Accept: "application/json;odata=verbose" } });
       const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
       if (Number.isFinite(id)) {
@@ -101,77 +101,142 @@ export async function resolveSourceUser(source) {
 }
 
 /**
- * Резолв принципала (user или group) на сайте-источнике.
- * @param {{id:string, clientKind:"main"|"dob", listApi?:string|null, resolveListApi?:(() => string|Promise<string>)|null}} source
- * @param {{id:number,title?:string|null,loginName?:string|null,email?:string|null,kind?:"user"|"group"|"unknown"}} principal
- * @returns {Promise<{id:number,kind:"user"|"group"|"unknown"}|null>}
+ * Приводит путь к request-ready виду через клиент источника.
+ * @param {{apiBase:string, toRequestUrl?:Function}} client
+ * @param {string} path
+ * @returns {string}
  */
-export async function resolvePrincipalOnSource(source, principal) {
-  if (!principal) return null;
-  const kind = principal.kind || classifyPrincipal(principal);
-  if (kind === "user") {
-    const email = (principal.email || "").trim();
-    if (!email) return null;
-    const key = _key(source.id, "user", email.toLowerCase());
-    const cached = _cacheGet(key);
-    if (cached && typeof cached.id === "number") return { id: cached.id, kind: "user" };
-    return _singleFlight(key, async () => {
-      const client = makeSourceClient(source);
+function requestUrl(client, path) {
+  if (typeof client?.toRequestUrl === "function") return client.toRequestUrl(path);
+  return `${client?.apiBase || ""}${path}`;
+}
+
+/**
+ * Резолв пользователя на сайте-источнике: email → getbyemail, иначе ensureuser(loginName).
+ * @param {any} source
+ * @param {any} principal
+ * @returns {Promise<{id:number,kind:"user"}|null>}
+ */
+async function resolveUserOnSource(source, principal) {
+  const email = (principal.email || principal.EMail || "").trim();
+  const loginName = (principal.loginName || "").trim();
+  if (!email && !loginName) return null;
+  const key = _key(source.id, "user", (email || loginName).toLowerCase());
+  const cached = _cacheGet(key);
+  if (cached && typeof cached.id === "number") return { id: cached.id, kind: "user" };
+  return _singleFlight(key, async () => {
+    const client = makeSourceClient(source);
+    if (email) {
       try {
-        const url = `${client.apiBase}/web/siteusers/getbyemail('${encodeURIComponent(email).replace(/'/g, "''")}')?$select=Id`;
+        const url = requestUrl(client, `/web/siteusers/getbyemail('${encodeURIComponent(email).replace(/'/g, "''")}')?$select=Id`);
         const resp = await client.get(url, { headers: { Accept: "application/json;odata=verbose" } });
         const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
-        if (Number.isFinite(id)) {
+        if (Number.isFinite(id) && id > 0) {
           _cacheSet(key, { id });
           return { id, kind: "user" };
         }
-        // 404 → ensureuser (требует digest)
-        if (resp?.status === 404 || resp?.response?.status === 404) {
-          const ensured = await _ensureUser(client, principal);
-          if (ensured) {
-            _cacheSet(key, { id: ensured });
-            return { id: ensured, kind: "user" };
-          }
-        }
       } catch (e) {
         const status = e?.response?.status;
-        if (status === 404) {
-          const ensured = await _ensureUser(client, principal);
-          if (ensured) {
-            _cacheSet(key, { id: ensured });
-            return { id: ensured, kind: "user" };
-          }
+        if (status && status !== 404) {
+          console.warn(`[identity:${source.id}] user ${email} not found`, status, e?.message);
         }
-        console.warn(`[identity:${source.id}] user ${email} not found`, status, e?.message);
       }
-      _cacheSet(key, { id: null });
-      return null;
-    });
-  }
-  if (kind === "group") {
-    const title = (principal.title || "").trim();
-    if (!title) return null;
-    const key = _key(source.id, "group", title.toLowerCase());
-    const cached = _cacheGet(key);
-    if (cached && typeof cached.id === "number") return { id: cached.id, kind: "group" };
-    return _singleFlight(key, async () => {
-      const client = makeSourceClient(source);
+    }
+    // 404 по email (сотрудник ещё не заходил на сайт) или email нет → ensureuser
+    const ensured = await _ensureUser(client, principal);
+    if (ensured) {
+      _cacheSet(key, { id: ensured });
+      return { id: ensured, kind: "user" };
+    }
+    _cacheSet(key, { id: null });
+    return null;
+  });
+}
+
+/**
+ * Резолв группы на сайте-источнике.
+ * Порядок: getbyname(Title) → sitegroups?$filter=Title eq … → getbyemail (mail-enabled).
+ * Только getbyname раньше: если группа называлась иначе (или была mail-enabled) —
+ * задачи группы на источнике не находились, хотя пользователь в ней состоит.
+ * @param {any} source
+ * @param {any} principal
+ * @returns {Promise<{id:number,kind:"group"}|null>}
+ */
+async function resolveGroupOnSource(source, principal) {
+  const title = (principal.title || "").trim();
+  const email = (principal.email || principal.EMail || "").trim();
+  if (!title && !email) return null;
+  const key = _key(source.id, "group", (title || email).toLowerCase());
+  const cached = _cacheGet(key);
+  if (cached && typeof cached.id === "number") return { id: cached.id, kind: "group" };
+  return _singleFlight(key, async () => {
+    const client = makeSourceClient(source);
+    const accept = { headers: { Accept: "application/json;odata=verbose" } };
+    if (title) {
       try {
-        const url = `${client.apiBase}/web/sitegroups/getbyname('${encodeURIComponent(title).replace(/'/g, "''")}')?$select=Id`;
-        const resp = await client.get(url, { headers: { Accept: "application/json;odata=verbose" } });
+        const url = requestUrl(client, `/web/sitegroups/getbyname('${encodeURIComponent(title).replace(/'/g, "''")}')?$select=Id,Title`);
+        const resp = await client.get(url, accept);
         const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
-        if (Number.isFinite(id)) {
+        if (Number.isFinite(id) && id > 0) {
           _cacheSet(key, { id });
           return { id, kind: "group" };
         }
       } catch (e) {
-        console.warn(`[identity:${source.id}] group ${title} not found`, e?.response?.status, e?.message);
+        if (e?.response?.status !== 404) {
+          console.warn(`[identity:${source.id}] group getbyname(${title}) failed`, e?.response?.status, e?.message);
+        }
       }
-      _cacheSet(key, { id: null });
-      return null;
-    });
+      // Fallback: поиск по Title (регистр/пробелы могут отличаться)
+      try {
+        const url = requestUrl(client, `/web/sitegroups?$filter=Title eq '${encodeURIComponent(title).replace(/'/g, "''")}'&$select=Id,Title&$top=1`);
+        const resp = await client.get(url, accept);
+        const items = resp?.data?.d?.results || [];
+        const id = Number(items?.[0]?.Id);
+        if (Number.isFinite(id) && id > 0) {
+          _cacheSet(key, { id });
+          return { id, kind: "group" };
+        }
+      } catch (e) {
+        console.warn(`[identity:${source.id}] group filter(${title}) failed`, e?.response?.status, e?.message);
+      }
+    }
+    // Mail-enabled группа: siteusers/getbyemail возвращает её же (SP.User с IsShareByEmailGuestUser и т.п.)
+    if (email) {
+      try {
+        const url = requestUrl(client, `/web/siteusers/getbyemail('${encodeURIComponent(email).replace(/'/g, "''")}')?$select=Id`);
+        const resp = await client.get(url, accept);
+        const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
+        if (Number.isFinite(id) && id > 0) {
+          _cacheSet(key, { id });
+          return { id, kind: "group" };
+        }
+      } catch (_e) { void _e; }
+    }
+    _cacheSet(key, { id: null });
+    return null;
+  });
+}
+
+/**
+ * Резолв принципала (user или group) на сайте-источнике.
+ * @param {{id:string, clientKind:"main"|"dob", listApi?:string|null, resolveListApi?:(() => string|Promise<string>)|null}} source
+ * @param {{id:number,title?:string|null,loginName?:string|null,email?:string|null,kind?:"user"|"group"|"unknown", kindHint?:"user"|"group"|null}} principal
+ * @returns {Promise<{id:number,kind:"user"|"group"|"unknown"}|null>}
+ */
+export async function resolvePrincipalOnSource(source, principal) {
+  if (!principal) return null;
+  const kind = principal.kindHint || principal.kind || classifyPrincipal(principal);
+  if (kind === "user") {
+    return await resolveUserOnSource(source, principal);
   }
-  return null;
+  if (kind === "group") {
+    return await resolveGroupOnSource(source, principal);
+  }
+  // kind неизвестен (DcEmail.Email без Title/EMail): пробуем оба пути.
+  // Раньше такой принципал молча выпадал → задачи групп не попадали в #tasks.
+  const asUser = await resolveUserOnSource(source, principal);
+  if (asUser) return asUser;
+  return await resolveGroupOnSource(source, principal);
 }
 
 async function _ensureUser(client, principal) {
@@ -180,7 +245,7 @@ async function _ensureUser(client, principal) {
   try {
     const body = { loginName };
     const resp = await client.post(
-      `${client.apiBase}/web/siteusers/ensureuser`,
+      requestUrl(client, "/web/siteusers/ensureuser"),
       body,
       { headers: { Accept: "application/json;odata=verbose", "Content-Type": "application/json;odata=verbose" } }
     );

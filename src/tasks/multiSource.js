@@ -61,6 +61,52 @@ export function mergeSort(items, orderByField = "Modified", dir = "desc") {
 }
 
 /**
+ * Приводит значение к массиву уникальных положительных Id.
+ * @param {any} value
+ * @returns {number[]}
+ */
+export function toIdList(value) {
+  if (value == null) return [];
+  const arr = Array.isArray(value) ? value : [value];
+  const out = [];
+  for (const v of arr) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) out.push(n);
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * Собирает AssignedToId-фильтр для одного источника.
+ *
+ * Требование: в #tasks должны находиться ВСЕ задачи пользователя и групп из DcEmail.
+ *   • userId  — Id текущего пользователя НА ЭТОМ сайте (resolveSourceIdentity);
+ *   • principalIds — Id групп/пользователей из DcEmail, срезолвленные на этом сайте;
+ *   • nativePrincipalIds — «родные» Id из DcEmail.Email. Для основного сайта это и
+ *     есть Id принципалов (поле — Person-or-Group на этом же сайте), поэтому
+ *     добавляем их напрямую: даже если резолв по email/Title не удался,
+ *     задачи группы не потеряются.
+ *
+ * @param {{id:string, clientKind?:string}} source
+ * @param {{userId?:number|null, principalIds?:number[]}|null} identity
+ * @param {{nativePrincipalIds?:number[], assignedIdsBySource?:{[k:string]:number[]}}} [opts]
+ * @returns {number[]}
+ */
+export function computeAssignedIds(source, identity, opts = {}) {
+  const bySource = opts.assignedIdsBySource || {};
+  const override = bySource[source?.id];
+  if (Array.isArray(override)) return toIdList(override);
+  const ids = [];
+  if (identity?.userId != null) ids.push(identity.userId);
+  for (const p of identity?.principalIds || []) ids.push(p);
+  const isMain = source?.clientKind === "main" || source?.id === "main";
+  if (isMain) {
+    for (const id of toIdList(opts.nativePrincipalIds)) ids.push(id);
+  }
+  return toIdList(ids);
+}
+
+/**
  * Параллельная загрузка задач от нескольких источников.
  * Каждому источнику — свой resolveSourceIdentity + fetchTasksForSource.
  * Частичная деградация: если часть источников упала — возвращаем остальные + errors[].
@@ -81,6 +127,12 @@ export function mergeSort(items, orderByField = "Modified", dir = "desc") {
  *     — per-source identity, предварительно резолвлено
  *     (useEnrichDistributionForSources). Если передано — используется
  *     вместо resolveSourceIdentity() на лету.
+ *   nativePrincipalIds?: number[]  — «родные» Id принципалов из DcEmail.Email
+ *     (Id основного сайта). Для источника main добавляются в AssignedToId-фильтр
+ *     напрямую — страховка, что задачи групп найдутся даже без резолва по email.
+ *   assignedIdsBySource?: {[sourceId:string]: number[]} — явный override фильтра
+ *   omitResultFields?: boolean (default true) — не запрашивать поля результата
+ *     (табличный режим: результат-поля не отображаются и на dob их нет → 400).
  * }} opts
  * @returns {Promise<{items:Array<any>, errors:Array<{sourceId:string,status:number|string,message:string}>, perSourceStats:object}>}
  */
@@ -133,9 +185,14 @@ export async function fetchTasksMultiSource(opts) {
     }
     const identity = ident.value.identity;
     const client = makeSourceClient(source);
-    const assignedIds = identity?.principalIds?.length
-      ? [...new Set([...(identity.principalIds || []), identity.userId].filter(Number.isFinite))]
-      : (identity?.userId != null ? [identity.userId] : []);
+    const isMain = source.clientKind === "main" || source.id === "main";
+    const assignedIds = computeAssignedIds(source, identity, {
+      nativePrincipalIds: opts.nativePrincipalIds,
+      assignedIdsBySource: opts.assignedIdsBySource,
+    });
+
+    perSourceStats[source.id].assignedIds = assignedIds;
+    perSourceStats[source.id].assignedIdsCount = assignedIds.length;
 
     if (assignedIds.length === 0) {
       // На источнике не срезолвился ни один Id — пропускаем с пометкой
@@ -152,10 +209,12 @@ export async function fetchTasksMultiSource(opts) {
     // запрашивать несуществующие (ResultSearchTHU, AdditionalsActionsRequired, ...)
     // и не ловить 400. Если они есть на этом источнике — caller должен передать
     // их через opts.sourceExtraFieldsById[sourceId].
-    const isMain = source.id === "main";
     const recipientField = isMain ? opts.recipientField : null;
     const scNumberField = isMain ? opts.scNumberField : null;
-    const resultFieldInternalNames = isMain ? opts.resultFieldInternalNames : [];
+    // Результат-поля в multi-source выборке по умолчанию НЕ запрашиваем
+    // (табличный режим их не показывает, на dob их нет). См. omitResultFields.
+    const omitResultFields = opts.omitResultFields !== false;
+    const resultFieldInternalNames = (isMain && !omitResultFields) ? (opts.resultFieldInternalNames || []) : [];
 
     try {
       const rows = await fetchTasksForSource(source, client, {
@@ -166,11 +225,15 @@ export async function fetchTasksMultiSource(opts) {
         scNumberField,
         resultFieldInternalNames,
         assignedIds,
+        // Внешние источники (dob) — консервативный select: только поля,
+        // которые реально есть в списке (иначе 400 «Столбец не существует»).
+        selectProfile: isMain ? "main" : "external",
       });
-      // К каждой строке приклеиваем compositeId + sourceId
+      // К каждой строке приклеиваем compositeId + sourceId (+ label для UI-бейджа)
       for (const r of rows) {
         r.compositeId = compositeId(source.id, r.Id);
         r.sourceId = source.id;
+        r.sourceLabel = source.label || source.id;
       }
       perSourceStats[source.id].fetched = rows.length;
       return rows;
@@ -187,7 +250,16 @@ export async function fetchTasksMultiSource(opts) {
     if (r.status === "fulfilled") {
       all = all.concat(r.value);
     } else {
-      errors.push(r.reason);
+      const reason = r.reason || {};
+      errors.push(reason);
+      // Пометка в perSourceStats, чтобы UI мог показать «часть источников недоступна»
+      // вместе с причинами (TasksView читает perSourceStats[id].error).
+      if (reason.sourceId) {
+        perSourceStats[reason.sourceId] = {
+          ...(perSourceStats[reason.sourceId] || {}),
+          error: { status: reason.status ?? "fetch-error", message: reason.message || "unknown" },
+        };
+      }
     }
   }
 

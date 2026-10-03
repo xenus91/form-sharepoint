@@ -30,6 +30,7 @@ export function useFieldsForSource(source, { enabled = true, staleTimeMs = 5 * 6
         listApi = await resolveSourceListApi(source, {
           apiBase: client.apiBase,
           get: client.get,
+          toRequestUrl: client.toRequestUrl,
         });
       } catch (e) {
         // Title-резолв не нашёлся — не блокируем остальные источники
@@ -39,11 +40,11 @@ export function useFieldsForSource(source, { enabled = true, staleTimeMs = 5 * 6
         }
         return [];
       }
-      // listApi уже содержит полный путь:
-      // - main: "/web/lists(guid'…')" — apiClient.get префиксует свой baseURL="/api"
-      // - dob:  "/dob-api/sites/dob/doblogistic/_api/web/lists(guid'…')" — уже с префиксом
-      // Поэтому НЕ добавляем client.apiBase ранее (иначе будет двойной префикс).
-      const url = `${listApi}/fields?$select=InternalName,Title,TypeAsString&$top=200`;
+      // listApi — путь ОТНОСИТЕЛЬНО api-base источника ("/web/lists(guid'…')").
+      // Приводим к request-ready виду через client.toRequestUrl():
+      //   - main → "/web/lists(guid'…')/fields…" (axios сам добавит baseURL "/api")
+      //   - dob  → "/dob-api/sites/dob/doblogistic/_api/web/lists(guid'…')/fields…"
+      const url = client.toRequestUrl(`${listApi}/fields?$select=InternalName,Title,TypeAsString&$top=200`);
       try {
         const resp = await client.get(url, {
           headers: { Accept: "application/json;odata=verbose" },

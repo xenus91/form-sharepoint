@@ -7,6 +7,8 @@ import { Box, Paper, Typography, Button, Chip, CircularProgress, Stack, Accordio
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FolderIcon from "@mui/icons-material/Folder";
 import TaskCard from "./TaskCard";
+import ExternalTaskCard from "./ExternalTaskCard";
+import { isExternalTask } from "../lib/cardTasks";
 import { isCompletedStatus } from "../../../tasks/status";
 import { extractTKNumberFromTask } from "../../../tasks/formatters";
 
@@ -42,6 +44,32 @@ const TaskList = React.memo(function TaskList({
   currentUserTitle = "",
   onRetry,
 }) {
+  // Внешние источники (dob и др.) рендерим read-only карточкой: TaskCard и мутации
+  // завязаны на основной список и не должны применяться к чужому элементу с тем же Id.
+  const renderTask = (task) => (
+    isExternalTask(task)
+      ? <ExternalTaskCard key={task.compositeId || `${task.sourceId}:${task.Id}`} task={task} />
+      : (
+        <TaskCard taskConfig={taskConfig} fieldDefaultActions={fieldDefaultActions}
+          key={`main:${task.Id}`}
+          task={task}
+          isCompleted={isCompletedStatus(task.Status, task.PercentComplete)}
+          isOverdue={task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false}
+          choices={choices}
+          resultFieldsMeta={resultFieldsMeta}
+          ctResultMap={ctResultMap}
+          updatingId={updatingId}
+          updatingAction={updatingAction}
+          pendingAnimation={pendingAnimation}
+          onResultClick={onResultClick}
+          onTakeInWork={onTakeInWork}
+          onComplete={onComplete}
+          currentUserId={currentUserId}
+          currentUserTitle={currentUserTitle}
+        />
+      )
+  );
+
   // virtualParentRef handled by parent Box sx overflow; no internal ref needed
   // empty / loading / error уже решает родитель, но дублируем для изоляции
   if (loading && tasks.length === 0) {
@@ -103,8 +131,6 @@ const TaskList = React.memo(function TaskList({
                     {vItems.map((virtualItem) => {
                       const task = filteredTasks[virtualItem.index];
                       if (!task) return null;
-                      const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
-                      const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
                       return (
                         <Box
                           key={virtualItem.key}
@@ -120,21 +146,7 @@ const TaskList = React.memo(function TaskList({
                             boxSizing: "border-box",
                           }}
                         >
-                          <TaskCard taskConfig={taskConfig} fieldDefaultActions={fieldDefaultActions}
-                            task={task}
-                            isCompleted={isCompleted}
-                            isOverdue={isOverdue}
-                            choices={choices}
-                            resultFieldsMeta={resultFieldsMeta}
-                            ctResultMap={ctResultMap}
-                            updatingId={updatingId}                            updatingAction={updatingAction}
-                            pendingAnimation={pendingAnimation}
-                            onResultClick={onResultClick}
-                            onTakeInWork={onTakeInWork}
-                            onComplete={onComplete}
-                            currentUserId={currentUserId}
-                            currentUserTitle={currentUserTitle}
-                          />
+                          {renderTask(task)}
                         </Box>
                       );
                     })}
@@ -144,28 +156,7 @@ const TaskList = React.memo(function TaskList({
             }
             return (
               <Stack key={sc} spacing={1.5} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
-                {groupTasks.map((task) => {
-                  const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
-                  const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
-                  return (
-                    <TaskCard taskConfig={taskConfig} fieldDefaultActions={fieldDefaultActions}
-                      key={task.Id}
-                      task={task}
-                      isCompleted={isCompleted}
-                      isOverdue={isOverdue}
-                      choices={choices}
-                      resultFieldsMeta={resultFieldsMeta}
-                      ctResultMap={ctResultMap}
-                      updatingId={updatingId}                      updatingAction={updatingAction}
-                      pendingAnimation={pendingAnimation}
-                      onResultClick={onResultClick}
-                      onTakeInWork={onTakeInWork}
-                      onComplete={onComplete}
-                      currentUserId={currentUserId}
-                      currentUserTitle={currentUserTitle}
-                    />
-                  );
-                })}
+                {groupTasks.map((task) => renderTask(task))}
               </Stack>
             );
           }
@@ -226,28 +217,7 @@ const TaskList = React.memo(function TaskList({
               </AccordionSummary>
               <AccordionDetails sx={{ p: 1.5, pt: 1, bgcolor: "#fafaff", borderRadius: "0 0 4px 4px" }}>
                 <Stack spacing={1.5} sx={{ width: "100%", maxWidth: "100%", boxSizing: "border-box" }}>
-                  {groupTasks.map((task) => {
-                    const isCompleted = isCompletedStatus(task.Status, task.PercentComplete);
-                    const isOverdue = task.DueDate ? new Date(task.DueDate).getTime() < Date.now() : false;
-                    return (
-                      <TaskCard taskConfig={taskConfig} fieldDefaultActions={fieldDefaultActions}
-                        key={task.Id}
-                        task={task}
-                        isCompleted={isCompleted}
-                        isOverdue={isOverdue}
-                        choices={choices}
-                        resultFieldsMeta={resultFieldsMeta}
-                        ctResultMap={ctResultMap}
-                        updatingId={updatingId}                        updatingAction={updatingAction}
-                        pendingAnimation={pendingAnimation}
-                        onResultClick={onResultClick}
-                        onTakeInWork={onTakeInWork}
-                        onComplete={onComplete}
-                        currentUserId={currentUserId}
-                        currentUserTitle={currentUserTitle}
-                      />
-                    );
-                  })}
+                  {groupTasks.map((task) => renderTask(task))}
                 </Stack>
               </AccordionDetails>
             </Accordion>

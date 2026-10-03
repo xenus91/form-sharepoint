@@ -217,6 +217,9 @@ export async function getTasksListFieldsOverview() {
   }
 }
 
+// Экспорт для тестов/отладки: разбор Email-принципалов DcEmail.
+export { _flattenEmailPrincipals as flattenEmailPrincipals };
+
 export function clearTasksFieldsCache() {
   _fieldsCache = null;
   _fieldsPromise = null;
@@ -247,11 +250,16 @@ function _flattenEmailPrincipals(rawEmail) {
     }
     const id = Number(it.Id);
     if (Number.isNaN(id)) continue;
+    const emailRaw = typeof it.EMail === "string" ? it.EMail : typeof it.Email === "string" ? it.Email : null;
     out.push({
       id,
       title: typeof it.Title === "string" ? it.Title : null,
       loginName: typeof it.LoginName === "string" ? it.LoginName : null,
-      email: typeof it.EMail === "string" ? it.EMail : null,
+      email: emailRaw,
+      // kindHint проставляет principalDetails.enrichDistribution (getuserbyid/getbyid):
+      // без него принципал без Title/EMail классифицируется как "unknown" и
+      // молча выпадал из AssignedToId-фильтра.
+      kindHint: it.kindHint === "user" || it.kindHint === "group" ? it.kindHint : null,
     });
   }
   return out;
@@ -269,6 +277,8 @@ function _flattenEmailPrincipals(rawEmail) {
  */
 export function classifyPrincipal(p) {
   if (!p) return "unknown";
+  // Явный тип из principalDetails (getuserbyid/getbyid) — самый надёжный источник.
+  if (p.kindHint === "user" || p.kindHint === "group") return p.kindHint;
   const email = (p.email || "").trim();
   const login = (p.loginName || "").trim();
   const title = (p.title || "").trim();
@@ -289,7 +299,7 @@ export function listDistributionPrincipals(dist) {
   if (!dist) return [];
   return _flattenEmailPrincipals(dist.Email).map((p) => {
     const kind = classifyPrincipal(p);
-    return { ...p, isUser: kind === "user", kind };
+    return { ...p, isUser: kind === "user", kind, kindHint: p.kindHint || (kind === "unknown" ? null : kind) };
   });
 }
 

@@ -15,6 +15,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { listDistributionPrincipals } from "./distribution";
 import { resolveSourceIdentity } from "./identity";
+import { enrichDistribution } from "./principalDetails";
 
 /**
  * Резолвит principals из dist на каждом источнике и возвращает мапу
@@ -37,9 +38,23 @@ export function useEnrichDistributionForSources(sources, distribution, { enabled
     queryKey: ["tasks", "siteIds", sourceIdsKey, distKey, principalsHash],
     queryFn: async () => {
       const map = {};
+      // Шаг 0: уточняем Id из DcEmail (getuserbyid/sitegroups getbyid), иначе
+      // принципалы без Title/EMail классифицируются как "unknown" и выпадают —
+      // задачи групп из DcEmail не находились.
+      let detailsById = {};
+      try {
+        const detailed = await enrichDistribution(distribution);
+        const detailedPrincipals = listDistributionPrincipals(detailed);
+        for (const p of detailedPrincipals) {
+          if (p?.id != null) detailsById[p.id] = p;
+        }
+      } catch (e) {
+        console.warn("[enrichDistributionForSources] principal details failed", e?.message || e);
+      }
+      const resolvedPrincipals = principals.map((p) => detailsById[p.id] || p);
       await Promise.allSettled(
         enabledSources.map(async (source) => {
-          const resolved = await resolveSourceIdentity(source, principals);
+          const resolved = await resolveSourceIdentity(source, resolvedPrincipals);
           map[source.id] = {
             userId: resolved.userId,
             principalIds: resolved.principalIds,

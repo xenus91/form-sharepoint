@@ -43,6 +43,7 @@ import ViewModeToggle from "./features/tasks/components/ViewModeToggle";
 import { useViewMode } from "./features/nav/viewMode";
 import { useDepartment } from "./features/nav/useDepartment";
 import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
+import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
@@ -52,6 +53,7 @@ import { useTaskMutations } from "./features/tasks/hooks/useTaskMutations"; // P
 import AdditionalActionsField from "./features/tasks/components/AdditionalActionsField";
 import TaskCard from "./features/tasks/components/TaskCard";
 import TaskList from "./features/tasks/components/TaskList";
+import ExternalTaskCard from "./features/tasks/components/ExternalTaskCard";
 import {
   formatDueLeft,
   formatDueDateFull,
@@ -180,6 +182,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // ===== multi-source табличный режим (см. plan.md, этапы 7, 10) =====
   const [viewModeView, setViewModeView] = useViewMode();
   const dept = useDepartment(propUserProfile);
+  // Multi-source данные нужны и таблице, и карточкам (чтобы задачи dob были видны
+  // в обоих режимах). В карточном режиме запрос включается, только если источников >1.
   const tableData = useTasksTableData({
     userProfile: propUserProfile,
     distribution,
@@ -187,8 +191,16 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     recipientField,
     scNumberField,
     resultFieldInternalNames,
-    enabled: viewModeView === "table" && !!currentUserId && !fieldsLoading,
+    mode: viewModeView,
+    enabled: !!currentUserId && !fieldsLoading,
   });
+
+  // Задачи из внешних источников (dob) — read-only карточки рядом с main-задачами.
+  const externalTasks = useMemo(
+    () => (tableData.rows || []).filter((r) => r && r.sourceId && r.sourceId !== "main"),
+    [tableData.rows]
+  );
+  const cardTasks = useMemo(() => mergeCardTasks(tasksData ?? [], externalTasks), [tasksData, externalTasks]);
 
   // enrich теперь внутри useTasksQuery (батч), здесь только expandedGroups для новых ТК
   useEffect(() => {
@@ -214,6 +226,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const [tab, setTab] = useState(0); // 0 = active, 1 = completed
 
   const [locationDialogOpen, setLocationDialogOpen] = useState(false);
+  // Задача внешнего источника (dob): в карточном режиме рендерится в списке,
+  // в табличном — открывается read-only диалогом (hash-роут умеет только main).
+  const [externalTaskDialog, setExternalTaskDialog] = useState(null);
   const [confirmNotFoundOpen, setConfirmNotFoundOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(null);
   const [pendingResult, setPendingResult] = useState("");
@@ -299,7 +314,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   useEffect(() => {
     if (!tasksData) return;
     if (onCountChange) {
-      const activeCountTmp = tasks.filter((t)=> !isCompletedStatus(t.Status, t.PercentComplete)).length;
+      // Счётчик — по всем источникам (main + dob), а не только по main
+      const activeCountTmp = cardTasks.filter((t)=> !isCompletedStatus(t.Status, t.PercentComplete)).length;
       onCountChange(activeCountTmp);
     }
     const newGroups = new Set(tasks.map((m)=> extractTKNumberFromTask(m)));
@@ -310,7 +326,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       newGroups.forEach((g)=>{ if(!prev.has(g)){ next.add(g); changed=true; }});
       return changed? next: prev;
     });
-  }, [tasksData, tasks]);
+  }, [tasksData, tasks, cardTasks]);
 
   const { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask } = useTaskMutations({
     entityType,
@@ -350,7 +366,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     activeCount, completedCount,
     filteredTasks, groupedTasks,
     toggleGroup,
-  } = useTasksFiltering(tasks, tab);
+  } = useTasksFiltering(cardTasks, tab);
 
   // ⭐ Завершённые задачи — отдельный ленивый источник (RenderListDataAsStream):
   // счётчик считаем сразу, карточки грузим порциями по 20 при открытии вкладки.
@@ -596,12 +612,19 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             <TasksGrid
               rows={tableData.rows}
               fields={[]}
-              resultFieldInternalNames={resultFieldInternalNames}
+              showSourceColumn={tableData.sources.length > 1}
               loading={tableData.isLoading}
               error={tableData.error?.message || null}
               onRowClick={(compositeId) => {
                 if (!compositeId) return;
-                const parsed = String(compositeId).split(":");
+                const key = String(compositeId);
+                // Внешний источник (dob:1) — hash-роут #tasks/<id> ищет по main-списку,
+                // поэтому открываем read-only диалог, а не «задача не найдена».
+                if (!key.startsWith("main:")) {
+                  const row = (tableData.rows || []).find((r) => r.compositeId === key);
+                  if (row) { setExternalTaskDialog(row); return; }
+                }
+                const parsed = key.split(":");
                 const id = parsed.slice(1).join(":");
                 try { window.location.hash = `#tasks/${id}`; } catch (_e) { void _e; }
               }}
@@ -742,6 +765,20 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         confirmTexts={confirmTextsForPending}
         onConfirm={(task, result) => completeTask(task, result, {}, "", [])}
       />
+
+      <Dialog open={!!externalTaskDialog} onClose={() => setExternalTaskDialog(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 700, color: "#171c8f" }}>
+          Задача из другого источника
+        </DialogTitle>
+        <DialogContent>
+          {externalTaskDialog ? <ExternalTaskCard task={externalTaskDialog} /> : null}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setExternalTaskDialog(null)} sx={{ textTransform: "none", fontWeight: 700 }}>
+            Закрыть
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
