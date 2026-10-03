@@ -66,6 +66,57 @@ export async function fetchStatusChoices(client, listApi) {
 }
 
 /**
+ * Тип элемента списка (`__metadata.type`) — обязательная часть MERGE-payload.
+ *
+ * Без него SharePoint отвечает 400 «Найдена запись без имени типа, но не указан
+ * ожидаемый тип…» — поэтому повторяем ту же схему, что и в основном источнике
+ * (`useTaskMutations.resolveEntityType`):
+ *   1. тип из свежего GET самого элемента (`__metadata.type`);
+ *   2. `ListItemEntityTypeFullName` у списка;
+ *   3. тип любого элемента списка (`/items?$top=1&$select=Id`);
+ *   4. полный GET элемента без $select (последний шанс — там всегда есть __metadata).
+ *
+ * @param {import("../sourceClient").SourceClient} client
+ * @param {string} listApi
+ * @param {{freshItem?:any, accept?:any, itemId?:number|string}} [opts]
+ * @returns {Promise<string|null>}
+ */
+export async function resolveListItemEntityType(client, listApi, opts = {}) {
+  const accept = opts.accept || { headers: { Accept: "application/json;odata=verbose" } };
+  const fromFresh = opts.freshItem?.__metadata?.type;
+  if (fromFresh) return fromFresh;
+  try {
+    const resp = await client.get(client.toRequestUrl(`${listApi}?$select=ListItemEntityTypeFullName`), accept);
+    const t = resp?.data?.d?.ListItemEntityTypeFullName;
+    if (t) return String(t);
+  } catch (_e) { void _e; /* пробуем следующий способ */ }
+  try {
+    const resp = await client.get(client.toRequestUrl(`${listApi}/items?$top=1&$select=Id`), accept);
+    const t = resp?.data?.d?.results?.[0]?.__metadata?.type;
+    if (t) return String(t);
+  } catch (_e) { void _e; /* пробуем следующий способ */ }
+  if (opts.itemId !== undefined && opts.itemId !== null) {
+    try {
+      const resp = await client.get(client.toRequestUrl(`${listApi}/items(${opts.itemId})`), accept);
+      const t = resp?.data?.d?.__metadata?.type;
+      if (t) return String(t);
+    } catch (_e) { void _e; /* источник попробует MERGE без типа */ }
+  }
+  return null;
+}
+
+/** Распознаёт ошибку SharePoint «нет имени типа в payload». */
+export function isMissingEntityTypeError(message) {
+  const m = String(message || "").toLowerCase();
+  return (
+    m.includes("без имени типа") ||
+    m.includes("не указан ожидаемый тип") ||
+    m.includes("no type name was found") ||
+    m.includes("expected type was specified")
+  );
+}
+
+/**
  * @typedef {object} TakeResult
  * @property {boolean} ok
  * @property {string} [reason] — "already-taken" | "completed" | "no-status-choice" | "error" | "invalid-id"
@@ -128,7 +179,8 @@ export async function takeTaskInWork(compositeKey, opts = {}) {
   if (!target) {
     try {
       choices = await fetchStatusChoices(client, listApi);
-    } catch (e) {
+    } catch (_e) {
+      void _e;
       choices = [];
     }
     target = pickInProgressChoice(choices);
@@ -148,15 +200,34 @@ export async function takeTaskInWork(compositeKey, opts = {}) {
   }
 
   // 3) MERGE — SharePoint проставит Editor (это и есть «взял в работу»).
+  //    ВАЖНО: payload обязан содержать __metadata.type списка, иначе SharePoint
+  //    отвечает 400 «Найдена запись без имени типа, но не указан ожидаемый тип…».
+  const entityType = await resolveListItemEntityType(client, listApi, { freshItem: fresh, accept, itemId: parsed.id });
+  const buildBody = (type) => (type ? { __metadata: { type }, Status: target } : { Status: target });
+  const headers = { Accept: "application/json;odata=verbose", "Content-Type": "application/json;odata=verbose" };
   try {
-    await client.merge(
-      itemUrl,
-      { Status: target },
-      { headers: { Accept: "application/json;odata=verbose", "Content-Type": "application/json;odata=verbose" } }
-    );
+    await client.merge(itemUrl, buildBody(entityType), { headers });
   } catch (e) {
     const status = e?.response?.status;
     const message = String(e?.response?.data?.error?.message?.value || e?.message || e);
+    // Ретрай: тип не удалось добрать заранее, а SharePoint на него жалуется —
+    // пробуем ещё раз, вытащив тип из полного GET элемента.
+    if (!entityType && isMissingEntityTypeError(message)) {
+      const lateType = await resolveListItemEntityType(client, listApi, { accept, itemId: parsed.id });
+      if (lateType) {
+        try {
+          await client.merge(itemUrl, buildBody(lateType), { headers });
+          return { ok: true, status: target, previousStatus: currentStatus };
+        } catch (e2) {
+          return {
+            ok: false,
+            reason: e2?.response?.status === 412 ? "already-taken" : "error",
+            status: currentStatus,
+            message: String(e2?.response?.data?.error?.message?.value || e2?.message || e2),
+          };
+        }
+      }
+    }
     if (status === 412) {
       return { ok: false, reason: "already-taken", message, status: currentStatus, editorTitle, editorId };
     }

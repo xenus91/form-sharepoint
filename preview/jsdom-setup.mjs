@@ -24,3 +24,30 @@ globalThis.Node = dom.window.Node;
 globalThis.getComputedStyle = dom.window.getComputedStyle;
 globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
 globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+// AG Grid и MUI требуют наблюдателей/hit-test API, которых нет в jsdom.
+globalThis.MutationObserver = dom.window.MutationObserver;
+globalThis.ResizeObserver = dom.window.ResizeObserver || class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+globalThis.window.ResizeObserver = globalThis.ResizeObserver;
+globalThis.IntersectionObserver = dom.window.IntersectionObserver || class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() { return []; }
+};
+globalThis.window.IntersectionObserver = globalThis.IntersectionObserver;
+const matchMedia = dom.window.matchMedia || ((q) => ({
+  matches: false,
+  media: q,
+  addListener() {},
+  removeListener() {},
+  addEventListener() {},
+  removeEventListener() {},
+  dispatchEvent() { return false; },
+}));
+globalThis.matchMedia = matchMedia;
+globalThis.window.matchMedia = matchMedia;

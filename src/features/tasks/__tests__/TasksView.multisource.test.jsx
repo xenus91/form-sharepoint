@@ -57,6 +57,27 @@ const DOB_TASK = {
   Created: "2026-10-03T00:29:41Z",
 };
 
+// Поле результата основного списка (для кнопок результатов, как в карточке)
+const RESULT_FIELD_DEF = {
+  InternalName: "ResultSearchTHU",
+  Title: "Результат поиска ТНУ",
+  TypeAsString: "Choice",
+  TypeDisplayName: "Результирующий выбор",
+  TypeShortDescription: "Результат задачи",
+  Choices: { results: ["Найдена", "Не найдена"] },
+};
+
+// main-задача, уже взятая в работу (Editor = я) — в карточке у неё кнопки результатов
+const MAIN_IN_PROGRESS = {
+  ...MAIN_TASK,
+  Id: 11,
+  Title: "Задача в работе ООБ",
+  Status: "В работе",
+  PercentComplete: 0,
+};
+
+const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS };
+
 // Задача, назначенная на группу из DcEmail (Id 33 на сайте ДОБ)
 const DOB_GROUP_TASK = { ...DOB_TASK, Id: 2, Title: "Заявка ООБ (на группу)", AssignedTo: { results: [{ Id: 33, Title: "ООБ" }] }, Modified: "2026-10-02T00:00:00Z" };
 
@@ -92,11 +113,24 @@ vi.mock("../../../api", () => {
       throw err;
     }
     if (u.includes("/web/sitegroups/getbyid(33)")) return { data: { d: { Id: 33, Title: "ООБ" } } };
-    if (d.includes(`${MAIN_LIST}/fields`)) return { data: { d: { results: fieldDefs(MAIN_FIELDS) } } };
-    // взятие в работу перечитывает СВЕЖИЙ статус элемента перед MERGE
+    if (d.includes(`${MAIN_LIST}/fields`)) {
+      // $filter=TypeDisplayName — выборка полей результата
+      if (/TypeDisplayName eq/.test(d)) return { data: { d: { results: [RESULT_FIELD_DEF] } } };
+      // $filter=InternalName eq 'X' — конкретное поле
+      const byName = d.match(/InternalName eq '([^']+)'/);
+      if (byName) {
+        const all = [...fieldDefs(MAIN_FIELDS), RESULT_FIELD_DEF];
+        return { data: { d: { results: all.filter((f) => f.InternalName === byName[1]) } } };
+      }
+      return { data: { d: { results: fieldDefs(MAIN_FIELDS) } } };
+    }
+    // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
-    if (single) return { data: { d: { ...MAIN_TASK, Id: Number(single[1]), __metadata: { etag: '"1"' } } } };
-    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK] } } };
+    if (single) {
+      const base = MAIN_TASKS_BY_ID[Number(single[1])] || MAIN_TASK;
+      return { data: { d: { ...base, __metadata: { etag: '"1"', type: "SP.Data.TasksListItem" } } } };
+    }
+    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
     // TaskBehaviour / прочие списки — пусто
     return { data: { d: { results: [] } } };
@@ -274,7 +308,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(search.tagName).toBe("INPUT");
 
     const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
-    expect(countRows()).toBe(3);
+    expect(countRows()).toBe(4);
 
     // колонки шапки — для проверки сортировки по клику
     const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell")];
@@ -292,7 +326,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       .sort((a, b) => a.index - b.index)
       .map((r) => r.title);
     const titlesInitial = readTitles();
-    expect(titlesInitial.length).toBe(3);
+    expect(titlesInitial.length).toBe(4);
 
     // AG Grid вешает обработчик сортировки на .ag-header-cell-label внутри ячейки
     const titleLabel = headerCells[titleIdx].querySelector(".ag-header-cell-label");
@@ -378,74 +412,77 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(state.requests.some((r) => /ProblemsPallet/i.test(r.url))).toBe(false);
   }, 30000);
 
-  it("кнопки «Взять в работу» и «Изменить» появляются НА строке при её выделении", async () => {
+  it("действия по задаче открываются В ТОЧКЕ КЛИКА по строке (popup, а не колонка)", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
     await settle(3000);
 
-    // Колонка действий закреплена справа, поэтому AG Grid рендерит её в своём
-    // контейнере, но с тем же row-id — кнопки ищем по row-id строки.
-    const actionsForRow = (rowId) =>
-      host.querySelector(`.ag-row[row-id="${rowId}"] .tasks-row-actions`);
-    const buttonsForRow = (rowId) => [...(actionsForRow(rowId)?.querySelectorAll("button") || [])];
-    const findButton = (rowId, re) => buttonsForRow(rowId).find((b) => re.test(b.textContent || ""));
-    const clickRow = async (row) => {
+    // MUI держит закрывающийся popup в DOM (jsdom не эмитит transitionend),
+    // поэтому берём последний и считаем закрытым по opacity: 0.
+    const popup = () => {
+      const el = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop() || null;
+      return el && el.style.opacity === "0" ? null : el;
+    };
+    const popupButtons = () => [...(popup()?.querySelectorAll("button") || [])];
+    const findButton = (re) => popupButtons().find((b) => re.test(b.textContent || ""));
+    const centerRows = () => [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
+    const rowByText = (re) => centerRows().find((r) => re.test(r.textContent || ""));
+    const clickCell = async (row, x, y) => {
+      const cell = row?.querySelector(".ag-cell");
+      expect(cell).toBeTruthy();
       await act(async () => {
-        row.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+        cell.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
         await new Promise((r) => setTimeout(r, 250));
       });
     };
-    const centerRows = () => [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
-    const rowByText = (re) => centerRows().find((r) => re.test(r.textContent || ""));
 
-    // пока ничего не выделено — кнопок действий нет ни в одной строке
-    expect(host.querySelectorAll(".tasks-row-actions button").length).toBe(0);
-    expect(host.textContent).toContain("Кликните строку");
+    // пока не кликнуто — попапа нет и колонки действий в таблице тоже нет
+    expect(popup()).toBeNull();
+    expect(host.querySelectorAll('[col-id="rowActions"]').length).toBe(0);
+    expect(host.textContent).toContain("в точке клика");
 
     // одиночный клик по строке dob-задачи = только выделение (без перехода)
     const hashBefore = window.location.hash;
     const dobRow = rowByText(/Заявка ООБ/);
     expect(dobRow).toBeTruthy();
-    const dobRowId = dobRow.getAttribute("row-id");
-    expect(dobRowId).toBeTruthy();
-    await clickRow(dobRow);
+    await clickCell(dobRow, 240, 360);
     expect(window.location.hash).toBe(hashBefore);
 
-    // кнопки появились именно на выделенной строке — их ровно две
-    expect(buttonsForRow(dobRowId).length).toBe(2);
-    expect(findButton(dobRowId, /Взять в работу/)).toBeTruthy();
-    expect(findButton(dobRowId, /Изменить/)).toBeTruthy();
-    // у остальных строк кнопок нет
-    for (const r of centerRows()) {
-      const otherId = r.getAttribute("row-id");
-      if (otherId === dobRowId) continue;
-      expect(buttonsForRow(otherId).length).toBe(0);
-    }
-    expect(host.querySelectorAll(".tasks-row-actions button").length).toBe(2);
+    // popup открылся именно в точке клика: координаты клика ушли в позиционирование
+    const paper = popup();
+    expect(paper).toBeTruthy();
+    const styleText = paper.getAttribute("style") || "";
+    expect(styleText).toContain("240px");
+    expect(styleText).toContain("360px");
+    // и в нём — действия карточки этой задачи
+    expect(popupButtons().length).toBe(2);
+    expect(findButton(/Взять в работу/)).toBeTruthy();
+    expect(findButton(/Изменить/)).toBeTruthy();
 
-    // «Взять в работу» на строке шлёт MERGE статуса в список источника
+    // «Взять в работу» из попапа шлёт MERGE статуса в список источника
     await act(async () => {
-      findButton(dobRowId, /Взять в работу/)
-        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 150));
+      findButton(/Взять в работу/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 200));
     });
     const merge = state.requests.find((r) => r.source === "dob" && r.method === "MERGE");
     expect(merge).toBeTruthy();
-    expect(merge.body).toEqual({ Status: "В работе" });
+    expect(merge.body).toMatchObject({ Status: "В работе" });
+    // после действия попап закрылся
+    expect(popup()).toBeNull();
 
-    // «Изменить» на строке открывает форму задачи источника (её же роут из карточки)
+    // «Изменить» открывает форму задачи источника (её же роут из карточки)
+    await clickCell(rowByText(/Заявка ООБ/), 300, 400);
     const hashBeforeEdit = window.location.hash;
     await act(async () => {
-      findButton(dobRowId, /Изменить/)
-        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 150));
+      findButton(/Изменить/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 200));
     });
     expect(window.location.hash).not.toBe(hashBeforeEdit);
-    expect(window.location.hash.toLowerCase()).toBe(`#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3`);
+    expect(window.location.hash.toLowerCase()).toBe("#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3");
   }, 30000);
 
-  it("на выделенной main-строке тоже есть обе кнопки, «Взять в работу» шлёт MERGE в основной список", async () => {
+  it("в попапе на main-строке есть «Взять в работу», и она шлёт MERGE в основной список", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -454,19 +491,22 @@ describe("TasksView — multi-source (#tasks)", () => {
     const mainRow = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
       .find((r) => /Основная задача ООБ/.test(r.textContent || ""));
     expect(mainRow).toBeTruthy();
+    const cell = mainRow.querySelector(".ag-cell");
     await act(async () => {
-      mainRow.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      cell.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 180, clientY: 220 }));
       await new Promise((r) => setTimeout(r, 250));
     });
 
-    const mainRowId = mainRow.getAttribute("row-id");
-    const rowButtons = () => [...host.querySelectorAll(`.ag-row[row-id="${mainRowId}"] .tasks-row-actions button`)];
-    const texts = rowButtons().map((b) => b.textContent || "");
+    const buttons = () => {
+      const el = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop() || null;
+      return el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
+    };
+    const texts = buttons().map((b) => b.textContent || "");
     // «Не начата» → можно взять в работу; «Изменить» есть всегда
     expect(texts.some((t) => /Взять в работу/.test(t))).toBe(true);
     expect(texts.some((t) => /Изменить/.test(t))).toBe(true);
 
-    const takeBtn = rowButtons().find((b) => /Взять в работу/.test(b.textContent || ""));
+    const takeBtn = buttons().find((b) => /Взять в работу/.test(b.textContent || ""));
     await act(async () => {
       takeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
       await new Promise((r) => setTimeout(r, 250));
@@ -479,5 +519,44 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(merge.url).toContain("items(10)");
     expect(String(merge.body?.Status || "").length).toBeGreaterThan(0);
     expect(state.requests.some((r) => r.source === "dob" && r.method === "MERGE")).toBe(false);
+  }, 30000);
+
+  it("для main-задачи «в работе» попап даёт кнопки результатов — как карточка", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .find((r) => /Задача в работе ООБ/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 260 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    const buttons = () => {
+      const el = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop() || null;
+      return el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
+    };
+    const findButton = (re) => buttons().find((b) => re.test(b.textContent || ""));
+    // кнопок результата в таблице нет — но действия по ним доступны из попапа
+    expect(findButton(/Найдена/)).toBeTruthy();
+    expect(findButton(/Не найдена/)).toBeTruthy();
+    expect(findButton(/Изменить/)).toBeTruthy();
+    // задача уже в работе — «Взять в работу» не предлагается
+    expect(findButton(/Взять в работу/)).toBeFalsy();
+
+    // результат из попапа уходит в основной список (тот же поток, что в карточке)
+    await act(async () => {
+      findButton(/Найдена/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await settle(800);
+    const write = state.requests.find((r) => r.source === "main" && r.body && r.body.ResultSearchTHU === "Найдена");
+    expect(write).toBeTruthy();
+    expect(write.url).toContain("items(11)");
   }, 30000);
 });

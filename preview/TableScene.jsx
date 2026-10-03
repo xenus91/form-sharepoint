@@ -71,15 +71,16 @@ export default function TableScene() {
       <Typography variant="body2" color="text.secondary">
         Шапка закреплена: прокрутите список — заголовки останутся на месте.
         Поиск над таблицей ищет по всем полям сразу, клик по заголовку — сортировка.
-        Клик по строке — выделение, и на самой строке появляются кнопки
-        «Взять в работу» (для незавершённых задач) и «Изменить»; двойной клик — тоже «изменить».
+        Клик по строке — выделение, а в ТОЧКЕ КЛИКА открывается меню действий по задаче:
+        «Взять в работу», результаты (как кнопки в карточке) и «Изменить»;
+        двойной клик по строке — тоже «изменить».
       </Typography>
 
       <Paper variant="outlined" sx={{ p: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
         <Typography variant="body2" color="text.secondary">
           {selectedRow
-            ? `Выделена задача #${selectedRow.Id} — кнопки действий на строке`
-            : "Кликните строку — появятся кнопки «Взять в работу» и «Изменить»"}
+            ? `Выделена задача #${selectedRow.Id} — действия открываются в точке клика`
+            : "Кликните строку — действия по задаче появятся в точке клика"}
         </Typography>
         {message && (
           <Typography variant="caption" color="primary">
@@ -97,9 +98,36 @@ export default function TableScene() {
             const row = rows.find((r) => r.compositeId === compositeId);
             setMessage(`Открытие формы задачи #${row?.Id}`);
           }}
-          onEditRow={(row) => setMessage(`Изменить задачу #${row?.Id} (в приложении — форма задачи источника)`)}
-          onTakeRow={(row) => setMessage(`Взять в работу задачу #${row?.Id} (в приложении — MERGE статуса: main-список или сайт источника)`)}
-          canTakeRow={(row) => row.Status === "Не начата"}
+          // Полный набор действий как в карточке: «Взять в работу» / результаты / «Изменить»
+          getRowActions={(row) => {
+            const actions = [];
+            if (row.Status === "Не начата") {
+              actions.push({
+                key: "take",
+                label: "Взять в работу",
+                icon: "take",
+                onClick: () => setMessage(`Взять в работу задачу #${row.Id} (в приложении — MERGE статуса: main-список или сайт источника)`),
+              });
+            }
+            if (row.Status === "В работе") {
+              for (const choice of ["Найдена", "Не найдена"]) {
+                actions.push({
+                  key: `result:${choice}`,
+                  label: choice,
+                  icon: "result",
+                  onClick: () => setMessage(`Результат «${choice}» по задаче #${row.Id} (в приложении — тот же поток, что в карточке)`),
+                });
+              }
+            }
+            actions.push({
+              key: "edit",
+              label: "Изменить",
+              icon: "edit",
+              variant: "contained",
+              onClick: () => setMessage(`Изменить задачу #${row.Id} (в приложении — форма задачи источника)`),
+            });
+            return actions;
+          }}
           takingId={null}
         />
       </Box>

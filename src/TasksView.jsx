@@ -27,6 +27,7 @@ import { resolveTaskRule } from "./services/taskBehaviour";
 import { resolveResultFlow } from "./features/tasks/resultFlow";
 import { resolveBehaviour } from "./services/behaviourParser";
 import { resolveTaskBehaviourByName, findContentTypeMeta } from "./services/taskBehaviour";
+import { resolveStylingForChoice, isGradient } from "./services/stylingConfig";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
 import { useCurrentUser } from "./features/tasks/hooks/useCurrentUser";
 import { useDistribution } from "./features/tasks/hooks/useDistribution";
@@ -540,6 +541,103 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     runAfterAnimation(() => completeTask(task, resultValue, {}, "", []));
   }, [fieldDefaultActions, taskConfiguration.data, completeTask]);
 
+  // ── Действия по строке таблицы ─────────────────────────────────────────────
+  // Набор действий = тот же, что у карточки задачи:
+  //   • «Взять в работу» — если задачу можно взять (main «Не начата» / внешняя незавершённая);
+  //   • кнопки результатов (найден/не найден/… из Behaviour.styling) — для main-задачи «в работе»;
+  //   • если задачу уже взял другой пользователь — карточка показывает «В работе у …»
+  //     (повторяем это информационной плашкой вместо кнопок);
+  //   • «Изменить» — открыть форму задачи (для внешних — форма источника).
+  // Показывает их TasksGrid в popup В ТОЧКЕ КЛИКА по строке.
+  const resolveRowChoiceStyling = useCallback((row, choice) => {
+    try {
+      const data = taskConfiguration?.data;
+      if (!data?.taskBehaviour || !data?.ctMetaMap) return null;
+      const ctId = String(row?.contentTypeId || row?.ContentTypeId || row?.raw?.ContentTypeId?.StringValue || "").trim();
+      if (!ctId) return null;
+      const ctMeta = findContentTypeMeta(ctId, data.ctMetaMap);
+      if (!ctMeta?.name) return null;
+      const tb = resolveTaskBehaviourByName(ctMeta.name, data.taskBehaviour);
+      if (!tb?.styling?.ok) return null;
+      return resolveStylingForChoice(choice, tb.styling.value);
+    } catch (_e) { return null; }
+  }, [taskConfiguration?.data]);
+
+  // Задачу уже взял кто-то другой (та же проверка, что в TaskCard).
+  const isRowTakenByOther = useCallback((row) => {
+    if (!currentUserId && !currentUserTitle) return false;
+    const takerTitle = row?.EditorTitle || row?.Editor || "";
+    const takerId = row?.EditorId ?? null;
+    if (!takerTitle && !takerId) return false;
+    const mineById = !!takerId && !!currentUserId && Number(takerId) === Number(currentUserId);
+    const mineByTitle = !!currentUserTitle && !!takerTitle
+      && String(takerTitle).trim().toLowerCase() === String(currentUserTitle).trim().toLowerCase();
+    return !mineById && !mineByTitle;
+  }, [currentUserId, currentUserTitle]);
+
+  const getTableRowActions = useCallback((row) => {
+    if (!row) return [];
+    const actions = [];
+    if (canTakeTableRow(row)) {
+      actions.push({
+        key: "take",
+        label: "Взять в работу",
+        icon: "take",
+        variant: "outlined",
+        disabled: !!externalTakingId && externalTakingId === row.compositeId,
+        onClick: () => handleTakeTableRow(row),
+      });
+    }
+    if (row.sourceId === "main" && isInProgressStatus(row.Status) && !isCompletedStatus(row.Status, row.PercentComplete)) {
+      if (isRowTakenByOther(row)) {
+        actions.push({
+          key: "taken-by-other",
+          kind: "info",
+          label: `В работе у ${row.EditorTitle || row.Editor || "другого пользователя"}`,
+          hint: "Задача уже взята другим пользователем. Возьмите другую задачу.",
+        });
+      } else {
+        // Choices — как в карточке: по ContentType задачи, иначе глобальный список.
+        let choicesForRow = [];
+        try {
+          const meta = getResultFieldForTask(row, ctResultMap, resultFieldsMeta);
+          if (meta?.choices?.length) choicesForRow = meta.choices.map(String);
+        } catch (_e) { /* ниже — глобальные choices */ }
+        if (choicesForRow.length === 0 && Array.isArray(choices)) choicesForRow = choices.map(String);
+        for (const choice of choicesForRow) {
+          const st = resolveRowChoiceStyling(row, choice);
+          const bg = st?.bg || null;
+          const gradient = bg && isGradient(bg) ? bg : null;
+          actions.push({
+            key: `result:${choice}`,
+            label: choice,
+            icon: "result",
+            variant: st?.variant || "outlined",
+            disabled: !!updatingId && updatingId === row.Id,
+            sx: {
+              ...(gradient ? { backgroundImage: gradient, color: st?.color || "#fff", borderColor: "transparent" } : {}),
+              ...(bg && !gradient ? { backgroundColor: bg, color: st?.color || "#fff", borderColor: "transparent" } : {}),
+            },
+            onClick: () => handleResultClick(row, choice),
+          });
+        }
+      }
+    }
+    actions.push({
+      key: "edit",
+      label: "Изменить",
+      icon: "edit",
+      variant: "contained",
+      disabled: !!updatingId && updatingId === row.Id,
+      onClick: () => openTaskForm(row.compositeId, tableData.sources),
+    });
+    return actions;
+  }, [
+    canTakeTableRow, externalTakingId, handleTakeTableRow, isRowTakenByOther,
+    resolveRowChoiceStyling, ctResultMap, resultFieldsMeta, choices, updatingId,
+    handleResultClick, tableData.sources,
+  ]);
+
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
   const confirmTextsForPending = useMemo(() => {
     if (!pendingTask || !pendingResult) return null;
@@ -656,12 +754,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 данные подразделения недоступны
               </Typography>
             )}
-            {/* Кнопки действий рисуются на самой строке (TasksGrid → RowActionsCell),
-                здесь только подсказка, что именно выбрано. */}
+            {/* Действия по задаче открываются popup'ом В ТОЧКЕ КЛИКА по строке
+                (TasksGrid → RowActionsPopover); здесь — подсказка, что именно выбрано. */}
             <Typography variant="caption" sx={{ color: selectedTableRowObj ? "text.primary" : "text.secondary" }}>
               {selectedTableRowObj
-                ? `Выбрана задача #${selectedTableRowObj.Id} — кнопки на строке`
-                : "Кликните строку — появятся кнопки «Взять в работу» и «Изменить»"}
+                ? `Выбрана задача #${selectedTableRowObj.Id} — действия в точке клика`
+                : "Кликните строку — действия по задаче появятся в точке клика"}
             </Typography>
           </Box>
           {/* Скролл — внутри AG Grid (шапка с фильтрами закреплена), поэтому
@@ -673,7 +771,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               error={tableData.error?.message || null}
               onSelectRow={setSelectedTableRow}
               onRowOpen={(compositeId) => openTaskForm(compositeId, tableData.sources)}
-              // «Взять в работу» и «Изменить» — прямо на выделенной строке
+              // Полный набор действий по задаче (как в карточке) — в popup'е у курсора
+              getRowActions={getTableRowActions}
               onEditRow={(row) => openTaskForm(row?.compositeId, tableData.sources)}
               onTakeRow={handleTakeTableRow}
               canTakeRow={canTakeTableRow}

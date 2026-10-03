@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const state = vi.hoisted(() => ({ requests: [], item: null, choices: [], mergeError: null }));
+const state = vi.hoisted(() => ({ requests: [], item: null, choices: [], mergeError: null, listEntityType: null }));
 
 vi.mock("../sourceClient", () => ({
   makeSourceClient: () => ({
@@ -15,11 +15,18 @@ vi.mock("../sourceClient", () => ({
     get: async (url) => {
       state.requests.push({ method: "GET", url });
       if (url.includes("/fields?")) return { data: { d: { results: [{ InternalName: "Status", Choices: { results: state.choices } }] } } };
+      if (url.includes("ListItemEntityTypeFullName")) {
+        return { data: { d: state.listEntityType ? { ListItemEntityTypeFullName: state.listEntityType } : {} } };
+      }
+      if (url.includes("/items?")) {
+        return { data: { d: { results: state.listEntityType ? [{ Id: 1, __metadata: { type: state.listEntityType } }] : [] } } };
+      }
       return { data: { d: state.item } };
     },
     post: async () => ({ data: { d: {} } }),
     merge: async (url, body) => {
       state.requests.push({ method: "MERGE", url, body });
+      if (typeof state.onMerge === "function") return state.onMerge(url, body);
       if (state.mergeError) throw state.mergeError;
       return { status: 204, data: {} };
     },
@@ -51,7 +58,9 @@ describe("takeTaskInWork", () => {
     state.requests = [];
     state.choices = ["Не начата", "В работе", "Завершена"];
     state.mergeError = null;
-    state.item = { Id: 1, Status: "Не начата", PercentComplete: 0, Editor: null };
+    state.listEntityType = null;
+    state.onMerge = null;
+    state.item = { Id: 1, Status: "Не начата", PercentComplete: 0, Editor: null, __metadata: { type: "SP.Data.RequestsTaskListItem" } };
   });
 
   it("берёт задачу в работу: MERGE со статусом «в работе»", async () => {
@@ -61,7 +70,7 @@ describe("takeTaskInWork", () => {
     const merge = state.requests.find((r) => r.method === "MERGE");
     expect(merge).toBeTruthy();
     expect(merge.url).toBe("/dob-api/sites/dob/doblogistic/_api/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')/items(1)");
-    expect(merge.body).toEqual({ Status: "В работе" });
+    expect(merge.body).toEqual({ __metadata: { type: "SP.Data.RequestsTaskListItem" }, Status: "В работе" });
   });
 
   it("не перетирает чужое взятие", async () => {
@@ -95,6 +104,43 @@ describe("takeTaskInWork", () => {
     const res = await takeTaskInWork("dob:1", { allSources: [{ ...SOURCE, inProgressStatus: "Взял в работу" }] });
     expect(res.ok).toBe(true);
     expect(res.status).toBe("Взял в работу");
+  });
+
+  it("тип берётся у списка, если его нет в свежем GET (иначе SharePoint 400)", async () => {
+    state.item = { Id: 1, Status: "Не начата", PercentComplete: 0, Editor: null };
+    state.listEntityType = "SP.Data.RequestsTaskListItem";
+    const res = await takeTaskInWork("dob:1", { allSources: [SOURCE] });
+    expect(res.ok).toBe(true);
+    const merge = state.requests.find((r) => r.method === "MERGE");
+    expect(merge.body).toEqual({ __metadata: { type: "SP.Data.RequestsTaskListItem" }, Status: "В работе" });
+  });
+
+  it("400 «не указан ожидаемый тип» → повтор MERGE с добранным типом", async () => {
+    state.item = { Id: 1, Status: "Не начата", PercentComplete: 0, Editor: null };
+    state.listEntityType = null; // заранее тип неизвестен
+    let attempt = 0;
+    state.mergeError = null;
+    const typeError = {
+      response: {
+        status: 400,
+        data: { error: { message: { value: "Найдена запись без имени типа, но не указан ожидаемый тип." } } },
+      },
+    };
+    // первый MERGE падает; тип появляется у списка только на этапе добора,
+    // поэтому второй MERGE уходит уже с __metadata.type и проходит
+    state.onMerge = () => {
+      attempt += 1;
+      if (attempt === 1) {
+        state.listEntityType = "SP.Data.RequestsTaskListItem";
+        throw typeError;
+      }
+      return { status: 204, data: {} };
+    };
+    const res = await takeTaskInWork("dob:1", { allSources: [SOURCE] });
+    expect(attempt).toBe(2);
+    expect(res.ok).toBe(true);
+    const lastMerge = state.requests.filter((r) => r.method === "MERGE").pop();
+    expect(lastMerge.body).toEqual({ __metadata: { type: "SP.Data.RequestsTaskListItem" }, Status: "В работе" });
   });
 
   it("412 при MERGE трактуется как «уже взята»", async () => {

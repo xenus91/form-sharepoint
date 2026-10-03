@@ -31,6 +31,10 @@ npx vite build --config preview/vite.config.js --ssr flow-check.mjs --outDir .ss
 node preview/.ssrout/flow-check.mjs     # поток результата: роутинг + клики + диалоги
 
 npx vite-node --config preview/vite.config.js preview/related-check.mjs   # диалог «Связанная заявка» (чипы/подписи/кнопки — не должны находиться)
+
+npx vite-node --config preview/vite.config.js preview/table-check.mjs     # таблица: меню действий в точке клика (координаты, состав, hash)
+
+npx vite-node --config preview/vite.config.js preview/take-check.mjs      # взятие dob-задачи: MERGE с __metadata.type (иначе SharePoint 400)
 ```
 
 Выводит содержимое каждой карточки так, как оно выглядит после загрузки данных
@@ -43,10 +47,12 @@ npx vite-node --config preview/vite.config.js preview/related-check.mjs   # ди
 | `vite.config.js` | root = `preview/`, подменяет `src/api.js` на мок (`resolveId`-плагин) |
 | `mockApi.js` | заглушка `apiClient`: отдаёт связанные элементы ProblemsPallet |
 | `CardsScene.jsx` | задачи и конфиг `TaskBehaviour` из реального кэша пользователя |
-| `TableScene.jsx` | табличный режим `#tasks` на мок-данных: закреплённая шапка, поиск, кнопки на строке (`?scene=table`) |
+| `TableScene.jsx` | табличный режим `#tasks` на мок-данных: закреплённая шапка, поиск, меню действий в точке клика (`?scene=table`) |
 | `RelatedScene.jsx` | диалог «Связанная заявка» (read-only) на мок-данных (`?scene=related`) |
-| `mockDob.js` | заглушка DOB-API (`dobApi`/`dobClient`) для сцен предпросмотра |
+| `mockDob.js` | заглушка DOB-API (`dobApi`/`dobClient`) для сцен предпросмотра + мини-эмуляция SharePoint для dob-списка задач (MERGE/`__metadata.type`) |
 | `related-check.mjs` | jsdom-проверка диалога «Связанная заявка»: печатает текст/поля и ловит лишние чипы, подписи и кнопки |
+| `table-check.mjs` | jsdom-проверка таблицы: действия открываются в точке клика, состав как в карточке |
+| `take-check.mjs` | jsdom-проверка взятия dob-задачи: мок SharePoint отвергает MERGE без `__metadata.type`, реальный `takeTaskInWork` проходит |
 | `main.jsx` | точка входа для браузера |
 | `jsdom-setup.mjs` | окружение jsdom (глобали для React/MUI) |
 | `client-check.mjs` | jsdom-рендер: печатает содержимое карточек и кнопки |

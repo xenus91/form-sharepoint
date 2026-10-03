@@ -1,11 +1,13 @@
+/* eslint-disable react/prop-types */
 // src/features/tasks/components/TasksGrid.jsx
 // AG Grid Community wrapper для табличного режима #tasks (multi-source).
 //
 // Поведение (по требованиям 2026-10-03):
 //   • клик по строке — только ВЫДЕЛЯЕТ задачу (как в разделе «Заявки ДОБ»);
-//   • кнопки «Взять в работу» и «Изменить» показываются НА САМОЙ СТРОКЕ
-//     (в закреплённой справа колонке действий), когда строка выделена;
-//   • двойной клик по строке — тоже открывает форму задачи;
+//   • действия по задаче открываются В ТОЧКЕ КЛИКА по строке (popup у курсора),
+//     и в нём — ВЕСЬ набор действий, который есть у карточки задачи
+//     («Взять в работу», кнопки результатов, «Изменить»);
+//   • двойной клик по строке — открывает форму задачи;
 //   • поля результата в таблице не показываются;
 //   • «Кому назначено» = AssignedTo, «Исполнитель» = Editor (кто взял в работу).
 //
@@ -13,11 +15,23 @@
 
 import { AgGridReact } from "ag-grid-react";
 import { memo, useMemo, useRef, useEffect, useState } from "react";
-import { Box, Button, IconButton, InputAdornment, Stack, TextField, Tooltip, Typography } from "@mui/material";
+import {
+  Box,
+  Button,
+  Divider,
+  IconButton,
+  InputAdornment,
+  Popover,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
+} from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 import EditIcon from "@mui/icons-material/Edit";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
 
@@ -25,85 +39,116 @@ import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableCol
 // "No AG Grid modules are registered" при первом рендере таблицы).
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+/** Иконки действий: строковый ключ из описания действия → MUI-иконка. */
+const ACTION_ICONS = {
+  take: <PlayArrowIcon fontSize="small" />,
+  edit: <EditIcon fontSize="small" />,
+  result: <TaskAltIcon fontSize="small" />,
+};
+
 /**
- * Ячейка действий в закреплённой справа колонке: кнопки «Взять в работу» и
- * «Изменить» видны только у ВЫДЕЛЕННОЙ строки (клик по строке — выделение).
+ * Popup с действиями по задаче — открывается В ТОЧКЕ КЛИКА по строке.
  *
- * Выделение спрашиваем у самой строки (`params.node.isSelected()`), а колбэки и
- * состояние берём из `params.context` — это тот же объект, что передан в
- * `context` у AgGridReact (AG Grid не копирует его, в отличие от
- * cellRendererParams, которые он deep-merge'ит и тем самым «замораживает»).
+ * @param {object} props
+ * @param {boolean} props.open
+ * @param {{top:number,left:number}|null} props.anchorPosition — координаты клика (viewport)
+ * @param {object|null} props.row
+ * @param {Array<{key:string,label:string,icon?:any,variant?:string,color?:string,sx?:object,disabled?:boolean,hint?:string,onClick?:Function}>} props.actions
+ * @param {() => void} props.onClose
  */
-const RowActionsCell = memo(function RowActionsCell(params) {
-  const actions = params.context || {};
-  const data = params.data;
-  const isSelected = !!params.node?.isSelected?.();
-  if (!data || !isSelected) return null;
-
-  const canTake = typeof actions.canTakeRow === "function" && actions.canTakeRow(data);
-  const busy = !!actions.takingId && actions.takingId === data.compositeId;
-
-  const stop = (fn) => (event) => {
-    // не даём клику по кнопке «дойти» до строки (выделение/двойной клик)
-    event.stopPropagation();
-    event.preventDefault();
-    fn?.();
-  };
-
+const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition, row, actions, onClose }) {
+  const list = Array.isArray(actions) ? actions : [];
   return (
-    <Stack
-      direction="row"
-      spacing={0.5}
-      className="tasks-row-actions"
-      sx={{ alignItems: "center", justifyContent: "flex-end", width: "100%", height: "100%", pr: 0.5 }}
+    <Popover
+      open={!!open && !!anchorPosition && !!row}
+      anchorReference="anchorPosition"
+      anchorPosition={anchorPosition || undefined}
+      onClose={onClose}
+      marginThreshold={8}
+      disableAutoFocus
+      disableRestoreFocus
+      slotProps={{
+        paper: {
+          className: "tasks-row-actions",
+          "data-testid": "tasks-row-actions",
+          elevation: 8,
+          sx: {
+            borderRadius: 2.5,
+            border: "1px solid rgba(23,28,143,0.16)",
+            p: 1,
+            minWidth: 250,
+            maxWidth: 340,
+          },
+        },
+      }}
     >
-      {canTake && (
-        <Button
-          size="small"
-          variant="outlined"
-          startIcon={<PlayArrowIcon fontSize="small" />}
-          disabled={busy}
-          onMouseDown={stop()}
-          onClick={stop(() => actions.onTakeRow?.(data))}
-          sx={{
-            borderRadius: 1.5,
-            textTransform: "none",
-            fontWeight: 700,
-            minWidth: 0,
-            px: 1,
-            height: 28,
-            fontSize: 12,
-            borderColor: "rgba(23,28,143,0.35)",
-            color: "#171c8f",
-            bgcolor: "#fff",
-            "&:hover": { borderColor: "#171c8f", bgcolor: "rgba(23,28,143,0.04)" },
-          }}
-        >
-          Взять в работу
-        </Button>
-      )}
-      <Button
-        size="small"
-        variant="contained"
-        startIcon={<EditIcon fontSize="small" />}
-        onMouseDown={stop()}
-        onClick={stop(() => actions.onEditRow?.(data))}
-        sx={{
-          borderRadius: 1.5,
-          textTransform: "none",
-          fontWeight: 700,
-          minWidth: 0,
-          px: 1,
-          height: 28,
-          fontSize: 12,
-          bgcolor: "#171c8f",
-          color: "#fff",
-          "&:hover": { bgcolor: "#10146a" },
-        }}
-      >
-        Изменить
-      </Button>
-    </Stack>
+      <Box sx={{ px: 0.75, pt: 0.25, pb: 0.75 }}>
+        <Typography variant="caption" sx={{ display: "block", fontWeight: 800, color: "#171c8f" }}>
+          Задача #{row?.Id}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+          {row?.Status || "—"}
+          {row?.AssignedTo ? ` • ${row.AssignedTo}` : ""}
+        </Typography>
+      </Box>
+      <Divider sx={{ mb: 0.75 }} />
+      <Stack spacing={0.75} data-testid="tasks-row-actions-list">
+        {list.map((action) => action.kind === "info" ? (
+          <Box
+            key={action.key}
+            sx={{
+              px: 0.75,
+              py: 0.5,
+              borderRadius: 1.5,
+              bgcolor: "rgba(255,193,7,0.12)",
+              border: "1px solid rgba(255,193,7,0.3)",
+            }}
+          >
+            <Typography variant="caption" sx={{ display: "block", fontWeight: 700, color: "#8d6e00" }}>
+              {action.label}
+            </Typography>
+            {action.hint && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                {action.hint}
+              </Typography>
+            )}
+          </Box>
+        ) : (
+          <Button
+            key={action.key}
+            fullWidth
+            size="small"
+            variant={action.variant || "outlined"}
+            color={action.color || "primary"}
+            startIcon={typeof action.icon === "string" ? ACTION_ICONS[action.icon] || null : action.icon || null}
+            disabled={!!action.disabled}
+            title={action.hint || undefined}
+            onClick={(event) => {
+              event.stopPropagation();
+              event.preventDefault();
+              onClose?.();
+              action.onClick?.();
+            }}
+            sx={{
+              justifyContent: "flex-start",
+              textTransform: "none",
+              fontWeight: 700,
+              borderRadius: 1.5,
+              minHeight: 34,
+              fontSize: 13,
+              ...(action.sx || {}),
+            }}
+          >
+            {action.label}
+          </Button>
+        ))}
+        {list.length === 0 && (
+          <Typography variant="caption" color="text.secondary" sx={{ px: 0.75, py: 0.5 }}>
+            Нет доступных действий
+          </Typography>
+        )}
+      </Stack>
+    </Popover>
   );
 });
 
@@ -112,8 +157,10 @@ const RowActionsCell = memo(function RowActionsCell(params) {
  * @param {Array<any>} props.rows — задачи с compositeId
  * @param {(compositeId:string|null) => void} [props.onSelectRow] — выделение строки
  * @param {(compositeId:string) => void} [props.onRowOpen] — открыть форму (двойной клик)
- * @param {(row:object) => void} [props.onEditRow] — «Изменить» на выделенной строке
- * @param {(row:object) => void} [props.onTakeRow] — «Взять в работу» на выделенной строке
+ * @param {(row:object) => Array<object>} [props.getRowActions] — полный набор действий
+ *        по задаче (как в карточке). Если не передан — собирается из legacy-пропов ниже.
+ * @param {(row:object) => void} [props.onEditRow] — «Изменить» (legacy-фолбэк)
+ * @param {(row:object) => void} [props.onTakeRow] — «Взять в работу» (legacy-фолбэк)
  * @param {(row:object) => boolean} [props.canTakeRow] — можно ли взять строку в работу
  * @param {string|null} [props.takingId] — compositeId строки, которая берётся в работу
  * @param {boolean} [props.showSourceColumn=false] — колонка источника (debug)
@@ -127,6 +174,7 @@ export default function TasksGrid({
   rows = [],
   onSelectRow,
   onRowOpen,
+  getRowActions,
   onEditRow,
   onTakeRow,
   canTakeRow,
@@ -140,12 +188,9 @@ export default function TasksGrid({
   const [quickFilter, setQuickFilter] = useState("");
   // Сколько строк осталось после поиска/фильтров — показываем рядом с полем.
   const [shownCount, setShownCount] = useState(null);
-  // Выделенная строка (compositeId) — кнопки действий видны только у неё.
-  const [selectedId, setSelectedId] = useState(null);
-  // Стабильная ссылка на колбэки/состояние для ячейки действий (см. RowActionsCell).
-  // Колбэки/состояние для ячейки действий. Объект НЕ пересоздаём: он уходит в
-  // `context` грида, а ячейка читает из него свежие значения при перерисовке.
-  const actionsRef = useRef({ takingId: null, onEditRow: null, onTakeRow: null, canTakeRow: null });
+  // Popup действий: строка + координаты клика (viewport coordinates).
+  const [menuRow, setMenuRow] = useState(null);
+  const [menuAnchor, setMenuAnchor] = useState(null);
 
   const showDbg = useMemo(() => {
     try {
@@ -158,31 +203,10 @@ export default function TasksGrid({
     return false;
   }, []);
 
-  // Всегда актуальные значения для ячейки действий (объект не пересоздаём).
-  actionsRef.current.takingId = takingId;
-  actionsRef.current.onEditRow = onEditRow;
-  actionsRef.current.onTakeRow = onTakeRow;
-  actionsRef.current.canTakeRow = canTakeRow;
-
-  const columnDefs = useMemo(() => {
-    const cols = buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg });
-    // Колонка действий — закреплена справа, вне сортировки/фильтров/поиска.
-    cols.push({
-      colId: "rowActions",
-      headerName: "",
-      width: 232,
-      minWidth: 210,
-      pinned: "right",
-      sortable: false,
-      filter: false,
-      floatingFilter: false,
-      resizable: false,
-      suppressMovable: true,
-      suppressHeaderMenuButton: true,
-      cellRenderer: RowActionsCell,
-    });
-    return cols;
-  }, [showSourceColumn, showDbg]);
+  const columnDefs = useMemo(
+    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg }),
+    [showSourceColumn, showDbg]
+  );
 
   const defaultColDef = useMemo(() => ({ ...TASK_GRID_DEFAULT_COL_DEF }), []);
 
@@ -199,6 +223,40 @@ export default function TasksGrid({
     headerHeight: 44,
   }), []);
 
+  const closeActions = useMemo(() => () => { setMenuRow(null); setMenuAnchor(null); }, []);
+
+  // Полный набор действий строки: приоритет — getRowActions (TasksView собирает
+  // его из тех же данных, что и карточка); иначе — legacy-фолбэк «Взять / Изменить».
+  const actionsForRow = useMemo(() => (row) => {
+    if (!row) return [];
+    if (typeof getRowActions === "function") {
+      try {
+        const list = getRowActions(row);
+        if (Array.isArray(list)) return list;
+      } catch (_e) { void _e; /* показываем legacy-набор */ }
+    }
+    const fallback = [];
+    const canTake = typeof canTakeRow === "function" && canTakeRow(row);
+    if (canTake) {
+      fallback.push({
+        key: "take",
+        label: "Взять в работу",
+        icon: "take",
+        variant: "outlined",
+        disabled: !!takingId && takingId === row.compositeId,
+        onClick: () => onTakeRow?.(row),
+      });
+    }
+    fallback.push({
+      key: "edit",
+      label: "Изменить",
+      icon: "edit",
+      variant: "contained",
+      onClick: () => onEditRow?.(row),
+    });
+    return fallback;
+  }, [getRowActions, canTakeRow, takingId, onTakeRow, onEditRow]);
+
   // Пересчёт счётчика строк при любом изменении модели (поиск/фильтр/данные).
   const onModelUpdated = useMemo(() => (event) => {
     const api = event?.api || gridRef.current?.api;
@@ -210,15 +268,28 @@ export default function TasksGrid({
     const api = gridRef.current?.api;
     const selected = api?.getSelectedNodes?.() || [];
     const id = selected.length > 0 ? (selected[0].data?.compositeId ?? null) : null;
-    setSelectedId(id);
     if (typeof onSelectRow === "function") onSelectRow(id);
   }, [onSelectRow]);
 
+  // Клик по строке: выделение + popup действий В ТОЧКЕ КЛИКА.
+  const onCellClicked = useMemo(() => (event) => {
+    const row = event?.data;
+    if (!row) return;
+    const native = event?.event;
+    let left = Number(native?.clientX);
+    let top = Number(native?.clientY);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) {
+      // Фолбэк (например, клик пришёл из кода): берём позицию ячейки.
+      const rect = event?.event?.target?.getBoundingClientRect?.();
+      left = rect ? rect.left + Math.min(24, rect.width / 2) : 0;
+      top = rect ? rect.top + rect.height : 0;
+    }
+    setMenuRow(row);
+    setMenuAnchor({ top, left });
+  }, []);
+
   const onRowDoubleClicked = useMemo(() => (event) => {
     if (typeof onRowOpen !== "function") return;
-    // двойной клик по кнопкам действий не открывает форму
-    const target = event?.event?.target;
-    if (target && typeof target.closest === "function" && target.closest(".tasks-row-actions")) return;
     const id = event?.data?.compositeId;
     if (id) onRowOpen(id);
   }, [onRowOpen]);
@@ -226,19 +297,16 @@ export default function TasksGrid({
   // При смене данных выделение живёт в AG Grid; если строк больше нет — сбрасываем.
   useEffect(() => {
     if (rows.length > 0) return;
-    setSelectedId(null);
+    closeActions();
     if (typeof onSelectRow === "function") onSelectRow(null);
-  }, [rows.length, onSelectRow]);
+  }, [rows.length, onSelectRow, closeActions]);
 
-  // Кнопки действий живут в ячейке: после смены выделения (или начала взятия
-  // в работу) перерисовываем ячейки — так кнопки появляются/исчезают на строке.
+  // Строка могла исчезнуть из данных (обновился источник) — закрываем popup.
   useEffect(() => {
-    const api = gridRef.current?.api;
-    if (!api) return;
-    // force: ячейка перерисовывается, даже если её значение не изменилось —
-    // иначе кнопки не появятся/не исчезнут на строке.
-    api.refreshCells({ force: true });
-  }, [selectedId, takingId]);
+    if (!menuRow) return;
+    const stillThere = (rows || []).some((r) => r && r.compositeId === menuRow.compositeId);
+    if (!stillThere) closeActions();
+  }, [rows, menuRow, closeActions]);
 
   if (loading && rows.length === 0) {
     return (
@@ -315,13 +383,22 @@ export default function TasksGrid({
           getRowId={getRowId}
           gridOptions={gridOptions}
           quickFilterText={quickFilter}
-          context={actionsRef.current}
           onModelUpdated={onModelUpdated}
           onSelectionChanged={onSelectionChanged}
+          onCellClicked={onCellClicked}
           onRowDoubleClicked={onRowDoubleClicked}
+          // При прокрутке строк координата клика «уезжает» — закрываем меню.
+          onBodyScroll={closeActions}
           suppressCellFocus
         />
       </Box>
+      <RowActionsPopover
+        open={!!menuRow}
+        anchorPosition={menuAnchor}
+        row={menuRow}
+        actions={menuRow ? actionsForRow(menuRow) : []}
+        onClose={closeActions}
+      />
     </Box>
   );
 }
