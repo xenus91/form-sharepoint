@@ -32,6 +32,19 @@ export function useTasksTableData(opts = {}) {
 
   const sources = useTasksSources(userProfile);
 
+  // DBG: фиксируем вход в хук и какие источники активны
+  try {
+    if (typeof window !== "undefined" && window.localStorage?.getItem("dbg_tasks") === "1") {
+      // eslint-disable-next-line no-console
+      console.log("[DBG:useTasksTableData]", {
+        enabled,
+        sourcesIds: sources.map((s) => s.id),
+        sourcesKind: sources.map((s) => s.clientKind),
+        sourcesEnabled: sources.map((s) => s.enabled),
+      });
+    }
+  } catch (_e) { void _e; }
+
   const query = useTasksForSources({
     sources,
     distribution,
