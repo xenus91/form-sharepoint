@@ -48,7 +48,6 @@ import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import { openTaskForm } from "./features/tasks/lib/openTaskForm";
 import { buildRowActions } from "./features/tasks/lib/rowActions";
-import { resolveResultDispatch } from "./features/tasks/lib/resultDispatch";
 import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
@@ -646,15 +645,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return renderStylingIcon(resolveStylingIcon("takeInWork", tb.stylingActions.value), React.createElement);
   }, [rowTaskBehaviour]);
 
-  // Правило Behaviour для конкретного результата строки — по нему решаем, можно ли
-  // завершить задачу «одним кликом» из таблицы или нужен inline-экран карточки
-  // (prompt-поля/доп. действия/подтверждение кнопками).
-  const resolveRowChoiceRule = useCallback((row, choice) => {
-    const tb = rowTaskBehaviour(row);
-    if (!tb?.behaviour?.ok) return null;
-    return resolveBehaviour(choice, tb.behaviour.value);
-  }, [rowTaskBehaviour]);
-
   // Задачу уже взял кто-то другой (та же проверка, что в TaskCard).
   const isRowTakenByOther = useCallback((row) => {
     if (!currentUserId && !currentUserTitle) return false;
@@ -689,20 +679,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       takeStyling: resolveRowTakeStyling(row),
       takeIcon: () => resolveRowTakeIcon(row),
       onTake: () => handleTakeTableRow(row),
-      onResult: (choice) => {
-        // Кнопка таблицы = кнопка карточки. Решение — общий диспетчер
-        // (features/tasks/lib/resultDispatch.js), тот же, что использует карточка:
-        //  • card-form / card-buttons — это UI карточки, открываем её сразу с этим
-        //    результатом (#tasks/<Id>?action=…);
-        //  • flow — диалог местоположения / подтверждения / запись, всё это работает
-        //    прямо из таблицы (loc + aa собирает доп. действия внутри диалога).
-        const dispatch = resolveResultDispatch(resolveRowChoiceRule(row, choice));
-        if (dispatch !== "flow") {
-          openTaskForm(row?.compositeId, tableData.sources, { action: choice });
-          return;
-        }
-        handleResultClick(row, choice);
-      },
+      onResult: (choice) => handleResultClick(row, choice),
       onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
     });
     if (__DBG_ENABLED__) {
@@ -717,7 +694,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [
     canTakeTableRow, externalTakingId, updatingId, isRowTakenByOther, choicesForRow,
     resolveRowChoiceStyling, resolveRowChoiceIcon, resolveRowTakeStyling, resolveRowTakeIcon,
-    resolveRowChoiceRule, handleTakeTableRow, handleResultClick, tableData.sources,
+    handleTakeTableRow, handleResultClick, tableData.sources,
   ]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
