@@ -269,6 +269,38 @@ export async function getDobItem(id, listGuid = DOB_LIST_GUID) {
   return item;
 }
 
+// Элемент для read-only просмотра (диалог «Связанная заявка»): тянем сразу имя
+// типа контента, чтобы показать «поля соответствуют типу контента».
+// Если расширение ContentType на тенанте не поддерживается — тихо откатываемся
+// на обычный getDobItem (поля всё равно приходят из метаданных списка).
+export async function getDobItemForView(id, listGuid = DOB_LIST_GUID) {
+  listGuid = normalizeListGuid(listGuid);
+  if (!id) throw new Error('getDobItemForView: id required');
+  const fields = await getDobFields(listGuid).catch(() => []);
+  const expands = ['ContentType', 'Author', 'Editor'];
+  if (Array.isArray(fields) && fields.length) {
+    const userFields = fields
+      .filter(f => (f.TypeAsString || '').toLowerCase() === 'user' && !['Author', 'Editor'].includes(f.InternalName) && !f.Hidden)
+      .map(f => f.InternalName);
+    if (userFields.length) expands.push(...userFields);
+  }
+  const uniqueExpands = [...new Set(expands)];
+  const selectParts = ['*', 'ContentType/Name', 'ContentType/StringValue'];
+  for (const e of uniqueExpands) {
+    if (e === 'ContentType') continue;
+    selectParts.push(`${e}/Title`, `${e}/Id`);
+  }
+  const url = `${dobListApi(listGuid)}/items(${id})?$select=${selectParts.join(',')}&$expand=${uniqueExpands.join(',')}`;
+  try {
+    const { data } = await dobAxios.get(url);
+    return data?.d || data;
+  } catch (e) {
+    const status = e?.response?.status;
+    console.warn('[dobApi] getDobItemForView: fallback без $expand=ContentType', status, e?.message);
+    return getDobItem(id, listGuid);
+  }
+}
+
 export async function getDobAttachments(id, listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
   const url = `${dobListApi(listGuid)}/items(${id})/AttachmentFiles`;

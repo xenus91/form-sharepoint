@@ -9,26 +9,15 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment } from './api/dobApi';
 import { DOB_LIST_GUID } from './api/dobClient';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
+import RelatedItemDialog from './components/RelatedItemDialog';
+import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
+import { resolveRelatedRef } from './lib/relatedItem';
 
-
-const HIDDEN_FORM_FIELDS = new Set([
-  'ComplianceAssetId', 'LinkTitleNoMenu', 'LinkTitle', 'Modified', 'UserFail',
-  '_UIVersionString', 'DocIcon', 'FolderChildCount', 'AppEditor', 'AppAuthor',
-  'ItemChildCount', 'Edit',
-  'x041d_x0435__x0434__x0435__x04', 'x0414_x0430__x0442__x0430__x001',
-  'x041b_x043e__x0433__x0438__x040', 'x0417_x0430__x043f__x0438__x04',
-  'x0443_x0432__x0435__x0434__x04',
-]);
-function isHiddenFormField(internal = '') {
-  const name = String(internal);
-  const normalized = name.replace(/^OData__?/, '').replace(/^_/, '');
-  return HIDDEN_FORM_FIELDS.has(name) || HIDDEN_FORM_FIELDS.has(normalized) ||
-    /^(?:x|_x)041d__x0435__x0434__x0435__x04|^(?:x|_x)0414__x0430__x0442__x0430__x001|^(?:x|_x)041b__x043e__x0433__x0438__x040|^(?:x|_x)0417__x0430__x043f__x0438__x04|^(?:x|_x)0443__x0432__x0435__x0434__x04/.test(normalized);
-}
 
 function isEditableField(f) {
   if (!f) return false;
@@ -40,32 +29,6 @@ function isEditableField(f) {
   const t = (f.TypeAsString || '').toLowerCase();
   if (['calculated','computed','counter','contenttypeid','lookup','attachments','file','guid','modstat'].includes(t)) return false;
   return true;
-}
-
-function getODataValue(row, internal) {
-  if (!row || !internal) return undefined;
-  if (row[internal] !== undefined) return row[internal];
-  if (row['OData__' + internal] !== undefined) return row['OData__' + internal];
-  if (row['OData_' + internal] !== undefined) return row['OData_' + internal];
-  if (internal.startsWith('_') && row[internal.slice(1)] !== undefined) return row[internal.slice(1)];
-  return undefined;
-}
-
-function looksLikeHtml(value) {
-  return typeof value === 'string' && /(?:<\/?[a-z][^>]*>|&lt;\/?[a-z][^&]*&gt;)/i.test(value);
-}
-function normalizeHtmlValue(value) {
-  if (typeof value !== 'string') return value || '';
-  if (!value.includes('&lt;')) return value;
-  const doc = new DOMParser().parseFromString(value, 'text/html');
-  return doc.body.textContent || value;
-}
-
-function toEditorHtml(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'object') return String(value.Html ?? value.Value ?? value.Description ?? '');
-  return String(value);
 }
 
 // listGuid — какой список редактируем. По умолчанию — список заявок ДОБ
@@ -80,6 +43,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [attachments, setAttachments] = useState([]);
+  // Read-only просмотр связанной заявки (RelatedItems задачи/заявки).
+  const [relatedOpen, setRelatedOpen] = useState(false);
   const prevChekHtmlRef = useRef(null);
   const pendingDeleteRef = useRef(new Set());
   const initialFormRef = useRef(null);
@@ -339,6 +304,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
   const loading = fieldsLoading || itemLoading;
 
+  // Связанная заявка: RelatedItems элемента (или lookup на список заявок ДОБ).
+  const relatedRef = useMemo(() => resolveRelatedRef(item, fields), [item, fields]);
+
   const editableFields = useMemo(() => {
     if (!fields) return [];
     return fields.filter(f => {
@@ -490,6 +458,29 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label={isDefaultList ? 'К списку' : 'К задачам'}><ArrowBackIcon fontSize="small" /></IconButton>
           <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>{isDefaultList ? 'Заявка ДОБ' : 'Задача'} #{id}</Typography>
           {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
+          <Tooltip title={relatedRef ? 'Показать данные связанной заявки (только чтение)' : 'У этой записи нет связанной заявки (RelatedItems пустое)'}>
+            <span>
+              <Button
+                size="small"
+                variant="contained"
+                disabled={!relatedRef}
+                onClick={() => setRelatedOpen(true)}
+                startIcon={<VisibilityIcon />}
+                sx={{
+                  borderRadius: .5,
+                  fontWeight: 800,
+                  color: '#fff',
+                  backgroundImage: 'linear-gradient(180deg,#ffb300 0%,#ef6c00 100%)',
+                  boxShadow: '0 2px 8px rgba(239,108,0,.35)',
+                  '&:hover': { backgroundImage: 'linear-gradient(180deg,#ffc233 0%,#f57c00 100%)' },
+                  '&.Mui-disabled': { backgroundImage: 'none', color: 'rgba(0,0,0,.26)' },
+                }}
+              >
+                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Просмотреть связанную заявку</Box>
+                <Box component="span" sx={{ display: { xs: 'inline', md: 'none' } }}>Связанная заявка</Box>
+              </Button>
+            </span>
+          </Tooltip>
           <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={{ borderRadius: .5 }}>Обновить</Button>
           <Button size="small" variant="contained" onClick={handleSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={{ borderRadius: .5, minWidth: 120, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)', color: '#fff' }}>
             {saving ? 'Сохранение…' : 'Сохранить'}
@@ -712,6 +703,14 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
         <Button onClick={handleSave} variant="contained" disabled={saving} startIcon={<SaveIcon />} sx={{ borderRadius: 2, minWidth: 160 }}>Сохранить</Button>
       </Box>
+
+      {/* Read-only просмотр связанной заявки: данные тянем из связанного элемента */}
+      <RelatedItemDialog
+        open={relatedOpen}
+        onClose={() => setRelatedOpen(false)}
+        relatedRef={relatedRef}
+        taskId={id}
+      />
     </Box>
   );
 }
