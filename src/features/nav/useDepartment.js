@@ -73,6 +73,10 @@ export function useDepartment(userProfile) {
     if (prevDeptRef.current !== upDepartment || upDepartment) {
       prevDeptRef.current = upDepartment;
       const { isOOB, reason } = resolveRouteAccess({ department: upDepartment });
+      try {
+        // eslint-disable-next-line no-console
+        console.log("[useDepartment]", { department: upDepartment, isOOB, reason });
+      } catch (_e) { void _e; }
       setState({ status: "ready", department: upDepartment, isOOB, reason, error: null });
     }
     return undefined;

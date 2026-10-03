@@ -1,6 +1,7 @@
 // src/features/tasks/hooks/useTasksSources.js
-// Селектор источников на основе useDepartment.
-// isOOB=true → [main, dob], иначе → [main].
+// Селектор активных источников для загрузки #tasks.
+// По требованию пользователя (2026-10-03) — оба источника активны для всех:
+// ООБ получает merged данные (main + dob), остальные — только main.
 // Уважает localStorage["tasks.sources"] override (для отладки).
 // План: см. artifacts/plan.md (этап 10).
 
@@ -19,8 +20,11 @@ export function useTasksSources(userProfile = null) {
     const all = getTaskSources();
     // Фильтруем по enabled
     const enabled = all.filter((s) => s.enabled !== false);
+
+    // ОБА источника активны для ООБ (merged данные)
+    // Для не-ООБ — main + dob тоже активны, но запрос к dob упадёт (нет доступа)
+    //   → частичная деградация через Promise.allSettled: вернётся только main
     if (isOOB) {
-      // ООБ: добавляем второй источник (dob), если он есть в enabled
       const dob = enabled.find((s) => s.id === "dob");
       const main = enabled.find((s) => s.id === "main") || getSourceById("main");
       const result = [];
@@ -28,9 +32,13 @@ export function useTasksSources(userProfile = null) {
       if (dob) result.push(dob);
       return result;
     }
-    // Не-ООБ: только main (или первый enabled)
+
+    // Не-ООБ: оба источника активны, fetchTasksMultiSource деградирует частично
     const main = enabled.find((s) => s.id === "main");
-    if (main) return [main];
-    return enabled.slice(0, 1);
+    const dob = enabled.find((s) => s.id === "dob");
+    const result = [];
+    if (main) result.push(main);
+    if (dob) result.push(dob);
+    return result;
   }, [isOOB]);
 }

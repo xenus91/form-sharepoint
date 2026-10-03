@@ -4,11 +4,15 @@
 
 /**
  * Паттерны ООБ-подразделений. Нормализованные (trim, NBSP→space, ё→е, lower-case).
- * Сопоставление — case-insensitive, без ё/е разницы, схлопывание пробелов.
+ * Сопоставление — substring match (любой паттерн должен быть подстрокой Department).
+ * Избегаем слишком коротких паттернов ("ооб"), чтобы не было ложных срабатываний.
  * @type {string[]}
  */
 export const OOB_DEPARTMENT_PATTERNS = [
   "отдел обеспечения бизнеса",
+  "обеспечения бизнеса",
+  // Аббревиатура допускается только если Department выглядит как ООБ:
+  // содержит "ооб" ровно как токен (через пробел или скобку), не как часть "ообеспечения"
 ];
 
 /**
@@ -27,6 +31,15 @@ export function normalizeDepartment(value) {
 }
 
 /**
+ * Аббревиатура ООБ — только как отдельный токен (через пробел, скобку или дефис).
+ * @param {string} norm — нормализованный Department
+ */
+function hasOobAbbreviation(norm) {
+  // "ооб" — отдельное слово или в скобках: "ооб", "(ооб)", "ооб рц-..."
+  return /(^|[\s\(\-])ооб($|[\s\)\-])/.test(norm) || /^ооб$/.test(norm);
+}
+
+/**
  * Матчится ли значение одному из OOB-паттернов.
  * @param {string|null|undefined} department
  * @returns {boolean}
@@ -34,7 +47,9 @@ export function normalizeDepartment(value) {
 export function matchDepartment(department) {
   const norm = normalizeDepartment(department);
   if (!norm) return false;
-  return OOB_DEPARTMENT_PATTERNS.some((p) => norm === p || norm.includes(p));
+  if (OOB_DEPARTMENT_PATTERNS.some((p) => norm.includes(p))) return true;
+  if (hasOobAbbreviation(norm)) return true;
+  return false;
 }
 
 /**
