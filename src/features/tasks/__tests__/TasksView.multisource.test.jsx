@@ -247,6 +247,10 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.textContent).toContain("Кому назначено");
     expect(host.textContent).toContain("Исполнитель");
     expect(host.textContent).toMatch(/Поршаков Сергей/);
+    // «Описание задачи» — сразу после «Заголовка», значение из Body dob-задачи
+    expect(host.textContent).toContain("Описание задачи");
+    expect(host.textContent.indexOf("Описание задачи")).toBeLessThan(host.textContent.indexOf("Статус"));
+    expect(host.textContent).toContain("Просмотр видеоархива");
     // в таблице нет ни колонки источника, ни бейджей «другого источника»
     expect(host.textContent).not.toContain("DOB Logistic");
     expect(host.textContent).not.toMatch(/другого (сайта|источника)/i);

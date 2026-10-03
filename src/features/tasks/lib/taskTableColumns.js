@@ -31,6 +31,21 @@ export function statusCellStyle(params) {
   };
 }
 
+// Тело задачи может прийти с HTML (внешние списки отдают Note как разметку) —
+// в таблице показываем плоский текст.
+function stripHtmlText(value) {
+  if (value == null) return "";
+  return String(value)
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function formatDate(value) {
   if (!value) return "";
   try {
@@ -62,6 +77,16 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     flex: 2,
     minWidth: 220,
     sortable: true,
+  });
+  cols.push({
+    headerName: "Описание задачи",
+    field: "Body",
+    flex: 1.5,
+    minWidth: 220,
+    sortable: true,
+    valueGetter: (p) => stripHtmlText(p.data?.Body),
+    cellStyle: { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+    tooltipValueGetter: (p) => stripHtmlText(p.data?.Body) || undefined,
   });
   cols.push({
     headerName: "Статус",

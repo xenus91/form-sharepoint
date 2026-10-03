@@ -53,6 +53,19 @@ describe("TasksGrid.buildTaskColumns", () => {
     expect(taker.valueGetter({ data: {} })).toBe("");
   });
 
+  it("«Описание задачи» идёт сразу после «Заголовка» и показывает плоский текст", () => {
+    const cols = buildTaskColumns();
+    const headers = cols.map((c) => c.headerName);
+    expect(headers.indexOf("Описание задачи")).toBe(headers.indexOf("Заголовок") + 1);
+
+    const desc = colByHeader(cols, "Описание задачи");
+    expect(desc.valueGetter({ data: { Body: "Просмотр видеоархива" } })).toBe("Просмотр видеоархива");
+    // HTML из внешних списков — в плоский текст
+    expect(desc.valueGetter({ data: { Body: "<p>Строка&nbsp;1</p><br/><b>Строка 2</b>" } })).toBe("Строка 1 Строка 2");
+    expect(desc.valueGetter({ data: {} })).toBe("");
+    expect(desc.valueGetter({ data: undefined })).toBe("");
+  });
+
   it("колонка источника появляется только по флагу", () => {
     const withSource = buildTaskColumns({ showSourceColumn: true });
     expect(withSource.map((c) => c.headerName)).toContain("Источник");
