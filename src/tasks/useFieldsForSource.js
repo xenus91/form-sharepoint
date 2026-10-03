@@ -26,8 +26,13 @@ export function useFieldsForSource(source, { enabled = true, staleTimeMs = 5 * 6
         apiBase: client.apiBase,
         get: client.get,
       });
-      const url = `${listApi}/fields?$select=InternalName,Title,TypeAsString&$top=200`;
-      const resp = await client.get(url, {
+      // URL для запроса: listApi уже содержит "/web/lists(...)" — для main
+      // apiClient.get префиксует свой baseURL="/api", для dob dobAxios НЕ
+      // имеет baseURL — нужно префиксовать client.apiBase вручную.
+      const fullUrl = client.apiBase
+        ? `${client.apiBase}${listApi.startsWith("/") ? listApi : `/${listApi}`}/fields?$select=InternalName,Title,TypeAsString&$top=200`
+        : `${listApi}/fields?$select=InternalName,Title,TypeAsString&$top=200`;
+      const resp = await client.get(fullUrl, {
         headers: { Accept: "application/json;odata=verbose" },
         __noCache: true,
       });
