@@ -37,6 +37,8 @@ export const DOB_TASKS_LIST_API = `/web/lists(guid'${DOB_TASKS_LIST_GUID.toLower
  * @property {string|null} [listTitle]
  * @property {boolean} [enabled=true]
  * @property {(() => string|Promise<string>)|null} [resolveListApi=null]
+ * @property {string|null} [inProgressStatus] — статус «в работе» на этом сайте.
+ *   Если null — берётся первый подходящий choice поля Status (см. takeTaskInWork).
  */
 
 /**
@@ -100,6 +102,10 @@ export const DEFAULT_TASK_SOURCES = [
     listTitle: "RequestsTask", // fallback-резолв по Title, если GUID в тенанте другой
     enabled: true,
     resolveListApi: null,
+    // Вокабуляр статусов на сайте ДОБ может отличаться — определяем автоматически
+    // по choice-полям списка; при необходимости задаётся override'ом
+    // localStorage["tasks.sources"] = { "dob": { "inProgressStatus": "В работе" } }.
+    inProgressStatus: null,
   },
 ];
 

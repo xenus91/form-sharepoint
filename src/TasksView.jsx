@@ -45,6 +45,7 @@ import { useDepartment } from "./features/nav/useDepartment";
 import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import { openTaskForm } from "./features/tasks/lib/openTaskForm";
+import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
@@ -92,6 +93,7 @@ import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchOffIcon from "@mui/icons-material/SearchOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import EditIcon from "@mui/icons-material/Edit";
+import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { useNotifications } from "./NotificationsProvider";
 
 
@@ -199,6 +201,34 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   );
   const cardTasks = useMemo(() => mergeCardTasks(tasksData ?? [], externalTasks), [tasksData, externalTasks]);
 
+  // Взятие в работу задачи внешнего источника (dob): MERGE статуса на сайте-владельце;
+  // SharePoint сам проставит Editor → «Исполнитель» в карточке/таблице.
+  const handleTakeExternalTask = useCallback(async (task) => {
+    const key = task?.compositeId || (task?.sourceId ? `${task.sourceId}:${task.Id}` : null);
+    if (!key) return;
+    setExternalTakingId(key);
+    try {
+      const res = await takeTaskInWork(key, { allSources: tableData.sources });
+      if (res.ok) {
+        notify(`Задача #${task.Id} взята в работу`, { severity: "success" });
+      } else if (res.reason === "already-taken") {
+        notify(
+          `Задача #${task.Id} уже в работе${res.editorTitle ? ` у ${res.editorTitle}` : ""}. Возьмите другую задачу.`,
+          { severity: "warning" }
+        );
+      } else if (res.reason === "completed") {
+        notify(`Задача #${task.Id} уже завершена.`, { severity: "warning" });
+      } else {
+        notify(`Не удалось взять задачу #${task.Id}: ${res.message || "ошибка"}`, { severity: "error" });
+      }
+      if (tableData.refetch) await tableData.refetch();
+    } catch (e) {
+      notify(`Не удалось взять задачу #${task.Id}: ${e?.message || "ошибка"}`, { severity: "error" });
+    } finally {
+      setExternalTakingId(null);
+    }
+  }, [notify, tableData]);
+
   // enrich теперь внутри useTasksQuery (батч), здесь только expandedGroups для новых ТК
   useEffect(() => {
     const data = tasksData;
@@ -226,6 +256,19 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // Выделенная строка таблицы (compositeId). Клик по строке только выделяет,
   // переход в форму — кнопкой «Изменить» или двойным кликом (как в «Заявки ДОБ»).
   const [selectedTableRow, setSelectedTableRow] = useState(null);
+  // Задача внешнего источника, которая сейчас берётся в работу (compositeId).
+  const [externalTakingId, setExternalTakingId] = useState(null);
+
+  // Выделенная строка таблицы: объект + можно ли её взять в работу
+  // (внешний источник, ещё не начата и не завершена).
+  const selectedTableRowObj = useMemo(
+    () => (tableData.rows || []).find((r) => r.compositeId === selectedTableRow) || null,
+    [tableData.rows, selectedTableRow]
+  );
+  const canTakeSelectedRow = !!selectedTableRowObj
+    && selectedTableRowObj.sourceId !== "main"
+    && !isCompletedStatus(selectedTableRowObj.Status, selectedTableRowObj.PercentComplete)
+    && !isInProgressStatus(selectedTableRowObj.Status);
   const [confirmNotFoundOpen, setConfirmNotFoundOpen] = useState(false);
   const [pendingTask, setPendingTask] = useState(null);
   const [pendingResult, setPendingResult] = useState("");
@@ -599,6 +642,25 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
                 данные подразделения недоступны
               </Typography>
             )}
+            {canTakeSelectedRow && (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<PlayArrowIcon />}
+                disabled={!!externalTakingId}
+                onClick={() => handleTakeExternalTask(selectedTableRowObj)}
+                sx={{
+                  borderRadius: 1.5,
+                  textTransform: "none",
+                  fontWeight: 700,
+                  borderColor: "rgba(23,28,143,0.35)",
+                  color: "#171c8f",
+                  "&:hover": { borderColor: "#171c8f", bgcolor: "rgba(23,28,143,0.04)" },
+                }}
+              >
+                Взять в работу
+              </Button>
+            )}
             <Button
               size="small"
               variant="contained"
@@ -676,6 +738,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         currentUserTitle={currentUserTitle}
         onRetry={loadTasks}
         onOpenExternalTask={(task) => openTaskForm(task?.compositeId, tableData.sources)}
+        onTakeExternalTask={handleTakeExternalTask}
+        externalTakingId={externalTakingId}
+        externalCurrentUserIds={Object.fromEntries(
+          Object.entries(tableData.sitePrincipalIds || {}).map(([sid, v]) => [sid, v?.userId ?? null])
+        )}
       />
       {tab === 1 && !isHashMode && completedTasks.length > 0 && (
         <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.75, pt: 1, pb: 2 }}>

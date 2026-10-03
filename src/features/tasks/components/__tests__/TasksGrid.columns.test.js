@@ -26,19 +26,27 @@ describe("TasksGrid.buildTaskColumns", () => {
     expect(json).not.toContain("Location1");
   });
 
-  it("«Кому назначено» читает AssignedTo, «Исполнитель» — Editor с фолбэком на AssignedTo", () => {
+  it("«Кому назначено» — всегда AssignedTo, «Исполнитель» — только тот, кто взял в работу", () => {
     const cols = buildTaskColumns();
     const assigned = colByHeader(cols, "Кому назначено");
     const taker = colByHeader(cols, "Исполнитель");
 
-    // dob-строка: назначено на группу, никто ещё не взял
+    // dob-строка: назначено на группу, никто ещё не взял → исполнителя нет
     const dobRow = { AssignedTo: "ООБ", EditorTitle: "", Editor: "" };
     expect(assigned.valueGetter({ data: dobRow })).toBe("ООБ");
-    expect(taker.valueGetter({ data: dobRow })).toBe("ООБ"); // фолбэк, колонка не пустует
+    expect(taker.valueGetter({ data: dobRow })).toBe("");
 
     // задача взята в работу: исполнитель — Editor
-    const inWork = { AssignedTo: "ООБ", EditorTitle: "Поршаков Сергей" };
+    const inWork = { AssignedTo: "ООБ", Status: "В работе", EditorTitle: "Поршаков Сергей" };
     expect(taker.valueGetter({ data: inWork })).toBe("Поршаков Сергей");
+
+    // не начата: Editor (автор задачи) НЕ должен считаться исполнителем
+    const notStarted = { AssignedTo: "ООБ", Status: "Не начата", EditorTitle: "Автор Задачи" };
+    expect(taker.valueGetter({ data: notStarted })).toBe("");
+
+    // завершена: исполнитель — тот, кто выполнил
+    const done = { AssignedTo: "ООБ", Status: "Завершена", PercentComplete: 1, EditorTitle: "Поршаков Сергей" };
+    expect(taker.valueGetter({ data: done })).toBe("Поршаков Сергей");
 
     // пустая строка не падает
     expect(assigned.valueGetter({ data: undefined })).toBe("");

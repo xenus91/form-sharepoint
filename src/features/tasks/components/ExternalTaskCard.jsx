@@ -15,9 +15,11 @@
 // форму редактирования этого источника (как dob_tasks/[id]).
 
 import React from "react";
-import { Box, Paper, Typography, Chip, Button, Stack } from "@mui/material";
+import { Box, Paper, Typography, Chip, Button, CircularProgress } from "@mui/material";
 import EditIcon from "@mui/icons-material/Edit";
-import { isCompletedStatus } from "../../../tasks/status";
+import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../../../tasks/status";
+import { resolveTaker } from "../lib/resolveTaker";
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 
 function stripHtml(html) {
@@ -32,9 +34,10 @@ function stripHtml(html) {
 }
 
 /**
- * @param {{task:any, isCompleted?:boolean, isOverdue?:boolean, onOpen?:(task:any)=>void}} props
+ * @param {{task:any, isCompleted?:boolean, isOverdue?:boolean, onOpen?:(task:any)=>void,
+ *          onTake?:(task:any)=>void, taking?:boolean, currentUserId?:number|null}} props
  */
-function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen }) {
+function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking = false, currentUserId = null }) {
   if (!task) return null;
   const title = stripHtml(task.Title) || stripHtml(task.Body).split("\n")[0] || "Без названия";
   const bodyRaw = stripHtml(task.Body);
@@ -42,7 +45,16 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen }) {
   const completed = isCompleted ?? isCompletedStatus(task.Status, task.PercentComplete);
   const due = formatDueLeft(task.DueDate);
   const overdue = isOverdue ?? due.overdue;
-  const taker = task.EditorTitle || task.Editor || task.AssignedTo || "—";
+  // «Кому назначено» — всегда AssignedTo, «Исполнитель» — всегда тот, кто ВЗЯЛ
+  // задачу в работу (до взятия исполнителя нет — см. resolveTaker).
+  const assignedTo = task.AssignedTo || "";
+  const taker = resolveTaker(task);
+  const taken = isInProgressStatus(task.Status);
+  // Кнопку показываем всегда, когда задачу можно взять (обработчик может быть не
+  // передан в тестах/на других экранах — тогда клик ничего не делает).
+  const canTake = !completed && !taken && (isNotStartedStatus(task.Status) || !task.Status);
+  const takerId = task.EditorId ?? null;
+  const isMine = !!takerId && !!currentUserId && Number(takerId) === Number(currentUserId);
 
   return (
     <Paper
@@ -146,13 +158,14 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen }) {
         ) : null}
       </Box>
 
-      {typeof onOpen === "function" && (
+      {canTake && (
         <Box sx={{ mt: 1.5 }}>
           <Button
             variant="contained"
             size="large"
-            onClick={() => onOpen(task)}
-            startIcon={<EditIcon />}
+            disabled={taking}
+            onClick={() => onTake?.(task)}
+            startIcon={<PlayArrowIcon />}
             sx={{
               borderRadius: "12px",
               fontWeight: 800,
@@ -163,6 +176,44 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen }) {
               backgroundImage: "linear-gradient(180deg, #7B84FF 0%, #5A67D8 100%)",
               color: "#fff",
               "&:hover": { backgroundImage: "linear-gradient(180deg, #8D95FF 0%, #6B7CFF 100%)" },
+              "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #9BA3FF 0%, #7B84FF 100%)", color: "#fff", opacity: 1 },
+            }}
+          >
+            {taking ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "Взять в работу"}
+          </Button>
+        </Box>
+      )}
+
+      {taken && !completed && taker && (
+        <Box sx={{ mt: 1.5, p: 1.25, borderRadius: "10px", bgcolor: "rgba(255,193,7,0.12)", border: "1px solid rgba(255,193,7,0.3)" }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, color: "#8d6e00" }}>
+            {isMine ? "В работе у вас" : `В работе у ${taker}`}
+          </Typography>
+          {!isMine && (
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              Задача уже взята другим пользователем. Возьмите другую задачу.
+            </Typography>
+          )}
+        </Box>
+      )}
+
+      {typeof onOpen === "function" && (
+        <Box sx={{ mt: canTake || (taken && taker && !completed) ? 1 : 1.5 }}>
+          <Button
+            variant="outlined"
+            size="large"
+            onClick={() => onOpen(task)}
+            startIcon={<EditIcon />}
+            sx={{
+              borderRadius: "12px",
+              fontWeight: 700,
+              textTransform: "none",
+              width: "100%",
+              height: 44,
+              fontSize: "0.95rem",
+              borderColor: "rgba(23,28,143,0.35)",
+              color: "#171c8f",
+              "&:hover": { borderColor: "#171c8f", bgcolor: "rgba(23,28,143,0.04)" },
             }}
           >
             Изменить
@@ -170,11 +221,11 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen }) {
         </Box>
       )}
 
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
-        <Typography variant="caption" sx={{ color: "text.secondary" }}>
-          Исполнитель: {task.AssignedTo || taker} • Статус: {task.Status || "—"}
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1, gap: 1 }}>
+        <Typography variant="caption" sx={{ color: "text.secondary", minWidth: 0 }}>
+          Кому назначено: {assignedTo || "—"} • Исполнитель: {taker || "—"} • Статус: {task.Status || "—"}
         </Typography>
-        <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
+        <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap" }}>
           #{task.Id}
         </Typography>
       </Box>

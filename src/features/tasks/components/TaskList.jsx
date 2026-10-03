@@ -44,12 +44,26 @@ const TaskList = React.memo(function TaskList({
   currentUserTitle = "",
   onRetry,
   onOpenExternalTask,
+  onTakeExternalTask,
+  externalTakingId = null,
+  // Id текущего пользователя НА САЙТЕ ИСТОЧНИКА ({ dob: 207 }) — Id на разных
+  // сайтах не совпадают, поэтому «это моя задача» определяем по своему Id.
+  externalCurrentUserIds = null,
 }) {
   // Внешние источники (dob и др.) рендерим read-only карточкой: TaskCard и мутации
   // завязаны на основной список и не должны применяться к чужому элементу с тем же Id.
   const renderTask = (task) => (
     isExternalTask(task)
-      ? <ExternalTaskCard key={task.compositeId || `${task.sourceId}:${task.Id}`} task={task} onOpen={onOpenExternalTask} />
+      ? (
+        <ExternalTaskCard
+          key={task.compositeId || `${task.sourceId}:${task.Id}`}
+          task={task}
+          onOpen={onOpenExternalTask}
+          onTake={onTakeExternalTask}
+          taking={externalTakingId != null && externalTakingId === (task.compositeId || `${task.sourceId}:${task.Id}`)}
+          currentUserId={externalCurrentUserIds ? (externalCurrentUserIds[task.sourceId] ?? null) : null}
+        />
+      )
       : (
         <TaskCard taskConfig={taskConfig} fieldDefaultActions={fieldDefaultActions}
           key={`main:${task.Id}`}

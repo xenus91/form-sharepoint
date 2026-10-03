@@ -68,14 +68,71 @@ describe("TaskList — карточки из нескольких источни
     expect(external[0].getAttribute("data-composite-id")).toBe("dob:1");
     expect(external[0].textContent).toContain("Заявка ООБ");
     expect(external[0].textContent).toContain("Просмотр видеоархива");
-    // исполнитель и номер — как у обычной карточки
-    expect(external[0].textContent).toMatch(/Исполнитель:.*Поршаков Сергей.*Статус: Не начата/);
+    // «Кому назначено» — AssignedTo; «Исполнитель» пуст, пока задачу не взяли
+    expect(external[0].textContent).toMatch(/Кому назначено: Поршаков Сергей/);
+    expect(external[0].textContent).toMatch(/Исполнитель: —/);
+    expect(external[0].textContent).toMatch(/Статус: Не начата/);
     expect(external[0].textContent).toContain("#1");
+    // задачу ещё не взяли → есть кнопка «Взять в работу»
+    expect([...external[0].querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(true);
     // никаких подписей про «другой сайт»/бейджа источника
     expect(external[0].textContent).not.toContain("DOB Logistic");
     expect(external[0].textContent).not.toMatch(/другого (сайта|источника)/i);
     // main-задача отрисована обычной карточкой без read-only пометки
     expect(external[0].textContent).not.toContain("Основная задача");
+  });
+
+  it("«Взять в работу» вызывает onTake; во взятой задаче — «В работе у …» без кнопки", () => {
+    const tasks = [DOB_TASK];
+    let taken = null;
+    const host = render(
+      <TaskList
+        tasks={tasks}
+        tab={0}
+        groupedTasks={[["Все", tasks]]}
+        filteredTasks={tasks}
+        groupingEnabled={false}
+        onTakeExternalTask={(t) => { taken = t; }}
+      />
+    );
+    const btn = [...host.querySelectorAll("button")].find((b) => /Взять в работу/.test(b.textContent || ""));
+    expect(btn).toBeTruthy();
+    act(() => { btn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true })); });
+    expect(taken).toBeTruthy();
+    expect(taken.compositeId).toBe("dob:1");
+
+    // задача уже в работе у другого пользователя
+    const inWork = { ...DOB_TASK, Status: "В работе", EditorTitle: "Поршаков Сергей", EditorId: 207 };
+    const host2 = render(
+      <TaskList
+        tasks={[inWork]}
+        tab={0}
+        groupedTasks={[["Все", [inWork]]]}
+        filteredTasks={[inWork]}
+        groupingEnabled={false}
+        onTakeExternalTask={() => {}}
+      />
+    );
+    const card2 = host2.querySelector('[data-testid="external-task-card"]');
+    expect(card2.textContent).toContain("В работе у Поршаков Сергей");
+    expect(card2.textContent).toMatch(/Исполнитель: Поршаков Сергей/);
+    expect([...card2.querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(false);
+  });
+
+  it("«В работе у вас» для своей задачи в работе", () => {
+    const mine = { ...DOB_TASK, Status: "В работе", EditorTitle: "Я", EditorId: 207 };
+    const host = render(
+      <TaskList
+        tasks={[mine]}
+        tab={0}
+        groupedTasks={[["Все", [mine]]]}
+        filteredTasks={[mine]}
+        groupingEnabled={false}
+        externalCurrentUserIds={{ dob: 207 }}
+      />
+    );
+    const card = host.querySelector('[data-testid="external-task-card"]');
+    expect(card.textContent).toContain("В работе у вас");
   });
 
   it("кнопка «Изменить» вызывает onOpen с задачей (переход в форму источника)", () => {

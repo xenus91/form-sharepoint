@@ -11,6 +11,8 @@
 // Вынесено из TasksGrid: файл с компонентом не должен экспортировать константы
 // (react-refresh/only-export-components) + так проще тестировать.
 
+import { resolveTaker } from "./resolveTaker";
+
 const STATUS_BG = {
   "В работе": "#e3f2fd",
   "Завершена": "#e8f5e9",
@@ -70,16 +72,16 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
   });
   cols.push({
     headerName: "Кому назначено",
-    // AssignedTo — строка из mapRawTask (поддерживает и {Title}, и {results:[…]})
+    // ВСЕГДА AssignedTo (на кого назначена задача) — см. требование 2026-10-03.
     valueGetter: (p) => p.data?.AssignedTo || p.data?.assignedTo?.title || "",
     width: 190,
     sortable: true,
   });
   cols.push({
     headerName: "Исполнитель",
-    // Фактический исполнитель — Editor (кто взял в работу); если задачу ещё
-    // не взяли, показываем назначение, чтобы колонка не пустовала.
-    valueGetter: (p) => p.data?.EditorTitle || p.data?.Editor || p.data?.AssignedTo || "",
+    // ВСЕГДА тот, кто ВЗЯЛ задачу в работу. До взятия — пусто: Editor у SharePoint
+    // проставляется и при создании, поэтому напрямую его показывать нельзя.
+    valueGetter: (p) => resolveTaker(p.data),
     width: 170,
     sortable: true,
   });

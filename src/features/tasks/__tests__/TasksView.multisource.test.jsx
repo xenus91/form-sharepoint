@@ -119,6 +119,9 @@ vi.mock("../../dob/api/dobClient", () => {
     if (u.includes("/web/sitegroups/getbyname") || u.includes("/web/sitegroups?$filter=Title")) {
       return { data: { d: { Id: 33, Title: "ООБ", results: [{ Id: 33, Title: "ООБ" }] } } };
     }
+    if (u.includes("/fields?") && /InternalName eq 'Status'/.test(decodeURIComponent(u).replace(/\$filter=/, ""))) {
+      return { data: { d: { results: [{ InternalName: "Status", Title: "Статус", Choices: { results: ["Не начата", "В работе", "Завершена"] } }] } } };
+    }
     if (d.includes(`${DOB_LIST}/fields`)) return { data: { d: { results: fieldDefs(DOB_FIELDS) } } };
     if (d.includes(`${DOB_LIST}/items`)) {
       const filter = parseFilter(u);
@@ -128,13 +131,17 @@ vi.mock("../../dob/api/dobClient", () => {
     }
     return { data: { d: { results: [] } } };
   };
+  const post = async (url, body) => {
+    state.requests.push({ source: "dob", url: String(url), method: "MERGE", body });
+    return { data: { d: {} }, status: 204 };
+  };
   return {
     DOB_SITE_RELATIVE: "/sites/dob/doblogistic",
     DOB_LIST_GUID: "21B5B544-BD98-4B06-891F-C5A137331394",
     dobApiBase,
     dobListApi: () => `${DOB_BASE}${DOB_LIST}`,
     getDobDigest: async () => "digest",
-    dobAxios: { get, post: async () => ({ data: { d: {} } }), interceptors: { request: { use() {} }, response: { use() {} } } },
+    dobAxios: { get, post, interceptors: { request: { use() {} }, response: { use() {} } } },
   };
 });
 
@@ -201,10 +208,12 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(external.length).toBeGreaterThanOrEqual(1);
     const dobCard = [...external].find((el) => /Заявка ООБ/.test(el.textContent || ""));
     expect(dobCard).toBeTruthy();
-    // карточка выглядит как обычная задача: исполнитель/статус/номер, кнопка действия;
-    // и НИЧЕГО не говорит про «другой источник»
-    expect(dobCard.textContent).toMatch(/Исполнитель:.*Поршаков Сергей.*Статус: Не начата/);
+    // карточка выглядит как обычная задача: «Кому назначено» = AssignedTo,
+    // «Исполнитель» пуст (никто не взял), есть кнопка «Взять в работу»
+    expect(dobCard.textContent).toMatch(/Кому назначено: Поршаков Сергей/);
+    expect(dobCard.textContent).toMatch(/Исполнитель: —/);
     expect(dobCard.textContent).toContain("#1");
+    expect([...dobCard.querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(true);
     expect(dobCard.textContent).not.toContain("DOB Logistic");
     expect(dobCard.textContent).not.toMatch(/другого (сайта|источника)/i);
     expect([...dobCard.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(true);
@@ -254,6 +263,28 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.textContent).not.toContain("ResultSearchTHU");
   }, 30000);
 
+  it("«Взять в работу» на карточке dob шлёт MERGE статуса в список источника", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+
+    const dobCard = [...host.querySelectorAll('[data-testid="external-task-card"]')]
+      .find((el) => /Заявка ООБ/.test(el.textContent || ""));
+    expect(dobCard).toBeTruthy();
+    const takeBtn = [...dobCard.querySelectorAll("button")].find((b) => /Взять в работу/.test(b.textContent || ""));
+    expect(takeBtn).toBeTruthy();
+
+    await act(async () => {
+      takeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await settle(800);
+
+    const merge = state.requests.find((r) => r.source === "dob" && r.method === "MERGE");
+    expect(merge).toBeTruthy();
+    expect(merge.url).toContain("lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')/items(1)");
+    expect(merge.body).toEqual({ Status: "В работе" });
+  }, 30000);
+
   it("клик по строке только выделяет, а кнопка «Изменить» открывает форму задачи источника", async () => {
     const host = renderTasksView();
     await settle(3000);
@@ -274,6 +305,17 @@ describe("TasksView — multi-source (#tasks)", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
     expect(window.location.hash).toBe(hashBefore);
+
+    // для выделенной dob-строки доступно и взятие в работу (как в «Заявки ДОБ»)
+    const takeBtn = [...host.querySelectorAll("button")].find((b) => /Взять в работу/.test(b.textContent || ""));
+    expect(takeBtn).toBeTruthy();
+    await act(async () => {
+      takeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    const merge = state.requests.find((r) => r.source === "dob" && r.method === "MERGE");
+    expect(merge).toBeTruthy();
+    expect(merge.body).toEqual({ Status: "В работе" });
 
     const editBtn2 = [...host.querySelectorAll("button")].find((b) => /Изменить/.test(b.textContent || ""));
     expect(editBtn2.disabled).toBe(false);
