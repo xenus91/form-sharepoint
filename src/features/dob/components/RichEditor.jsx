@@ -13,6 +13,7 @@ import ClassicEditor from '@ckeditor/ckeditor5-build-classic';
 import { Box, Button, MenuItem, Select, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { RICH_TEMPLATE_BAR_SX } from '../lib/formStyles';
 import { makeUploadAdapter } from './richUploadAdapter';
 
 const TEMPLATE_KEY = 'dob-chekresult-templates';
@@ -106,13 +107,13 @@ export default function RichEditor({
 
   return (
     <Box sx={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', border: invalid ? '1px solid #d32f2f' : '1px solid rgba(23,28,143,.18)', borderRadius: 0.5, overflow: 'hidden', bgcolor: '#fff' }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ p: .5, bgcolor: '#f8f9ff', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
-        <Typography variant="caption" sx={{ alignSelf: 'center', fontWeight: 700, color: '#171c8f' }}>Шаблон:</Typography>
-        <Select size="small" displayEmpty value={selectedTemplate} onChange={event => applyTemplate(event.target.value)} sx={{ minWidth: 170, borderRadius: .5 }} disabled={readOnly}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={0.75} data-testid="rich-template-bar" sx={RICH_TEMPLATE_BAR_SX}>
+        <Typography variant="caption" sx={{ alignSelf: 'center', fontWeight: 700, color: '#171c8f', whiteSpace: 'nowrap' }}>Шаблон:</Typography>
+        <Select size="small" displayEmpty value={selectedTemplate} onChange={event => applyTemplate(event.target.value)} sx={{ minWidth: 160, borderRadius: .5 }} disabled={readOnly}>
           <MenuItem value=""><em>Выберите шаблон</em></MenuItem>
           {templates.map(item => <MenuItem key={item.name} value={item.name}>{item.name}</MenuItem>)}
         </Select>
-        <TextField size="small" value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder="Название нового шаблона" disabled={readOnly} sx={{ minWidth: 170, flex: 1, '& .MuiOutlinedInput-root': { borderRadius: .5 } }} />
+        <TextField size="small" value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder="Название нового шаблона" disabled={readOnly} sx={{ minWidth: 160, flex: 1, '& .MuiOutlinedInput-root': { borderRadius: .5 } }} />
         <Tooltip title="Сохранить текущий текст как шаблон"><span><Button size="small" variant="outlined" sx={{ borderRadius: .5 }} onClick={saveTemplate} disabled={readOnly || !templateName.trim()} startIcon={<SaveIcon />}>Сохранить</Button></span></Tooltip>
         <Tooltip title="Удалить пользовательский шаблон"><span><Button size="small" color="error" sx={{ borderRadius: .5 }} onClick={removeTemplate} disabled={readOnly || !selectedTemplate || DEFAULT_TEMPLATES.some(item => item.name === selectedTemplate)}><DeleteIcon fontSize="small" /></Button></span></Tooltip>
       </Stack>
@@ -145,7 +146,7 @@ export default function RichEditor({
         </Box>
       ) : null}
       {!readOnly && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 1, py: .75 }}>
-        CKEditor 5: форматирование, списки, ссылки, таблицы и изображения. Изображения сохраняются в ChekResult как base64 и дополнительно загружаются во вложения.
+        CKEditor 5: форматирование, списки, ссылки, таблицы и изображения. Каждое изображение загружается вложением задачи, а в текст вставляется ссылка на вложение (не base64).
       </Typography>}
     </Box>
   );

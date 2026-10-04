@@ -130,6 +130,29 @@ export const FORM_SECONDARY_BUTTON_SX = { borderRadius: 0.5 };
 export const FORM_ACTIONS_SX = { display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' };
 
 /**
+ * Строка шаблонов rich-редактора: поля компактные (32 px, вровень с кнопками рядом).
+ * Тема приложения (App.jsx) поднимает все outlined-поля до 56 px
+ * (`MuiOutlinedInput.height`), поэтому здесь высота ограничена явно — иначе
+ * «выбор шаблона» и «название шаблона» выглядят очень высокими инпутами.
+ * `!important` — theme-overrides и sx идут в один слой emotion; так результат не
+ * зависит от порядка вставки стилей.
+ */
+export const RICH_TEMPLATE_BAR_SX = {
+  p: 0.5,
+  bgcolor: '#f8f9ff',
+  borderBottom: '1px solid rgba(23,28,143,.12)',
+  alignItems: 'center',
+  '& .MuiInputBase-root': {
+    height: '32px !important',
+    minHeight: '32px !important',
+    bgcolor: '#fff',
+  },
+  '& .MuiInputBase-input': { fontSize: 13, py: '0 !important' },
+  '& .MuiSelect-select': { py: '0 !important', display: 'flex', alignItems: 'center' },
+  '& .MuiFormControl-root': { m: 0 },
+};
+
+/**
  * Акцент незаполненной обязательной секции: рамка и «полоса» заголовка краснеют,
  * чтобы при ошибке валидации было видно, ГДЕ искать пропущенное поле.
  */

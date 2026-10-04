@@ -7,7 +7,9 @@
 //
 // • серверный путь (что хранится) → `attachmentStorageUrl` (см. lib/attachmentUrl.js);
 // • в редакторе показывается рабочий адрес: в dev — через прокси `/dob-api`;
-// • если загрузка не удалась — возвращаем base64, чтобы текст не потерялся.
+// • если загрузка не удалась — возвращаем base64, чтобы текст НЕ потерялся, но
+//   сохранение формы блокируется (см. `fieldsWithBase64`): в SharePoint уходит
+//   только ссылка на вложение, поэтому base64 — временное состояние редактора.
 //
 // Вынесено из RichEditor, чтобы файл компонента экспортировал только компонент
 // (react-refresh/only-export-components) и адаптер можно было тестировать отдельно.
@@ -41,7 +43,10 @@ export function makeUploadAdapter(loader, onUploadImage) {
           const link = uploadedLink(await onUploadImage(file));
           if (link) return { default: link };
         } catch (e) {
-          console.warn('[RichEditor] вложение не загрузилось — картинка останется base64', e?.message || e);
+          console.warn(
+            '[RichEditor] вложение не загрузилось: картинка пока base64, сохранение будет заблокировано до повторной загрузки',
+            e?.message || e,
+          );
         }
       }
       return { default: await fileToBase64(file) };

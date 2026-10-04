@@ -46,6 +46,11 @@ export async function materializeRichHtml(html, opts = {}) {
 
 /**
  * То же для словаря значений формы { internalName: html }.
+ *
+ * Строки без картинок тоже прогоняются через нормализацию адресов: если картинка
+ * записана в верхнем регистре (`<IMG SRC="/dob-api/…">`), её адрес тоже должен
+ * стать серверным — в SharePoint не должно попадать ничего похожего на прокси.
+ *
  * @param {object} values
  * @param {object} [opts] — как у materializeRichHtml
  * @returns {Promise<object>} тот же объект, если менять нечего
@@ -54,12 +59,28 @@ export async function materializeRichValues(values, opts = {}) {
   const out = { ...(values || {}) };
   let changed = false;
   for (const [key, value] of Object.entries(out)) {
-    if (typeof value !== 'string' || !value.includes('<img')) continue;
-    const next = await materializeRichHtml(value, opts);
+    if (typeof value !== 'string') continue;
+    const next = value.includes('<img') ? await materializeRichHtml(value, opts) : toStorageImages(value);
     if (next !== value) {
       out[key] = next;
       changed = true;
     }
   }
   return changed ? out : values;
+}
+
+/**
+ * Поля, в которых ПОСЛЕ материализации остались base64-КАРТИНКИ: значит, вложение
+ * создать не удалось. Такие значения нельзя сохранять — в SharePoint должна уходить
+ * ссылка на вложение, а не `data:image/…` (требование к richtext).
+ *
+ * @param {object} values — значения формы
+ * @returns {string[]} имена полей с оставшимся base64
+ */
+export function fieldsWithBase64(values = {}) {
+  const out = [];
+  for (const [key, value] of Object.entries(values || {})) {
+    if (typeof value === 'string' && dataUrlSrcs(value).length > 0) out.push(key);
+  }
+  return out;
 }

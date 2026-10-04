@@ -145,4 +145,34 @@ describe("DobTaskEditView — сохранение картинок ссылко
     await settle(200);
     expect(uploadDobAttachment).not.toHaveBeenCalled();
   });
+
+  it("картинку не удалось загрузить — сохранение НЕ выполняется (base64 в SharePoint не уходит)", async () => {
+    itemValue = `<p>Проверено</p><img src="${BASE64}">`;
+    uploadDobAttachment.mockRejectedValueOnce(new Error("нет прав"));
+    const { host } = await renderForm();
+
+    clickSave(host);
+    await settle(260);
+
+    expect(uploadDobAttachment).toHaveBeenCalledTimes(1);
+    // В SharePoint не уходит ни base64, ни битая ссылка: форму можно сохранить
+    // повторно, текст в редакторе остаётся нетронутым.
+    expect(updateDobItem).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Изображение не удалось сохранить вложением");
+    expect(host.querySelector('[data-testid="rich-editor"]').value).toContain(BASE64);
+  });
+
+  it("в поле уходит ссылка /sites/… даже если картинка была вставлена через /dob-api", async () => {
+    itemValue = '<p>x</p><img src="/dob-api/sites/dob/doblogistic/Lists/DobLogistic/Attachments/77/a.png">';
+    const { host } = await renderForm();
+    clickSave(host);
+    await settle(200);
+
+    expect(updateDobItem).toHaveBeenCalled();
+    const body = updateDobItem.mock.calls.at(-1)[1];
+    const savedHtml = String(body.ChekResult ?? body.OData_ChekResult ?? "");
+    expect(savedHtml).toContain("/sites/dob/doblogistic/Lists/DobLogistic/Attachments/77/a.png");
+    expect(savedHtml).not.toContain("/dob-api/");
+    expect(savedHtml).not.toContain("data:image");
+  });
 });

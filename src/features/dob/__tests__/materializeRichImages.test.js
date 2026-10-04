@@ -4,7 +4,11 @@
 // ВЛОЖЕНИЕ, в тексте остаётся ссылка «/sites/…/Attachments/<id>/<file>».
 import { describe, it, expect, vi } from "vitest";
 
-import { materializeRichHtml, materializeRichValues } from "../lib/materializeRichImages";
+import {
+  fieldsWithBase64,
+  materializeRichHtml,
+  materializeRichValues,
+} from "../lib/materializeRichImages";
 
 const DATA_1 = "data:image/png;base64,AQID";
 const DATA_2 = "data:image/jpeg;base64,BAUG";
@@ -82,6 +86,49 @@ describe("materializeRichValues — словарь значений формы",
   it("если менять нечего — возвращает исходный объект", async () => {
     const values = { Title: "T", DescriptionCheckResult: "<p>x</p>" };
     expect(await materializeRichValues(values, {})).toBe(values);
+  });
+
+  it("адреса картинок через dev-прокси приводятся к серверному виду", async () => {
+    const values = {
+      Title: "T",
+      ChekResult: '<IMG SRC="/dob-api/sites/dob/Lists/L/Attachments/1/a.png">',
+    };
+    const out = await materializeRichValues(values, {});
+    expect(out.ChekResult).toBe('<IMG SRC="/sites/dob/Lists/L/Attachments/1/a.png">');
+  });
+});
+
+describe("fieldsWithBase64 — где остался base64", () => {
+  it("находит поля с data:image и игнорирует остальные", () => {
+    const values = {
+      Title: "Заявка",
+      ChekResult: `<p>x</p><img src="${DATA_1}">`,
+      DescriptionCheckResult: `<p>текст</p><img src="${LINK_1}">`,
+      ErrorCount: "2",
+    };
+    expect(fieldsWithBase64(values)).toEqual(["ChekResult"]);
+  });
+
+  it("после успешной материализации base64 не остаётся", async () => {
+    const values = { ChekResult: `<p>x</p><img src="${DATA_1}">` };
+    const out = await materializeRichValues(values, {
+      upload: vi.fn(async (file) => ({ ServerRelativeUrl: LINK_1, FileName: file.name })),
+    });
+    expect(fieldsWithBase64(out)).toEqual([]);
+  });
+
+  it("если загрузка не удалась — поле с base64 видно вызывающему", async () => {
+    const values = { ChekResult: `<p>x</p><img src="${DATA_1}">` };
+    const out = await materializeRichValues(values, {
+      upload: vi.fn(async () => { throw new Error("нет прав"); }),
+      onError: vi.fn(),
+    });
+    expect(fieldsWithBase64(out)).toEqual(["ChekResult"]);
+  });
+
+  it("пустой/некорректный словарь — пустой список", () => {
+    expect(fieldsWithBase64()).toEqual([]);
+    expect(fieldsWithBase64({ A: null, B: 5 })).toEqual([]);
   });
 
   it("две картинки в одном поле — два вложения", async () => {

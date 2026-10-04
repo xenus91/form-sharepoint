@@ -18,7 +18,7 @@ import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
 import { fileNameFromSrc, removedImgSrcs, removedImgSrcsByValues } from './lib/richImages';
 import { attachmentDisplayUrl, toDisplayImages, toStorageImages } from './lib/attachmentUrl';
-import { materializeRichValues } from './lib/materializeRichImages';
+import { fieldsWithBase64, materializeRichValues } from './lib/materializeRichImages';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
 import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
 import { useTaskConfiguration } from '../tasks/hooks/useTaskConfiguration';
@@ -326,6 +326,16 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       // Картинки rich-текста: base64 → вложение, в тексте — ссылка на него.
       const prepared = await materializeFormValues(form);
       if (prepared !== form) setForm(prepared);
+      // Требование: в SharePoint уходит ССЫЛКА на вложение, а не base64. Если
+      // что-то не загрузилось — не пишем вовсе (текст в редакторе сохраняется,
+      // пользователь может повторить сохранение).
+      const base64Left = fieldsWithBase64(prepared);
+      if (base64Left.length > 0) {
+        const msg = `Изображение не удалось сохранить вложением: ${base64Left.join(', ')}. Повторите сохранение или удалите изображение.`;
+        setSaveError(msg);
+        notify(msg, { severity: 'error' });
+        return;
+      }
       // Build payload — only editable fields, but include ChekResult always
       const payload = {};
       const editableSet = new Set((fields || []).filter(isEditableField).map(f=>f.InternalName));
@@ -548,6 +558,13 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       // Картинки rich-текста (DescriptionCheckResult и т.п.): base64 → вложения,
       // в тексте — ссылки на `/Attachments/<id>/<file>`.
       const preparedValues = await materializeFormValues(values);
+      const base64Left = fieldsWithBase64(preparedValues);
+      if (base64Left.length > 0) {
+        const msg = `Изображение не удалось сохранить вложением: ${base64Left.join(', ')}. Повторите сохранение или удалите изображение.`;
+        setSaveError(msg);
+        notify(msg, { severity: 'error' });
+        return;
+      }
       const body = { Status: 'Завершена', PercentComplete: 1 };
       const field = resultField || 'DobSearchResult';
       if (result) body[field] = result;
@@ -940,14 +957,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           value={chekValue || ''}
           onChange={(html)=> handleChange(chekInternal, html)}
           onUploadImage={handleUploadImage}
-          onDeleteImage={(src)=> {
-            if (!src || src.startsWith('data:')) return;
-            let fileName = '';
-            try { fileName = decodeURIComponent(src.split('?')[0].split('#')[0].split('/').pop() || ''); } catch {}
-            if (!fileName) return;
-            console.log('[DobEdit][onDeleteImage] from editor', fileName, src.slice(0,80));
-            handleDeleteAttachment(fileName);
-          }}
+          onDeleteImage={deleteAttachmentForSrc}
           isUploading={isUploadingImage}
           invalid={richInvalid}
           footer={attachmentsBlock}
@@ -1104,7 +1114,15 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <Box key={internal} data-dob-field={internal} sx={{ gridColumn: { md: '1 / -1' }, minWidth: 0 }}>
                   <Typography variant="caption" sx={{ display: 'block', mb: .5, color: isInvalid ? '#c62828' : 'text.secondary', fontWeight: isInvalid ? 700 : 400 }}>{title}{f.Required ? ' *' : ''}</Typography>
-                  <RichEditor value={htmlValue} readOnly={!editable} invalid={isInvalid} onChange={html => handleChange(internal, html)} />
+                  <RichEditor
+                    value={htmlValue}
+                    readOnly={!editable}
+                    invalid={isInvalid}
+                    onChange={html => handleChange(internal, html)}
+                    onUploadImage={handleUploadImage}
+                    onDeleteImage={deleteAttachmentForSrc}
+                    isUploading={isUploadingImage}
+                  />
                 </Box>
               );
             }

@@ -58,7 +58,7 @@ import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import ContentTypeResultDialog from "./features/tasks/components/ContentTypeResultDialog";
 import { fetchTaskContentTypeMeta, isDialogRequired, isResultCheckTask, taskContentTypeId, taskContentTypeName } from "./tasks/contentTypeFields";
 import { toStorageImages } from "./features/dob/lib/attachmentUrl";
-import { materializeRichValues } from "./features/dob/lib/materializeRichImages";
+import { fieldsWithBase64, materializeRichValues } from "./features/dob/lib/materializeRichImages";
 import { isTaskTakenByCurrentUser } from "./features/tasks/lib/currentUserMatch";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
 import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
@@ -871,6 +871,16 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       });
     } catch (e) {
       notify(`Картинки не удалось сохранить вложениями: ${String(e?.message || e).slice(0, 160)}`, { severity: "warning" });
+    }
+    // В SharePoint должна уходить ссылка на вложение, а не base64: если картинку
+    // загрузить не удалось — задачу не закрываем, диалог оставляем открытым.
+    const base64Left = fieldsWithBase64(storedValues);
+    if (base64Left.length > 0) {
+      notify(
+        `Изображение не удалось сохранить вложением: ${base64Left.join(", ")}. Повторите сохранение или удалите изображение.`,
+        { severity: "error" },
+      );
+      return;
     }
     setCtDialog(null);
     completeTask(dialogTask, result, storedValues, null, []);
