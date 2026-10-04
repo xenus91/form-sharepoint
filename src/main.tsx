@@ -14,8 +14,8 @@ import NotificationsProvider from "./NotificationsProvider";
 // перезапуск dev-сервера / жёсткая перезагрузка страницы).
 // eslint-disable-next-line no-console
 console.info(
-  "[form-sharepoint] ct-detect v4: состав формы — FieldLinks CT (select'ы, " +
-  "пользователь с должностью и департаментом, «взята другим» не для исполнителя), " +
+  "[form-sharepoint] ct-detect v5: значения выбора без «[object Object]», " +
+  "профиль человека одним запросом (должность · департамент), " +
   "дочитывание типа у элемента, логи [ct-detect] при открытии меню строки",
 );
 
