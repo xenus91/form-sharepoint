@@ -4,6 +4,7 @@
 // В текст при этом остаётся base64: картинка сразу видна в редакторе и не зависит
 // от прав на вложение/прокси. Если загрузка вложения не удалась — текст всё равно
 // не теряется (base64 остаётся).
+/* eslint-disable react/prop-types */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CKEditor } from '@ckeditor/ckeditor5-react';
 import ClassicEditor from '@ckeditor/ckeditor5-build-classic';
@@ -52,7 +53,19 @@ function UploadAdapterPlugin(onUploadImage) {
   };
 }
 
-export default function RichEditor({ value = '', onChange, onUploadImage, onDeleteImage, readOnly = false, isUploading = false }) {
+export default function RichEditor({
+  value = '',
+  onChange,
+  onUploadImage,
+  onDeleteImage,
+  readOnly = false,
+  isUploading = false,
+  // Блок вложений показывается ВНУТРИ редактора (внутри его рамки): это часть
+  // rich-поля — картинки из текста лежат вложениями, и удалять их удобно рядом.
+  footer = null,
+  // Незаполненное обязательное поле акцентируется рамкой (валидация формы).
+  invalid = false,
+}) {
   const editorRef = useRef(null);
   const [templates, setTemplates] = useState(readTemplates);
   const [selectedTemplate, setSelectedTemplate] = useState('');
@@ -111,7 +124,7 @@ export default function RichEditor({ value = '', onChange, onUploadImage, onDele
   }, [selectedTemplate, templates]);
 
   return (
-    <Box sx={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', border: '1px solid rgba(23,28,143,.18)', borderRadius: 0.5, overflow: 'hidden', bgcolor: '#fff' }}>
+    <Box sx={{ width: '100%', maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', border: invalid ? '1px solid #d32f2f' : '1px solid rgba(23,28,143,.18)', borderRadius: 0.5, overflow: 'hidden', bgcolor: '#fff' }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ p: .5, bgcolor: '#f8f9ff', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
         <Typography variant="caption" sx={{ alignSelf: 'center', fontWeight: 700, color: '#171c8f' }}>Шаблон:</Typography>
         <Select size="small" displayEmpty value={selectedTemplate} onChange={event => applyTemplate(event.target.value)} sx={{ minWidth: 170, borderRadius: .5 }} disabled={readOnly}>
@@ -134,6 +147,22 @@ export default function RichEditor({ value = '', onChange, onUploadImage, onDele
           onError={error => console.error('[CKEditor]', error)}
         />
       </Box>
+      {footer ? (
+        <Box
+          data-testid="rich-editor-footer"
+          sx={{
+            width: '100%',
+            minWidth: 0,
+            boxSizing: 'border-box',
+            px: 1,
+            py: 0.75,
+            bgcolor: '#f8f9ff',
+            borderTop: '1px solid rgba(23,28,143,.14)',
+          }}
+        >
+          {footer}
+        </Box>
+      ) : null}
       {!readOnly && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', px: 1, py: .75 }}>
         CKEditor 5: форматирование, списки, ссылки, таблицы и изображения. Изображения сохраняются в ChekResult как base64 и дополнительно загружаются во вложения.
       </Typography>}

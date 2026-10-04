@@ -10,7 +10,7 @@
 //   • секции с акцентной полосой, спокойные отступы 8/12/16 px;
 //   • кнопки: одна основная (градиент), одна вторичная (контур), высота 32 px.
 
-const FIELD_HEIGHT = 40; // стандартная высота MUI size="small"
+export const FIELD_HEIGHT = 40; // стандартная высота MUI size="small"
 
 /** Корень страницы формы: отступы, поля 36px со выровненными подписями. */
 export const FORM_PAGE_SX = {
@@ -128,6 +128,31 @@ export const FORM_SECONDARY_BUTTON_SX = { borderRadius: 0.5 };
 
 /** Строка действий под формой (Сохранить/Отмена) — как футер формы ДОБ. */
 export const FORM_ACTIONS_SX = { display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' };
+
+/**
+ * Акцент незаполненной обязательной секции: рамка и «полоса» заголовка краснеют,
+ * чтобы при ошибке валидации было видно, ГДЕ искать пропущенное поле.
+ */
+export const FORM_INVALID_SECTION_SX = {
+  borderColor: '#d32f2f',
+  boxShadow: '0 0 0 1px rgba(211,47,47,.22)',
+  bgcolor: '#fffafa',
+};
+
+/**
+ * Числовое поле («Кол-во ошибок»): высота ОДНА со всеми однострочными полями.
+ * Браузер рисует <input type="number"> со своим внутренним размером (спиннер),
+ * из-за этого поле выбивалось из ряда — фиксируем высоту и убираем спиннеры.
+ */
+export const FORM_NUMBER_FIELD_SX = {
+  '& .MuiInputBase-root': { minHeight: FIELD_HEIGHT, height: FIELD_HEIGHT },
+  '& .MuiInputBase-input': { height: '100%', padding: '8.5px 14px', boxSizing: 'border-box' },
+  '& input[type="number"]': { MozAppearance: 'textfield' },
+  '& input[type="number"]::-webkit-outer-spin-button, & input[type="number"]::-webkit-inner-spin-button': {
+    WebkitAppearance: 'none',
+    margin: 0,
+  },
+};
 
 /** Группа кнопок результата (ToggleButtonGroup) — «кнопки» результирующего выбора. */
 export const RESULT_TOGGLE_GROUP_SX = {

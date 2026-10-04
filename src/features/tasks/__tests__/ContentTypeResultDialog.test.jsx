@@ -15,8 +15,8 @@ import { RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
 
 // CKEditor в jsdom не поднимаем: рич-текст подменяем textarea с тем же контрактом.
 vi.mock("../../dob/components/RichEditor", () => ({
-  default: ({ value, onChange, onUploadImage, isUploading }) => (
-    <>
+  default: ({ value, onChange, onUploadImage, isUploading, footer, invalid }) => (
+    <div data-testid="rich-editor-box" data-invalid={invalid ? "1" : "0"}>
     <textarea
       data-testid="rich-editor"
       value={value || ""}
@@ -28,7 +28,8 @@ vi.mock("../../dob/components/RichEditor", () => ({
       data-uploading={isUploading ? "1" : "0"}
       onClick={() => onUploadImage?.(new File(["x"], "photo.png", { type: "image/png" }))}
     >upload</button>
-    </>
+    {footer ? <div data-testid="rich-editor-footer">{footer}</div> : null}
+    </div>
   ),
 }));
 
@@ -167,6 +168,36 @@ describe("ContentTypeResultDialog — форма по типу контента"
     expect(alert.textContent).toContain("Выберите результат проверки");
     expect(alert.textContent).toContain("Заполните «Описание результата проверки»");
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("ошибка валидации акцентирует незаполненные ПОЛЯ и БЛОКИ и уходит наружу (snackbar)", async () => {
+    const onValidationError = vi.fn();
+    const { onSubmit } = renderDialog({ onValidationError });
+    await settle(80);
+    await act(async () => { click(buttonByText("Сохранить")); await settle(20); });
+    // блоки: результат (кнопки не выбраны) и главное rich-поле
+    const resultBlock = document.body.querySelector('[data-testid="ct-result-block"]');
+    const mainBlock = document.body.querySelector('[data-testid="ct-main-field"]');
+    expect(resultBlock.getAttribute("data-ct-invalid")).toBe("true");
+    expect(mainBlock.getAttribute("data-ct-invalid")).toBe("true");
+    // поле подсвечено как обязательное: редактор получил invalid (рамка краснеет)
+    expect(mainBlock.querySelector('[data-testid="rich-editor-box"]').getAttribute("data-invalid")).toBe("1");
+    // страница получает список проблем — покажет snackbar с предупреждением
+    expect(onValidationError).toHaveBeenCalledTimes(1);
+    expect(onValidationError.mock.calls[0][0]).toContain("Выберите результат проверки");
+    expect(onValidationError.mock.calls[0][0]).toContain("Заполните «Описание результата проверки»");
+    expect(onSubmit).not.toHaveBeenCalled();
+    // как только результат выбран и текст введён — подсветка снимается, отправка идёт
+    await act(async () => { click(buttonByText("Годен")); await settle(10); });
+    await act(async () => {
+      typeInto(document.body.querySelector('[data-testid="rich-editor"]'), "<p>готово</p>");
+      await settle(10);
+    });
+    await act(async () => { click(buttonByText("Сохранить")); await settle(30); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(resultBlock.getAttribute("data-ct-invalid")).toBe(null);
+    expect(mainBlock.getAttribute("data-ct-invalid")).toBe(null);
+    expect(mainBlock.querySelector('[data-testid="rich-editor-box"]').getAttribute("data-invalid")).toBe("0");
   });
 
   it("картинка из rich-текста уходит на загрузку вложением (их может быть несколько)", async () => {

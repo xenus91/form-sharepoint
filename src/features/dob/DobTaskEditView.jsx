@@ -32,6 +32,8 @@ import {
   FORM_SECTION_TITLE_SX,
   FORM_TASK_HEAD_SX,
   FORM_FIELD_WIDE_SX,
+  FORM_INVALID_SECTION_SX,
+  FORM_NUMBER_FIELD_SX,
 } from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
 
@@ -52,10 +54,19 @@ function attachmentHref(serverRelativeUrl) {
  * Вложения задачи/заявки (изображения из rich-текста попадают сюда, их может быть
  * несколько). Один и тот же блок в обеих ветках формы.
  */
-function renderAttachments({ attachments = [], onDelete, note = true } = {}) {
-  if (!attachments.length) return null;
+function renderAttachments({ attachments = [], onDelete, note = true, inside = false, emptyHint = false } = {}) {
+  if (!attachments.length) {
+    if (!emptyHint) return null;
+    return (
+      <Box data-testid="dob-attachments" data-empty="true">
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <AttachFileIcon sx={{ fontSize: 15 }} /> Вложений пока нет — картинки из текста сохраняются вложениями и появятся здесь.
+        </Typography>
+      </Box>
+    );
+  }
   return (
-    <Box sx={{ mt: 1 }} data-testid="dob-attachments">
+    <Box sx={{ mt: inside ? 0 : 1 }} data-testid="dob-attachments">
       <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
         <AttachFileIcon fontSize="small" /> Вложения ({attachments.length}):
       </Typography>
@@ -165,6 +176,19 @@ function peopleOfField(raw) {
   return [asUser(raw)].filter(Boolean);
 }
 
+/**
+ * Поле формы не заполнено? Обязательность берём ТОЛЬКО из Required в SharePoint.
+ * Для rich-полей (Note/Text) теги не считаются содержимым.
+ */
+function isFormValueEmpty(field, value) {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return normalizeChoiceValues(value).length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  const t = typeOfField(field);
+  const raw = (t === 'note' || t === 'text') ? String(value).replace(/<[^>]*>/g, ' ') : String(value);
+  return raw.trim().length === 0;
+}
+
 export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = '#dob_tasks' }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
@@ -181,6 +205,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   const pendingDeleteRef = useRef(new Set());
   const initialFormRef = useRef(null);
   const dirtySetRef = useRef(new Set());
+  // Незаполненные обязательные поля после попытки сохранить: поле краснеет,
+  // блок/секция акцентируются, а пользователю показывается snackbar.
+  const [invalidFields, setInvalidFields] = useState(() => new Set());
 
   // helper: extract img srcs from html
 
@@ -244,7 +271,27 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
   const handleChange = useCallback((internal, value) => {
     dirtySetRef.current.add(internal);
+    setInvalidFields(prev => {
+      if (!prev.has(internal)) return prev;
+      const next = new Set(prev);
+      next.delete(internal);
+      return next;
+    });
     setForm(prev => ({ ...prev, [internal]: value }));
+  }, []);
+
+  /** Прокрутка к первому незаполненному полю (фокус — в его инпут). */
+  const focusFirstInvalid = useCallback((internal) => {
+    if (!internal || typeof document === 'undefined') return;
+    const node = document.querySelector(`[data-dob-field="${internal}"]`);
+    if (!node) return;
+    if (typeof node.scrollIntoView === 'function') {
+      try { node.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { node.scrollIntoView(); }
+    }
+    const input = typeof node.querySelector === 'function' ? node.querySelector('input, textarea, [tabindex]') : null;
+    if (input && typeof input.focus === 'function') {
+      try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+    }
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -499,6 +546,10 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     }
   }, [id, listGuid, notify, qc, handleBack]);
 
+  const handleCtValidationError = useCallback((problems) => {
+    notify(`Заполните обязательные поля: ${(problems || []).join('; ')}`, { severity: 'warning' });
+  }, [notify]);
+
   const loading = fieldsLoading || itemLoading;
 
   // Заголовок в шапке (номер + название задачи) и описание в теле — сразу под
@@ -576,6 +627,37 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
   const chekInternal = chekField?.InternalName || 'ChekResult';
   const chekValue = toEditorHtml(form[chekInternal] ?? getODataValue(item, chekInternal) ?? '');
+  // Акцент блоков: «Результат проверки» (rich) и «Остальные поля» — по тому, ГДЕ
+  // остались незаполненные обязательные поля.
+  const richInvalid = invalidFields.has(chekInternal);
+  const fieldsInvalid = Array.from(invalidFields).some((n) => n !== chekInternal);
+
+  /**
+   * Сохранение с валидацией обязательных полей (Required в SharePoint): до запроса
+   * подсвечиваем незаполненные поля/блоки, показываем snackbar и прокручиваем к
+   * первому пропуску — иначе сервер отвечает 400 и непонятно, что заполнять.
+   */
+  const validateAndSave = useCallback(() => {
+    const missing = [];
+    for (const f of editableFields) {
+      if (f.Required !== true || !isEditableField(f)) continue;
+      const internal = f.InternalName;
+      if (internal === chekInternal) continue;
+      if (isFormValueEmpty(f, form[internal] ?? getODataValue(item, internal))) missing.push(f);
+    }
+    if (chekField?.Required === true && isFormValueEmpty(chekField, form[chekInternal] ?? getODataValue(item, chekInternal))) {
+      missing.unshift(chekField);
+    }
+    if (missing.length > 0) {
+      setInvalidFields(new Set(missing.map((f) => f.InternalName)));
+      const names = missing.map((f) => String(f.Title || f.InternalName));
+      notify(`Заполните обязательные поля: ${names.join(', ')}`, { severity: 'warning' });
+      focusFirstInvalid(missing[0].InternalName);
+      return;
+    }
+    setInvalidFields((prev) => (prev.size > 0 ? new Set() : prev));
+    handleSave();
+  }, [editableFields, chekField, chekInternal, form, item, notify, focusFirstInvalid, handleSave]);
 
   useEffect(() => {
     if (!fields || !item) return;
@@ -623,6 +705,15 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
   // Синхрон: если картинка удалена из ChekResult (в редакторе) — удалить вложение
   // Удаляем вложения для картинок, которые убрали из rich-текста (обе ветки формы).
+  // Блок вложений показывается ВНУТРИ CKEditor — и в форме заявки, и в форме
+  // задачи типа контента: картинки из rich-текста лежат вложениями.
+  const attachmentsBlock = renderAttachments({
+    attachments,
+    onDelete: handleDeleteAttachment,
+    inside: true,
+    emptyHint: true,
+  });
+
   const deleteAttachmentForSrc = useCallback((src) => {
     const fileName = fileNameFromSrc(src);
     if (!fileName) return;
@@ -716,6 +807,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           onDeleteImage={deleteAttachmentForSrc}
           isUploading={isUploadingImage}
           onValuesChange={handleCtValuesChange}
+          richFooter={attachmentsBlock}
+          onValidationError={handleCtValidationError}
           contentTypeId={checkCtId}
           contentTypeName="Результат проверки ООБ"
           submitLabel="Сохранить"
@@ -725,7 +818,6 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           onSubmit={handleCheckResultSubmit}
           onClose={handleBack}
         />
-        {renderAttachments({ attachments, onDelete: handleDeleteAttachment })}
       </Box>
     );
   }
@@ -775,7 +867,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             </span>
           </Tooltip>
           <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={FORM_SECONDARY_BUTTON_SX}>Обновить</Button>
-          <Button size="small" variant="contained" onClick={handleSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={FORM_PRIMARY_BUTTON_SX}>
+          <Button size="small" variant="contained" onClick={validateAndSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={FORM_PRIMARY_BUTTON_SX}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </Button>
         </Toolbar>
@@ -785,10 +877,22 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
       {taskHead}
-      <Box className="dob-rich-section" sx={{ ...FORM_SECTION_SX, position: 'relative', zIndex: 1, flex: '0 0 auto' }}>
+      <Box
+        className="dob-rich-section"
+        data-dob-invalid={richInvalid ? 'true' : undefined}
+        sx={{
+          ...FORM_SECTION_SX,
+          ...(richInvalid ? FORM_INVALID_SECTION_SX : null),
+          position: 'relative',
+          zIndex: 1,
+          flex: '0 0 auto',
+        }}
+      >
         <Box sx={FORM_SECTION_HEAD_SX}>
-          <Box sx={FORM_SECTION_BAR_SX} />
-          <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Результат проверки</Typography>
+          <Box sx={{ ...FORM_SECTION_BAR_SX, ...(richInvalid ? { bgcolor: '#d32f2f' } : null) }} />
+          <Typography variant="subtitle1" sx={{ ...FORM_SECTION_TITLE_SX, ...(richInvalid ? { color: '#c62828' } : null) }}>
+            Результат проверки{chekField?.Required === true ? ' *' : ''}
+          </Typography>
         </Box>
         {isUploadingImage && <LinearProgress sx={{ mb: 1, borderRadius: 1 }} />}
         <RichEditor
@@ -804,14 +908,26 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             handleDeleteAttachment(fileName);
           }}
           isUploading={isUploadingImage}
+          invalid={richInvalid}
+          footer={attachmentsBlock}
         />
-        {renderAttachments({ attachments, onDelete: handleDeleteAttachment })}
       </Box>
 
-      <Box className="dob-fields-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 2, flex: '0 0 auto' }}>
+      <Box
+        className="dob-fields-section"
+        data-dob-invalid={fieldsInvalid ? 'true' : undefined}
+        sx={{
+          width: '100%',
+          minWidth: 0,
+          position: 'relative',
+          zIndex: 2,
+          flex: '0 0 auto',
+          ...(fieldsInvalid ? { ...FORM_INVALID_SECTION_SX, p: { xs: 1, md: 1.25 } } : null),
+        }}
+      >
         <Box sx={FORM_SECTION_HEAD_SX}>
-          <Box sx={FORM_SECTION_BAR_SX} />
-          <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Остальные поля</Typography>
+          <Box sx={{ ...FORM_SECTION_BAR_SX, ...(fieldsInvalid ? { bgcolor: '#d32f2f' } : null) }} />
+          <Typography variant="subtitle1" sx={{ ...FORM_SECTION_TITLE_SX, ...(fieldsInvalid ? { color: '#c62828' } : null) }}>Остальные поля</Typography>
         </Box>
         <Box sx={FORM_FIELD_GRID_SX}>
           {editableFields.filter(f => f.InternalName !== chekInternal && !/^(?:modified|откорректировано|изменено)$/i.test(String(f.InternalName || f.Title || '').trim()) && !/откорректировано|изменено/i.test(String(f.Title || ''))).map(f => {
@@ -821,11 +937,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             const editable = isEditableField(f);
             const value = form[internal] ?? getODataValue(item, internal) ?? '';
             const isCalculated = t === 'calculated' || t === 'computed';
+            const isInvalid = invalidFields.has(internal);
 
             if (internal === 'Author' || internal === 'Editor') {
               const disp = item?.[internal]?.Title || value || '';
               return (
-                <TextField key={internal} label={title} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth />
+                <TextField key={internal} data-dob-field={internal} label={title} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth />
               );
             }
             // Поля типа «Пользователь или группа»: автокомплит по УЧЁТНОЙ ЗАПИСИ,
@@ -834,10 +951,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             if (USER_TYPES.has(t)) {
               const multiple = t === 'usermulti' || f.AllowMultipleValues === true;
               return (
-                <Box key={internal} sx={FORM_FIELD_WIDE_SX}>
+                <Box key={internal} data-dob-field={internal} sx={FORM_FIELD_WIDE_SX}>
                   <PersonFieldAutocomplete
                     label={title}
                     required={f.Required === true}
+                    error={isInvalid}
+                    helperText={isInvalid ? 'Обязательное поле' : undefined}
                     multiple={multiple}
                     disabled={!editable}
                     value={peopleOfField(value)}
@@ -856,6 +975,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <TextField
                   key={internal}
+                  data-dob-field={internal}
+                  error={isInvalid}
+                  helperText={isInvalid ? 'Обязательное поле' : undefined}
                   select
                   label={`${title}${f.Required ? ' *' : ''}`}
                   value={selected}
@@ -877,6 +999,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <FormControlLabel
                   key={internal}
+                  data-dob-field={internal}
                   control={<Checkbox checked={!!boolVal} onChange={e=> handleChange(internal, e.target.checked)} disabled={!editable} />}
                   label={`${title}${f.Required ? ' *' : ''}`}
                   sx={{ alignItems: 'center' }}
@@ -899,6 +1022,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <TextField
                   key={internal}
+                  data-dob-field={internal}
+                  error={isInvalid}
+                  helperText={isInvalid ? 'Обязательное поле' : undefined}
                   label={`${title}${f.Required ? ' *' : ''}`}
                   type="date"
                   value={dispVal}
@@ -918,6 +1044,10 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <TextField
                   key={internal}
+                  data-dob-field={internal}
+                  error={isInvalid}
+                  helperText={isInvalid ? 'Обязательное поле' : undefined}
+                  sx={FORM_NUMBER_FIELD_SX}
                   label={`${title}${f.Required ? ' *' : ''}`}
                   value={value ?? ''}
                   onChange={e=> handleChange(internal, e.target.value)}
@@ -931,9 +1061,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             if ((t === 'note' || t === 'text') && looksLikeHtml(value)) {
               const htmlValue = normalizeHtmlValue(value);
               return (
-                <Box key={internal} sx={{ gridColumn: { md: '1 / -1' }, minWidth: 0 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: .5 }}>{title}{f.Required ? ' *' : ''}</Typography>
-                  <RichEditor value={htmlValue} readOnly={!editable} onChange={html => handleChange(internal, html)} />
+                <Box key={internal} data-dob-field={internal} sx={{ gridColumn: { md: '1 / -1' }, minWidth: 0 }}>
+                  <Typography variant="caption" sx={{ display: 'block', mb: .5, color: isInvalid ? '#c62828' : 'text.secondary', fontWeight: isInvalid ? 700 : 400 }}>{title}{f.Required ? ' *' : ''}</Typography>
+                  <RichEditor value={htmlValue} readOnly={!editable} invalid={isInvalid} onChange={html => handleChange(internal, html)} />
                 </Box>
               );
             }
@@ -941,6 +1071,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <TextField
                   key={internal}
+                  data-dob-field={internal}
+                  error={isInvalid}
+                  helperText={isInvalid ? 'Обязательное поле' : undefined}
                   label={`${title}${f.Required ? ' *' : ''}`}
                   value={value || ''}
                   onChange={e=> handleChange(internal, e.target.value)}
@@ -957,6 +1090,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <TextField
                   key={internal}
+                  data-dob-field={internal}
+                  error={isInvalid}
+                  helperText={isInvalid ? 'Обязательное поле' : undefined}
                   label={`${title}${f.Required ? ' *' : ''}`}
                   value={typeof value === 'object' ? value?.Url || '' : value || ''}
                   onChange={e=> handleChange(internal, e.target.value)}
@@ -970,6 +1106,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             return (
               <TextField
                 key={internal}
+                data-dob-field={internal}
+                error={isInvalid}
+                helperText={isInvalid ? 'Обязательное поле' : undefined}
                 label={`${title}${f.Required ? ' *' : ''}`}
                 value={value || ''}
                 onChange={e=> handleChange(internal, e.target.value)}
@@ -989,7 +1128,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
         <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
         <Box sx={FORM_ACTIONS_SX}>
-          <Button onClick={handleSave} variant="contained" disabled={saving} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
+          <Button onClick={validateAndSave} variant="contained" disabled={saving} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </Button>
         </Box>

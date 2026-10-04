@@ -9,6 +9,10 @@ import { getResultFieldForTask } from "../../../tasks/resultField";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { TASKS_LIST_API } from "../../../tasks/config";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
+// Функции формы заявки ДОБ нужны здесь ровно для одного: MultiChoice-колонки
+// SharePoint (odata=verbose) принимает ТОЛЬКО объектом-коллекцией, а строка
+// «a;#b» даёт 400 «unexpected 'PrimitiveValue' … 'StartObject' expected».
+import { toVerbosePayload } from "../../dob/api/dobApi";
 
 // Минимальное время, которое карточка проводит в состоянии «Сохранение...» (мс).
 // Иначе при быстром ответе сервера оверлей мелькает и кажется, что карточка пропала мгновенно.
@@ -58,7 +62,9 @@ function applyPromptFieldsToPayload(payload, promptFieldValues) {
         : ids[0];
       continue;
     }
-    payload[fieldName] = value;
+    // Значения многозначных колонок (MultiChoice и т.п.) — в verbose-форме:
+    // строка «a;#b» → {"__metadata":{"type":"Collection(Edm.String)"},"results":[…]}.
+    payload[fieldName] = toVerbosePayload({ [fieldName]: value }, [], "collections")[fieldName];
   }
 }
 

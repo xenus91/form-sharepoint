@@ -14,9 +14,9 @@ import NotificationsProvider from "./NotificationsProvider";
 // перезапуск dev-сервера / жёсткая перезагрузка страницы).
 // eslint-disable-next-line no-console
 console.info(
-  "[form-sharepoint] ct-detect v8: MERGE с Content-Type odata=verbose (ошибка " +
-  "PrimitiveValue/StartObject), картинки rich-текста — вложениями (сколько угодно), " +
-  "без React-варнинга key в спреде props формы результата",
+  "[form-sharepoint] ct-detect v9: MultiChoice в MERGE — коллекцией Collection(Edm.String) " +
+  "(ошибка PrimitiveValue/StartObject), валидация обязательных полей с акцентом и snackbar, " +
+  "картинки rich-текста — вложениями внутри CKEditor, ровная высота числового поля",
 );
 
 

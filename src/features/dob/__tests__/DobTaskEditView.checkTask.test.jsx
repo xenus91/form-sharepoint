@@ -58,8 +58,10 @@ vi.mock("../api/dobApi", () => ({
 // RichEditor мокаем: важно, что он ПОЛУЧАЕТ onUploadImage (картинки → вложения,
 // их может быть несколько) и умеет отдать html в форму.
 vi.mock("../components/RichEditor", () => ({
-  default: ({ value, onChange, onUploadImage }) => (
-    <div>
+  // footer — блок вложений, который страница передаёт редактору: он показывается
+  // ВНУТРИ редактора (внутри его рамки), а не отдельным блоком под ним.
+  default: ({ value, onChange, onUploadImage, footer }) => (
+    <div data-testid="rich-editor-box">
       <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
       <button
         type="button"
@@ -75,6 +77,7 @@ vi.mock("../components/RichEditor", () => ({
       >
         upload-2
       </button>
+      {footer ? <div data-testid="rich-editor-footer">{footer}</div> : null}
     </div>
   ),
 }));
@@ -193,6 +196,26 @@ describe("DobTaskEditView — задача «Результат проверки
     expect(text.indexOf("Остальные поля")).toBeGreaterThan(text.indexOf("Описание результата проверки"));
   });
 
+  it("незаполненные обязательные поля: блоки акцентируются, показывается snackbar, MERGE не уходит", async () => {
+    const { host } = await renderForm();
+    const save = [...host.querySelectorAll("button")].find((b) => b.textContent.trim() === "Сохранить");
+    expect(save).toBeTruthy();
+    await act(async () => { mouseClick(save); await settle(40); });
+
+    // сервер не тревожим: сначала обязательные поля (Required в SharePoint)
+    expect(updateDobItem).not.toHaveBeenCalled();
+    // snackbar с предупреждением — что именно заполнить
+    expect(document.body.textContent).toContain("Заполните обязательные поля");
+    expect(document.body.textContent).toContain("Описание результата проверки");
+    // акцент БЛОКОВ: результат (кнопки) и главное rich-поле
+    const resultBlock = host.querySelector('[data-testid="ct-result-block"]');
+    const mainBlock = host.querySelector('[data-testid="ct-main-field"]');
+    expect(resultBlock.getAttribute("data-ct-invalid")).toBe("true");
+    expect(mainBlock.getAttribute("data-ct-invalid")).toBe("true");
+    // и список проблем под полями (кто именно не заполнен)
+    expect(host.querySelector('[data-testid="ct-result-dialog-problems"]')).toBeTruthy();
+  });
+
   it("картинки из rich-текста сохраняются ВЛОЖЕНИЯМИ задачи, их может быть несколько", async () => {
     const { host } = await renderForm();
     // аналог вставки картинки: редактор отдаёт файл странице → вложение
@@ -207,10 +230,14 @@ describe("DobTaskEditView — задача «Результат проверки
     expect(uploadDobAttachment).toHaveBeenCalledTimes(2);
     // оба файла ушли именно в список задачи
     expect(uploadDobAttachment.mock.calls.map((c) => c[2])).toEqual([MAIN_GUID, MAIN_GUID]);
-    // и обе картинки видны как вложения
-    const chips = host.querySelectorAll('[data-testid="dob-attachments"] .MuiChip-root');
-    expect(chips.length).toBe(2);
-    expect(host.textContent).toContain("Вложения (2)");
+    // и обе картинки видны как вложения — БЛОК ВНУТРИ редактора (внутри рамки),
+    // а не отдельной строкой под ним
+    const editorBox = host.querySelector('[data-testid="rich-editor-box"]');
+    expect(editorBox).toBeTruthy();
+    const attachments = editorBox.querySelector('[data-testid="dob-attachments"]');
+    expect(attachments).toBeTruthy();
+    expect(attachments.querySelectorAll(".MuiChip-root").length).toBe(2);
+    expect(attachments.textContent).toContain("Вложения (2)");
   });
 
   it("«Сохранить» без обязательного описания ничего не пишет (обязательность из SP)", async () => {

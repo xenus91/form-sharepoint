@@ -29,6 +29,8 @@ import {
   FORM_FIELD_FULL_SX,
   FORM_FIELD_GRID_SX,
   FORM_FIELD_WIDE_SX,
+  FORM_INVALID_SECTION_SX,
+  FORM_NUMBER_FIELD_SX,
   FORM_PRIMARY_BUTTON_SX,
   FORM_SECONDARY_BUTTON_SX,
   FORM_SECTION_BAR_SX,
@@ -45,6 +47,20 @@ import {
   plainText,
   validateRequiredFields,
 } from "../../../tasks/contentTypeFields";
+
+/**
+ * Контрол не заполнен? Логика та же, что в validateRequiredFields (rich-текст
+ * сравниваем по тексту без тегов, множественный выбор — по длине списка), но
+ * результат нужен по каждому полю: подсветить ИМЕННО незаполненные блоки.
+ */
+function isControlEmpty(control, value) {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return normalizeChoiceValues(value).length === 0;
+  if (typeof value === "number") return Number.isNaN(value);
+  if (typeof value === "object") return Object.keys(value).length === 0;
+  const text = control?.kind === "richtext" ? plainText(value) : String(value).trim();
+  return text.length === 0;
+}
 
 function readTaskValue(task, internal) {
   if (!task || !internal) return undefined;
@@ -129,11 +145,18 @@ export default function ContentTypeResultDialog({
   // Значения формы «наружу» — страница следит за картинками в rich-тексте
   // (удалили картинку из текста → вложение тоже удаляем).
   onValuesChange = null,
+  // Блок вложений задачи показывается ВНУТРИ rich-поля (внутри рамки CKEditor):
+  // картинки из текста лежат вложениями, удалять их удобно рядом с текстом.
+  richFooter = null,
+  // Ошибка валидации «наружу» — страница показывает snackbar с предупреждением.
+  onValidationError = null,
 }) {
   const [result, setResult] = React.useState(initialResult || "");
   const [values, setValues] = React.useState({});
   const [problems, setProblems] = React.useState([]);
   const [touched, setTouched] = React.useState(false);
+  // Прокрутка к первому незаполненному блоку при ошибке валидации.
+  const contentRef = React.useRef(null);
 
   const fieldsQ = useQuery({
     queryKey: ["ct-fields", contentTypeId, listGuid || "main"],
@@ -204,6 +227,9 @@ export default function ContentTypeResultDialog({
     if (!result) found.unshift("Выберите результат проверки");
     if (found.length > 0) {
       setProblems(found);
+      // Страница (#dob_tasks/<id>) показывает snackbar с предупреждением — форма
+      // сама про ошибку молчит только списком под полями.
+      onValidationError?.(found);
       return;
     }
     const payload = {};
@@ -248,7 +274,7 @@ export default function ContentTypeResultDialog({
     }
     // resultField — имя колонки результата (нужно форме ДОБ, чтобы записать MERGE)
     onSubmit?.({ result, values: payload, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
-  }, [form, values, result, resultFieldInternalName, onSubmit]);
+  }, [form, values, result, resultFieldInternalName, onSubmit, onValidationError]);
 
   // Отдаём submit наружу (кнопка «Сохранить» в шапке страницы — как у заявки ДОБ).
   React.useEffect(() => {
@@ -267,6 +293,31 @@ export default function ContentTypeResultDialog({
     () => form.controls.filter((c) => c !== mainControl),
     [form.controls, mainControl],
   );
+
+  // Незаполненные обязательные поля — после попытки сохранить (touched). Нужны,
+  // чтобы акцентировать конкретные поля И блоки (результат / описание / остальные).
+  const missingControls = React.useMemo(() => {
+    if (!touched) return [];
+    return form.controls.filter((c) => c.required && isControlEmpty(c, values[c.internalName]));
+  }, [touched, form.controls, values]);
+  const resultInvalid = touched && !result && (choices.length > 0 || Boolean(form.resultBlock?.required));
+  const mainInvalid = missingControls.includes(mainControl);
+  const otherInvalid = missingControls.some((c) => c !== mainControl);
+
+  // Ошибка валидации: прокручиваем к первому незаполненному блоку — в длинной
+  // форме «Остальные поля» уезжают за экран и ошибку не видно.
+  React.useEffect(() => {
+    if (problems.length === 0) return;
+    const root = contentRef.current;
+    if (!root || typeof root.querySelector !== "function") return;
+    const node = root.querySelector('[data-ct-invalid="true"]');
+    if (!node || typeof node.scrollIntoView !== "function") return;
+    try {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch {
+      node.scrollIntoView();
+    }
+  }, [problems]);
 
   const title = confirmTexts?.title || `Закрытие задачи #${task?.Id ?? ""}`.trim();
   const message = confirmTexts?.message || "";
@@ -289,9 +340,13 @@ export default function ContentTypeResultDialog({
         )}
 
         {!fieldsQ.isLoading && (
-          <Stack spacing={1.25}>
+          <Stack spacing={1.25} ref={contentRef}>
             {choices.length > 0 && (
-              <Box sx={FORM_SECTION_SX} data-testid="ct-result-block">
+              <Box
+                sx={{ ...FORM_SECTION_SX, ...(resultInvalid ? FORM_INVALID_SECTION_SX : null) }}
+                data-testid="ct-result-block"
+                data-ct-invalid={resultInvalid ? "true" : undefined}
+              >
                 <Box sx={FORM_SECTION_HEAD_SX}>
                   <Box sx={FORM_SECTION_BAR_SX} />
                   <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
@@ -322,7 +377,11 @@ export default function ContentTypeResultDialog({
             )}
 
             {mainControl && (
-              <Box sx={FORM_SECTION_SX} data-testid="ct-main-field">
+              <Box
+                sx={{ ...FORM_SECTION_SX, ...(mainInvalid ? FORM_INVALID_SECTION_SX : null) }}
+                data-testid="ct-main-field"
+                data-ct-invalid={mainInvalid ? "true" : undefined}
+              >
                 <Box sx={FORM_SECTION_HEAD_SX}>
                   <Box sx={FORM_SECTION_BAR_SX} />
                   <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
@@ -336,6 +395,8 @@ export default function ContentTypeResultDialog({
                   onUploadImage={onUploadImage}
                   onDeleteImage={onDeleteImage}
                   isUploading={isUploading}
+                  invalid={mainInvalid}
+                  footer={richFooter}
                 />
                 {mainControl.description && (
                   <Typography variant="caption" color="text.secondary">{mainControl.description}</Typography>
@@ -344,7 +405,11 @@ export default function ContentTypeResultDialog({
             )}
 
             {gridControls.length > 0 && (
-              <Box sx={FORM_SECTION_SX} data-testid="ct-other-fields">
+              <Box
+                sx={{ ...FORM_SECTION_SX, ...(otherInvalid ? FORM_INVALID_SECTION_SX : null) }}
+                data-testid="ct-other-fields"
+                data-ct-invalid={otherInvalid ? "true" : undefined}
+              >
                 <Box sx={FORM_SECTION_HEAD_SX}>
                   <Box sx={FORM_SECTION_BAR_SX} />
                   <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Остальные поля</Typography>
@@ -352,10 +417,9 @@ export default function ContentTypeResultDialog({
                 <Box sx={FORM_FIELD_GRID_SX}>
                 {gridControls.map((control) => {
               const value = values[control.internalName];
-              const invalid = touched && control.required
-                && (value === undefined || value === null || String(value).trim() === ""
-                  || (control.kind === "richtext" && plainText(value).length === 0)
-                  || ((control.kind === "multichoice" || Array.isArray(value)) && normalizeChoiceValues(value).length === 0));
+              // Подсветка ИМЕННО незаполненного обязательного поля (после попытки
+              // сохранить) — список problems объясняет, что именно не так.
+              const invalid = missingControls.includes(control);
               const helper = control.description || (invalid ? "Обязательное поле" : "");
               // ВАЖНО: key НЕ кладём в общий объект — React требует передавать его
               // напрямую в JSX (<TextField key=… {...common} />), иначе варнинг
@@ -375,6 +439,8 @@ export default function ContentTypeResultDialog({
                       onUploadImage={onUploadImage}
                       onDeleteImage={onDeleteImage}
                       isUploading={isUploading}
+                      invalid={Boolean(invalid)}
+                      footer={richFooter}
                     />
                     {control.description && (
                       <Typography variant="caption" color="text.secondary">{control.description}</Typography>
@@ -508,9 +574,12 @@ export default function ContentTypeResultDialog({
 
               if (control.kind === "number") {
                 return (
+                  // Высота — как у остальных однострочных полей (см. FORM_NUMBER_FIELD_SX):
+                  // у <input type="number"> свой внутренний размер из-за «спиннера».
                   <TextField
                     key={control.internalName}
                     {...common}
+                    sx={FORM_NUMBER_FIELD_SX}
                     label={`${control.title}${control.required ? " *" : ""}`}
                     type="number"
                     value={value ?? ""}

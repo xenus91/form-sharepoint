@@ -174,6 +174,25 @@ describe("useTaskMutations.completeTask", () => {
     expect(body.Status).toBe("Завершена"); // системное поле не перезаписано
   });
 
+  it("MultiChoice из формы уходит объектом-коллекцией, а не строкой «;#»", async () => {
+    // Регрессия: SP в odata=verbose отвечает «unexpected 'PrimitiveValue' … a
+    // 'StartObject' node was expected», если многозначная колонка пришла строкой.
+    const { apiState: api } = await mountAndComplete({
+      resultValue: "Не исправлено",
+      promptValues: {
+        ErrorTypeValidation: "Бессистемно;#Размещение",
+        GuiltyId: { __metadata: { type: "Collection(Edm.Int32)" }, results: [936, 20] },
+      },
+    });
+    const body = api.post.mock.calls.at(-1)[1];
+    expect(body.ErrorTypeValidation).toEqual({
+      __metadata: { type: "Collection(Edm.String)" },
+      results: ["Бессистемно", "Размещение"],
+    });
+    // многократный выбор людей не расплющился в одно значение
+    expect(body.GuiltyId.results).toEqual([936, 20]);
+  });
+
   it("Boolean-колонка не распознана: повторяем запрос со true/false и запоминаем тип", async () => {
     // Регрессия пользователя: «Не удается преобразовать значение-примитив в ожидаемый тип Edm.Boolean».
     const accepted = [];
