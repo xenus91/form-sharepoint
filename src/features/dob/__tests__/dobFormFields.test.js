@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildViewFields,
+  isHiddenFormField,
   formatFieldValue,
   hasFieldValue,
   sanitizeHtmlForView,
@@ -76,6 +77,18 @@ describe("dob/lib/dobFormFields — поля по типу контента", ()
     expect(names).not.toContain("HiddenField");
     expect(names).not.toContain("Modified");
     expect(names).not.toContain("ContentType");
+  });
+
+  it("колонки «Дополнительных действий» не показываются: их нет в типе контента", () => {
+    const fields = [
+      { InternalName: "AdditionalActions", Title: "Доп. действия", TypeAsString: "MultiChoice" },
+      { InternalName: "AdditionalActionsRequired", Title: "Доп. действия обязательны", TypeAsString: "Boolean" },
+      { InternalName: "Title", Title: "Заголовок", TypeAsString: "Text" },
+    ];
+    const item = { Title: "Задача", AdditionalActions: { results: ["Перебрать"] }, AdditionalActionsRequired: true };
+    expect(isHiddenFormField("AdditionalActions")).toBe(true);
+    expect(isHiddenFormField("AdditionalActionsRequired")).toBe(true);
+    expect(buildViewFields(fields, item, { showEmpty: true }).map((f) => f.internal)).toEqual(["Title"]);
   });
 
   it("buildViewFields с showEmpty показывает пустые поля, но по-прежнему не служебные", () => {

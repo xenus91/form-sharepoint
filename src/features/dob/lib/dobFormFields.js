@@ -7,6 +7,10 @@
 // Служебные поля, которые не показываем в форме/просмотре (системные +
 // поля с кодированными русскими именами, дублирующие Modified и т.п.).
 export const HIDDEN_FORM_FIELDS = new Set([
+  // Колонки «Дополнительных действий»: в типах контента их нет, приложение их не
+  // использует — в форме и в просмотре им не место (пользователь: «их отображать
+  // не нужно»). Состав формы вообще строится по FieldLinks типа контента.
+  'AdditionalActions', 'AdditionalActionsRequired',
   'ComplianceAssetId', 'LinkTitleNoMenu', 'LinkTitle', 'Modified', 'UserFail',
   '_UIVersionString', 'DocIcon', 'FolderChildCount', 'AppEditor', 'AppAuthor',
   'ItemChildCount', 'Edit',
