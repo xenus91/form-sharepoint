@@ -10,19 +10,19 @@
 //     «В работе у X» — повторяем её как информационный пункт;
 //   • «Изменить» → форма задачи (как кнопка «Изменить» карточки внешней задачи).
 //
-// Уточнения 2026-10-04 (раунд 14):
+// Уточнения 2026-10-04 (раунд 14) — единое правило для ВСЕХ задач (и main, и ДОБ):
+//   • пока задача НЕ взята в работу — доступно только «Взять в работу»;
+//     «Изменить» не показываем, иначе форму задачи можно открыть в обход взятия;
+//   • «Изменить» появляется ПОСЛЕ взятия в работу (задача «в работе» и не у
+//     другого пользователя);
 //   • ЗАВЕРШЁННЫЕ задачи (любого источника) — кнопок нет вообще: только
-//     информационная плашка «Задача завершена»;
-//   • задачи ДОБ (внешний источник и main-задачи «Результат проверки ООБ»):
-//     сначала только «Взять в работу», а «Изменить» появляется ПОСЛЕ взятия
-//     (задача в работе и не у другого пользователя). До взятия форма задачи
-//     недоступна — так задачу нельзя «изменить» в обход взятия в работу.
+//     информационная плашка «Задача завершена».
 //
 // Модуль чистый: все зависимости (можно ли взять, choices, стили, иконки,
 // обработчики) приходят в opts — поэтому паритет с карточкой проверяется
 // юнит-тестами без DOM.
 
-import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../../../tasks/status";
+import { isCompletedStatus, isInProgressStatus } from "../../../tasks/status";
 
 /**
  * sx из Behaviour-стилизации — переносится ЦЕЛИКОМ, как делает карточка
@@ -102,7 +102,9 @@ export function primaryActionSx(styling, fallback = DEFAULT_TAKE_SX) {
  *
  * @param {object} row — строка таблицы (нужны sourceId, Status, PercentComplete, Id)
  * @param {object} opts
- * @param {boolean} [opts.canTake] — можно ли взять задачу в работу (см. TasksView.canTakeTableRow)
+ * @param {boolean} [opts.canTake] — можно ли взять задачу в работу (см. TasksView.canTakeTableRow).
+ *   Оставлен для совместимости: доступность действий теперь определяет СТАТУС
+ *   (не взята → «Взять в работу», взята → «Изменить»/результаты, завершена → плашка)
  * @param {boolean} [opts.taking] — по этой строке уже идёт взятие в работу
  * @param {boolean} [opts.updating] — по этой задаче идёт запись (завершение результата)
  * @param {boolean} [opts.takenByOther] — задачу взял другой пользователь
@@ -123,7 +125,6 @@ export function primaryActionSx(styling, fallback = DEFAULT_TAKE_SX) {
 export function buildRowActions(row, opts = {}) {
   if (!row) return [];
   const {
-    canTake = false,
     taking = false,
     updating = false,
     takenByOther = false,
@@ -154,7 +155,6 @@ export function buildRowActions(row, opts = {}) {
   const status = row.Status || "";
   const completed = isCompletedStatus(status, row.PercentComplete);
   const inProgress = isInProgressStatus(status);
-  const notStarted = isNotStartedStatus(status);
 
   const editAction = (disabled) => ({
     key: "edit",
@@ -183,27 +183,11 @@ export function buildRowActions(row, opts = {}) {
   if (completed) return [completedInfo()];
 
   if (dobLike) {
-    if (canTake) actions.push(takeAction(taking));
-    if (inProgress) {
-      if (takenByOther) {
-        actions.push({
-          key: "taken-by-other",
-          kind: "info",
-          label: `В работе у ${takerLabel || "другого пользователя"}`,
-          hint: "Задача уже взята другим пользователем. Возьмите другую задачу.",
-        });
-      } else {
-        // Взята в работу (мной) → доступна «Изменить»: форма ДОБ по кнопке.
-        actions.push(editAction(taking));
-      }
+    // Не взята в работу → только «Взять в работу» («Изменить» — после взятия).
+    if (!inProgress) {
+      actions.push(takeAction(updating || taking));
+      return actions;
     }
-    return actions;
-  }
-
-  if (!completed && !inProgress) {
-    // «Не начата» и любой прочий незавершённый статус — как fallback-ветка карточки.
-    if (canTake || notStarted) actions.push(takeAction(updating || taking));
-  } else if (inProgress) {
     if (takenByOther) {
       actions.push({
         key: "taken-by-other",
@@ -212,28 +196,51 @@ export function buildRowActions(row, opts = {}) {
         hint: "Задача уже взята другим пользователем. Возьмите другую задачу.",
       });
     } else {
-      for (const choice of choices) {
-        const styling = resolveStyling ? resolveStyling(choice) : null;
-        const variant = styling?.variant || "contained";
-        const editor = resolveEditor ? resolveEditor(choice) : null;
-        actions.push({
-          key: `result:${choice}`,
-          label: choice,
-          // иконка — как в карточке (Behaviour «i»), иначе нейтральная
-          icon: (resolveIcon ? resolveIcon(choice) : null) || "result",
-          variant,
-          disabled: updating,
-          sx: resultActionSx(styling, variant),
-          // есть инлайн-форма → попап покажет её (поля/подтверждение как в карточке)
-          editor: editor || null,
-          onClick: () => onResult?.(choice),
-        });
-      }
+      // Взята в работу (мной) → доступна «Изменить»: форма ДОБ по кнопке.
+      actions.push(editAction(taking));
     }
+    return actions;
   }
 
-  // «Изменить» у main-задач: закреплена внизу меню — видна всегда, даже если
-  // кнопок много. У завершённых её нет (выше возвращается только плашка).
+  // Задача НЕ взята в работу («Не начата» и любой прочий незавершённый статус):
+  // единственное действие — «Взять в работу» (как fallback-ветка карточки).
+  if (!inProgress) {
+    actions.push(takeAction(updating || taking));
+    return actions;
+  }
+
+  if (takenByOther) {
+    actions.push({
+      key: "taken-by-other",
+      kind: "info",
+      label: `В работе у ${takerLabel || "другого пользователя"}`,
+      hint: "Задача уже взята другим пользователем. Возьмите другую задачу.",
+    });
+    return actions;
+  }
+
+  // «В работе» у меня — кнопки результата по типу контента (как в карточке).
+  for (const choice of choices) {
+    const styling = resolveStyling ? resolveStyling(choice) : null;
+    const variant = styling?.variant || "contained";
+    const editor = resolveEditor ? resolveEditor(choice) : null;
+    actions.push({
+      key: `result:${choice}`,
+      label: choice,
+      // иконка — как в карточке (Behaviour «i»), иначе нейтральная
+      icon: (resolveIcon ? resolveIcon(choice) : null) || "result",
+      variant,
+      disabled: updating,
+      sx: resultActionSx(styling, variant),
+      // есть инлайн-форма → попап покажет её (поля/подтверждение как в карточке)
+      editor: editor || null,
+      onClick: () => onResult?.(choice),
+    });
+  }
+
+  // «Изменить» — только ПОСЛЕ взятия в работу: закреплена внизу меню, поэтому
+  // видна даже когда кнопок результата много. У завершённых её нет (выше
+  // возвращается только плашка «Задача завершена»).
   actions.push(editAction(updating || taking));
   return actions;
 }

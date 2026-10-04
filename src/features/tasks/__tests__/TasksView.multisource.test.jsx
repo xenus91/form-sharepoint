@@ -789,9 +789,9 @@ describe("TasksView — multi-source (#tasks)", () => {
       return el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
     };
     const texts = buttons().map((b) => b.textContent || "");
-    // «Не начата» → можно взять в работу; «Изменить» есть всегда
+    // «Не начата» → задача ещё не взята в работу: только «Взять в работу»
     expect(texts.some((t) => /Взять в работу/.test(t))).toBe(true);
-    expect(texts.some((t) => /Изменить/.test(t))).toBe(true);
+    expect(texts.some((t) => /Изменить/.test(t))).toBe(false);
 
     const takeBtn = buttons().find((b) => /Взять в работу/.test(b.textContent || ""));
     await act(async () => {
@@ -814,8 +814,9 @@ describe("TasksView — multi-source (#tasks)", () => {
     await clickByText(host, /Таблица/);
     await settle(3000);
 
+    // задача «в работе» (уже взята) — только у неё доступна «Изменить»
     const row = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
-      .find((r) => /Основная задача ООБ/.test(r.textContent || ""));
+      .find((r) => /Задача в работе ООБ/.test(r.textContent || ""));
     expect(row).toBeTruthy();
     await act(async () => {
       row.querySelector(".ag-cell").dispatchEvent(
@@ -832,7 +833,20 @@ describe("TasksView — multi-source (#tasks)", () => {
       await new Promise((r) => setTimeout(r, 250));
     });
     // main-задача открывается своей формой (Id), а не формой dob-списка
-    expect(window.location.hash).toBe("#tasks/10");
+    expect(window.location.hash).toBe("#tasks/11");
+
+    // а у НЕ взятой в работу main-задачи «Изменить» нет — только «Взять в работу»
+    const idleRow = [...host.querySelectorAll('.ag-center-cols-container .ag-row')]
+      .find((r) => /Основная задача ООБ/.test(r.textContent || ""));
+    await act(async () => {
+      idleRow.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 260, clientY: 300 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+    const idlePopup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    const idleLabels = [...idlePopup.querySelectorAll("button")].map((b) => b.textContent.trim());
+    expect(idleLabels).toEqual(["Взять в работу"]);
   }, 30000);
 
   it("таблица: результат с полем и подтверждением (p + c) — форма В ПОПОВЕРЕ, затем диалог подтверждения", async () => {

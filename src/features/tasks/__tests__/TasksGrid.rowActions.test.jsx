@@ -193,46 +193,52 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
   });
 
-  it("идёт обновление задачи: строка подсвечена, видна подпись и полоса прогресса", async () => {
+  it("идёт обновление задачи: кружок-лоадер ВНУТРИ ячейки Id этой строки", async () => {
     const { host } = renderGrid({
       updatingId: 10,
       getRowActions: () => [{ key: "edit", label: "Изменить", icon: "edit" }],
     });
     await settle(400);
 
-    // подпись и полоса прогресса над таблицей
-    const busy = host.querySelector('[data-testid="tasks-grid-busy"]');
-    expect(busy).toBeTruthy();
-    expect(busy.textContent).toContain("Задача #10 — обновляется");
-    expect(busy.querySelector(".MuiLinearProgress-root")).toBeTruthy();
+    // кружок ровно один — в ячейке Id именно обновляемой задачи
+    const spinners = [...host.querySelectorAll('[data-testid="tasks-row-spinner"]')];
+    expect(spinners).toHaveLength(1);
+    const spinnerRow = spinners[0].closest(".ag-row");
+    // колонка Id закреплена (pinned left) — AG Grid держит её в отдельном
+    // контейнере, поэтому ориентируемся на row-id, а не на текст строки
+    expect(spinnerRow.getAttribute("row-id")).toBe("main:10");
+    expect(spinners[0].querySelector(".MuiCircularProgress-root")).toBeTruthy();
+    // номер задачи остался на месте — строка не «прыгает»
+    expect(spinners[0].textContent).toContain("10");
 
-    // строка обновляемой задачи помечена классом (CSS-пульсация + бегущая полоса)
-    const rows = [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
-    const busyRow = rows.find((r) => /Основная задача ООБ/.test(r.textContent || ""));
-    const idleRow = rows.find((r) => /Заявка ООБ/.test(r.textContent || ""));
-    expect(busyRow.className).toContain("tasks-row-busy");
-    expect(busyRow.className).toContain("tasks-row-updating");
+    // строка помечена классом (лёгкая подсветка), соседняя — нет
+    expect(spinnerRow.className).toContain("tasks-row-busy");
+    expect(spinnerRow.className).toContain("tasks-row-updating");
+    const idleRow = [...host.querySelectorAll(".ag-row")].find((r) => r.getAttribute("row-id") === "dob:1");
+    expect(idleRow.querySelector('[data-testid="tasks-row-spinner"]')).toBeNull();
     expect(idleRow.className || "").not.toContain("tasks-row-busy");
   });
 
-  it("взятие в работу внешней задачи тоже видно в таблице", async () => {
+  it("взятие в работу внешней задачи: кружок в ячейке Id этой же строки", async () => {
     const { host } = renderGrid({
       takingId: "dob:1",
       getRowActions: () => [{ key: "edit", label: "Изменить", icon: "edit" }],
     });
     await settle(400);
 
-    const busy = host.querySelector('[data-testid="tasks-grid-busy"]');
-    expect(busy.textContent).toContain("Задача #1 — берём в работу");
-    const rows = [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
-    const busyRow = rows.find((r) => /Заявка ООБ/.test(r.textContent || ""));
-    expect(busyRow.className).toContain("tasks-row-taking");
+    const spinner = host.querySelector('[data-testid="tasks-row-spinner"]');
+    expect(spinner).toBeTruthy();
+    expect(spinner.textContent).toContain("1");
+    const spinnerRow = spinner.closest(".ag-row");
+    expect(spinnerRow.getAttribute("row-id")).toBe("dob:1");
+    expect(spinnerRow.className).toContain("tasks-row-busy");
+    expect(spinnerRow.className).toContain("tasks-row-taking");
   });
 
-  it("индикатор обновления исчезает, когда запись завершена", async () => {
+  it("кружок исчезает, когда запись завершена", async () => {
     const { host, root } = renderGrid({ updatingId: 10, getRowActions: () => [] });
     await settle(400);
-    expect(host.querySelector('[data-testid="tasks-grid-busy"]')).toBeTruthy();
+    expect(host.querySelector('[data-testid="tasks-row-spinner"]')).toBeTruthy();
 
     act(() => {
       root.render(
@@ -242,7 +248,10 @@ describe("TasksGrid — действия в точке клика", () => {
       );
     });
     await settle(200);
-    expect(host.querySelector('[data-testid="tasks-grid-busy"]')).toBeNull();
+    expect(host.querySelectorAll('[data-testid="tasks-row-spinner"]')).toHaveLength(0);
+    // и подсветка строки снята
+    const row = [...host.querySelectorAll(".ag-row")].find((r) => r.getAttribute("row-id") === "main:10");
+    expect(row.className || "").not.toContain("tasks-row-busy");
   });
 
   it("открытие/закрытие поповера не пересобирает таблицу (быстрый отклик)", async () => {

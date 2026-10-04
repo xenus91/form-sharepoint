@@ -18,10 +18,10 @@ import { memo, useMemo, useRef, useEffect, useState } from "react";
 import {
   Box,
   Button,
+  CircularProgress,
   Divider,
   IconButton,
   InputAdornment,
-  LinearProgress,
   Popover,
   Stack,
   TextField,
@@ -48,6 +48,34 @@ const ACTION_ICONS = {
   edit: <EditIcon fontSize="small" />,
   result: <TaskAltIcon fontSize="small" />,
 };
+
+/**
+ * Ячейка «Id». Пока по задаче идёт действие (запись результата или взятие в
+ * работу) — внутри ячейки крутится маленький кружок, сам номер остаётся на месте.
+ *
+ * Почему не полоса/плашка: AG Grid позиционирует строки абсолютно, поэтому любые
+ * вставки над строкой или свой `position` у `.ag-row` ломают раскладку (строка
+ * «уезжает», под ней появляется пропуск). Кружок внутри ячейки ничего не сдвигает.
+ *
+ * @param {object} props — параметры ячейки AG Grid (value, data, context)
+ */
+const IdCell = memo(function IdCell({ value, data, context }) {
+  const busy = !!data && (
+    (context?.updatingId != null && String(data.Id) === String(context.updatingId))
+    || (context?.takingId != null && data.compositeId === context.takingId)
+  );
+  if (!busy) return <span>{value}</span>;
+  return (
+    <Box
+      data-testid="tasks-row-spinner"
+      title="Задача обновляется…"
+      sx={{ display: "flex", alignItems: "center", gap: 0.75, height: "100%", overflow: "hidden" }}
+    >
+      <CircularProgress size={14} thickness={6} sx={{ color: "#171c8f", flexShrink: 0 }} />
+      <span>{value}</span>
+    </Box>
+  );
+});
 
 /**
  * Popup с действиями по задаче — открывается В ТОЧКЕ КЛИКА по строке.
@@ -219,6 +247,7 @@ const GridTable = memo(function GridTable({
   theme,
   rowData,
   columnDefs,
+  context,
   defaultColDef,
   getRowId,
   gridOptions,
@@ -236,6 +265,7 @@ const GridTable = memo(function GridTable({
       theme={theme}
       rowData={rowData}
       columnDefs={columnDefs}
+      context={context}
       defaultColDef={defaultColDef}
       getRowId={getRowId}
       gridOptions={gridOptions}
@@ -308,7 +338,9 @@ export default function TasksGrid({
   }, []);
 
   const columnDefs = useMemo(
-    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg }),
+    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg })
+      // кружок-лоадер живёт внутри ячейки Id (не сдвигает строки)
+      .map((col) => (col.field === "Id" ? { ...col, cellRenderer: IdCell } : col)),
     [showSourceColumn, showDbg]
   );
 
@@ -329,25 +361,23 @@ export default function TasksGrid({
 
   const closeActions = useMemo(() => () => { setMenuRow(null); setMenuAnchor(null); }, []);
 
-  // Строка, по которой СЕЙЧАС идёт запись (результат) или взятие в работу —
-  // для визуального отклика в таблице (см. getRowClass и полосу прогресса ниже).
-  const busyRow = useMemo(() => {
-    if (updatingId == null && !takingId) return null;
-    return (rows || []).find((r) => r && (
-      (updatingId != null && String(r.Id) === String(updatingId))
-      || (takingId != null && r.compositeId === takingId)
-    )) || null;
-  }, [rows, updatingId, takingId]);
+  // Строка, по которой СЕЙЧАС идёт запись (результат) или взятие в работу:
+  // класс для лёгкой подсветки + кружок-лоадер в ячейке Id (см. IdCell).
+  // Контекст AG Grid: по нему ячейка Id понимает, что по задаче идёт действие.
+  // Объект мемоизирован — пока идёт/кончилось действие, идентичность не меняется
+  // и таблица не перерисовывается лишний раз.
+  const gridContext = useMemo(() => ({ updatingId, takingId }), [updatingId, takingId]);
 
-  const busyKind = useMemo(() => {
-    if (!busyRow) return null;
-    if (takingId != null && busyRow.compositeId === takingId) return "take";
-    return "update";
-  }, [busyRow, takingId]);
-
-  const busyLabel = busyKind === "take"
-    ? `Задача #${busyRow?.Id ?? ""} — берём в работу…`
-    : `Задача #${busyRow?.Id ?? ""} — обновляется…`;
+  // Сменилась «занятая» задача: обновляем ТОЛЬКО колонку Id (иначе ячейка не
+  // узнала бы о новом контексте) и перерисовываем строки, чтобы подсветка
+  // `tasks-row-busy` не осталась на уже свободной задаче. Обе операции дешёвые
+  // и вызываются дважды за действие — в начале и в конце.
+  useEffect(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    api.refreshCells?.({ columns: ["Id"], force: true });
+    api.redrawRows?.();
+  }, [gridContext]);
 
   const getRowClass = useMemo(() => (params) => {
     const data = params?.data;
@@ -502,22 +532,13 @@ export default function TasksGrid({
           {shownCount === null ? "" : `Найдено: ${shownCount} из ${rows.length}`}
         </Typography>
       </Box>
-      {/* Видно, что задача обновляется: строка подсвечена и «пульсирует»,
-          а здесь — полоса прогресса и подпись. */}
-      {busyRow && (
-        <Box data-testid="tasks-grid-busy" sx={{ mb: 0.5 }}>
-          <Typography variant="caption" sx={{ display: "block", fontWeight: 700, color: "#171c8f", mb: 0.25 }}>
-            {busyLabel}
-          </Typography>
-          <LinearProgress sx={{ height: 3, borderRadius: 1 }} />
-        </Box>
-      )}
       <Box sx={{ flex: 1, minHeight: 0, width: "100%" }}>
         <GridTable
           gridRef={gridRef}
           theme={themeQuartz}
           rowData={rows}
           columnDefs={columnDefs}
+          context={gridContext}
           defaultColDef={defaultColDef}
           getRowId={getRowId}
           gridOptions={gridOptions}
