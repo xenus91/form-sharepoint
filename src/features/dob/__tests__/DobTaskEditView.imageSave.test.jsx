@@ -137,11 +137,23 @@ describe("DobTaskEditView — сохранение картинок ссылко
     expect(savedHtml).not.toContain("/dob-api/");
   });
 
-  it("сохранённая ссылка показывается в редакторе рабочим адресом (dev — /dob-api)", async () => {
+  it("сохранённая ссылка показывается REST-запросом содержимого (dev — /dob-api, $value)", async () => {
     itemValue = '<p>Проверено</p><img src="/sites/dob/doblogistic/Lists/DobLogistic/Attachments/77/a.png">';
     const { host } = await renderForm();
     const editor = host.querySelector('[data-testid="rich-editor"]');
-    expect(editor.value).toContain("/dob-api/sites/dob/doblogistic/Lists/DobLogistic/Attachments/77/a.png");
+    // Прямой путь на файл показывать нельзя: прокси отдавал его как JSON, и картинка
+    // была битой. Показываем `$value` — он качается бинарём в любом окружении.
+    expect(editor.value).toContain("/dob-api/sites/dob/doblogistic/_api/web/getfilebyserverrelativeurl(");
+    expect(editor.value).toContain("Attachments/77/a.png')/$value");
+    expect(editor.value).not.toContain('src="/sites/');
+  });
+
+  it("картинка, вставленная из буфера, тоже отображается через $value (не прямой путь)", async () => {
+    // Как в жизни: адаптер получил ServerRelativeUrl и подставил адрес показа.
+    const { uploadedLink } = await import("../components/richUploadAdapter");
+    const link = uploadedLink({ ServerRelativeUrl: "/sites/obrazceo/Lists/List/Attachments/737/image_1.png" });
+    expect(link).toContain("/dob-api/sites/obrazceo/_api/web/getfilebyserverrelativeurl(");
+    expect(link).toContain("image_1.png')/$value");
   });
 
   it("если картинок нет — вложения не загружаются, текст сохраняется как есть", async () => {

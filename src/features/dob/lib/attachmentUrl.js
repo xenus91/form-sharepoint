@@ -4,8 +4,13 @@
 // • ХРАНИМ в SharePoint серверный путь — «/sites/dob/doblogistic/Lists/…/Attachments/<id>/<file>».
 //   Именно он отдаётся в rich-текст вместо base64: заявка сохраняется со ссылкой,
 //   а не с многокилобайтной строкой data:image.
-// • ПОКАЗЫВАЕМ рабочий адрес: в dev «/sites/…» не проксируется напрямую, поэтому
-//   добавляем префикс прокси «/dob-api»; в prod — абсолютный origin страницы.
+// • ПОКАЗЫВАЕМ рабочий адрес: REST-запрос за СОДЕРЖИМЫМ файла,
+//   «…/_api/web/getfilebyserverrelativeurl('<путь>')/$value» (в dev — через префикс
+//   прокси «/dob-api», в prod — с origin страницы). Почему не просто
+//   «/sites/…/Attachments/<id>/<file>»: такой путь вне `_api` прокси отдавал как
+//   JSON-запрос (`Accept: application/json`), и браузер получал испорченный файл —
+//   в richtext картинка выглядела «сломанной». `/$value` однозначен для любого
+//   прокси и всегда качается как бинарь.
 //
 // При сохранении (перед MERGE) ссылки прогоняются через attachmentStorageUrl, при
 // отображении (в редакторе) — через attachmentDisplayUrl. Так в базе никогда не
@@ -32,8 +37,22 @@ function originOf() {
   }
 }
 
+/** Признак REST-адреса содержимого файла (собранного нами или SharePoint). */
+const FILE_VALUE_RE = /getfilebyserverrelativeurl\(\s*['"]([^'"]+)['"]\s*\)\/(?:\$value|%24value)/i;
+
+/** Кодируем путь по сегментам: слэши остаются, всё остальное — %-escape. */
+function encodePath(path) {
+  return String(path || '').split('/').map(encodeURIComponent).join('/');
+}
+
 /**
  * Адрес для <img src> / window.open: рабочий в текущем окружении.
+ *
+ * Для серверного пути вложения («/sites/…/Lists/…/Attachments/<id>/<file>») отдаём
+ * REST-запрос содержимого файла (`…/_api/web/getfilebyserverrelativeurl('<путь>')/$value`)
+ * — он качается бинарём в любом окружении. Сайт берём из самого пути (всё, что до
+ * `/Lists/…`), поэтому ссылки обоих списков (основной и сайт ДОБ) раскрываются верно.
+ *
  * @param {string} serverRelativeUrl — «/sites/…» (как хранится), либо уже готовый URL
  * @returns {string}
  */
@@ -44,7 +63,27 @@ export function attachmentDisplayUrl(serverRelativeUrl) {
     // абсолютный http(s) — уже готов; прочие схемы (data:, blob:) не трогаем
     return url;
   }
-  if (PROXY_PREFIXES.some((prefix) => url === prefix || url.startsWith(`${prefix}/`))) return url;
+  const viaProxy = PROXY_PREFIXES.some((prefix) => url === prefix || url.startsWith(`${prefix}/`));
+
+  // Уже REST-адрес содержимого файла — только добавить префикс прокси/оригин.
+  if (FILE_VALUE_RE.test(url)) {
+    if (viaProxy) return url;
+    if (isDev()) return `/dob-api${url}`;
+    const origin = originOf();
+    return origin ? `${origin}${url}` : url;
+  }
+  if (viaProxy) return url;
+
+  // Прямая ссылка на файл вложения → REST-запрос содержимого.
+  const listsAt = url.indexOf('/Lists/');
+  const sitePath = listsAt > 0 ? url.slice(0, listsAt) : '';
+  if (sitePath) {
+    const rest = `${sitePath}/_api/web/getfilebyserverrelativeurl('${encodePath(url)}')/$value`;
+    if (isDev()) return `/dob-api${rest}`;
+    const origin = originOf();
+    return origin ? `${origin}${rest}` : rest;
+  }
+
   if (isDev()) return `/dob-api${url}`;
   const origin = originOf();
   return origin ? `${origin}${url}` : url;
@@ -57,8 +96,14 @@ export function attachmentDisplayUrl(serverRelativeUrl) {
  * @returns {string}
  */
 export function attachmentStorageUrl(url) {
-  const raw = String(url || '').trim();
+  let raw = String(url || '').trim();
   if (!raw) return '';
+  // REST-адрес содержимого файла → обратно к серверному пути (иначе после показа
+  // картинки в редакторе в хранилище попал бы «…/_api/web/getfilebyserverrelativeurl…»).
+  const rest = raw.match(FILE_VALUE_RE);
+  if (rest && rest[1]) {
+    try { raw = decodeURIComponent(rest[1]); } catch (_e) { void _e; raw = rest[1]; }
+  }
   if (raw.startsWith('/')) {
     for (const prefix of PROXY_PREFIXES) {
       if (raw === prefix) return '';

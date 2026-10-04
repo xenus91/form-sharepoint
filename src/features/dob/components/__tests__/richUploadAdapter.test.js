@@ -2,6 +2,8 @@
 // src/features/dob/components/__tests__/richUploadAdapter.test.js
 // Адаптер загрузки CKEditor: в тексте должна остаться ССЫЛКА на вложение,
 // а не base64 (иначе заявка сохраняется строкой data:image/…).
+// Ссылка — в АДРЕСЕ ПОКАЗА: REST-запрос содержимого файла (`…/$value`), потому что
+// прямой путь «/sites/…/Attachments/…» прокси отдавал как JSON, и картинка была битой.
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 import { makeUploadAdapter, uploadedLink } from "../richUploadAdapter";
@@ -31,7 +33,8 @@ describe("richUploadAdapter — картинки как вложения", () =>
 
     expect(onUploadImage).toHaveBeenCalledWith(FILE);
     expect(out.default).toBe(
-      "/dob-api/sites/dob/doblogistic/Lists/DobLogistic/Attachments/7/photo.png",
+      "/dob-api/sites/dob/doblogistic/_api/web/getfilebyserverrelativeurl(" +
+      "'/sites/dob/doblogistic/Lists/DobLogistic/Attachments/7/photo.png')/$value",
     );
     expect(out.default).not.toMatch(/^data:/);
   });
@@ -41,14 +44,16 @@ describe("richUploadAdapter — картинки как вложения", () =>
     const adapter = makeUploadAdapter(loaderWith(FILE), vi.fn().mockResolvedValue(SAVED));
     const out = await adapter.upload();
     expect(out.default).toBe(
-      `${window.location.origin}/sites/dob/doblogistic/Lists/DobLogistic/Attachments/7/photo.png`,
+      `${window.location.origin}/sites/dob/doblogistic/_api/web/getfilebyserverrelativeurl(` +
+      "'/sites/dob/doblogistic/Lists/DobLogistic/Attachments/7/photo.png')/$value",
     );
   });
 
   it("страница может вернуть готовую строку-путь", () => {
     vi.stubEnv("DEV", true);
     expect(uploadedLink("/sites/dob/Lists/L/Attachments/1/a.png")).toBe(
-      "/dob-api/sites/dob/Lists/L/Attachments/1/a.png",
+      "/dob-api/sites/dob/_api/web/getfilebyserverrelativeurl(" +
+      "'/sites/dob/Lists/L/Attachments/1/a.png')/$value",
     );
     expect(uploadedLink(null)).toBe("");
   });

@@ -257,7 +257,10 @@ export default function ContentTypeResultDialog({
         const next = { ...prev };
         for (const [key, value] of Object.entries(prev)) {
           if (typeof value !== "string" || !value.includes("<img")) continue;
-          const cleaned = removeImgByFileName(value, fileName);
+          // Значения в редакторе — в АДРЕСАХ ПОКАЗА (`…/$value` через прокси), а
+          // сравнение идёт по серверному пути, иначе имя файла из адреса не
+          // вытащить. После чистки возвращаем рабочий адрес редактору.
+          const cleaned = toDisplayImages(removeImgByFileName(toStorageImages(value), fileName));
           if (cleaned !== value) {
             next[key] = cleaned;
             changed = true;
