@@ -5,8 +5,9 @@
 //   • «в работе»  → кнопки результатов по ContentType (порядок и подписи — как в карточке)
 //                   + «Изменить»;
 //   • чужая задача «в работе» → плашка «В работе у X» вместо кнопок результатов;
-//   • задачи внешнего источника (dob) → «Взять в работу» + «Изменить» (read-only карточка);
-//   • завершённая задача → только «Изменить».
+//   • задачи ДОБ (внешний источник и main-задачи «Результат проверки ООБ») →
+//     «Взять в работу», а «Изменить» появляется ТОЛЬКО после взятия в работу;
+//   • завершённая задача (любая) → ни одной кнопки, только плашка «Задача завершена».
 
 import { describe, it, expect, vi } from "vitest";
 import { buildRowActions, resultActionSx, primaryActionSx, DEFAULT_TAKE_SX } from "../lib/rowActions";
@@ -35,7 +36,7 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(actions[1].variant).toBe("outlined");
   });
 
-  it("main-задача «Результат проверки ООБ» (externalLike): без кнопок результата, только «Изменить»", () => {
+  it("main-задача «Результат проверки ООБ» (externalLike): без кнопок результата, «Изменить» — после взятия", () => {
     // Как у задач dob: результат и поля собирает форма ДОБ, в карточке/таблице
     // кнопок результата нет (иначе был бы «молчаливый» обход формы).
     const onResult = vi.fn();
@@ -52,6 +53,13 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(onResult).not.toHaveBeenCalled();
     actions[0].onClick();
     expect(onEdit).toHaveBeenCalledTimes(1);
+
+    // Не взята в работу: единственное действие — «Взять в работу».
+    const notStarted = buildRowActions(
+      { sourceId: "main", Id: 14, Status: "Не начата", PercentComplete: 0 },
+      { canTake: true, externalLike: true, onEdit, choices: ["Годен"] },
+    );
+    expect(labels(notStarted)).toEqual(["Взять в работу"]);
   });
 
   it("main «в работе»: кнопки результатов по типу контента + «Изменить»", () => {
@@ -128,25 +136,49 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(labels(actions)).toEqual(["Взять в работу", "Изменить"]);
   });
 
-  it("завершённая задача — только «Изменить»", () => {
-    const actions = buildRowActions(MAIN_DONE, { canTake: false, choices: ["Найдена"] });
-    expect(labels(actions)).toEqual(["Изменить"]);
+  it("завершённая задача — кнопок нет вообще (только плашка «Задача завершена»)", () => {
+    const actions = buildRowActions(MAIN_DONE, { canTake: true, choices: ["Найдена"], updating: false });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ key: "completed", kind: "info", label: "Задача завершена" });
+    expect(actions[0].onClick).toBeUndefined();
+
+    // завершённая dob-задача — то же самое: ни «Взять в работу», ни «Изменить»
+    const dobDone = buildRowActions(
+      { sourceId: "dob", Id: 3, Status: "Завершена", PercentComplete: 1 },
+      { canTake: true },
+    );
+    expect(labels(dobDone)).toEqual(["Задача завершена"]);
+    expect(dobDone[0].kind).toBe("info");
   });
 
-  it("внешний источник (dob): «Взять в работу» + «Изменить», без результата", () => {
+  it("внешний источник (dob): сначала только «Взять в работу», «Изменить» — после взятия", () => {
     const onTake = vi.fn();
+    const onEdit = vi.fn();
     const actions = buildRowActions(DOB_NOT_STARTED, {
       canTake: true,
       choices: ["Найдена"], // у dob результатов не показываем — карточка read-only
       onTake,
+      onEdit,
     });
-    expect(labels(actions)).toEqual(["Взять в работу", "Изменить"]);
+    expect(labels(actions)).toEqual(["Взять в работу"]);
     actions[0].onClick();
     expect(onTake).toHaveBeenCalledTimes(1);
+    expect(onEdit).not.toHaveBeenCalled();
 
-    // dob-задача уже в работе: взять нельзя, «Изменить» остаётся
-    const inProgress = buildRowActions(DOB_IN_PROGRESS, { canTake: false });
+    // взята в работу (мной): «Изменить» доступна, «Взять в работу» больше нет
+    const inProgress = buildRowActions(DOB_IN_PROGRESS, { canTake: false, onEdit });
     expect(labels(inProgress)).toEqual(["Изменить"]);
+    inProgress[0].onClick();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+
+    // взята другим — только плашка, никаких кнопок
+    const foreign = buildRowActions(DOB_IN_PROGRESS, {
+      canTake: false,
+      takenByOther: true,
+      takerLabel: "Иванов Пётр",
+    });
+    expect(labels(foreign)).toEqual(["В работе у Иванов Пётр"]);
+    expect(foreign[0].kind).toBe("info");
   });
 
   it("«Взять в работу» выглядит как кнопка карточки, stylingActions.takeInWork имеет приоритет", () => {
@@ -202,8 +234,8 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(resultActionSx(null)).toEqual({});
   });
 
-  it("«Изменить» есть в меню ВСЕГДА и закреплена внизу (в т.ч. у «образцовых»/dob)", () => {
-    // dob-строка «в работе»: взять нельзя — «Изменить» обязана остаться
+  it("«Изменить» у main-задач закреплена внизу; у dob — только после взятия в работу", () => {
+    // dob-строка «в работе» (взята мной): взять нельзя — «Изменить» доступна
     const dob = buildRowActions({ sourceId: "dob", Id: 2, Status: "В работе" }, { canTake: false });
     expect(labels(dob)).toEqual(["Изменить"]);
     expect(dob.at(-1).sticky).toBe(true);
@@ -216,11 +248,20 @@ describe("buildRowActions — паритет с карточкой", () => {
     const notSticky = many.filter((a) => !a.sticky);
     expect(notSticky).toHaveLength(10);
 
-    // у всех веток (main/dob, любой статус) ровно одна «Изменить»
-    for (const row of [MAIN_NOT_STARTED, MAIN_IN_PROGRESS, MAIN_DONE, MAIN_CANCELLED, DOB_NOT_STARTED, DOB_IN_PROGRESS]) {
+    // «Изменить» ровно одна там, где она положена правилами 2026-10-04
+    const expectEdits = (row, count) => {
       const actions = buildRowActions(row, { canTake: true, choices: ["Найдена"] });
-      expect(actions.filter((a) => a.key === "edit")).toHaveLength(1);
-    }
+      expect(actions.filter((a) => a.key === "edit")).toHaveLength(count);
+    };
+    // main: у незавершённых — есть (даже «Отменена»), у завершённой — нет
+    expectEdits(MAIN_NOT_STARTED, 1);
+    expectEdits(MAIN_IN_PROGRESS, 1);
+    expectEdits(MAIN_CANCELLED, 1);
+    expectEdits(MAIN_DONE, 0);
+    // dob: до взятия в работу — нет, после — есть, у завершённой — нет
+    expectEdits(DOB_NOT_STARTED, 0);
+    expectEdits(DOB_IN_PROGRESS, 1);
+    expectEdits({ sourceId: "dob", Id: 4, Status: "Завершена", PercentComplete: 1 }, 0);
   });
 
   it("resolveEditor: кнопка результата получает инлайн-форму для поповера", () => {

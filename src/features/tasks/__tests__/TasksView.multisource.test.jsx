@@ -24,7 +24,7 @@ const DOB_LIST = "/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')";
 const MAIN_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems", "ResultSearchTHU", "Location1", "OffDepKey", "AdditionalsActionsRequired", "AdditionalActions"];
 const DOB_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems"];
 
-const state = vi.hoisted(() => ({ requests: [], behaviourOverride: null, thuChoices: null }));
+const state = vi.hoisted(() => ({ requests: [], behaviourOverride: null, thuChoices: null, dobTaken: {} }));
 
 const MAIN_TASK = {
   Id: 10,
@@ -355,14 +355,24 @@ vi.mock("../../dob/api/dobClient", () => {
     if (d.includes(`${DOB_LIST}/fields`)) return { data: { d: { results: fieldDefs(DOB_FIELDS) } } };
     if (d.includes(`${DOB_LIST}/items`)) {
       const filter = parseFilter(u);
-      const rows = [DOB_TASK];
-      if (/AssignedToId eq 33/.test(filter)) rows.push(DOB_GROUP_TASK);
+      // После «Взять в работу» (MERGE статуса) элемент реально меняется на сайте —
+      // мок отражает это, иначе «Изменить после взятия» нечем проверить.
+      const applyTaken = (row) => (state.dobTaken[row.Id]
+        ? { ...row, ...state.dobTaken[row.Id] }
+        : row);
+      const rows = [applyTaken(DOB_TASK)];
+      if (/AssignedToId eq 33/.test(filter)) rows.push(applyTaken(DOB_GROUP_TASK));
       return { data: { d: { results: rows.filter((r) => filter.includes(`eq ${r.AssignedTo.results[0].Id}`)) } } };
     }
     return { data: { d: { results: [] } } };
   };
   const post = async (url, body) => {
     state.requests.push({ source: "dob", url: String(url), method: "MERGE", body });
+    // Взятие в работу: статус + Editor (как это делает SharePoint).
+    const itemId = Number(String(url).match(/items\((\d+)\)/)?.[1]);
+    if (Number.isFinite(itemId) && body?.Status === "В работе") {
+      state.dobTaken[itemId] = { Status: "В работе", PercentComplete: 0, Editor: { Id: 207, Title: "Поршаков Сергей" } };
+    }
     return { data: { d: {} }, status: 204 };
   };
   return {
@@ -453,6 +463,7 @@ async function clickByText(host, re) {
 describe("TasksView — multi-source (#tasks)", () => {
   beforeEach(() => {
     state.requests = [];
+    state.dobTaken = {};
     state.behaviourOverride = null;
     localStorage.clear();
     sessionStorage.clear();
@@ -476,7 +487,20 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect([...dobCard.querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(true);
     expect(dobCard.textContent).not.toContain("DOB Logistic");
     expect(dobCard.textContent).not.toMatch(/другого (сайта|источника)/i);
-    expect([...dobCard.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(true);
+    // До взятия в работу формы задачи нет: единственная кнопка — «Взять в работу».
+    expect([...dobCard.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(false);
+
+    // Взяли в работу → появилась «Изменить» (требование 2026-10-04)
+    await act(async () => {
+      [...dobCard.querySelectorAll("button")].find((b) => /Взять в работу/.test(b.textContent || ""))
+        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    await settle(600);
+    const dobCardAfter = [...host.querySelectorAll('[data-testid="external-task-card"]')]
+      .find((el) => /Заявка ООБ/.test(el.textContent || ""));
+    expect([...dobCardAfter.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(true);
+    expect([...dobCardAfter.querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(false);
 
     // main-задача тоже на месте
     expect(host.textContent).toContain("Основная задача ООБ");
@@ -712,10 +736,11 @@ describe("TasksView — multi-source (#tasks)", () => {
     const styleText = paper.getAttribute("style") || "";
     expect(styleText).toContain("240px");
     expect(styleText).toContain("360px");
-    // и в нём — действия карточки этой задачи
-    expect(popupButtons().length).toBe(2);
+    // В нём — действия карточки этой задачи. Задача ещё «Не начата»: формы у неё
+    // нет, единственное действие — «Взять в работу» (правило 2026-10-04).
+    expect(popupButtons().length).toBe(1);
     expect(findButton(/Взять в работу/)).toBeTruthy();
-    expect(findButton(/Изменить/)).toBeTruthy();
+    expect(findButton(/Изменить/)).toBeFalsy();
 
     // «Взять в работу» из попапа шлёт MERGE статуса в список источника
     await act(async () => {
@@ -728,8 +753,13 @@ describe("TasksView — multi-source (#tasks)", () => {
     // после действия попап закрылся
     expect(popup()).toBeNull();
 
-    // «Изменить» открывает форму задачи источника (её же роут из карточки)
+    // Список перечитан: задача уже «В работе» (взята) → в попапе появилась «Изменить»
+    await settle(800);
     await clickCell(rowByText(/Заявка ООБ/), 300, 400);
+    expect(findButton(/Взять в работу/)).toBeFalsy();
+    expect(findButton(/Изменить/)).toBeTruthy();
+
+    // «Изменить» открывает форму задачи источника (её же роут из карточки)
     const hashBeforeEdit = window.location.hash;
     await act(async () => {
       findButton(/Изменить/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));

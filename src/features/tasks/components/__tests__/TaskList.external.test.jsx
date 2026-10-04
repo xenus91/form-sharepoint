@@ -135,8 +135,26 @@ describe("TaskList — карточки из нескольких источни
     expect(card.textContent).toContain("В работе у вас");
   });
 
+  it("«Изменить» появляется ТОЛЬКО после взятия в работу (не начата → кнопки нет)", () => {
+    const tasks = [DOB_TASK]; // «Не начата», исполнителя нет
+    const host = render(
+      <TaskList
+        tasks={tasks}
+        tab={0}
+        groupedTasks={[["Все", tasks]]}
+        filteredTasks={tasks}
+        groupingEnabled={false}
+        onOpenExternalTask={() => {}}
+      />
+    );
+    const card = host.querySelector('[data-testid="external-task-card"]');
+    expect([...card.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(false);
+    expect([...card.querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(true);
+  });
+
   it("кнопка «Изменить» вызывает onOpen с задачей (переход в форму источника)", () => {
-    const tasks = [DOB_TASK];
+    // задача взята мной в работу — форма доступна
+    const tasks = [{ ...DOB_TASK, Status: "В работе", EditorTitle: "Поршаков Сергей", EditorId: 207 }];
     let opened = null;
     const host = render(
       <TaskList
@@ -145,6 +163,7 @@ describe("TaskList — карточки из нескольких источни
         groupedTasks={[["Все", tasks]]}
         filteredTasks={tasks}
         groupingEnabled={false}
+        externalCurrentUserIds={{ dob: 207 }}
         onOpenExternalTask={(t) => { opened = t; }}
       />
     );
@@ -153,6 +172,23 @@ describe("TaskList — карточки из нескольких источни
     act(() => { btn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true })); });
     expect(opened).toBeTruthy();
     expect(opened.compositeId).toBe("dob:1");
+  });
+
+  it("у завершённой задачи кнопок нет вообще", () => {
+    const tasks = [{ ...DOB_TASK, Status: "Завершена", PercentComplete: 1 }];
+    const host = render(
+      <TaskList
+        tasks={tasks}
+        tab={0}
+        groupedTasks={[["Все", tasks]]}
+        filteredTasks={tasks}
+        groupingEnabled={false}
+        onOpenExternalTask={() => {}}
+        onTakeExternalTask={() => {}}
+      />
+    );
+    const card = host.querySelector('[data-testid="external-task-card"]');
+    expect(card.querySelectorAll("button")).toHaveLength(0);
   });
 
   it("без внешних задач карточек внешнего источника нет", () => {

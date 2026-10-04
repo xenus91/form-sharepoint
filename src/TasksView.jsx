@@ -1040,6 +1040,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return Array.isArray(choices) ? choices.map(String) : [];
   }, [rowChoices, resultFieldMetaForRow, choices]);
 
+  /**
+   * Выделение строки таблицы. Обновление состояния страницы (счётчики, подсказка
+   * под таблицей) — низкоприоритетное: `startTransition` не блокирует открытие
+   * поповера действий, поэтому клик по строке ощущается мгновенным.
+   */
+  const handleSelectTableRow = useCallback((compositeId) => {
+    React.startTransition(() => setSelectedTableRow(compositeId));
+  }, []);
+
   const getTableRowActions = useCallback((row) => {
     // Тип контента строки может быть незнакомым/отсутствовать — работаем с
     // обогащённой строкой, чтобы попап не отличался от карточки.
@@ -1258,7 +1267,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               rows={tableData.rows}
               loading={tableData.isLoading}
               error={tableData.error?.message || null}
-              onSelectRow={setSelectedTableRow}
+              onSelectRow={handleSelectTableRow}
               onRowOpen={(compositeId) => openTaskFormResolved(withCtMeta((tableData.rows || []).find((r) => r.compositeId === compositeId) || null), compositeId)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора
               getRowActions={getTableRowActions}
@@ -1266,6 +1275,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               onTakeRow={handleTakeTableRow}
               canTakeRow={canTakeTableRow}
               takingId={externalTakingId}
+              updatingId={updatingId}
             />
           </Box>
         </Box>

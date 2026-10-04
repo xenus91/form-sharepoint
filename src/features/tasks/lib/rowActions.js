@@ -8,8 +8,15 @@
 //     результата этого типа контента, вид — из TaskBehaviour.stylingResultButton);
 //   • задачу уже взял другой пользователь → в карточке кнопок нет, там плашка
 //     «В работе у X» — повторяем её как информационный пункт;
-//   • «Изменить» → форма задачи (как кнопка «Изменить» карточки внешней задачи),
-//     закреплена внизу меню — видна всегда.
+//   • «Изменить» → форма задачи (как кнопка «Изменить» карточки внешней задачи).
+//
+// Уточнения 2026-10-04 (раунд 14):
+//   • ЗАВЕРШЁННЫЕ задачи (любого источника) — кнопок нет вообще: только
+//     информационная плашка «Задача завершена»;
+//   • задачи ДОБ (внешний источник и main-задачи «Результат проверки ООБ»):
+//     сначала только «Взять в работу», а «Изменить» появляется ПОСЛЕ взятия
+//     (задача в работе и не у другого пользователя). До взятия форма задачи
+//     недоступна — так задачу нельзя «изменить» в обход взятия в работу.
 //
 // Модуль чистый: все зависимости (можно ли взять, choices, стили, иконки,
 // обработчики) приходят в opts — поэтому паритет с карточкой проверяется
@@ -149,20 +156,47 @@ export function buildRowActions(row, opts = {}) {
   const inProgress = isInProgressStatus(status);
   const notStarted = isNotStartedStatus(status);
 
-  // Внешний источник (dob) и задачи-«Диалог ДОБ» (тип «Результат проверки ООБ»):
-  // карточка read-only — «Взять в работу» + «Изменить», без кнопок результата.
-  if ((row.sourceId && row.sourceId !== "main") || externalLike) {
+  const editAction = (disabled) => ({
+    key: "edit",
+    label: "Изменить",
+    icon: "edit",
+    variant: "outlined",
+    sx: { ...DEFAULT_EDIT_SX },
+    sticky: true,
+    disabled,
+    onClick: () => onEdit?.(),
+  });
+
+  // Плашка «Задача завершена»: завершённые задачи не редактируются и не берутся
+  // в работу — кнопок нет ни у main, ни у внешних источников (в карточке то же).
+  const completedInfo = () => ({
+    key: "completed",
+    kind: "info",
+    label: "Задача завершена",
+    hint: "Действия по завершённой задаче недоступны.",
+  });
+
+  // Задача ДОБ: внешний источник (dob) либо main-задача типа «Результат проверки
+  // ООБ». Форма задачи (как и кнопки результата) — только после взятия в работу.
+  const dobLike = (row.sourceId && row.sourceId !== "main") || externalLike;
+
+  if (completed) return [completedInfo()];
+
+  if (dobLike) {
     if (canTake) actions.push(takeAction(taking));
-    actions.push({
-      key: "edit",
-      label: "Изменить",
-      icon: "edit",
-      variant: "outlined",
-      sx: { ...DEFAULT_EDIT_SX },
-      sticky: true,
-      disabled: taking,
-      onClick: () => onEdit?.(),
-    });
+    if (inProgress) {
+      if (takenByOther) {
+        actions.push({
+          key: "taken-by-other",
+          kind: "info",
+          label: `В работе у ${takerLabel || "другого пользователя"}`,
+          hint: "Задача уже взята другим пользователем. Возьмите другую задачу.",
+        });
+      } else {
+        // Взята в работу (мной) → доступна «Изменить»: форма ДОБ по кнопке.
+        actions.push(editAction(taking));
+      }
+    }
     return actions;
   }
 
@@ -198,15 +232,8 @@ export function buildRowActions(row, opts = {}) {
     }
   }
 
-  actions.push({
-    key: "edit",
-    label: "Изменить",
-    icon: "edit",
-    variant: "outlined",
-    sx: { ...DEFAULT_EDIT_SX },
-    sticky: true, // закреплена внизу меню — видна всегда, даже если кнопок много
-    disabled: updating || taking,
-    onClick: () => onEdit?.(),
-  });
+  // «Изменить» у main-задач: закреплена внизу меню — видна всегда, даже если
+  // кнопок много. У завершённых её нет (выше возвращается только плашка).
+  actions.push(editAction(updating || taking));
   return actions;
 }

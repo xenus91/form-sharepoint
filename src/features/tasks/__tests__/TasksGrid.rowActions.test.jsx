@@ -164,7 +164,7 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(openPopup().textContent).toContain("#1");
   });
 
-  it("без getRowActions работает legacy-набор «Взять в работу» + «Изменить»", async () => {
+  it("без getRowActions работает тот же набор правил (dob: «Взять в работу»)", async () => {
     const onTakeRow = vi.fn();
     const onEditRow = vi.fn();
     const { host } = renderGrid({
@@ -174,9 +174,11 @@ describe("TasksGrid — действия в точке клика", () => {
     });
     await settle(400);
 
+    // dob-строка «Не начата»: единственное действие — «Взять в работу»
+    // («Изменить» появится после взятия — правило 2026-10-04).
     await clickCell(rowByText(host, /Заявка ООБ/), 200, 300);
     const labels = popupButtons().map((b) => b.textContent);
-    expect(labels).toEqual(["Взять в работу", "Изменить"]);
+    expect(labels).toEqual(["Взять в работу"]);
 
     await act(async () => {
       popupButtons().find((b) => b.textContent === "Взять в работу")
@@ -186,9 +188,86 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(onTakeRow).toHaveBeenCalledTimes(1);
     expect(onTakeRow.mock.calls[0][0].compositeId).toBe("dob:1");
 
-    // у строки, которую нельзя взять, кнопки «Взять в работу» нет
+    // у main-строки «в работе» кнопки «Взять в работу» нет, «Изменить» остаётся
     await clickCell(rowByText(host, /Основная задача ООБ/), 200, 300);
     expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
+  });
+
+  it("идёт обновление задачи: строка подсвечена, видна подпись и полоса прогресса", async () => {
+    const { host } = renderGrid({
+      updatingId: 10,
+      getRowActions: () => [{ key: "edit", label: "Изменить", icon: "edit" }],
+    });
+    await settle(400);
+
+    // подпись и полоса прогресса над таблицей
+    const busy = host.querySelector('[data-testid="tasks-grid-busy"]');
+    expect(busy).toBeTruthy();
+    expect(busy.textContent).toContain("Задача #10 — обновляется");
+    expect(busy.querySelector(".MuiLinearProgress-root")).toBeTruthy();
+
+    // строка обновляемой задачи помечена классом (CSS-пульсация + бегущая полоса)
+    const rows = [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
+    const busyRow = rows.find((r) => /Основная задача ООБ/.test(r.textContent || ""));
+    const idleRow = rows.find((r) => /Заявка ООБ/.test(r.textContent || ""));
+    expect(busyRow.className).toContain("tasks-row-busy");
+    expect(busyRow.className).toContain("tasks-row-updating");
+    expect(idleRow.className || "").not.toContain("tasks-row-busy");
+  });
+
+  it("взятие в работу внешней задачи тоже видно в таблице", async () => {
+    const { host } = renderGrid({
+      takingId: "dob:1",
+      getRowActions: () => [{ key: "edit", label: "Изменить", icon: "edit" }],
+    });
+    await settle(400);
+
+    const busy = host.querySelector('[data-testid="tasks-grid-busy"]');
+    expect(busy.textContent).toContain("Задача #1 — берём в работу");
+    const rows = [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
+    const busyRow = rows.find((r) => /Заявка ООБ/.test(r.textContent || ""));
+    expect(busyRow.className).toContain("tasks-row-taking");
+  });
+
+  it("индикатор обновления исчезает, когда запись завершена", async () => {
+    const { host, root } = renderGrid({ updatingId: 10, getRowActions: () => [] });
+    await settle(400);
+    expect(host.querySelector('[data-testid="tasks-grid-busy"]')).toBeTruthy();
+
+    act(() => {
+      root.render(
+        <ThemeProvider theme={createTheme()}>
+          <TasksGrid rows={ROWS} updatingId={null} getRowActions={() => []} />
+        </ThemeProvider>
+      );
+    });
+    await settle(200);
+    expect(host.querySelector('[data-testid="tasks-grid-busy"]')).toBeNull();
+  });
+
+  it("открытие/закрытие поповера не пересобирает таблицу (быстрый отклик)", async () => {
+    const { host } = renderGrid({
+      getRowActions: () => [{ key: "edit", label: "Изменить", icon: "edit" }],
+    });
+    await settle(400);
+    const gridNode = host.querySelector(".ag-root-wrapper");
+    expect(gridNode).toBeTruthy();
+
+    // Запоминаем DOM-узел ЯЧЕЙКИ: если бы таблица перерисовывалась при открытии
+    // поповера, AG Grid пересоздал бы строки/ячейки.
+    const cellNode = host.querySelector(".ag-center-cols-container .ag-row .ag-cell");
+    await clickCell(rowByText(host, /Заявка ООБ/), 200, 300);
+    expect(openPopup()).toBeTruthy();
+    expect(host.querySelector(".ag-root-wrapper")).toBe(gridNode);
+    expect(host.querySelector(".ag-center-cols-container .ag-row .ag-cell")).toBe(cellNode);
+
+    // закрытие тоже не должно трогать таблицу
+    await act(async () => {
+      document.body.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true }));
+      document.body.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 160));
+    });
+    expect(host.querySelector(".ag-center-cols-container .ag-row .ag-cell")).toBe(cellNode);
   });
 
   it("информационный пункт («В работе у X») рисуется плашкой без кнопки", async () => {

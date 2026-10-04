@@ -21,6 +21,7 @@ import {
   Divider,
   IconButton,
   InputAdornment,
+  LinearProgress,
   Popover,
   Stack,
   TextField,
@@ -34,6 +35,7 @@ import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
+import { buildRowActions } from "../lib/rowActions";
 import ResultInlineEditor from "./ResultInlineEditor";
 
 // Регистрируем все community-модули AG Grid (иначе AG Grid error #272
@@ -133,6 +135,9 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
       marginThreshold={12}
       disableAutoFocus
       disableRestoreFocus
+      // Поповер должен открываться «мгновенно»: стандартные 225 мс входа и
+      // 195 мс выхода ощущались как задержка при клике по строке.
+      transitionDuration={{ enter: 110, exit: 80 }}
       slotProps={{
         paper: {
           className: "tasks-row-actions",
@@ -202,6 +207,52 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
 });
 
 /**
+ * Сама таблица AG Grid — ВЫНЕСЕНА в memo-компонент.
+ *
+ * Зачем: состояние поповера действий (menuRow/menuAnchor) живёт в `TasksGrid`.
+ * Если рендерить AgGridReact там же, каждое открытие/закрытие/скролл меню
+ * перерисовывало ВСЮ таблицу — это и давало заметные тормоза при клике по строке.
+ * Все пропсы ниже мемоизированы, поэтому memo реально пропускает перерисовку.
+ */
+const GridTable = memo(function GridTable({
+  gridRef,
+  theme,
+  rowData,
+  columnDefs,
+  defaultColDef,
+  getRowId,
+  gridOptions,
+  quickFilterText,
+  getRowClass,
+  onModelUpdated,
+  onSelectionChanged,
+  onCellClicked,
+  onRowDoubleClicked,
+  onBodyScroll,
+}) {
+  return (
+    <AgGridReact
+      ref={gridRef}
+      theme={theme}
+      rowData={rowData}
+      columnDefs={columnDefs}
+      defaultColDef={defaultColDef}
+      getRowId={getRowId}
+      gridOptions={gridOptions}
+      quickFilterText={quickFilterText}
+      getRowClass={getRowClass}
+      onModelUpdated={onModelUpdated}
+      onSelectionChanged={onSelectionChanged}
+      onCellClicked={onCellClicked}
+      onRowDoubleClicked={onRowDoubleClicked}
+      // При прокрутке строк координата клика «уезжает» — закрываем меню.
+      onBodyScroll={onBodyScroll}
+      suppressCellFocus
+    />
+  );
+});
+
+/**
  * @param {object} props
  * @param {Array<any>} props.rows — задачи с compositeId
  * @param {(compositeId:string|null) => void} [props.onSelectRow] — выделение строки
@@ -212,6 +263,9 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
  * @param {(row:object) => void} [props.onTakeRow] — «Взять в работу» (legacy-фолбэк)
  * @param {(row:object) => boolean} [props.canTakeRow] — можно ли взять строку в работу
  * @param {string|null} [props.takingId] — compositeId строки, которая берётся в работу
+ * @param {number|string|null} [props.updatingId] — Id задачи, по которой идёт запись
+ *        (завершение результата): строка подсвечивается и «пульсирует», а над
+ *        таблицей видно, что задача обновляется
  * @param {boolean} [props.showSourceColumn=false] — колонка источника (debug)
  * @param {boolean} [props.loading]
  * @param {string} [props.error]
@@ -228,6 +282,7 @@ export default function TasksGrid({
   onTakeRow,
   canTakeRow,
   takingId = null,
+  updatingId = null,
   showSourceColumn = false,
   loading = false,
   error = null,
@@ -274,37 +329,55 @@ export default function TasksGrid({
 
   const closeActions = useMemo(() => () => { setMenuRow(null); setMenuAnchor(null); }, []);
 
+  // Строка, по которой СЕЙЧАС идёт запись (результат) или взятие в работу —
+  // для визуального отклика в таблице (см. getRowClass и полосу прогресса ниже).
+  const busyRow = useMemo(() => {
+    if (updatingId == null && !takingId) return null;
+    return (rows || []).find((r) => r && (
+      (updatingId != null && String(r.Id) === String(updatingId))
+      || (takingId != null && r.compositeId === takingId)
+    )) || null;
+  }, [rows, updatingId, takingId]);
+
+  const busyKind = useMemo(() => {
+    if (!busyRow) return null;
+    if (takingId != null && busyRow.compositeId === takingId) return "take";
+    return "update";
+  }, [busyRow, takingId]);
+
+  const busyLabel = busyKind === "take"
+    ? `Задача #${busyRow?.Id ?? ""} — берём в работу…`
+    : `Задача #${busyRow?.Id ?? ""} — обновляется…`;
+
+  const getRowClass = useMemo(() => (params) => {
+    const data = params?.data;
+    if (!data) return undefined;
+    const updating = updatingId != null && String(data.Id) === String(updatingId);
+    const taking = takingId != null && data.compositeId === takingId;
+    if (!updating && !taking) return undefined;
+    return taking ? "tasks-row-busy tasks-row-taking" : "tasks-row-busy tasks-row-updating";
+  }, [updatingId, takingId]);
+
   // Полный набор действий строки: приоритет — getRowActions (TasksView собирает
-  // его из тех же данных, что и карточка); иначе — legacy-фолбэк «Взять / Изменить».
+  // его из тех же данных, что и карточка); иначе — ТОТ ЖЕ сборщик правил
+  // (buildRowActions), чтобы фолбэк не расходился с основным поведением
+  // (у dob «Изменить» — после взятия, у завершённых кнопок нет).
   const actionsForRow = useMemo(() => (row) => {
     if (!row) return [];
     if (typeof getRowActions === "function") {
       try {
         const list = getRowActions(row);
         if (Array.isArray(list)) return list;
-      } catch (_e) { void _e; /* показываем legacy-набор */ }
+      } catch (_e) { void _e; /* показываем фолбэк */ }
     }
-    const fallback = [];
-    const canTake = typeof canTakeRow === "function" && canTakeRow(row);
-    if (canTake) {
-      fallback.push({
-        key: "take",
-        label: "Взять в работу",
-        icon: "take",
-        variant: "outlined",
-        disabled: !!takingId && takingId === row.compositeId,
-        onClick: () => onTakeRow?.(row),
-      });
-    }
-    fallback.push({
-      key: "edit",
-      label: "Изменить",
-      icon: "edit",
-      variant: "contained",
-      onClick: () => onEditRow?.(row),
+    return buildRowActions(row, {
+      canTake: typeof canTakeRow === "function" ? canTakeRow(row) : false,
+      taking: !!takingId && takingId === row.compositeId,
+      updating: updatingId != null && String(row.Id) === String(updatingId),
+      onTake: () => onTakeRow?.(row),
+      onEdit: () => onEditRow?.(row),
     });
-    return fallback;
-  }, [getRowActions, canTakeRow, takingId, onTakeRow, onEditRow]);
+  }, [getRowActions, canTakeRow, takingId, updatingId, onTakeRow, onEditRow]);
 
   // Пересчёт счётчика строк при любом изменении модели (поиск/фильтр/данные).
   const onModelUpdated = useMemo(() => (event) => {
@@ -349,6 +422,13 @@ export default function TasksGrid({
     closeActions();
     if (typeof onSelectRow === "function") onSelectRow(null);
   }, [rows.length, onSelectRow, closeActions]);
+
+  // Действия собираются ОДИН раз на открытие меню (а не на каждый рендер):
+  // сборка дёргает Behaviour/ContentType строки — это самый «дорогой» шаг клика.
+  const menuActions = useMemo(
+    () => (menuRow ? actionsForRow(menuRow) : []),
+    [menuRow, actionsForRow],
+  );
 
   // Строка могла исчезнуть из данных (обновился источник) — закрываем popup.
   useEffect(() => {
@@ -422,9 +502,19 @@ export default function TasksGrid({
           {shownCount === null ? "" : `Найдено: ${shownCount} из ${rows.length}`}
         </Typography>
       </Box>
+      {/* Видно, что задача обновляется: строка подсвечена и «пульсирует»,
+          а здесь — полоса прогресса и подпись. */}
+      {busyRow && (
+        <Box data-testid="tasks-grid-busy" sx={{ mb: 0.5 }}>
+          <Typography variant="caption" sx={{ display: "block", fontWeight: 700, color: "#171c8f", mb: 0.25 }}>
+            {busyLabel}
+          </Typography>
+          <LinearProgress sx={{ height: 3, borderRadius: 1 }} />
+        </Box>
+      )}
       <Box sx={{ flex: 1, minHeight: 0, width: "100%" }}>
-        <AgGridReact
-          ref={gridRef}
+        <GridTable
+          gridRef={gridRef}
           theme={themeQuartz}
           rowData={rows}
           columnDefs={columnDefs}
@@ -432,20 +522,19 @@ export default function TasksGrid({
           getRowId={getRowId}
           gridOptions={gridOptions}
           quickFilterText={quickFilter}
+          getRowClass={getRowClass}
           onModelUpdated={onModelUpdated}
           onSelectionChanged={onSelectionChanged}
           onCellClicked={onCellClicked}
           onRowDoubleClicked={onRowDoubleClicked}
-          // При прокрутке строк координата клика «уезжает» — закрываем меню.
           onBodyScroll={closeActions}
-          suppressCellFocus
         />
       </Box>
       <RowActionsPopover
         open={!!menuRow}
         anchorPosition={menuAnchor}
         row={menuRow}
-        actions={menuRow ? actionsForRow(menuRow) : []}
+        actions={menuActions}
         onClose={closeActions}
       />
     </Box>

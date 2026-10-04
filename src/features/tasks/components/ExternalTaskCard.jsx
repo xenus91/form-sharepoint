@@ -57,6 +57,11 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
   // «Задача моя?» — Id взявшего на сайте источника ИЛИ совпадение ФИО
   // (Id на разных сайтах не совпадают, а Editor может прийти строкой).
   const isMine = isTaskTakenByCurrentUser(task, { currentUserId, currentUserTitle, currentUserIdBySource });
+  // Требования 2026-10-04: у задачи ДОБ сначала только «Взять в работу», а
+  // «Изменить» появляется ПОСЛЕ взятия в работу (задача в работе и не у другого
+  // пользователя). Завершённые задачи — вообще без кнопок.
+  const takenByOther = taken && !!taker && !isMine;
+  const canEdit = !completed && taken && !takenByOther;
 
   return (
     <Paper
@@ -199,7 +204,7 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
         </Box>
       )}
 
-      {typeof onOpen === "function" && (
+      {typeof onOpen === "function" && canEdit && (
         <Box sx={{ mt: canTake || (taken && taker && !completed) ? 1 : 1.5 }}>
           <Button
             variant="outlined"
