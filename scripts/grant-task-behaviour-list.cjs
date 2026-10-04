@@ -6,7 +6,8 @@
 //   1. Проверяет наличие списка `TaskBehaviour` — если нет, создаёт.
 //   2. Создаёт поля: Behaviour (MultiLineText, AllowUnlimitedLength),
 //      StylingResultButton (MultiLineText, AllowUnlimitedLength),
-//      Description (Text), Enabled (Boolean, default true).
+//      Description (Text), Enabled (Boolean, default true),
+//      IsDobTask (Boolean, default false) — «задачи этого типа ведёт наша форма ДОБ».
 //   3. Идемпотентно: повторный запуск пропускает уже существующие элементы.
 //
 // Использование:
@@ -114,6 +115,15 @@ const FIELDS_TO_ENSURE = [
     Title: "Enabled",
     TypeAsString: "Boolean",
     Schema: { DefaultValue: "1" },
+  },
+  {
+    // Признак «задача ДОБ»: задачи этого типа открываются нашей формой
+    // (#dob_tasks/<id>) и закрываются формой по колонкам типа контента.
+    // Настраивается на КАЖДЫЙ тип контента своей записью (Title = имя CT).
+    InternalName: "IsDobTask",
+    Title: "IsDobTask",
+    TypeAsString: "Boolean",
+    Schema: { DefaultValue: "0" },
   },
 ];
 

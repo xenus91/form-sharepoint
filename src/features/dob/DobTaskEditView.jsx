@@ -21,6 +21,8 @@ import { attachmentDisplayUrl, toDisplayImages, toStorageImages } from './lib/at
 import { materializeRichValues } from './lib/materializeRichImages';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
 import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
+import { useTaskConfiguration } from '../tasks/hooks/useTaskConfiguration';
+import { markDobTask } from '../../services/taskBehaviour';
 import {
   FORM_ACTIONS_SX,
   FORM_APPBAR_SX,
@@ -222,6 +224,11 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // контента (FieldLinks): в списке есть колонки, которых в типе нет, и раньше
   // они попадали в «Остальные поля» (AdditionalActions, AdditionalActionsRequired).
   const itemCtId = contentTypeIdOf(item?.ContentTypeId);
+  // ⭐ Признак «задача ДОБ» по TaskBehaviour (IsDobTask = Да в записи по имени типа
+  // контента): такие задачи ведёт наша форма — внутри неё показываем форму по
+  // колонкам типа контента, а не форму заявки. Конфигурация кешируется react-query.
+  const taskConfiguration = useTaskConfiguration({ enabled: !!item });
+
   const { data: ctFields } = useQuery({
     queryKey: ['dob-ct-fields', listGuid, itemCtId],
     queryFn: () => getDobContentTypeFields(itemCtId, listGuid),
@@ -798,11 +805,14 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     );
   }
 
-  // ⭐ «Результат проверки ООБ» (тип контента из группы ProblemsPallet) ведёт себя
-  // как задача сайта ДОБ: вместо полей заявки показываем форму закрытия по колонкам
-  // типа контента. Задача не закрывается мимо диалога.
+  // ⭐ Задача ДОБ (тип контента «Результат проверки ООБ» или запись TaskBehaviour с
+  // IsDobTask = Да) ведётся нашей формой: вместо полей заявки показываем форму
+  // закрытия по колонкам типа контента. Задача не закрывается мимо диалога.
   const checkCtId = itemCtId;
-  if (item && isDialogRequired(null, checkCtId, taskContentTypeName(item), item)) {
+  // Без useMemo: вычисление ниже ранних return'ов (loading/ошибка) — хук здесь
+  // нарушал бы порядок хуков. Проверка дешёвая: имя CT → запись TaskBehaviour.
+  const dobAwareItem = markDobTask(item, taskConfiguration.data);
+  if (item && isDialogRequired(null, checkCtId, taskContentTypeName(item), dobAwareItem)) {
     return (
       <Box data-dob-edit-page="true" sx={FORM_PAGE_SX}>
         <AppBar position="sticky" elevation={0} sx={FORM_APPBAR_SX}>
@@ -841,7 +851,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           richFooter={attachmentsBlock}
           onValidationError={handleCtValidationError}
           contentTypeId={checkCtId}
-          contentTypeName="Результат проверки ООБ"
+          contentTypeName={taskContentTypeName(item) || "Результат проверки ООБ"}
           submitLabel="Сохранить"
           cancelLabel="Отмена"
           submitting={saving}

@@ -5,22 +5,19 @@ import apiClient from "../../../api";
 import { createAdaptivePolling } from "../../../utils/polling";
 import { mapRawTask } from "../../../tasks/mapping";
 import { TASKS_LIST_API, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "../../../tasks/config";
-import { isDobTaskFlag } from "../../../tasks/contentTypeFields";
-
 /**
  * Polling запрашивает короткий набор полей (HASH_POLL_SELECT), поэтому маппинг
- * «теряет» признаки задачи (IsDobTask, ContentTypeId, raw). Раньше объект задачи
- * в state ЗАМЕНЯЛСЯ на такой урезанный — и задача ДОБ после первого же опроса
- * переставала опознаваться (её открывало обычной формой). Здесь признаки
- * переносятся из предыдущего объекта.
+ * «теряет» признаки задачи (ContentTypeId, raw). Раньше объект задачи в state
+ * ЗАМЕНЯЛСЯ на такой урезанный — и задача ДОБ после первого же опроса переставала
+ * опознаваться (её открывало обычной формой). Здесь признаки переносятся из
+ * предыдущего объекта.
  */
 function mergePolledTask(prev, mapped, raw) {
   if (!prev) return mapped;
   return {
     ...mapped,
     ContentTypeId: mapped.ContentTypeId || prev.ContentTypeId || null,
-    IsDobTask: isDobTaskFlag(mapped.IsDobTask) || isDobTaskFlag(prev.IsDobTask)
-      || isDobTaskFlag(prev.raw?.IsDobTask) || isDobTaskFlag(raw?.IsDobTask),
+    isDobTask: mapped.isDobTask === true || prev.isDobTask === true,
     raw: { ...(prev.raw || {}), ...(raw || {}) },
   };
 }

@@ -29,7 +29,7 @@ import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
 import { resolveTaskRule } from "./services/taskBehaviour";
 import { resolveResultFlow } from "./features/tasks/resultFlow";
 import { resolveBehaviour } from "./services/behaviourParser";
-import { resolveTaskBehaviourByName, findContentTypeMeta } from "./services/taskBehaviour";
+import { resolveTaskBehaviourByName, findContentTypeMeta, markDobTask } from "./services/taskBehaviour";
 import { resolveStylingForChoice, resolveStylingIcon } from "./services/stylingConfig";
 import { renderStylingIcon } from "./services/stylingIcons";
 import { useTaskConfiguration } from "./features/tasks/hooks/useTaskConfiguration";
@@ -247,17 +247,24 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return () => { cancelled = true; };
   }, [tableData.rows, ctMetaById]);
 
+  // ⭐ Задача ДОБ определяется настройкой TaskBehaviour: в записи по имени типа
+  // контента стоит IsDobTask = Да. Признак проставляем в саму задачу, чтобы им
+  // пользовались и детекция формы (contentTypeFields), и карточки/таблица.
+  // Колонка в списке задач для этого НЕ используется: её значение по умолчанию одно
+  // на весь список и одинаково для всех типов контента.
+  const withDobFlag = useCallback((row) => markDobTask(row, taskConfiguration?.data), [taskConfiguration?.data]);
+
   const withCtMeta = useCallback((row) => {
     if (!row || (row.sourceId && row.sourceId !== "main")) return row;
     const meta = ctMetaById[row.Id];
-    if (!meta || isResultCheckTask(row)) return row;
-    return {
+    if (!meta || isResultCheckTask(row)) return withDobFlag(row);
+    return withDobFlag({
       ...row,
       contentTypeId: meta.ctId || row.contentTypeId || row.ContentTypeId || null,
       contentTypeName: meta.ctName || row.contentTypeName || null,
       raw: { ...(row.raw || {}), ContentTypeId: meta.ctId || row.raw?.ContentTypeId },
-    };
-  }, [ctMetaById]);
+    });
+  }, [ctMetaById, withDobFlag]);
 
   // ⭐ Открытие формы задачи. Если у задачи (строки таблицы/карточки) НЕТ типа
   // контента — дочитываем его у самого элемента основного списка: иначе задача
@@ -286,15 +293,21 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         resultCheck: isResultCheckTask(t),
       });
     }
+    // Признак ДОБ (TaskBehaviour) — до выбора роута: по нему #tasks открывает
+    // нашу форму DobTaskEditView вместо обычной карточки.
+    t = withDobFlag(t);
     return openTaskForm(cid, tableData.sources, t);
-  }, [tableData.sources, logCtDetect]);
+  }, [tableData.sources, logCtDetect, withDobFlag]);
 
   // Задачи из внешних источников (dob) — read-only карточки рядом с main-задачами.
   const externalTasks = useMemo(
     () => (tableData.rows || []).filter((r) => r && r.sourceId && r.sourceId !== "main"),
     [tableData.rows]
   );
-  const cardTasks = useMemo(() => mergeCardTasks(tasksData ?? [], externalTasks), [tasksData, externalTasks]);
+  const cardTasks = useMemo(
+    () => mergeCardTasks(tasksData ?? [], externalTasks).map((t) => withDobFlag(t)),
+    [tasksData, externalTasks, withDobFlag],
+  );
 
   // Взятие в работу задачи внешнего источника (dob): MERGE статуса на сайте-владельце;
   // SharePoint сам проставит Editor → «Исполнитель» в карточке/таблице.
@@ -1018,6 +1031,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       ct: taskContentTypeId(rowR) || null,
       ctName: taskContentTypeName(rowR) || null,
       dobLike: isDobLikeTask(rowR),
+      isDobTask: rowR?.isDobTask === true,
       status: rowR?.Status || "",
     });
     if (__DBG_ENABLED__) {

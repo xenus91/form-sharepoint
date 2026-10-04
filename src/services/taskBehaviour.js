@@ -1,12 +1,17 @@
 // TaskBehaviour: единственная загрузка конфигурации, sessionStorage-кэш и CT.Name → Title resolver.
 import { parseBehaviour, resolveBehaviour } from "./behaviourParser";
 import { parseStyling } from "./stylingConfig";
+import { extractSpErrorMessage, extractMissingField, isMissingFieldError } from "../tasks/spError";
 
 const LIST_TITLE = "TaskBehaviour";
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const STORAGE_KEY = "sp:taskBehaviour:map:v2";
 const STORAGE_AT = "sp:taskBehaviour:at:v2";
-const FIELD_SELECT = "Id,Title,Description,Behaviour,StylingResultButton,StylingActions,Enabled,Modified";
+const FIELD_SELECT = "Id,Title,Description,Behaviour,StylingResultButton,StylingActions,Enabled,Modified,IsDobTask";
+// Флаг IsDobTask — колонка в списке TaskBehaviour (Bool). Если её ещё не создали,
+// SharePoint отвечает 400 «Столбец … не существует»: повторяем запрос без поля —
+// остальная настройка поведения важнее, чем один признак.
+const FIELD_SELECT_NO_DOB = "Id,Title,Description,Behaviour,StylingResultButton,StylingActions,Enabled,Modified";
 const debugEnabled = () => {
   try { return typeof window !== "undefined" && (new URLSearchParams(location.search).get("dbg") === "1" || localStorage.getItem("dbg_tasks") === "1"); } catch { return false; }
 };
@@ -36,6 +41,11 @@ function normaliseRecord(raw) {
     styling: String(raw.StylingResultButton || ""),
     stylingActions: String(raw.StylingActions || ""),
     enabled: parseBool(raw.Enabled, true),
+    // ⭐ Задача ведётся нашей формой ДОБ (см. hasDobTaskFlag в contentTypeFields):
+    // настраивается в TaskBehaviour ПО ИМЕНИ типа контента, а не колонкой в списке
+    // задач (значение по умолчанию колонки в списке одно на весь список и
+    // «расползается» по всем типам контента).
+    isDobTask: parseBool(raw.IsDobTask ?? raw.OData_IsDobTask ?? null, false),
     modified: String(raw.Modified || ""),
   };
 }
@@ -66,17 +76,35 @@ export async function fetchTaskBehaviour(apiClient, { forceRefresh = false } = {
   if (!forceRefresh && inflight) return inflight;
 
   const request = (async () => {
-    const url = `/web/lists/getbytitle('${LIST_TITLE}')/items?$filter=Enabled eq 1&$select=${FIELD_SELECT}&$top=500`;
+    let select = FIELD_SELECT;
+    const url = () => `/web/lists/getbytitle('${LIST_TITLE}')/items?$filter=Enabled eq 1&$select=${select}&$top=500`;
     try {
-      const { data } = await apiClient.get(url, {
-        headers: { Accept: "application/json;odata=verbose" },
-        __noCache: forceRefresh,
-      });
+      let data = null;
+      try {
+        ({ data } = await apiClient.get(url(), {
+          headers: { Accept: "application/json;odata=verbose" },
+          __noCache: forceRefresh,
+        }));
+      } catch (error) {
+        const rawMsg = extractSpErrorMessage(error);
+        const missing = isMissingFieldError(rawMsg) ? extractMissingField(rawMsg) : "";
+        // Поля IsDobTask в списке ещё нет — берём настройку без него (флаг = false).
+        if (missing && missing.toLowerCase() === "isdobtask") {
+          console.warn(`[TaskBehaviour] колонки ${missing} нет в списке — читаю настройку без флага ДОБ`);
+          select = FIELD_SELECT_NO_DOB;
+          ({ data } = await apiClient.get(url(), {
+            headers: { Accept: "application/json;odata=verbose" },
+            __noCache: forceRefresh,
+          }));
+        } else {
+          throw error;
+        }
+      }
       const records = (data?.d?.results || []).map(normaliseRecord).filter(Boolean);
       cache = new Map(records.map((record) => [record.id, record]));
       cacheAt = Date.now();
       saveToStorage();
-      tbDebug("loaded", { request: url, count: cache.size, cache: "sessionStorage", fields: FIELD_SELECT });
+      tbDebug("loaded", { request: url(), count: cache.size, cache: "sessionStorage", fields: select, dobTaskIds: records.filter((r) => r.isDobTask).map((r) => r.id) });
       return cache;
     } catch (error) {
       tbDebug("request failed", { status: error?.response?.status, message: error?.message });
@@ -123,12 +151,22 @@ const warnedPartial = new Set();
 // у которого нет собственной записи в TaskBehaviour.
 const FALLBACK_TITLES = new Set(["*", "_default", "default"]);
 
-export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
+/**
+ * Запись TaskBehaviour для типа контента (по имени).
+ *
+ * @param {string} contentTypeName
+ * @param {Map<number, object>} taskBehaviourMap
+ * @param {{ allowFallback?: boolean }} [opts] — искать ли общую запись «*»/«_default»
+ * @returns {{ record: object, matchedBy: string, viaFallback: boolean }|null}
+ */
+function findBehaviourRecord(contentTypeName, taskBehaviourMap, opts = {}) {
+  const { allowFallback = true } = opts;
   if (!contentTypeName || !taskBehaviourMap?.size) return null;
   const records = [...taskBehaviourMap.values()].filter((item) => item.enabled);
   // 1) точное совпадение ContentType.Name → TaskBehaviour.Title
   let record = records.find((item) => norm(item.title) === norm(contentTypeName));
   let matchedBy = "ContentType.Name → TaskBehaviour.Title";
+  let viaFallback = false;
   // 2) частичное совпадение: названия входят друг в друга.
   //    Пример: тип контента «Исправление проблемной ЕО», запись «Задача исправления проблемной ЕО».
   //    Берём самую длинную подходящую запись (самую специфичную).
@@ -155,15 +193,95 @@ export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
     }
   }
   // 3) общая запись («*» / «_default») — если своей у типа контента нет
-  if (!record) {
+  if (!record && allowFallback) {
     record = records.find((item) => FALLBACK_TITLES.has(norm(item.title)));
     matchedBy = "TaskBehaviour fallback ('*' / '_default')";
+    viaFallback = Boolean(record);
     if (record) tbDebug("fallback used", { contentTypeName, fallbackTitle: record.title, id: record.id });
   }
   if (!record) {
     tbDebug("not resolved", { contentTypeName, available: records.map((r) => r.title) });
     return null;
   }
+  return { record, matchedBy, viaFallback };
+}
+
+/**
+ * Запись TaskBehaviour для типа контента (по имени) — публичная обёртка.
+ *
+ * @param {string} contentTypeName
+ * @param {Map<number, object>} taskBehaviourMap
+ * @returns {{ record: object, matchedBy: string, viaFallback: boolean }|null}
+ */
+export function findTaskBehaviourRecord(contentTypeName, taskBehaviourMap) {
+  return findBehaviourRecord(contentTypeName, taskBehaviourMap);
+}
+
+/**
+ * Тип контента ведётся нашей формой ДОБ: в его записи TaskBehaviour стоит
+ * `IsDobTask = true`.
+ *
+ * ⚠️ Общая запись («*» / «_default») признак НЕ включает: иначе флаг «расползётся»
+ * на все задачи без своей настройки — ровно та проблема, из-за которой этот признак
+ * убран из колонки списка задач (там значение по умолчанию одно на весь список).
+ *
+ * @param {string} contentTypeName — имя типа контента задачи
+ * @param {Map<number, object>} taskBehaviourMap — config.taskBehaviour
+ * @returns {boolean}
+ */
+export function isDobTaskByName(contentTypeName, taskBehaviourMap) {
+  const found = findBehaviourRecord(contentTypeName, taskBehaviourMap, { allowFallback: false });
+  return Boolean(found?.record?.isDobTask);
+}
+
+/** Имя типа контента задачи — из наших полей, из CT.Name (verbose) или из raw. */
+function contentTypeNameOf(task) {
+  const direct = task?.contentTypeName || task?.ContentTypeName || "";
+  if (String(direct).trim()) return String(direct).trim();
+  const fromRaw = task?.raw?.ContentType?.Name || task?.raw?.OData_ContentType?.Name || "";
+  return String(fromRaw).trim();
+}
+
+/**
+ * Задача ведётся нашей формой ДОБ (по TaskBehaviour её типа контента).
+ *
+ * @param {object} task — задача (contentTypeId/contentTypeName или raw.ContentType.Name)
+ * @param {object|null} config — taskConfiguration.data ({ taskBehaviour, ctMetaMap })
+ * @returns {boolean}
+ */
+export function isDobTaskForTask(task, config) {
+  if (!task || typeof task !== "object") return false;
+  if (task.isDobTask === true) return true; // уже помечена (быстрая проверка)
+  const map = config?.taskBehaviour;
+  if (!map?.size) return false;
+  let name = contentTypeNameOf(task);
+  if (!name) {
+    const ctId = String(task.contentTypeId || task.ContentTypeId || task.raw?.ContentTypeId?.StringValue || task.raw?.ContentTypeId || "").trim();
+    if (ctId && config?.ctMetaMap) {
+      const meta = findContentTypeMeta(ctId, config.ctMetaMap);
+      name = String(meta?.name || "").trim();
+    }
+  }
+  return name ? isDobTaskByName(name, map) : false;
+}
+
+/**
+ * Проставляет задаче признак `isDobTask: true`, если её тип контента помечен в
+ * TaskBehaviour (idempotent: уже помеченную задачу не копируем).
+ *
+ * @param {object} task
+ * @param {object|null} config — taskConfiguration.data
+ * @returns {object} та же задача, если менять нечего
+ */
+export function markDobTask(task, config) {
+  if (!task || typeof task !== "object" || task.isDobTask === true) return task;
+  return isDobTaskForTask(task, config) ? { ...task, isDobTask: true } : task;
+}
+
+export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
+  const found = findBehaviourRecord(contentTypeName, taskBehaviourMap);
+  if (!found) return null;
+  const { record, matchedBy, viaFallback } = found;
   const behaviour = parseBehaviour(record.behaviour);
   const styling = parseStyling(record.styling);
   const stylingActions = parseStyling(record.stylingActions);
@@ -180,8 +298,8 @@ export function resolveTaskBehaviourByName(contentTypeName, taskBehaviourMap) {
   }
   if (!styling.ok) console.warn("[TaskBehaviour] StylingResultButton не разобран", { title: record.title, error: styling.error });
   if (!stylingActions.ok) console.warn("[TaskBehaviour] StylingActions не разобран", { title: record.title, error: stylingActions.error });
-  tbDebug("resolved", { contentTypeName, title: record.title, id: record.id, matchedBy, behaviourOk: behaviour.ok, stylingOk: styling.ok, stylingActionsOk: stylingActions.ok });
-  return { configId: record.id, raw: record, behaviour, styling, stylingActions, matchedBy };
+  tbDebug("resolved", { contentTypeName, title: record.title, id: record.id, matchedBy, viaFallback, isDobTask: record.isDobTask === true, behaviourOk: behaviour.ok, stylingOk: styling.ok, stylingActionsOk: stylingActions.ok });
+  return { configId: record.id, raw: record, behaviour, styling, stylingActions, matchedBy, viaFallback, isDobTask: record.isDobTask === true };
 }
 
 export function findContentTypeMeta(contentTypeId, ctMetaMap) {

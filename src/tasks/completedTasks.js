@@ -521,7 +521,7 @@ export async function fetchCompletedTasksPage(opts) {
 
 const REST_PAGE_FIELDS = [
   "Id", "Title", "Body", "Status", "PercentComplete", "DueDate", "Created", "Modified",
-  "ContentTypeId", "RelatedItems", "Location1", "ResultSearchTHU", "IsDobTask",
+  "ContentTypeId", "RelatedItems", "Location1", "ResultSearchTHU",
   "AdditionalsActionsRequired", "AdditionalActions",
 ];
 

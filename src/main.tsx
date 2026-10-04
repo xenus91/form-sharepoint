@@ -14,7 +14,7 @@ import NotificationsProvider from "./NotificationsProvider";
 // перезапуск dev-сервера / жёсткая перезагрузка страницы).
 // eslint-disable-next-line no-console
 console.info(
-  "[form-sharepoint] ct-detect v10: картинки rich-текста — ссылкой на вложение, задачи по флагу IsDobTask " +
+  "[form-sharepoint] ct-detect v11: задача ДОБ — по записи TaskBehaviour (IsDobTask), картинки rich-текста — вложением " +
   "(ошибка PrimitiveValue/StartObject), валидация обязательных полей с акцентом и snackbar, " +
   "картинки rich-текста — вложениями внутри CKEditor, ровная высота числового поля",
 );

@@ -105,6 +105,10 @@
     </label>
     <button class="ghost" id="btnCopyAll">Скопировать все три JSON</button>
     <button class="ghost" id="btnDownload">Скачать .json</button>
+    <label style="display:inline-flex;gap:6px;align-items:center;margin-top:8px">
+      <input type="checkbox" id="isDobTask">
+      <b>IsDobTask</b> — задача ведётся нашей формой ДОБ
+    </label>
   </div>
 </header>
 
@@ -169,6 +173,7 @@
   <section class="panel" style="margin-top:18px">
     <h2>JSON для записи в TaskBehaviour</h2>
     <p class="hint">Скопируйте и вставьте в соответствующее поле записи списка TaskBehaviour.</p>
+    <p class="hint" id="dobHint"></p>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
       <div class="json-block">
         <div class="row"><h3>Behaviour</h3><button class="mini" data-copy="behaviour">Копировать</button></div>
@@ -898,6 +903,16 @@
     state = next; preview = { active:null, step:"idle", values:{}, acts:[], payload:null };
     rerender();
   });
+
+  /* ── признак «задача ДОБ»: колонка IsDobTask записи TaskBehaviour ────────── */
+  function syncDobHint(){
+    var on = $("isDobTask").checked;
+    $("dobHint").innerHTML = on
+      ? "✅ <b>IsDobTask = Да</b> в этой записи TaskBehaviour (Title = имя типа контента): задачи этого типа ведёт наша форма ДОБ — открываются формой закрытия по колонкам типа контента (<code>#dob_tasks/&lt;id&gt;</code>). Ключ <code>dlg</code> для этого не нужен."
+      : "Задачи открываются обычной формой <code>#tasks/&lt;id&gt;</code>. Если часть задач должна вестись формой ДОБ — включите <b>IsDobTask</b> и поставьте галочку в записи TaskBehaviour этого типа контента.";
+  }
+  $("isDobTask").addEventListener("change", syncDobHint);
+  syncDobHint();
 
   // первичная отрисовка
   rerender();

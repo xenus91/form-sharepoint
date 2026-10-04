@@ -10,8 +10,6 @@ const __dgroup = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.groupCollap
 // eslint-disable-next-line no-unused-vars
 const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}catch(_e){ void _e;} };
 
-import { isDobTaskFlag } from "./contentTypeFields";
-
 // Маппинг сырого SP task в наш task-объект.
 // Раньше жил внутри TasksView.jsx как mapRawTask — вынесен сюда для переиспользования
 // в loadTasks, fetchFullTask, searchTaskByRelatedItem, hashSearch и т.д.
@@ -143,9 +141,6 @@ export function mapRawTask(r, opts = {}) {
     SCNumber: scNumberVal || "",
     RelatedItems: r.RelatedItems || null,
     ContentTypeId: contentTypeIdVal || null,
-    // Bool-флаг «задача ДОБ» (настраивается в типе контента задачи). Нужен, чтобы
-    // #tasks открывал такие задачи формой DobTaskEditView независимо от CT.
-    IsDobTask: isDobTaskFlag(r.IsDobTask ?? r.OData_IsDobTask),
     raw: r,
   };
 }

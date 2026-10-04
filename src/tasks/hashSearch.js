@@ -8,7 +8,6 @@ import apiClient from "../api";
 import { TASKS_LIST_API, HASH_CAML_ROW_LIMIT, FULL_TASK_SELECT, FULL_TASK_EXPAND } from "./config";
 import { mapRawTask } from "./mapping";
 import { extractEONumberFromTask } from "./formatters";
-import { extractMissingField, isMissingFieldError } from "./spError";
 import { HASH_LOG, HASH_WARN } from "./log";
 import { findInIndex, buildTaskIndex } from "../utils/taskIndex";
 
@@ -33,20 +32,10 @@ export async function fetchFullTask(id) {
   } catch (e) {
     const st = e?.response?.status;
     const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
-    // Fallback если новые поля (AdditionalActions/IsDobTask) ещё не созданы в списке
-    // (старый деплой) — повторяем запрос без отсутствующего поля. ContentTypeId и
-    // IsDobTask сохраняем: по ним форма понимает, что это задача ДОБ.
-    if (msg.includes("additionalactions") || isMissingFieldError(msg)) {
+    // Fallback если новые поля AdditionalActions ещё не созданы в списке (старый деплой)
+    if (msg.includes("additionalactions")) {
       try {
-        const missing = isMissingFieldError(msg) ? extractMissingField(msg) : "";
-        const fallbackSelect = (missing
-          ? FULL_TASK_SELECT.split(",").filter((f) => f.trim().toLowerCase() !== missing.toLowerCase())
-          : [
-              "Id", "Title", "Body", "AssignedTo/Id", "AssignedTo/Title", "Status",
-              "ResultSearchTHU", "Location1", "Created", "Modified", "PercentComplete",
-              "DueDate", "Editor/Id", "Editor/Title", "RelatedItems", "ContentTypeId",
-            ]
-        ).join(",");
+        const fallbackSelect = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems";
         const { data } = await apiClient.get(
           `${TASKS_LIST_API}/items(${id})?$select=${fallbackSelect}&$expand=${FULL_TASK_EXPAND}`,
           { headers: { Accept: "application/json;odata=verbose" } }
