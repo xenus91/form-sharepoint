@@ -198,6 +198,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     enabled: !!currentUserId && !fieldsLoading,
   });
 
+  // Служебный Set для одноразового лога дочитывания типа контента (см. ниже).
+  const ctFetchLoggedRef = React.useRef(null);
+  if (ctFetchLoggedRef.current === null) ctFetchLoggedRef.current = new Set();
+  const __CT_FETCH_LOGGED__ = ctFetchLoggedRef.current;
+
   // ⭐ Открытие формы задачи. Если у задачи (строки таблицы/карточки) НЕТ типа
   // контента — дочитываем его у самого элемента основного списка: иначе задача
   // «Результат проверки ООБ» уходит на #tasks/<Id> обычной карточкой с кнопками,
@@ -210,13 +215,19 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     if (t && mainTask && !taskContentTypeId(t)) {
       const rawId = t.Id ?? Number(String(cid || "").split(":").pop());
       const ctId = await fetchTaskContentTypeId(rawId).catch(() => "");
-      if (ctId) {
-        if (__DBG_ENABLED__) __dlog("[DBG:ct-detect] тип контента дочитан у элемента", { id: rawId, ctId });
-        t = { ...t, contentTypeId: ctId, raw: { ...(t.raw || {}), ContentTypeId: ctId } };
-      }
+      // Пишем в консоль всегда (по одной строке на задачу): это нетипичный случай —
+      // строка пришла без ContentTypeId, тип дочитан у элемента. Без такого лога
+      // «открылась не та форма» невозможно отличить от ошибки детекта.
+      try {
+        if (!__CT_FETCH_LOGGED__.has(String(rawId))) {
+          __CT_FETCH_LOGGED__.add(String(rawId));
+          console.info("[ct-detect] у задачи не было ContentTypeId — дочитан у элемента", { id: rawId, ctId: ctId || null });
+        }
+      } catch (_e) { void _e; }
+      if (ctId) t = { ...t, contentTypeId: ctId, raw: { ...(t.raw || {}), ContentTypeId: ctId } };
     }
     return openTaskForm(cid, tableData.sources, t);
-  }, [tableData.sources]);
+  }, [tableData.sources, __CT_FETCH_LOGGED__]);
 
   // Задачи из внешних источников (dob) — read-only карточки рядом с main-задачами.
   const externalTasks = useMemo(
