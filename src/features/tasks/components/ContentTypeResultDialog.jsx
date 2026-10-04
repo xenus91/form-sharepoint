@@ -18,7 +18,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert, Autocomplete, Box, Checkbox, Button, Chip, CircularProgress, Dialog, DialogActions,
-  DialogContent, DialogTitle, FormControlLabel, Stack, TextField, Typography,
+  DialogContent, DialogTitle, FormControlLabel, Paper, Stack, TextField, Typography,
 } from "@mui/material";
 import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
@@ -92,6 +92,10 @@ export default function ContentTypeResultDialog({
   submitting = false,
   onSubmit,
   onClose,
+  // inline: та же форма, но не в модальном окне — её показывает форма ДОБ
+  // (страница #dob_tasks/<id>), чтобы задача «Результат проверки ООБ» закрывалась
+  // кнопками результата прямо на экране задачи.
+  inline = false,
 }) {
   const [result, setResult] = React.useState(initialResult || "");
   const [values, setValues] = React.useState({});
@@ -101,7 +105,7 @@ export default function ContentTypeResultDialog({
   const fieldsQ = useQuery({
     queryKey: ["ct-fields", contentTypeId],
     queryFn: () => fetchContentTypeFields(contentTypeId),
-    enabled: Boolean(open && contentTypeId),
+    enabled: Boolean((open || inline) && contentTypeId),
     staleTime: 30 * 60 * 1000,
     retry: 1,
   });
@@ -115,7 +119,7 @@ export default function ContentTypeResultDialog({
 
   // Инициализация значений из задачи + результата из Behaviour/карточки
   React.useEffect(() => {
-    if (!open) return;
+    if (!open && !inline) return;
     const next = {};
     for (const control of form.controls) {
       const raw = readTaskValue(task, control.internalName);
@@ -128,11 +132,11 @@ export default function ContentTypeResultDialog({
     setValues(next);
     setProblems([]);
     setTouched(false);
-  }, [open, task, form.controls]);
+  }, [open, inline, task, form.controls]);
 
   React.useEffect(() => {
-    if (open) setResult(initialResult || "");
-  }, [open, initialResult]);
+    if (open || inline) setResult(initialResult || "");
+  }, [open, inline, initialResult]);
 
   const choices = React.useMemo(() => {
     const list = (Array.isArray(resultChoices) ? resultChoices : []).map((c) => String(c)).filter(Boolean);
@@ -181,20 +185,30 @@ export default function ContentTypeResultDialog({
       if (text.trim() === "" && !control.required) continue;
       payload[control.internalName] = text;
     }
-    onSubmit?.({ result, values: payload });
+    // resultField — имя колонки результата (нужно форме ДОБ, чтобы записать MERGE)
+    onSubmit?.({ result, values: payload, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
   };
 
   const title = confirmTexts?.title || `Закрытие задачи #${task?.Id ?? ""}`.trim();
   const message = confirmTexts?.message || "";
 
+  const Wrapper = inline ? Paper : Dialog;
+  const wrapperProps = inline
+    ? {
+      elevation: 0,
+      "data-testid": "ct-result-dialog",
+      sx: { borderRadius: "14px", border: "1px solid rgba(23,28,143,0.12)", background: "#fff" },
+    }
+    : {
+      open,
+      onClose: submitting ? undefined : onClose,
+      fullWidth: true,
+      maxWidth: "md",
+      PaperProps: { sx: { borderRadius: "14px" }, "data-testid": "ct-result-dialog" },
+    };
+
   return (
-    <Dialog
-      open={open}
-      onClose={submitting ? undefined : onClose}
-      fullWidth
-      maxWidth="md"
-      PaperProps={{ sx: { borderRadius: "14px" }, "data-testid": "ct-result-dialog" }}
-    >
+    <Wrapper {...wrapperProps}>
       <DialogTitle sx={{ fontWeight: 800, pb: 0.5 }}>
         {title}
         {contentTypeName && (
@@ -454,6 +468,6 @@ export default function ContentTypeResultDialog({
           {submitLabel || "Сохранить"}
         </Button>
       </DialogActions>
-    </Dialog>
+    </Wrapper>
   );
 }

@@ -130,6 +130,7 @@ export function buildRowActions(row, opts = {}) {
     onResult,
     onEdit,
     resolveEditor = null,
+    externalLike = false,
   } = opts;
 
   const takeAction = (disabled) => ({
@@ -148,8 +149,9 @@ export function buildRowActions(row, opts = {}) {
   const inProgress = isInProgressStatus(status);
   const notStarted = isNotStartedStatus(status);
 
-  // Внешний источник (dob): карточка внешней задачи read-only — «Взять в работу» + «Изменить».
-  if (row.sourceId && row.sourceId !== "main") {
+  // Внешний источник (dob) и задачи-«Диалог ДОБ» (тип «Результат проверки ООБ»):
+  // карточка read-only — «Взять в работу» + «Изменить», без кнопок результата.
+  if ((row.sourceId && row.sourceId !== "main") || externalLike) {
     if (canTake) actions.push(takeAction(taking));
     actions.push({
       key: "edit",

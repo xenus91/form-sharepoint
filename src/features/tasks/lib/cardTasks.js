@@ -10,10 +10,29 @@
 // Дубликаты (по sourceId:Id) отбрасываются.
 
 import { mergeSort } from "../../../tasks/multiSource";
+import { taskContentTypeId, RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
 
 /** @param {any} task @returns {boolean} */
 export function isExternalTask(task) {
   return !!task && !!task.sourceId && task.sourceId !== "main";
+}
+
+/**
+ * Задача ведёт себя как задача сайта ДОБ: read-only карточка + «Взять в работу»/
+ * «Изменить», а форма — DobTaskEditView (закрытие через диалог ДОБ).
+ *
+ * К таким относятся и задачи основного списка с типом контента
+ * «Результат проверки ООБ»: у них нет кнопок результата в карточке/таблице —
+ * результат и поля собирает диалог внутри формы.
+ *
+ * @param {any} task
+ * @returns {boolean}
+ */
+export function isDobLikeTask(task) {
+  if (!task) return false;
+  if (isExternalTask(task)) return true;
+  const ct = String(taskContentTypeId(task) || "").toLowerCase();
+  return ct !== "" && ct === String(RESULT_CHECK_OOO_CT_ID).toLowerCase();
 }
 
 /**

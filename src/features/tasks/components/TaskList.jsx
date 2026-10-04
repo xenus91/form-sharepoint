@@ -8,7 +8,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FolderIcon from "@mui/icons-material/Folder";
 import TaskCard from "./TaskCard";
 import ExternalTaskCard from "./ExternalTaskCard";
-import { isExternalTask } from "../lib/cardTasks";
+import { isDobLikeTask } from "../lib/cardTasks";
 import { isCompletedStatus } from "../../../tasks/status";
 import { extractTKNumberFromTask } from "../../../tasks/formatters";
 
@@ -53,7 +53,7 @@ const TaskList = React.memo(function TaskList({
   // Внешние источники (dob и др.) рендерим read-only карточкой: TaskCard и мутации
   // завязаны на основной список и не должны применяться к чужому элементу с тем же Id.
   const renderTask = (task) => (
-    isExternalTask(task)
+    isDobLikeTask(task)
       ? (
         <ExternalTaskCard
           key={task.compositeId || `${task.sourceId}:${task.Id}`}

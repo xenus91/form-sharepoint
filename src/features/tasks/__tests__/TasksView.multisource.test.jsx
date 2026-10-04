@@ -113,6 +113,8 @@ const CT_CHECK_FIELDS = [
   { InternalName: "Guilty", Title: "Guilty", TypeAsString: "User", AllowMultipleValues: true, Required: false },
 ];
 const CT_OOB = "0x0108003365C4474CAE8C42BCE396314E88E51F0001A4ABEEA9CB93478EEBA71D023E4D0700E86894FD720BCD49A61B7F23B3CFB37F";
+// GUID основного списка задач (Tasks) — на него ведёт форма ДОБ для задач нового типа.
+const MAIN_GUID = "463b634e-a71a-4fef-9a1f-b803431d8639";
 const CT_META = [
   { StringId: CT_THU, Name: "Задача ТНУ", Id: { StringValue: CT_THU }, FieldLinks: { results: [{ Id: RESULT_FIELD_THU.Id }] } },
   { StringId: CT_OOB, Name: "Задача ООБ", Id: { StringValue: CT_OOB }, FieldLinks: { results: [{ Id: RESULT_FIELD_OOB.Id }] } },
@@ -922,63 +924,29 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(write.url).toContain("items(12)");
   }, 40000);
 
-  it("«Результат проверки ООБ»: карточка закрывается через диалог по колонкам, обязательные поля из SP контролируются", async () => {
+  it("«Результат проверки ООБ»: карточка как у dob (взять/изменить), «Изменить» ведёт в форму ДОБ", async () => {
     const host = renderTasksView();
     await settle(3000);
 
-    const card = cardByText(host, /Проверка ЕО \(ООБ\)/);
+    // задача нового типа рисуется read-only карточкой ДОБ — БЕЗ кнопок результата
+    const card = [...host.querySelectorAll('[data-testid="external-task-card"]')]
+      .find((el) => /Проверка ЕО \(ООБ\)/.test(el.textContent || ""));
     expect(card).toBeTruthy();
-    const resultBtn = cardButton(card, "Годен");
-    expect(resultBtn).toBeTruthy();
+    expect([...card.querySelectorAll("button")].some((b) => b.textContent.trim() === "Годен")).toBe(false);
 
-    await act(async () => { mouseClick(resultBtn); await wait200(); });
+    const edit = [...card.querySelectorAll("button")].find((b) => b.textContent.trim() === "Изменить");
+    expect(edit).toBeTruthy();
+    window.location.hash = "#tasks";
+    await act(async () => { mouseClick(edit); await wait200(); });
     await settle(300);
 
-    // «молча» ничего не пишем: открылся диалог, форма — по колонкам типа контента
-    expect(state.requests.some((r) => r.source === "main" && r.merge && r.body && r.body.DobSearchResult)).toBe(false);
-    const dialog = document.body.querySelector('[data-testid="ct-result-dialog"]');
-    expect(dialog).toBeTruthy();
-    const dtext = dialog.textContent;
-    expect(dtext).toContain("Результат проверки ООБ");
-    expect(dtext).toContain("Описание результата проверки *");
-    expect(dtext).toContain("Кол-во ошибок");
-    expect(dtext).toContain("Тип ошибки");
-    expect(dtext).toContain("Виновный");
-    // системные колонки задачи в форму не попали
-    expect(dtext).not.toContain("Состояние задачи");
-
-    // обязательное описание пустое → отправка блокируется
-    const save = [...dialog.querySelectorAll("button")].find((b) => /Сохранить/.test(b.textContent || ""));
-    expect(save).toBeTruthy();
-    await act(async () => { mouseClick(save); await wait200(); });
-    expect(document.body.querySelector('[data-testid="ct-result-dialog-problems"]').textContent)
-      .toContain("Заполните «Описание результата проверки»");
-
-    // заполняем рич-текст и сохраняем
-    const rich = dialog.querySelector("textarea");
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-      setter.call(rich, "<p>Проверено, замечаний нет</p>");
-      rich.dispatchEvent(new window.Event("input", { bubbles: true }));
-      await wait200();
-    });
-    await act(async () => { mouseClick(save); await wait200(); });
-    await settle(900);
-
-    const write = state.requests
-      .filter((r) => r.source === "main" && r.merge && r.body && r.body.DobSearchResult === "Годен")
-      .pop();
-    expect(write).toBeTruthy();
-    expect(String(write.body.DescriptionCheckResult)).toContain("Проверено");
-    expect(write.body.GuiltyId).toEqual({ __metadata: { type: "Collection(Edm.Int32)" }, results: [5] });
-    expect(write.body.Status).toBe("Завершена");
-    expect(write.body.PercentComplete).toBe(1);
-    // доп. действий у правила нет → legacy-поля не отправляем
-    expect("AdditionalsActionsRequired" in write.body).toBe(false);
-    expect("AdditionalActions" in write.body).toBe(false);
+    // ⭐ как задачи сайта dob: открывается форма ДОБ, но с основным списком
+    expect(window.location.hash).toBe(`#dob_tasks/13?list=${MAIN_GUID}`);
+    // «молча» ничего не пишем — результат соберёт форма закрытия
+    expect(state.requests.some((r) => r.source === "main" && r.merge)).toBe(false);
   }, 40000);
 
-  it("«Результат проверки ООБ» в таблице: попап строки открывает тот же диалог по колонкам", async () => {
+  it("«Результат проверки ООБ» в таблице: попап как у dob — без кнопок результата, «Изменить» в форму ДОБ", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -997,17 +965,16 @@ describe("TasksView — multi-source (#tasks)", () => {
     const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')]
       .filter((el) => el.style.opacity !== "0" && /#13\b/.test(el.textContent || "")).pop();
     expect(popup).toBeTruthy();
-    const found = [...popup.querySelectorAll("button")].find((b) => b.textContent.trim() === "Годен");
-    expect(found).toBeTruthy();
+    const labels = [...popup.querySelectorAll("button")].map((b) => b.textContent.trim());
+    // как у dob: только действия, кнопок результата нет (их собирает форма ДОБ)
+    expect(labels).toContain("Изменить");
+    expect(labels).not.toContain("Годен");
 
-    await act(async () => { mouseClick(found); await wait200(); });
+    const edit = [...popup.querySelectorAll("button")].find((b) => b.textContent.trim() === "Изменить");
+    await act(async () => { mouseClick(edit); await wait200(); });
     await settle(300);
-
-    // диалог тот же, что в карточке; записи до заполнения обязательных полей нет
-    const dialog = document.body.querySelector('[data-testid="ct-result-dialog"]');
-    expect(dialog).toBeTruthy();
-    expect(dialog.textContent).toContain("Описание результата проверки *");
-    expect(state.requests.some((r) => r.source === "main" && r.merge && r.body && r.body.DobSearchResult)).toBe(false);
+    expect(window.location.hash).toBe(`#dob_tasks/13?list=${MAIN_GUID}`);
+    expect(state.requests.some((r) => r.source === "main" && r.merge)).toBe(false);
   }, 40000);
 
   it("таблица + конфиг инлайном (p:[Location1], без aa): форма в поповере, как в карточке, без диалогов", async () => {

@@ -46,7 +46,8 @@ import { useViewMode } from "./features/nav/viewMode";
 import { useDepartment } from "./features/nav/useDepartment";
 import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
-import { openTaskForm } from "./features/tasks/lib/openTaskForm";
+import { openTaskForm, buildTaskFormHash } from "./features/tasks/lib/openTaskForm";
+import { isDobLikeTask } from "./features/tasks/lib/cardTasks";
 import { buildRowActions, stylingToSx } from "./features/tasks/lib/rowActions";
 import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
@@ -574,7 +575,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
     if (_needsForm) {
       notify(`Результат «${resultValue}» требует заполнить поля — открываю карточку задачи #${task.Id}`, { severity: "info" });
-      openTaskForm(task?.compositeId, tableData.sources);
+      openTaskForm(task?.compositeId, tableData.sources, task);
       return;
     }
 
@@ -613,7 +614,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   useEffect(() => {
     const targets = (tableData.rows || []).filter(
-      (r) => isMainInProgressRow(r) && !freshChoicesRequestedRef.current.has(r.compositeId)
+      (r) => isMainInProgressRow(r) && !isDobLikeTask(r) && !freshChoicesRequestedRef.current.has(r.compositeId)
     );
     if (targets.length === 0) return undefined;
     for (const row of targets) freshChoicesRequestedRef.current.add(row.compositeId);
@@ -842,7 +843,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       onTake: () => handleTakeTableRow(row),
       onResult: (choice) => handleResultClick(row, choice),
       resolveEditor: (choice) => buildResultEditor(row, choice),
-      onEdit: () => openTaskForm(row?.compositeId, tableData.sources),
+      externalLike: isDobLikeTask(row),
+      onEdit: () => openTaskForm(row?.compositeId, tableData.sources, row),
     });
     if (__DBG_ENABLED__) {
       __dlog("[DBG:rowActions]", {
@@ -898,6 +900,14 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   // PR2: polling вынесен в useHashPolling (adaptivePolling 60s, focus throttle 30s)
   useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMatch, setIsHashTaskRefreshing, recipientField, scNumberField, currentUserId, distribution, taskFieldNames, resultFieldInternalNames, queryClient, lastHashFocusRef });
+  // ⭐ Задача «Результат проверки ООБ» открывается ФОРМОЙ ДОБ (как задачи сайта dob),
+  // а не стандартной карточкой: deep-link #tasks/<Id> уводим на #dob_tasks/<Id>?list=<основной список>.
+  React.useEffect(() => {
+    const t = elementTaskMatch;
+    if (!t || t.sourceId !== "main" || !isDobLikeTask(t)) return;
+    const hash = buildTaskFormHash(t.compositeId || `main:${t.Id}`, tableData.sources, t);
+    if (hash && window.location.hash !== hash) window.location.hash = hash;
+  }, [elementTaskMatch, tableData.sources]);
   useTasksFocusPolling({ currentUserId, isHashMode, queryClient, lastFocusLoadRef });
 
   if (fieldsLoading) {
@@ -997,10 +1007,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               loading={tableData.isLoading}
               error={tableData.error?.message || null}
               onSelectRow={setSelectedTableRow}
-              onRowOpen={(compositeId) => openTaskForm(compositeId, tableData.sources)}
+              onRowOpen={(compositeId) => openTaskForm(compositeId, tableData.sources, (tableData.rows || []).find((r) => r.compositeId === compositeId) || null)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора
               getRowActions={getTableRowActions}
-              onEditRow={(row) => openTaskForm(row?.compositeId, tableData.sources)}
+              onEditRow={(row) => openTaskForm(row?.compositeId, tableData.sources, row)}
               onTakeRow={handleTakeTableRow}
               canTakeRow={canTakeTableRow}
               takingId={externalTakingId}
@@ -1054,8 +1064,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         currentUserId={currentUserId}
         currentUserTitle={currentUserTitle}
         onRetry={loadTasks}
-        onOpenExternalTask={(task) => openTaskForm(task?.compositeId, tableData.sources)}
-        onTakeExternalTask={handleTakeExternalTask}
+        onOpenExternalTask={(task) => openTaskForm(task?.compositeId, tableData.sources, task)}
+        onTakeExternalTask={handleTakeTableRow}
         externalTakingId={externalTakingId}
         externalCurrentUserIds={Object.fromEntries(
           Object.entries(tableData.sitePrincipalIds || {}).map(([sid, v]) => [sid, v?.userId ?? null])

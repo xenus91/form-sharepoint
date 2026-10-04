@@ -35,6 +35,25 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(actions[1].variant).toBe("outlined");
   });
 
+  it("main-задача «Результат проверки ООБ» (externalLike): без кнопок результата, только «Изменить»", () => {
+    // Как у задач dob: результат и поля собирает форма ДОБ, в карточке/таблице
+    // кнопок результата нет (иначе был бы «молчаливый» обход формы).
+    const onResult = vi.fn();
+    const onEdit = vi.fn();
+    const row = { sourceId: "main", Id: 13, Status: "В работе", PercentComplete: 0 };
+    const actions = buildRowActions(row, {
+      choices: ["Годен", "Брак"],
+      onResult,
+      onEdit,
+      externalLike: true,
+      resolveEditor: () => ({ fields: [{ internalName: "DescriptionCheckResult" }] }),
+    });
+    expect(labels(actions)).toEqual(["Изменить"]);
+    expect(onResult).not.toHaveBeenCalled();
+    actions[0].onClick();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
   it("main «в работе»: кнопки результатов по типу контента + «Изменить»", () => {
     const onResult = vi.fn();
     const actions = buildRowActions(MAIN_IN_PROGRESS, {

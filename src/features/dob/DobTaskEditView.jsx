@@ -16,6 +16,8 @@ import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
+import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
+import { isDialogRequired } from '../../tasks/contentTypeFields';
 import { resolveRelatedRef } from './lib/relatedItem';
 
 
@@ -298,9 +300,45 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
 
   const isDefaultList = listGuid === DOB_LIST_GUID;
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     window.location.hash = onBackHash || '#dob_tasks';
-  };
+  }, [onBackHash]);
+
+  // ⭐ Задача типа «Результат проверки ООБ» живёт в основном списке, но ведёт себя
+  // как задачи сайта ДОБ: закрывается ТОЛЬКО через форму по колонкам типа контента
+  // (кнопки DobSearchResult + rich-текст/автокомплиты/число/«Пользователь или группа»).
+  // Собираем MERGE вручную: результат + значения полей + Status/PercentComplete.
+  const handleCheckResultSubmit = useCallback(async ({ result, values, resultField }) => {
+    setSaving(true);
+    setSaveError('');
+    try {
+      const body = { Status: 'Завершена', PercentComplete: 1 };
+      const field = resultField || 'DobSearchResult';
+      if (result) body[field] = result;
+      for (const [name, value] of Object.entries(values || {})) {
+        if (value === undefined || value === null) continue;
+        // «Пользователь или группа» → <Field>Id (число или Collection(Edm.Int32))
+        if (typeof value === 'object' && Array.isArray(value.__userIds)) {
+          const ids = value.__userIds.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+          if (ids.length === 0) continue;
+          body[`${name}Id`] = (value.__userMulti === true || ids.length > 1)
+            ? { __metadata: { type: 'Collection(Edm.Int32)' }, results: ids }
+            : ids[0];
+          continue;
+        }
+        body[name] = value;
+      }
+      await updateDobItem(id, body, listGuid);
+      notify(`Задача #${id} завершена: ${result || 'результат сохранён'}`, { severity: 'success' });
+      try { qc.invalidateQueries(); } catch (_e) { void _e; }
+      handleBack();
+    } catch (e) {
+      const msg = e?.response?.data?.error?.message?.value || e?.message || String(e);
+      setSaveError(String(msg).slice(0, 600));
+    } finally {
+      setSaving(false);
+    }
+  }, [id, listGuid, notify, qc, handleBack]);
 
   const loading = fieldsLoading || itemLoading;
 
@@ -435,6 +473,38 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       <Box sx={{ display: 'grid', placeItems: 'center', height: 400, gap: 1 }}>
         <CircularProgress />
         <Typography color="text.secondary">Загрузка заявки {id}…</Typography>
+      </Box>
+    );
+  }
+
+  // ⭐ «Результат проверки ООБ» (тип контента из группы ProblemsPallet) ведёт себя
+  // как задача сайта ДОБ: вместо полей заявки показываем форму закрытия по колонкам
+  // типа контента. Задача не закрывается мимо диалога.
+  const checkCtId = String(item?.ContentTypeId?.StringValue || item?.ContentTypeId || '');
+  if (item && isDialogRequired(null, checkCtId)) {
+    return (
+      <Box data-dob-edit-page="true" sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: .75, p: { xs: .5, md: .75 }, boxSizing: 'border-box' }}>
+        <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1100, bgcolor: '#fff', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
+          <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
+            <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f' }} aria-label="Открыть меню"><MenuIcon /></IconButton>
+            <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f' }} aria-label="К задачам"><ArrowBackIcon fontSize="small" /></IconButton>
+            <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>Задача #{id}</Typography>
+            {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
+            <Button size="small" variant="outlined" onClick={() => refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={{ borderRadius: .5 }}>Обновить</Button>
+          </Toolbar>
+        </AppBar>
+        {saveError && <Alert severity="error" onClose={() => setSaveError('')}>{saveError}</Alert>}
+        <ContentTypeResultDialog
+          inline
+          task={item}
+          contentTypeId={checkCtId}
+          contentTypeName="Результат проверки ООБ"
+          submitLabel="Сохранить"
+          cancelLabel="Отмена"
+          submitting={saving}
+          onSubmit={handleCheckResultSubmit}
+          onClose={handleBack}
+        />
       </Box>
     );
   }

@@ -1,14 +1,45 @@
 // src/features/dob/api/dobApi.js
 // High-level DOB list operations — fields, items, update
 import { dobApiBase, dobListApi, dobAxios, DOB_LIST_GUID } from './dobClient';
+import apiClient from '../../../api';
+import { TASKS_LIST_API, TASKS_LIST_GUID } from '../../../tasks/config';
+
+// ⭐ Списки основного сайта (ProblemsPallet/Tasks) редактируются ТОЙ ЖЕ формой, что
+// заявки ДОБ: #dob_tasks/<id>?list=<GUID основного списка>. Для таких списков ходим
+// через основной клиент (свой digest и прокси /api), для остальных — через DOB-клиент
+// (/dob-api/sites/dob/doblogistic). Так задача «Результат проверки ООБ» открывается
+// в форме ДОБ, а пишется в свой список.
+const MAIN_LIST_GUIDS = new Set([String(TASKS_LIST_GUID || '').toLowerCase()]);
+
+/** Список принадлежит основному сайту (а не сайту ДОБ). */
+export function isMainSiteList(listGuid) {
+  const id = String(listGuid || '').trim().replace(/[{}]/g, '').toLowerCase();
+  return MAIN_LIST_GUIDS.has(id);
+}
+
+/** Путь к списку: основной сайт (относительно apiClient) или сайт ДОБ (абсолютный). */
+function listApiOf(listGuid) {
+  return isMainSiteList(listGuid) ? TASKS_LIST_API : dobListApi(listGuid);
+}
+
+/** HTTP-клиент под сайт списка (у основного — свой digest и прокси /api). */
+function httpOf(listGuid) {
+  return isMainSiteList(listGuid) ? apiClient : dobAxios;
+}
+
+/** Конфиг чтения: основной клиент кэширует GET — для формы читаем без кэша. */
+function readConfig(listGuid) {
+  return isMainSiteList(listGuid) ? { __noCache: true } : undefined;
+}
+
 
 // Fetch ListItemEntityTypeFullName for MERGE payloads (кэш по списку)
 const entityTypeCache = new Map();
 export async function getDobEntityType(listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
   if (entityTypeCache.has(listGuid)) return entityTypeCache.get(listGuid);
-  const url = `${dobListApi(listGuid)}?$select=ListItemEntityTypeFullName`;
-  const { data } = await dobAxios.get(url);
+  const url = `${listApiOf(listGuid)}?$select=ListItemEntityTypeFullName`;
+  const { data } = await httpOf(listGuid).get(url);
   const type = data?.d?.ListItemEntityTypeFullName
     || (listGuid === DOB_LIST_GUID ? 'SP.Data.DoblogisticListItem' : 'SP.Data.RequestsTaskListItem');
   entityTypeCache.set(listGuid, type);
@@ -18,8 +49,8 @@ export async function getDobEntityType(listGuid = DOB_LIST_GUID) {
 // Fetch fields metadata for the DOB list (filtered)
 export async function getDobFields(listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
-  const url = `${dobListApi(listGuid)}/fields?$select=InternalName,Title,TypeAsString,TypeDisplayName,Required,Hidden,ReadOnlyField,Description,DefaultValue,Choices,FillInChoice,AllowMultipleValues,LookupList,LookupField,Formula,SchemaXml&$top=200`;
-  const { data } = await dobAxios.get(url);
+  const url = `${listApiOf(listGuid)}/fields?$select=InternalName,Title,TypeAsString,TypeDisplayName,Required,Hidden,ReadOnlyField,Description,DefaultValue,Choices,FillInChoice,AllowMultipleValues,LookupList,LookupField,Formula,SchemaXml&$top=200`;
+  const { data } = await httpOf(listGuid).get(url, readConfig(listGuid));
   const raw = data?.d?.results || data?.value || [];
   return raw;
 }
@@ -80,11 +111,11 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
   let attempt = 0;
   while (attempt < 5) {
     const selectForExpand = buildSelectForExpands(currentExpands);
-    let url = `${dobListApi(listGuid)}/items?$select=${selectForExpand}&$expand=${currentExpands}&$top=${top}`;
+    let url = `${listApiOf(listGuid)}/items?$select=${selectForExpand}&$expand=${currentExpands}&$top=${top}`;
     if (orderBy) url += `&$orderby=${orderBy}${orderDesc ? ' desc' : ' asc'}`;
     if (currentFilter) url += `&$filter=${encodeURIComponent(currentFilter)}`;
     try {
-      const { data } = await dobAxios.get(url);
+      const { data } = await httpOf(listGuid).get(url);
       const results = data?.d?.results || data?.value || [];
       const next = data?.d?.__next || data?.['odata.nextLink'] || null;
       return { results, next };
@@ -151,7 +182,7 @@ export async function getDobItemsPaged({ pageSize = 50, fields = null, filter = 
           fetchUrl = `${isDob ? '/dob-api' : '/api'}${apiPath}`;
         } catch {}
       }
-      const { data } = await dobAxios.get(fetchUrl);
+      const { data } = await httpOf(listGuid).get(fetchUrl);
       const chunk = data?.d?.results || data?.value || [];
       all.push(...chunk);
       nextUrl = data?.d?.__next || data?.['odata.nextLink'] || null;
@@ -169,9 +200,9 @@ export async function updateDobItem(id, payload, listGuid = DOB_LIST_GUID) {
   while (attempt < 6) {
     const entity = await getDobEntityType(listGuid);
     const body = { __metadata: { type: entity }, ...currentPayload };
-    const url = `${dobListApi(listGuid)}/items(${id})`;
+    const url = `${listApiOf(listGuid)}/items(${id})`;
     try {
-      const { data } = await dobAxios.post(url, body, {
+      const { data } = await httpOf(listGuid).post(url, body, {
         headers: {
           'X-HTTP-Method': 'MERGE',
           'IF-MATCH': '*',
@@ -240,8 +271,8 @@ export async function createDobItem(payload, listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
   const entity = await getDobEntityType(listGuid);
   const body = { __metadata: { type: entity }, ...payload };
-  const url = `${dobListApi(listGuid)}/items`;
-  const { data } = await dobAxios.post(url, body);
+  const url = `${listApiOf(listGuid)}/items`;
+  const { data } = await httpOf(listGuid).post(url, body);
   return data?.d || data;
 }
 
@@ -263,8 +294,8 @@ export async function getDobItem(id, listGuid = DOB_LIST_GUID) {
     return parts.join(',');
   }
   const selectForExpand = buildSelectForExpands(expands);
-  const url = `${dobListApi(listGuid)}/items(${id})?$select=${selectForExpand}&$expand=${expands}`;
-  const { data } = await dobAxios.get(url);
+  const url = `${listApiOf(listGuid)}/items(${id})?$select=${selectForExpand}&$expand=${expands}`;
+  const { data } = await httpOf(listGuid).get(url, readConfig(listGuid));
   const item = data?.d || data;
   return item;
 }
@@ -290,9 +321,9 @@ export async function getDobItemForView(id, listGuid = DOB_LIST_GUID) {
     if (e === 'ContentType') continue;
     selectParts.push(`${e}/Title`, `${e}/Id`);
   }
-  const url = `${dobListApi(listGuid)}/items(${id})?$select=${selectParts.join(',')}&$expand=${uniqueExpands.join(',')}`;
+  const url = `${listApiOf(listGuid)}/items(${id})?$select=${selectParts.join(',')}&$expand=${uniqueExpands.join(',')}`;
   try {
-    const { data } = await dobAxios.get(url);
+    const { data } = await httpOf(listGuid).get(url);
     return data?.d || data;
   } catch (e) {
     const status = e?.response?.status;
@@ -303,8 +334,8 @@ export async function getDobItemForView(id, listGuid = DOB_LIST_GUID) {
 
 export async function getDobAttachments(id, listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
-  const url = `${dobListApi(listGuid)}/items(${id})/AttachmentFiles`;
-  const { data } = await dobAxios.get(url);
+  const url = `${listApiOf(listGuid)}/items(${id})/AttachmentFiles`;
+  const { data } = await httpOf(listGuid).get(url);
   const results = data?.d?.results || data?.value || [];
   return results;
 }
@@ -324,8 +355,8 @@ export async function uploadDobAttachment(id, file, listGuid = DOB_LIST_GUID) {
   while (attempt < 4) {
     try {
       const buffer = await file.arrayBuffer();
-      const url = `${dobListApi(listGuid)}/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
-      const { data } = await dobAxios.post(url, buffer, {
+      const url = `${listApiOf(listGuid)}/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
+      const { data } = await httpOf(listGuid).post(url, buffer, {
         headers: { 'Content-Type': 'application/octet-stream' },
         transformRequest: (d) => d,
       });
@@ -369,7 +400,7 @@ export async function uploadDobAttachment(id, file, listGuid = DOB_LIST_GUID) {
 
 export async function deleteDobAttachment(id, fileName, listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
-  const url = `${dobListApi(listGuid)}/items(${id})/AttachmentFiles/getByFileName('${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
-  const { data } = await dobAxios.post(url, null, { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
+  const url = `${listApiOf(listGuid)}/items(${id})/AttachmentFiles/getByFileName('${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
+  const { data } = await httpOf(listGuid).post(url, null, { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
   return data;
 }

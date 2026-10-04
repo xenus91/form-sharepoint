@@ -10,16 +10,38 @@
 // Вынесено отдельно от TasksView, чтобы поведение было тестируемым.
 
 import { parseCompositeId } from "../../../tasks/multiSource";
+import { taskContentTypeId, RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
+import { TASKS_LIST_GUID } from "../../../tasks/config";
+
+/**
+ * Задача закрывается через диалог ДОБ (тип контента «Результат проверки ООБ»):
+ * её ведёт та же форма, что задачи сайта dob — DobTaskEditView.
+ * @param {any} task
+ * @returns {boolean}
+ */
+export function isDialogResultTask(task) {
+  const ct = String(taskContentTypeId(task) || "").toLowerCase();
+  return ct !== "" && ct === String(RESULT_CHECK_OOO_CT_ID).toLowerCase();
+}
 
 /**
  * @param {string} compositeId — "<sourceId>:<id>"
  * @param {Array<{id:string, listGuid?:string|null}>} [sources]
+ * @param {any} [task] — нужен, чтобы отличить «Результат проверки ООБ» от обычной задачи
  * @returns {string|null} hash роута или null, если перейти некуда
  */
-export function buildTaskFormHash(compositeId, sources = []) {
+export function buildTaskFormHash(compositeId, sources = [], task = null) {
   const parsed = parseCompositeId(compositeId);
   if (!parsed) return null;
-  if (parsed.sourceId === "main") return `#tasks/${parsed.id}`;
+  if (parsed.sourceId === "main") {
+    // ⭐ «Результат проверки ООБ» ведёт себя как задачи сайта dob: открывается
+    // формой ДОБ (тот же экран DobTaskEditView), но список — основной.
+    // Задача стандартного типа остаётся в карточке #tasks/<Id>.
+    if (isDialogResultTask(task)) {
+      return `#dob_tasks/${parsed.id}?list=${String(TASKS_LIST_GUID || "").toLowerCase()}`;
+    }
+    return `#tasks/${parsed.id}`;
+  }
   const source = (sources || []).find((s) => s && s.id === parsed.sourceId);
   const listGuid = source?.listGuid ? String(source.listGuid).toLowerCase() : null;
   if (!listGuid) return null;
@@ -30,10 +52,11 @@ export function buildTaskFormHash(compositeId, sources = []) {
  * Открывает форму задачи. Возвращает true, если навигация произошла.
  * @param {string} compositeId
  * @param {Array<any>} [sources]
+ * @param {any} [task]
  * @returns {boolean}
  */
-export function openTaskForm(compositeId, sources = []) {
-  const hash = buildTaskFormHash(compositeId, sources);
+export function openTaskForm(compositeId, sources = [], task = null) {
+  const hash = buildTaskFormHash(compositeId, sources, task);
   if (!hash) return false;
   try {
     window.location.hash = hash;
