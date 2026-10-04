@@ -100,6 +100,35 @@ describe("contentTypeFields — тип контента «Результат п�
     expect(form.required.map((c) => c.internalName)).toEqual(["DescriptionCheckResult"]);
   });
 
+  it("колонка типа OutcomeChoice («Результирующий выбор») даёт КНОПКИ результата, а не пропадает", () => {
+    // Именно этот случай ломал форму в живом тенанте: тип колонки OutcomeChoice
+    // не имел вида контрола → поле молча выпадало и кнопок результата не было.
+    expect(controlKindOf(FIELD({ InternalName: "DobSearchResult", TypeAsString: "OutcomeChoice" }))).toBe("select");
+    const form = buildContentTypeForm([
+      FIELD({ InternalName: "DobSearchResult", Title: "ДобSearchResult", TypeAsString: "OutcomeChoice", Required: true, Choices: { results: ["Годен", "Брак"] } }),
+      FIELD({ InternalName: "DescriptionCheckResult", TypeAsString: "Note" }),
+    ]);
+    expect(form.resultBlock).toMatchObject({ internalName: "DobSearchResult", choices: ["Годен", "Брак"], required: true });
+    expect(form.resultBlock.title).toBe("ДобSearchResult");
+    expect(form.controls.map((c) => c.internalName)).toEqual(["DescriptionCheckResult"]);
+  });
+
+  it("если колонки результата нет в FieldLinks — берём её из метаданных списка (запасной блок)", () => {
+    const form = buildContentTypeForm(
+      [FIELD({ InternalName: "ErrorCountValidation", TypeAsString: "Number" })],
+      {
+        fallbackResultField: {
+          internalName: "DobSearchResult",
+          title: "Результат проверки",
+          choices: ["Годен", "Брак"],
+          required: true,
+        },
+      },
+    );
+    expect(form.resultBlock).toMatchObject({ internalName: "DobSearchResult", choices: ["Годен", "Брак"], required: true });
+    expect(form.controls.map((c) => c.internalName)).toEqual(["ErrorCountValidation"]);
+  });
+
   it("обязательные поля из SharePoint не дают отправить пустую форму", () => {
     const form = buildContentTypeForm([
       FIELD({ InternalName: "DobSearchResult", Title: "DobSearchResult", TypeAsString: "Choice", Required: true, Choices: { results: ["Годен"] } }),

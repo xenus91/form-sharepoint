@@ -117,15 +117,27 @@ describe("PersonFieldAutocomplete — «Пользователь или груп
     expect(onChange.mock.calls[0][0]).toEqual([IVANOV]);
   });
 
-  it("у выбранного пользователя в чипе видно имя, должность и офис", async () => {
+  it("чип содержит ТОЛЬКО имя, а должность/департамент/офис — в карточке по клику", async () => {
     renderField({ value: [IVANOV] });
     await settle(80);
     const chip = document.body.querySelector(".MuiChip-root");
     expect(chip).toBeTruthy();
     expect(chip.textContent).toContain("Иванов Иван Иванович");
-    expect(chip.textContent).toContain("Главный специалист");
-    expect(chip.textContent).toContain("Департамент ИТ");
-    expect(chip.textContent).toContain("СПб, Ленинский 1");
+    // Полные сведения не «раздувают» чип и не выезжают за края формы.
+    expect(chip.textContent).not.toContain("Главный специалист");
+    expect(chip.textContent).not.toContain("Департамент ИТ");
+    expect(chip.textContent).not.toContain("СПб, Ленинский 1");
+    const chipLabel = chip.querySelector("[title]");
+    expect(chipLabel?.getAttribute("title")).toContain("Главный специалист");
+
+    await act(async () => {
+      chip.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await settle(80);
+    });
+    const text = document.querySelector('[data-testid="person-details-body"]')?.textContent || "";
+    expect(text).toContain("Главный специалист");
+    expect(text).toContain("Департамент ИТ");
+    expect(text).toContain("СПб, Ленинский 1");
   });
 
   it("клик по выбранному чипу раскрывает свойства: должность, департамент, офис, учётная запись", async () => {

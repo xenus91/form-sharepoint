@@ -189,7 +189,7 @@ export default function PersonFieldAutocomplete({
           );
         }}
         renderTags={(items, getItemProps) => (
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, py: 0.25 }}>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, py: 0.25, minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
             {items.map((user, index) => {
               const info = detailsOf(positions, user) || {};
               const chipProps = getItemProps({ index });
@@ -209,19 +209,21 @@ export default function PersonFieldAutocomplete({
                     chipProps.onClick?.(event);
                     openDetails(event, user);
                   }}
+                  // Только имя: должность/департамент/офис — в карточке по клику,
+                  // чтобы подпись не выезжала за края формы.
                   label={(
-                    <Box sx={{ display: "inline-flex", alignItems: "baseline", gap: 0.5, maxWidth: 320 }}>
-                      <Box component="span" sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{personDisplayName(user)}</Box>
-                      {info.label && (
-                        <Box component="span" sx={{ color: "text.secondary", fontSize: "0.7rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {info.label}
-                        </Box>
-                      )}
+                    <Box
+                      component="span"
+                      title={info.label ? `${personDisplayName(user)} — ${info.label}` : personDisplayName(user)}
+                      sx={{ fontWeight: 700, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    >
+                      {personDisplayName(user)}
                     </Box>
                   )}
                   sx={{
                     borderRadius: 0.5,
                     height: 28,
+                    maxWidth: "100%",
                     cursor: "pointer",
                     ...(isOpen ? { borderColor: "#171c8f", bgcolor: "rgba(23,28,143,.06)" } : {}),
                   }}

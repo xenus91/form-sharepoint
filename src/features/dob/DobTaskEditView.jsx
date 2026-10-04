@@ -17,7 +17,7 @@ import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
-import { contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
+import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
 import {
   FORM_ACTIONS_SX,
   FORM_APPBAR_SX,
@@ -25,9 +25,35 @@ import {
   FORM_PAGE_SX,
   FORM_PRIMARY_BUTTON_SX,
   FORM_SECONDARY_BUTTON_SX,
+  FORM_SECTION_BAR_SX,
+  FORM_SECTION_HEAD_SX,
+  FORM_SECTION_SX,
   FORM_SECTION_TITLE_SX,
+  FORM_TASK_HEAD_SX,
+  FORM_FIELD_WIDE_SX,
 } from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
+
+/**
+ * Описание задачи для тела формы: снимаем rich-теги, но СОХРАНЯЕМ абзацы —
+ * иначе многострочное описание слипается в одну строку (`white-space: pre-wrap`).
+ */
+function taskDescriptionText(raw) {
+  if (!raw) return '';
+  const html = looksLikeHtml(raw) ? String(raw) : '';
+  if (!html) return String(raw).trim();
+  return html
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\s*\/\s*(p|div|li|tr|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
+}
 import { resolveRelatedRef } from './lib/relatedItem';
 
 
@@ -429,6 +455,46 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
   const loading = fieldsLoading || itemLoading;
 
+  // Заголовок в шапке (номер + название задачи) и описание в теле — сразу под
+  // шапкой, ДО полей: сначала контекст задачи, потом форма.
+  const taskTitle = String(item?.Title ?? '').trim();
+  const rawBody = item?.Body || item?.Description || item?.TaskDescription || '';
+  const taskBody = taskDescriptionText(rawBody);
+  const heading = taskTitle ? `Задача #${id} · ${taskTitle}` : `Задача #${id}`;
+
+  const taskHead = (item && taskBody) ? (
+    <Box sx={FORM_TASK_HEAD_SX} data-testid="dob-task-head">
+      <Typography variant="caption" sx={{ fontWeight: 800, color: '#171c8f', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+        Описание задачи
+      </Typography>
+      <Typography variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+        {taskBody}
+      </Typography>
+    </Box>
+  ) : null;
+
+  // Результирующий выбор для этого списка: в FieldLinks типа контента колонки
+  // результата может не быть (она заведена на уровне списка) — тогда берём её из
+  // метаданных списка, иначе форма остаётся без кнопок результата.
+  const listResultField = useMemo(() => {
+    const list = fields || [];
+    const pick = list.find(f => String(f?.TypeAsString || '').toLowerCase() === 'outcomechoice' && !f.Hidden)
+      || list.find(f => /searchresult|resultsearch|^result/i.test(String(f?.InternalName || '')) && !f.Hidden);
+    if (!pick) return null;
+    const rawChoices = Array.isArray(pick.Choices) ? pick.Choices : (pick.Choices?.results || []);
+    const choices = (rawChoices || []).map(v => String(v && typeof v === 'object' ? (v.Value ?? '') : v)).filter(Boolean);
+    if (choices.length === 0) return null;
+    return {
+      internalName: pick.InternalName,
+      title: pick.Title && pick.Title !== pick.InternalName
+        ? String(pick.Title)
+        : (FIELD_LABEL_OVERRIDES[pick.InternalName] || String(pick.InternalName)),
+      choices,
+      required: pick.Required === true,
+      allowFillIn: pick.FillInChoice === true,
+    };
+  }, [fields]);
+
   // Связанная заявка: RelatedItems элемента (или lookup на список заявок ДОБ).
   const relatedRef = useMemo(() => resolveRelatedRef(item, fields), [item, fields]);
 
@@ -581,7 +647,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
             <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
             <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="К задачам"><ArrowBackIcon fontSize="small" /></IconButton>
-            <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>Задача #{id}</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {heading}
+            </Typography>
             {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
             <Button size="small" variant="outlined" onClick={() => refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={FORM_SECONDARY_BUTTON_SX}>Обновить</Button>
             <Button
@@ -597,9 +665,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           </Toolbar>
         </AppBar>
         {saveError && <Alert severity="error" onClose={() => setSaveError('')}>{saveError}</Alert>}
+        {taskHead}
         <ContentTypeResultDialog
           inline
           task={item}
+          listGuid={listGuid}
+          resultField={listResultField}
           contentTypeId={checkCtId}
           contentTypeName="Результат проверки ООБ"
           submitLabel="Сохранить"
@@ -630,7 +701,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
           <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
           <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label={isDefaultList ? 'К списку' : 'К задачам'}><ArrowBackIcon fontSize="small" /></IconButton>
-          <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>{isDefaultList ? 'Заявка ДОБ' : 'Задача'} #{id}</Typography>
+          <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {taskTitle ? `${isDefaultList ? 'Заявка ДОБ' : 'Задача'} #${id} · ${taskTitle}` : `${isDefaultList ? 'Заявка ДОБ' : 'Задача'} #${id}`}
+          </Typography>
           {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
           <Tooltip title={relatedRef ? 'Показать данные связанной заявки (только чтение)' : 'У этой записи нет связанной заявки (RelatedItems пустое)'}>
             <span>
@@ -665,11 +738,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       {saveError && <Alert severity="error" onClose={()=> setSaveError('')}>{saveError}</Alert>}
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
-      <Box className="dob-rich-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 1, flex: '0 0 auto' }}>
-        <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Результат проверки — главное поле</Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-          Поддерживает таблицы, списки, форматирование и вставку изображений. Изображения автоматически загружаются как вложения заявки и вставляются как {'<img src="...">'}.
-        </Typography>
+      {taskHead}
+      <Box className="dob-rich-section" sx={{ ...FORM_SECTION_SX, position: 'relative', zIndex: 1, flex: '0 0 auto' }}>
+        <Box sx={FORM_SECTION_HEAD_SX}>
+          <Box sx={FORM_SECTION_BAR_SX} />
+          <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Результат проверки</Typography>
+        </Box>
         {isUploadingImage && <LinearProgress sx={{ mb: 1, borderRadius: 1 }} />}
         <RichEditor
           value={chekValue || ''}
@@ -718,7 +792,10 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       </Box>
 
       <Box className="dob-fields-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 2, flex: '0 0 auto' }}>
-        <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Остальные поля</Typography>
+        <Box sx={FORM_SECTION_HEAD_SX}>
+          <Box sx={FORM_SECTION_BAR_SX} />
+          <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Остальные поля</Typography>
+        </Box>
         <Box sx={FORM_FIELD_GRID_SX}>
           {editableFields.filter(f => f.InternalName !== chekInternal && !/^(?:modified|откорректировано|изменено)$/i.test(String(f.InternalName || f.Title || '').trim()) && !/откорректировано|изменено/i.test(String(f.Title || ''))).map(f => {
             const internal = f.InternalName;
@@ -740,7 +817,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             if (USER_TYPES.has(t)) {
               const multiple = t === 'usermulti' || f.AllowMultipleValues === true;
               return (
-                <Box key={internal} sx={{ minWidth: 0 }}>
+                <Box key={internal} sx={FORM_FIELD_WIDE_SX}>
                   <PersonFieldAutocomplete
                     label={title}
                     required={f.Required === true}

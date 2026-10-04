@@ -516,7 +516,12 @@ function allowMultiple(field) {
 function choicesOf(field) {
   const raw = field?.Choices;
   const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.results) ? raw.results : []);
-  return list.map((v) => String(v).trim()).filter(Boolean);
+  // В verbose-ответах значение приходит объектом {Value} / {LookupValue} —
+  // приводим к строке заранее, чтобы кнопки не подписывались «[object Object]».
+  return list.map((v) => {
+    if (v && typeof v === "object") return String(v.Value ?? v.LookupValue ?? "").trim();
+    return String(v).trim();
+  }).filter(Boolean);
 }
 
 /** Вид контрола по типу колонки (или null — поле не показываем/не поддерживаем). */
@@ -528,10 +533,16 @@ export function controlKindOf(field) {
     case "text":
       return "text";
     case "choice":
+    // OutcomeChoice — это тот же выбор, но «результирующий» (DobSearchResult).
+    // Раньше он не имел вида контрола и молча выпадал из формы вместе с кнопками
+    // результата («Кнопок результирующего выбора я не наблюдаю!»).
+    case "outcomechoice":
+    case "combobox":
       // Выбор без свободного ввода — настоящий select; с FillInChoice — автокомплит
       // (можно ввести своё значение).
       return field?.FillInChoice === true ? "autocomplete" : "select";
     case "multichoice":
+    case "gridchoice":
       return "multichoice";
     case "number":
     case "currency":
@@ -618,12 +629,20 @@ export function isFormField(field) {
  */
 export function buildContentTypeForm(fields = [], opts = {}) {
   const resultNames = new Set((opts.resultFieldInternalNames || []).map((n) => String(n).toLowerCase()));
+  // Запасной блок результата: колонка есть в СПИСКЕ, но в FieldLinks типа контента
+  // её нет (например, «Результирующий выбор» добавлен на уровне списка). Тогда
+  // кнопки результата всё равно должны быть на форме.
+  const fallback = opts.fallbackResultField || null;
   const isResultChoiceField = (field) => {
     const internal = String(field.InternalName || "");
     if (resultNames.has(internal.toLowerCase())) return true;
     const display = String(field.TypeDisplayName || "").toLowerCase();
     const shortDesc = String(field.TypeShortDescription || "").toLowerCase();
+    const typeAsString = String(field.TypeAsString || "").toLowerCase();
+    // OutcomeChoice — колонка «Результирующий выбор» (DobSearchResult и т.п.)
+    if (typeAsString === "outcomechoice" && choicesOf(field).length > 0) return true;
     if (display.includes("результирующий выбор") || shortDesc.includes("результат задачи")) return true;
+    if (display.includes("outcome")) return true;
     // Эвристика по имени поля (когда метаданные не отдали тип): ResultSearchTHU,
     // ResultOOB, DobSearchResult. Специально НЕ ловим «…CheckResult» (описание проверки).
     const compact = internal.toLowerCase();
@@ -668,6 +687,15 @@ export function buildContentTypeForm(fields = [], opts = {}) {
       multiple: allowMultiple(field),
       description: field.Description ? String(field.Description) : "",
     });
+  }
+  if (!resultBlock && fallback && fallback.internalName) {
+    resultBlock = {
+      internalName: fallback.internalName,
+      title: fallback.title || FIELD_LABEL_OVERRIDES[fallback.internalName] || fallback.internalName,
+      choices: (fallback.choices || []).map(String),
+      required: fallback.required === true,
+      allowFillIn: fallback.allowFillIn === true,
+    };
   }
   return {
     resultBlock,

@@ -29,6 +29,7 @@ const FIELDS = [
 const ITEM = {
   Id: 13,
   Title: "Проверка ЕО (ООБ)",
+  Body: "<p>Проверить партию ЕО, выданную 01.10, по результатам обхода.</p>",
   Status: "В работе",
   ContentTypeId: RESULT_CHECK_OOO_CT_ID,
 };
@@ -137,6 +138,30 @@ describe("DobTaskEditView — задача «Результат проверки
     expect(text).not.toContain("Состояние задачи");
     // и это НЕ поля заявки ДОБ (нет «Результат проверки — главное поле»)
     expect(text).not.toContain("Результат проверки — главное поле");
+  });
+
+  it("название — в шапке, описание задачи — в теле ПЕРЕД полем richtext, «Остальные поля» — ниже", async () => {
+    const { host } = await renderForm();
+    const text = host.textContent || "";
+    // Название задачи стоит рядом с номером в шапке страницы
+    expect(text).toContain("Задача #13 · Проверка ЕО (ООБ)");
+    const head = host.querySelector('[data-testid="dob-task-head"]');
+    expect(head).toBeTruthy();
+    const headText = head.textContent || "";
+    // Описание задачи — сразу в теле, теги rich-описания сняты
+    expect(headText).toContain("Проверить партию ЕО, выданную 01.10, по результатам обхода.");
+    expect(headText).not.toContain("<p>");
+    // Порядок: описание задачи → кнопки результата → поле richtext → «Остальные поля»
+    const main = host.querySelector('[data-testid="ct-main-field"]');
+    expect(main).toBeTruthy();
+    expect(main.textContent).toContain("Описание результата проверки");
+    const order = [
+      head.compareDocumentPosition(host.querySelector('[data-testid="ct-result-block"]')),
+      host.querySelector('[data-testid="ct-result-block"]').compareDocumentPosition(main),
+      main.compareDocumentPosition(host.querySelector('[data-testid="ct-other-fields"]')),
+    ];
+    order.forEach((pos) => expect(pos & window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy());
+    expect(text.indexOf("Остальные поля")).toBeGreaterThan(text.indexOf("Описание результата проверки"));
   });
 
   it("«Сохранить» без обязательного описания ничего не пишет (обязательность из SP)", async () => {

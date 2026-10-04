@@ -17,19 +17,25 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Alert, Autocomplete, Box, Checkbox, Button, Chip, CircularProgress, Dialog, DialogActions,
+  Alert, Autocomplete, Box, Checkbox, Button, CircularProgress, Dialog, DialogActions,
   DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, TextField, ToggleButton,
   ToggleButtonGroup, Typography,
 } from "@mui/material";
 import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
+import { getDobContentTypeFields } from "../../dob/api/dobApi";
 import {
   FORM_ACTIONS_SX,
   FORM_FIELD_FULL_SX,
   FORM_FIELD_GRID_SX,
+  FORM_FIELD_WIDE_SX,
   FORM_PRIMARY_BUTTON_SX,
   FORM_SECONDARY_BUTTON_SX,
+  FORM_SECTION_BAR_SX,
+  FORM_SECTION_HEAD_SX,
+  FORM_SECTION_SX,
   FORM_SECTION_TITLE_SX,
+  RESULT_TOGGLE_GROUP_SX,
 } from "../../dob/lib/formStyles";
 import {
   buildContentTypeForm,
@@ -110,6 +116,11 @@ export default function ContentTypeResultDialog({
   // submitRef: страница (#dob_tasks/<id>) кладёт в него submit формы — кнопка
   // «Сохранить» в шапке страницы работает так же, как в форме заявки ДОБ.
   submitRef = null,
+  // listGuid — список ЗАДАЧИ: поля типа контента читаем у него (а не у основного
+  // списка) и, если в FieldLinks нет колонки результата, берём её из метаданных
+  // списка (resultField) — иначе форма оставалась без кнопок результата.
+  listGuid = "",
+  resultField = null,
 }) {
   const [result, setResult] = React.useState(initialResult || "");
   const [values, setValues] = React.useState({});
@@ -117,8 +128,12 @@ export default function ContentTypeResultDialog({
   const [touched, setTouched] = React.useState(false);
 
   const fieldsQ = useQuery({
-    queryKey: ["ct-fields", contentTypeId],
-    queryFn: () => fetchContentTypeFields(contentTypeId),
+    queryKey: ["ct-fields", contentTypeId, listGuid || "main"],
+    // Поля читаем у ТОГО списка, в котором лежит задача (у внешних списков свои
+    // типы контента и свои колонки).
+    queryFn: () => (listGuid
+      ? getDobContentTypeFields(contentTypeId, listGuid)
+      : fetchContentTypeFields(contentTypeId)),
     enabled: Boolean((open || inline) && contentTypeId),
     staleTime: 30 * 60 * 1000,
     retry: 1,
@@ -126,9 +141,13 @@ export default function ContentTypeResultDialog({
 
   const form = React.useMemo(
     () => buildContentTypeForm(fieldsQ.data || [], {
-      resultFieldInternalNames: resultFieldInternalName ? [resultFieldInternalName] : [],
+      resultFieldInternalNames: [
+        resultFieldInternalName,
+        resultField?.internalName,
+      ].filter(Boolean),
+      fallbackResultField: resultField,
     }),
-    [fieldsQ.data, resultFieldInternalName],
+    [fieldsQ.data, resultFieldInternalName, resultField],
   );
 
   // Инициализация значений из задачи + результата из Behaviour/карточки
@@ -158,8 +177,9 @@ export default function ContentTypeResultDialog({
   const choices = React.useMemo(() => {
     const list = (Array.isArray(resultChoices) ? resultChoices : []).map((c) => String(c)).filter(Boolean);
     if (list.length > 0) return list;
-    return form.resultBlock?.choices || [];
-  }, [resultChoices, form.resultBlock]);
+    if (form.resultBlock?.choices?.length) return form.resultBlock.choices;
+    return (resultField?.choices || []).map((c) => String(c)).filter(Boolean);
+  }, [resultChoices, form.resultBlock, resultField]);
 
   const setValue = (internal, value) => {
     setValues((prev) => ({ ...prev, [internal]: value }));
@@ -225,6 +245,17 @@ export default function ContentTypeResultDialog({
     return () => { submitRef.current = null; };
   }, [submitRef, handleSubmit]);
 
+  // Главный рич-текст («Описание результата проверки») показываем отдельной
+  // секцией сразу после результата: это основное поле формы, а не «остальное».
+  const mainControl = React.useMemo(
+    () => form.controls.find((c) => c.kind === "richtext") || null,
+    [form.controls],
+  );
+  const gridControls = React.useMemo(
+    () => form.controls.filter((c) => c !== mainControl),
+    [form.controls, mainControl],
+  );
+
   const title = confirmTexts?.title || `Закрытие задачи #${task?.Id ?? ""}`.trim();
   const message = confirmTexts?.message || "";
 
@@ -248,11 +279,14 @@ export default function ContentTypeResultDialog({
         {!fieldsQ.isLoading && (
           <Stack spacing={1.25}>
             {choices.length > 0 && (
-              <Box>
-                <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
-                  {form.resultBlock?.title || "Результат"}
-                  {form.resultBlock?.required ? " *" : ""}
-                </Typography>
+              <Box sx={FORM_SECTION_SX} data-testid="ct-result-block">
+                <Box sx={FORM_SECTION_HEAD_SX}>
+                  <Box sx={FORM_SECTION_BAR_SX} />
+                  <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
+                    {form.resultBlock?.title || "Результат"}
+                    {form.resultBlock?.required ? " *" : ""}
+                  </Typography>
+                </Box>
                 {/* Результирующий выбор — группа кнопок (button group), как в форме ДОБ */}
                 <ToggleButtonGroup
                   exclusive
@@ -264,24 +298,7 @@ export default function ContentTypeResultDialog({
                     setResult(next);
                     if (problems.length) setProblems([]);
                   }}
-                  sx={{
-                    flexWrap: "wrap",
-                    gap: 0.5,
-                    "& .MuiToggleButton-root": {
-                      border: "1px solid rgba(23,28,143,.24)",
-                      borderRadius: 0.5,
-                      px: 1.5,
-                      height: 32,
-                      textTransform: "none",
-                      fontWeight: 700,
-                      color: "#171c8f",
-                    },
-                    "& .MuiToggleButton-root.Mui-selected": {
-                      backgroundColor: "#171c8f",
-                      color: "#fff",
-                      "&:hover": { backgroundColor: "#2a31a8" },
-                    },
-                  }}
+                  sx={RESULT_TOGGLE_GROUP_SX}
                 >
                   {choices.map((choice) => (
                     <ToggleButton key={choice} value={choice} data-testid={`ct-result-choice-${choice}`}>
@@ -292,14 +309,33 @@ export default function ContentTypeResultDialog({
               </Box>
             )}
 
-            {form.controls.length > 0 && (
-              <Typography variant="subtitle1" sx={{ ...FORM_SECTION_TITLE_SX, mb: 0.25 }}>
-                Остальные поля
-              </Typography>
+            {mainControl && (
+              <Box sx={FORM_SECTION_SX} data-testid="ct-main-field">
+                <Box sx={FORM_SECTION_HEAD_SX}>
+                  <Box sx={FORM_SECTION_BAR_SX} />
+                  <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
+                    {mainControl.title}{mainControl.required ? " *" : ""}
+                  </Typography>
+                </Box>
+                <RichEditor
+                  value={values[mainControl.internalName] || ""}
+                  readOnly={submitting}
+                  onChange={(html) => setValue(mainControl.internalName, html)}
+                />
+                {mainControl.description && (
+                  <Typography variant="caption" color="text.secondary">{mainControl.description}</Typography>
+                )}
+              </Box>
             )}
 
-            <Box sx={FORM_FIELD_GRID_SX}>
-            {form.controls.map((control) => {
+            {gridControls.length > 0 && (
+              <Box sx={FORM_SECTION_SX} data-testid="ct-other-fields">
+                <Box sx={FORM_SECTION_HEAD_SX}>
+                  <Box sx={FORM_SECTION_BAR_SX} />
+                  <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Остальные поля</Typography>
+                </Box>
+                <Box sx={FORM_FIELD_GRID_SX}>
+                {gridControls.map((control) => {
               const value = values[control.internalName];
               const invalid = touched && control.required
                 && (value === undefined || value === null || String(value).trim() === ""
@@ -333,17 +369,20 @@ export default function ContentTypeResultDialog({
 
               if (control.kind === "person") {
                 return (
-                  <PersonFieldAutocomplete
-                    key={control.internalName}
-                    label={control.title}
-                    value={value || []}
-                    onChange={(next) => setValue(control.internalName, next)}
-                    multiple={control.multiple !== false}
-                    required={control.required}
-                    disabled={submitting}
-                    error={Boolean(invalid)}
-                    helperText={helper}
-                  />
+                  // «Пользователь или группа» — широкая ячейка, чтобы имя и чипы
+                  // не выезжали за края формы.
+                  <Box key={control.internalName} sx={FORM_FIELD_WIDE_SX}>
+                    <PersonFieldAutocomplete
+                      label={control.title}
+                      value={value || []}
+                      onChange={(next) => setValue(control.internalName, next)}
+                      multiple={control.multiple !== false}
+                      required={control.required}
+                      disabled={submitting}
+                      error={Boolean(invalid)}
+                      helperText={helper}
+                    />
+                  </Box>
                 );
               }
 
@@ -521,8 +560,10 @@ export default function ContentTypeResultDialog({
                   helperText={helper}
                 />
               );
-            })}
-            </Box>
+                })}
+                </Box>
+              </Box>
+            )}
 
             {form.controls.length === 0 && !fieldsQ.isLoading && (
               <Alert severity="info">
@@ -541,17 +582,6 @@ export default function ContentTypeResultDialog({
               </Alert>
             )}
 
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-              {form.required.map((c) => (
-                <Chip
-                  key={c.internalName}
-                  size="small"
-                  variant="outlined"
-                  label={`${c.title} *`}
-                  sx={{ borderRadius: "6px", fontSize: "0.7rem" }}
-                />
-              ))}
-            </Box>
           </Stack>
         )}
     </>
