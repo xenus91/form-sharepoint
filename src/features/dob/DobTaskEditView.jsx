@@ -16,7 +16,7 @@ import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
-import { fileNameFromSrc, removedImgSrcs, removedImgSrcsByValues } from './lib/richImages';
+import { fileNameFromSrc, removeImgByFileName, removedImgSrcs, removedImgSrcsByValues, sameFormValues } from './lib/richImages';
 import { attachmentDisplayUrl, toDisplayImages, toStorageImages } from './lib/attachmentUrl';
 import { fieldsWithBase64, materializeRichValues } from './lib/materializeRichImages';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
@@ -91,6 +91,26 @@ function renderAttachments({ attachments = [], onDelete, note = true, inside = f
       )}
     </Box>
   );
+}
+
+/**
+ * Убрать картинку файла из ВСЕХ rich-значений формы ({ internalName: html }).
+ * Возвращает новый объект только если что-то реально изменилось (иначе `null`) —
+ * чтобы не гонять ререндер зря.
+ */
+function stripAttachmentFromValues(values, fileName) {
+  if (!values || !fileName) return null;
+  let changed = false;
+  const next = { ...values };
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value !== 'string' || !value.includes('<img')) continue;
+    const cleaned = removeImgByFileName(value, fileName);
+    if (cleaned !== value) {
+      next[key] = cleaned;
+      changed = true;
+    }
+  }
+  return changed ? next : null;
 }
 
 /**
@@ -196,6 +216,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   const [relatedOpen, setRelatedOpen] = useState(false);
   const ctSubmitRef = useRef(null); // submit формы задачи (кнопка в шапке страницы)
   const [ctValues, setCtValues] = useState({}); // значения формы задачи (CT) — для синхронизации вложений
+  // «Пульт» формы задачи (CT): попросить её убрать картинку удалённого вложения
+  // из своего rich-текста (значения живут внутри ContentTypeResultDialog).
+  const ctValuesControlRef = useRef(null);
   const prevCtHtmlRef = useRef({});
   const prevChekHtmlRef = useRef(null);
   const pendingDeleteRef = useRef(new Set());
@@ -727,19 +750,11 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       notify(`Вложение ${fileName} удалено`, { severity: 'success' });
       // Remove from attachments state
       setAttachments(prev => prev.filter(a => a.FileName !== fileName && a.ServerRelativeUrl !== fileName));
-      // Also remove image from ChekResult HTML if present (only if not already removed by editor)
-      setForm(prev => {
-        const cur = prev[chekInternal] || '';
-        if (typeof cur === 'string' && cur.includes(fileName)) {
-          // remove img tags that contain fileName
-          const cleaned = cur.replace(new RegExp(`<img[^>]*${fileName.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}[^>]*>`, 'gi'), '');
-          if (cleaned !== cur) {
-            console.log('[DobEdit][delete] cleaned html from fileName', fileName);
-            return { ...prev, [chekInternal]: cleaned };
-          }
-        }
-        return prev;
-      });
+      // Каскад: картинка удалённого вложения уходит из ВСЕХ rich-полей формы
+      // (не только из основного) и из rich-текста формы задачи (CT).
+      setForm((prev) => stripAttachmentFromValues(prev, fileName) || prev);
+      ctValuesControlRef.current?.removeImagesByFileName?.(fileName);
+      console.log('[DobEdit][delete] cleaned html for', fileName);
       // Refresh from server
       getDobAttachments(id, listGuid).then(setAttachments).catch(()=>{});
     } catch (e) {
@@ -748,7 +763,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     } finally {
       pendingDeleteRef.current.delete(fileName);
     }
-  }, [id, listGuid, notify, chekInternal]);
+  }, [id, listGuid, notify]);
 
   // Синхрон: если картинка удалена из ChekResult (в редакторе) — удалить вложение
   // Удаляем вложения для картинок, которые убрали из rich-текста (обе ветки формы).
@@ -762,6 +777,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   });
 
   const deleteAttachmentForSrc = useCallback((src) => {
+    // base64/blob — ещё не вложение (загружается при сохранении): удалять нечего.
+    if (!src || typeof src !== 'string' || src.startsWith('data:') || src.startsWith('blob:')) return;
     const fileName = fileNameFromSrc(src);
     if (!fileName) return;
     const exists = attachments.some(a => a.FileName === fileName || a.ServerRelativeUrl?.endsWith('/' + fileName));
@@ -797,7 +814,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // Та же логика для rich-текста ФОРМЫ ЗАДАЧИ (CT): значения формы нам отдаёт
   // ContentTypeResultDialog через onValuesChange. Картинок может быть несколько —
   // все они уже загружены вложениями, лишние вложения удаляем.
-  const handleCtValuesChange = useCallback((next) => setCtValues(next), []);
+  // Значения формы задачи (CT) «наружу». Сравниваем с предыдущими: одинаковые
+  // значения не должны вызывать ререндер (иначе возможен цикл «форма сообщила →
+  // страница перерисовалась → форма сообщила снова»).
+  const handleCtValuesChange = useCallback((next) => {
+    setCtValues((prev) => (sameFormValues(prev, next) ? prev : next));
+  }, []);
   useEffect(() => {
     // Сравниваем в «серверном» виде: значения могли прийти и как «/sites/…»
     // (сохранённое), и как рабочий адрес редактора («/dob-api/…» / origin).
@@ -866,6 +888,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           isUploading={isUploadingImage}
           onValuesChange={handleCtValuesChange}
           richFooter={attachmentsBlock}
+          valuesControlRef={ctValuesControlRef}
           onValidationError={handleCtValidationError}
           contentTypeId={checkCtId}
           contentTypeName={taskContentTypeName(item) || "Результат проверки ООБ"}

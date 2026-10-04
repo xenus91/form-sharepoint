@@ -2,7 +2,7 @@
 // Картинки rich-текста → вложения: разбор src, имя файла, diff удалённых картинок.
 
 import { describe, it, expect } from "vitest";
-import { extractImgSrcs, fileNameFromSrc, removedImgSrcs, removedImgSrcsByValues, mapImgSrcs, dataUrlSrcs, replaceImgSrc, dataUrlToFile } from "../lib/richImages";
+import { extractImgSrcs, fileNameFromSrc, removeImgByFileName, removedImgSrcs, removedImgSrcsByValues, mapImgSrcs, dataUrlSrcs, replaceImgSrc, dataUrlToFile } from "../lib/richImages";
 
 describe("richImages — картинки rich-текста и вложения", () => {
   it("достаёт все src картинок (их может быть несколько)", () => {
@@ -24,6 +24,20 @@ describe("richImages — картинки rich-текста и вложения"
     const after = '<img src="/b.png"><img src="/c.png">';
     expect(removedImgSrcs(before, after)).toEqual(["/a.png"]);
     expect(removedImgSrcs(before, before)).toEqual([]);
+  });
+
+  it("removeImgByFileName убирает картинку удалённого вложения (и /sites, и /dob-api)", () => {
+    const html =
+      '<p>отчёт</p>' +
+      '<img src="/sites/dob/doblogistic/Lists/DobLogistic/Attachments/7/фото%201.png">' +
+      '<img src="/dob-api/sites/dob/doblogistic/Lists/DobLogistic/Attachments/7/other.png">';
+    const out = removeImgByFileName(html, "фото 1.png");
+    expect(out).not.toContain("фото%201.png");
+    expect(out).toContain("other.png");
+    expect(out).toContain("<p>отчёт</p>");
+    // чужое имя/пустое имя — текст не трогаем
+    expect(removeImgByFileName(html, "нет-такого.png")).toBe(html);
+    expect(removeImgByFileName(html, "")).toBe(html);
   });
 
   it("diff по значениям формы: удалённые картинки из любого rich-поля", () => {

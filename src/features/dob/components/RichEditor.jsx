@@ -14,6 +14,8 @@ import { Box, Button, MenuItem, Select, Stack, TextField, Tooltip, Typography } 
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { RICH_TEMPLATE_BAR_SX } from '../lib/formStyles';
+import { toStorageImages } from '../lib/attachmentUrl';
+import { removedImgSrcs } from '../lib/richImages';
 import { makeUploadAdapter } from './richUploadAdapter';
 
 const TEMPLATE_KEY = 'dob-chekresult-templates';
@@ -49,6 +51,9 @@ export default function RichEditor({
   invalid = false,
 }) {
   const editorRef = useRef(null);
+  // Последний html редактора: по разнице определяем УДАЛЁННЫЕ картинки, чтобы
+  // сообщить странице (она удалит вложение) — каскад в сторону «текст → вложения».
+  const lastHtmlRef = useRef(value || '');
   const [templates, setTemplates] = useState(readTemplates);
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [templateName, setTemplateName] = useState('');
@@ -72,14 +77,35 @@ export default function RichEditor({
 
   useEffect(() => {
     if (editorRef.current && value !== undefined && value !== editorRef.current.getData()) {
+      // Значение пришло ИЗВНЕ (загрузка с сервера, сохранение, шаблон) — это не
+      // «пользователь удалил картинку», поэтому ref обновляем до setData.
+      lastHtmlRef.current = value || '';
       editorRef.current.setData(value || '');
     }
   }, [value]);
+
+  /**
+   * Изменение текста в редакторе: сообщаем наружу про исчезнувшие картинки.
+   * Сравниваем в «серверном» виде — в тексте может быть и `/sites/…`
+   * (сохранённое значение), и рабочий адрес редактора (`/dob-api/…`).
+   */
+  const handleEditorChange = useCallback((html) => {
+    const next = typeof html === 'string' ? html : '';
+    const prev = lastHtmlRef.current || '';
+    lastHtmlRef.current = next;
+    if (onDeleteImage && prev !== next) {
+      for (const src of removedImgSrcs(toStorageImages(prev), toStorageImages(next))) onDeleteImage(src);
+    }
+    onChange?.(next);
+  }, [onChange, onDeleteImage]);
 
   const applyTemplate = useCallback((name) => {
     setSelectedTemplate(name);
     const template = templates.find(item => item.name === name);
     if (template && editorRef.current) {
+      // Подмена текста шаблоном — не «удаление картинок пользователем»: ref
+      // обновляем до setData, чтобы не удалить вложения по diff'у.
+      lastHtmlRef.current = template.html;
       editorRef.current.setData(template.html);
       onChange?.(template.html);
     }
@@ -125,7 +151,7 @@ export default function RichEditor({
           data={value || ''}
           disabled={readOnly}
           onReady={editor => { editorRef.current = editor; }}
-          onChange={(_, editor) => onChange?.(editor.getData())}
+          onChange={(_, editor) => handleEditorChange(editor.getData())}
           onError={error => console.error('[CKEditor]', error)}
         />
       </Box>

@@ -24,6 +24,7 @@ import {
 import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
 import { toDisplayImages, toStorageImages } from "../../dob/lib/attachmentUrl";
+import { removeImgByFileName } from "../../dob/lib/richImages";
 import { getDobContentTypeFields } from "../../dob/api/dobApi";
 import {
   FORM_ACTIONS_SX,
@@ -146,6 +147,11 @@ export default function ContentTypeResultDialog({
   // Значения формы «наружу» — страница следит за картинками в rich-тексте
   // (удалили картинку из текста → вложение тоже удаляем).
   onValuesChange = null,
+  // «Пульт» для страницы-владельца формы (#dob_tasks/<id>): попросить убрать
+  // картинку удалённого вложения из rich-текста. Значения формы живут ВНУТРИ
+  // диалога, поэтому снаружи их можно изменить только так — иначе каскад
+  // «удалили вложение из блока вложений» не доходил бы до текста.
+  valuesControlRef = null,
   // Блок вложений задачи показывается ВНУТРИ rich-поля (внутри рамки CKEditor):
   // картинки из текста лежат вложениями, удалять их удобно рядом с текстом.
   richFooter = null,
@@ -154,6 +160,14 @@ export default function ContentTypeResultDialog({
 }) {
   const [result, setResult] = React.useState(initialResult || "");
   const [values, setValues] = React.useState({});
+  // Актуальные значения — для setValue/«пульта»: React-состояние доступно только
+  // в следующем рендере, а обработчики редактора приходят пачками.
+  const valuesRef = React.useRef(values);
+  // Колбэк наружу держим в ref: у вызывающей стороны он может быть inline-функцией
+  // (новая на каждом рендере), и если бы он был в зависимостях эффекта инициализации,
+  // получился бы цикл «эффект → onValuesChange → ререндер родителя → эффект».
+  const onChangeRef = React.useRef(onValuesChange);
+  React.useEffect(() => { onChangeRef.current = onValuesChange; }, [onValuesChange]);
   const [problems, setProblems] = React.useState([]);
   const [touched, setTouched] = React.useState(false);
   // Прокрутка к первому незаполненному блоку при ошибке валидации.
@@ -200,9 +214,13 @@ export default function ContentTypeResultDialog({
         next[control.internalName] = normalizeChoiceValue(raw);
       } else next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
     }
+    valuesRef.current = next;
     setValues(next);
     setProblems([]);
     setTouched(false);
+    // Владелец формы (страница #dob_tasks/<id>) следит за картинками в тексте:
+    // сообщаем ему стартовые значения, чтобы он видел ПОСЛЕДУЮЩИЕ удаления.
+    onChangeRef.current?.(next);
   }, [open, inline, task, form.controls]);
 
   React.useEffect(() => {
@@ -217,13 +235,44 @@ export default function ContentTypeResultDialog({
   }, [resultChoices, form.resultBlock, resultField]);
 
   const setValue = (internal, value) => {
-    setValues((prev) => {
-      const next = { ...prev, [internal]: value };
-      onValuesChange?.(next);
-      return next;
-    });
+    const next = { ...valuesRef.current, [internal]: value };
+    valuesRef.current = next;
+    setValues(next);
+    // ВАЖНО: onValuesChange вызываем ЗДЕСЬ, а не внутри setValues(updater):
+    // React выполняет updater во время рендера, и обновление родителя попадало
+    // в рендер («Cannot update a component (DobTaskEditView) while rendering a
+    // different component (ContentTypeResultDialog)»).
+    onChangeRef.current?.(next);
     if (touched && problems.length > 0) setProblems([]);
   };
+
+  // Каскадное удаление: страница просит убрать из rich-текста картинку файла,
+  // вложение которого удалили (или наоборот — см. removedImgSrcs в RichEditor).
+  React.useEffect(() => {
+    if (!valuesControlRef) return undefined;
+    valuesControlRef.current = {
+      removeImagesByFileName: (fileName) => {
+        const prev = valuesRef.current || {};
+        let changed = false;
+        const next = { ...prev };
+        for (const [key, value] of Object.entries(prev)) {
+          if (typeof value !== "string" || !value.includes("<img")) continue;
+          const cleaned = removeImgByFileName(value, fileName);
+          if (cleaned !== value) {
+            next[key] = cleaned;
+            changed = true;
+          }
+        }
+        if (!changed) return;
+        valuesRef.current = next;
+        setValues(next);
+        onChangeRef.current?.(next);
+      },
+    };
+    return () => {
+      if (valuesControlRef) valuesControlRef.current = null;
+    };
+  }, [valuesControlRef]);
 
   const handleSubmit = React.useCallback(() => {
     setTouched(true);

@@ -24,7 +24,7 @@ import {
 import { TASKS_LIST_API, TASKS_LIST_GUID, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
 import { getSourceById } from "./tasks/sources";
 import { uploadDobAttachment, deleteDobAttachment } from "./features/dob/api/dobApi";
-import { fileNameFromSrc, removedImgSrcsByValues } from "./features/dob/lib/richImages";
+import { fileNameFromSrc, removedImgSrcsByValues, sameFormValues } from "./features/dob/lib/richImages";
 import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
 import { resolveTaskRule } from "./services/taskBehaviour";
 import { resolveResultFlow } from "./features/tasks/resultFlow";
@@ -387,6 +387,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // несколько), а удалённые из текста — удаляем из вложений (как на странице задачи).
   const [ctUploading, setCtUploading] = useState(false);
   const ctImagesRef = React.useRef({});
+  // Идентификатор формы, для которой собран текущий снимок картинок (см. ниже):
+  // новый элемент — новый набор картинок, снимок сбрасывается.
+  const ctImagesTaskIdRef = React.useRef(null);
   // Выделенная строка таблицы (compositeId). Клик по строке только выделяет,
   // переход в форму — кнопкой «Изменить» или двойным кликом (как в «Заявки ДОБ»).
   const [selectedTableRow, setSelectedTableRow] = useState(null);
@@ -823,9 +826,19 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   const handleCtValuesChange = useCallback((next) => {
     const id = Number(ctDialog?.task?.Id);
-    const prev = ctImagesRef.current || {};
     const snapshot = {};
     for (const [k, v] of Object.entries(next || {})) snapshot[k] = String(v ?? "");
+    // Новая форма — новый набор картинок: сбрасываем снимок от ИМЕНИ задачи, а не
+    // отдельным эффектом (иначе он затирал стартовые значения диалога и первое
+    // удаление картинки не убирало вложение).
+    const isNewTask = ctImagesTaskIdRef.current !== id;
+    // Ничего не изменилось — не гоняем ререндер (и не ищем удаления).
+    if (!isNewTask && sameFormValues(ctImagesRef.current || {}, snapshot)) return;
+    if (isNewTask) {
+      ctImagesTaskIdRef.current = id;
+      ctImagesRef.current = {};
+    }
+    const prev = ctImagesRef.current || {};
     ctImagesRef.current = snapshot;
     if (!Number.isFinite(id)) return;
     const guid = ctListGuidOf(ctDialog?.task);
@@ -840,9 +853,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       deleteDobAttachment(id, fileName, guid).catch(() => {});
     }
   }, [ctDialog, ctListGuidOf]);
-
-  // Новая форма — новый набор картинок
-  useEffect(() => { ctImagesRef.current = {}; }, [ctDialog?.task?.Id]);
 
   const dialogContentTypeName = useCallback((task) => {
     try {

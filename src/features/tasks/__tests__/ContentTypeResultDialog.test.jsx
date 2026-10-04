@@ -12,6 +12,7 @@ import { act } from "react-dom/test-utils";
 import { ThemeProvider, createTheme } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
+import { sameFormValues } from "../../dob/lib/richImages";
 
 // CKEditor в jsdom не поднимаем: рич-текст подменяем textarea с тем же контрактом.
 vi.mock("../../dob/components/RichEditor", () => ({
@@ -242,6 +243,114 @@ describe("ContentTypeResultDialog — форма по типу контента"
     // необязательное пустое поле не отправляем
     expect("ErrorTypeValidation" in payload.values).toBe(false);
   });
+
+// ── Каскад вложений и rich-текста ───────────────────────────────────────────
+describe("ContentTypeResultDialog — значения rich-текста и вложения", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    MOCK_FIELDS = FIELDS;
+  });
+
+  it("onValuesChange не вызывается во время рендера (нет React-варнинга)", async () => {
+    // Владелец значений — отдельный компонент (как DobTaskEditView): если диалог
+    // обновляет его прямо в updater'е setValues, React ругается
+    // «Cannot update a component while rendering a different component».
+    const seen = [];
+    // Объект задачи стабилен между рендерами — как в приложении (react-query/state).
+    const parentTask = { Id: 501, Title: "Результат проверки ООБ" };
+    // Родитель как в приложении: одинаковые значения не вызывают ререндер
+    // (DobTaskEditView/TasksView делают так же — иначе возможен цикл).
+    const Parent = () => {
+      const [, setState] = React.useState({});
+      const handleChange = React.useCallback((next) => {
+        seen.push(next);
+        setState((prev) => (sameFormValues(prev, next) ? prev : next));
+      }, []);
+      return (
+        <ContentTypeResultDialog
+          open
+          task={parentTask}
+          contentTypeId={RESULT_CHECK_OOO_CT_ID}
+          contentTypeName="Результат проверки ООБ"
+          resultChoices={["Годен", "Брак"]}
+          initialResult=""
+          onSubmit={() => {}}
+          onClose={() => {}}
+          onValuesChange={handleChange}
+        />
+      );
+    };
+    const errors = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args) => { errors.push(args.map(String).join(" ")); });
+    try {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      act(() => {
+        createRoot(host).render(
+          <QueryClientProvider client={qc}>
+            <ThemeProvider theme={createTheme()}><Parent /></ThemeProvider>
+          </QueryClientProvider>,
+        );
+      });
+      await settle(80);
+      // Два изменения ПОДРЯД в одном батче: у хука уже есть незавершённое
+      // обновление, поэтому updater setValues выполняется в фазе рендера — именно
+      // так баг и проявлялся у пользователя (вставка из буфера).
+      const editor = document.body.querySelector('[data-testid="rich-editor"]');
+      act(() => {
+        typeInto(editor, "<p>проверено");
+        typeInto(editor, "<p>проверено</p>");
+      });
+      await settle(40);
+      expect(seen.at(-1).DescriptionCheckResult).toBe("<p>проверено</p>");
+      expect(errors.join("\n")).not.toContain("Cannot update a component");
+      expect(errors.join("\n")).not.toContain("while rendering a different component");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("«пульт» страницы убирает картинку удалённого вложения из rich-текста", async () => {
+    const onValuesChange = vi.fn();
+    const valuesControlRef = { current: null };
+    renderDialog({
+      onValuesChange,
+      valuesControlRef,
+      task: {
+        Id: 501,
+        Title: "Результат проверки ООБ",
+        DescriptionCheckResult:
+          '<p>отчёт</p><img src="/sites/dob/doblogistic/Lists/DobLogistic/Attachments/501/photo.png">',
+      },
+    });
+    await settle(80);
+    expect(valuesControlRef.current).toBeTruthy();
+
+    const before = document.body.querySelector('[data-testid="rich-editor"]').value;
+    expect(before).toContain("photo.png");
+
+    act(() => { valuesControlRef.current.removeImagesByFileName("photo.png"); });
+    await settle(40);
+
+    const after = document.body.querySelector('[data-testid="rich-editor"]').value;
+    expect(after).not.toContain("photo.png");
+    expect(after).toContain("<p>отчёт</p>");
+    expect(onValuesChange.mock.calls.at(-1)[0].DescriptionCheckResult).not.toContain("photo.png");
+  });
+
+  it("«пульт» не трогает текст, если такого файла в нём нет", async () => {
+    const onValuesChange = vi.fn();
+    const valuesControlRef = { current: null };
+    renderDialog({ onValuesChange, valuesControlRef, task: { Id: 501, Title: "T", DescriptionCheckResult: "<p>просто текст</p>" } });
+    await settle(80);
+    const calls = onValuesChange.mock.calls.length;
+    act(() => { valuesControlRef.current.removeImagesByFileName("нет-такого.png"); });
+    await settle(40);
+    expect(onValuesChange.mock.calls.length).toBe(calls);
+    expect(document.body.querySelector('[data-testid="rich-editor"]').value).toBe("<p>просто текст</p>");
+  });
+});
 
 it("«Тип ошибки» не показывает «[object Object]»: verbose-коллекция → пустое поле", async () => {
     // Ровно то, что приходит от SharePoint (odata=verbose) для MultiChoice:

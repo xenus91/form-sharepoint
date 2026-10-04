@@ -43,6 +43,40 @@ export function removedImgSrcsByValues(prevValues = {}, nextValues = {}) {
   return removed;
 }
 
+/**
+ * Убрать из html картинки, которые указывают на файл вложения.
+ * Сравнение идёт по ИМЕНИ файла, поэтому `/sites/…/a.png` и рабочий адрес
+ * `/dob-api/sites/…/a.png` — один и тот же файл. Каскад: удалили вложение —
+ * картинка исчезает из текста (и наоборот, см. removedImgSrcs).
+ */
+export function removeImgByFileName(html, fileName) {
+  if (!html || typeof html !== 'string' || !fileName) return html;
+  return html.replace(/<img[^>]+src=["']([^"']+)["'][^>]*>/gi, (all, src) => (
+    fileNameFromSrc(src) === fileName ? '' : all
+  ));
+}
+
+/**
+ * Одинаковые ли словари значений формы ({ internalName: value }).
+ * Нужно, чтобы «сообщение значений наружу» не гоняло лишние ререндеры (и не
+ * зациклилось, если владелец формы передал нестабильные props).
+ */
+export function sameFormValues(a = {}, b = {}) {
+  const ak = Object.keys(a || {});
+  const bk = Object.keys(b || {});
+  if (ak.length !== bk.length) return false;
+  for (const key of ak) {
+    const av = a[key];
+    const bv = b[key];
+    if (Array.isArray(av) || Array.isArray(bv)) {
+      if (JSON.stringify(av ?? null) !== JSON.stringify(bv ?? null)) return false;
+      continue;
+    }
+    if (String(av ?? '') !== String(bv ?? '')) return false;
+  }
+  return true;
+}
+
 /** Заменить src у всех <img> в html (через mapper). */
 export function mapImgSrcs(html, mapper) {
   if (!html || typeof html !== 'string') return html;

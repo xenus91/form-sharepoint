@@ -68,10 +68,11 @@ function ensureDobApiUrl(originalUrl = "") {
   return fixed;
 }
 
-// Бинарные GET: файл контента (картинки/документы), а не JSON
-function isBinaryRequest(url = "") {
-  return /\/\$value(\?|$)/i.test(url) || /OpenBinaryStream/i.test(url);
-}
+// Бинарные GET: файл контента (картинки/документы), а не JSON.
+// Разбор — в scripts/spProxyUrl.cjs (покрыт тестом): помимо `$value` бинарём
+// считается ПРЯМАЯ ссылка на вложение/файл (`/sites/.../Attachments/1/a.png`) —
+// иначе картинка из rich-текста приезжает в браузер битой.
+const { isBinaryRequest } = require("./scripts/spProxyUrl.cjs");
 
 // Нужен ли X-RequestDigest: для POST/MERGE/DELETE и т.п.
 // (GET без тела — не требует)

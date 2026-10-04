@@ -25,6 +25,7 @@ const LIST_FIELDS = [
 ];
 
 let itemValue = "";
+let attachmentsValue = [];
 
 vi.mock("../api/dobApi", () => ({
   getDobFields: vi.fn(async () => LIST_FIELDS),
@@ -43,8 +44,11 @@ vi.mock("../api/dobApi", () => ({
     url: `/dob-api/sites/dob/doblogistic/Lists/DobLogistic/Attachments/${id}/${file.name}`,
     src: `/dob-api/sites/dob/doblogistic/Lists/DobLogistic/Attachments/${id}/${file.name}`,
   })),
-  getDobAttachments: vi.fn(async () => []),
-  deleteDobAttachment: vi.fn(async () => ({})),
+  getDobAttachments: vi.fn(async () => attachmentsValue),
+  deleteDobAttachment: vi.fn(async (_id, fileName) => {
+    attachmentsValue = attachmentsValue.filter((a) => a.FileName !== fileName);
+    return {};
+  }),
   getDobItems: vi.fn(async () => ({ results: [], next: null })),
   getDobItemsPaged: vi.fn(async () => []),
 }));
@@ -60,7 +64,7 @@ vi.mock("../components/RichEditor", () => ({
 
 vi.mock("../../tasks/components/PersonFieldAutocomplete", () => ({ default: () => null }));
 
-const { updateDobItem, uploadDobAttachment } = await import("../api/dobApi");
+const { updateDobItem, uploadDobAttachment, deleteDobAttachment } = await import("../api/dobApi");
 const { default: DobTaskEditView } = await import("../DobTaskEditView");
 const NotificationsProvider = (await import("../../../NotificationsProvider")).default;
 
@@ -112,7 +116,9 @@ describe("DobTaskEditView — сохранение картинок ссылко
     document.body.innerHTML = "";
     updateDobItem.mockClear();
     uploadDobAttachment.mockClear();
+    deleteDobAttachment.mockClear();
     itemValue = "";
+    attachmentsValue = [];
   });
 
   it("base64 в тексте → загрузка вложением, в MERGE уходит ссылка /sites/…", async () => {
@@ -160,6 +166,49 @@ describe("DobTaskEditView — сохранение картинок ссылко
     expect(updateDobItem).not.toHaveBeenCalled();
     expect(host.textContent).toContain("Изображение не удалось сохранить вложением");
     expect(host.querySelector('[data-testid="rich-editor"]').value).toContain(BASE64);
+  });
+
+  it("каскад: удалили вложение из блока → картинка уходит из rich-текста", async () => {
+    const serverRelative = "/sites/dob/doblogistic/Lists/DobLogistic/Attachments/77/photo.png";
+    itemValue = `<p>отчёт</p><img src="${serverRelative}">`;
+    attachmentsValue = [{ FileName: "photo.png", ServerRelativeUrl: serverRelative }];
+    const { host } = await renderForm();
+
+    const chipDelete = host.querySelector(".MuiChip-deleteIcon");
+    expect(chipDelete).toBeTruthy();
+    await act(async () => {
+      chipDelete.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    await settle(160);
+
+    expect(deleteDobAttachment).toHaveBeenCalledWith(77, "photo.png", LIST_GUID);
+    // картинки в тексте больше нет — и в сохранённом значении тоже
+    expect(host.querySelector('[data-testid="rich-editor"]').value).not.toContain("photo.png");
+    clickSave(host);
+    await settle(200);
+    const body = updateDobItem.mock.calls.at(-1)[1];
+    const savedHtml = String(body.ChekResult ?? body.OData_ChekResult ?? "");
+    expect(savedHtml).not.toContain("<img");
+    expect(savedHtml).toContain("отчёт");
+  });
+
+  it("каскад: убрали картинку из rich-текста → вложение тоже удаляется", async () => {
+    const serverRelative = "/sites/dob/doblogistic/Lists/DobLogistic/Attachments/77/photo.png";
+    itemValue = `<p>отчёт</p><img src="${serverRelative}">`;
+    attachmentsValue = [{ FileName: "photo.png", ServerRelativeUrl: serverRelative }];
+    const { host } = await renderForm();
+
+    const editor = host.querySelector('[data-testid="rich-editor"]');
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(editor, "<p>отчёт</p>");
+      editor.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 60));
+    });
+    await settle(160);
+
+    expect(deleteDobAttachment).toHaveBeenCalledWith(77, "photo.png", LIST_GUID);
   });
 
   it("в поле уходит ссылка /sites/… даже если картинка была вставлена через /dob-api", async () => {
