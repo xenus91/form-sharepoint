@@ -15,12 +15,20 @@ import { RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
 
 // CKEditor в jsdom не поднимаем: рич-текст подменяем textarea с тем же контрактом.
 vi.mock("../../dob/components/RichEditor", () => ({
-  default: ({ value, onChange }) => (
+  default: ({ value, onChange, onUploadImage, isUploading }) => (
+    <>
     <textarea
       data-testid="rich-editor"
       value={value || ""}
       onChange={(e) => onChange?.(e.target.value)}
     />
+    <button
+      type="button"
+      data-testid="rich-upload"
+      data-uploading={isUploading ? "1" : "0"}
+      onClick={() => onUploadImage?.(new File(["x"], "photo.png", { type: "image/png" }))}
+    >upload</button>
+    </>
   ),
 }));
 
@@ -159,6 +167,27 @@ describe("ContentTypeResultDialog — форма по типу контента"
     expect(alert.textContent).toContain("Выберите результат проверки");
     expect(alert.textContent).toContain("Заполните «Описание результата проверки»");
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("картинка из rich-текста уходит на загрузку вложением (их может быть несколько)", async () => {
+    const onUploadImage = vi.fn(async () => ({ ServerRelativeUrl: "/sites/x/photo.png" }));
+    const onValuesChange = vi.fn();
+    renderDialog({ onUploadImage, onValuesChange, isUploading: true });
+    await settle(80);
+    // обработчик загрузки прокинут в редактор и в состоянии «загружается»
+    const up = document.body.querySelector('[data-testid="rich-upload"]');
+    expect(up).toBeTruthy();
+    expect(up.getAttribute("data-uploading")).toBe("1");
+    await act(async () => { click(up); await settle(10); });
+    expect(onUploadImage).toHaveBeenCalledTimes(1);
+    expect(onUploadImage.mock.calls[0][0].name).toBe("photo.png");
+    // значения формы отдаются наружу (страница следит за вложениями)
+    await act(async () => {
+      typeInto(document.body.querySelector('[data-testid="rich-editor"]'), "<p>текст с картинкой</p>");
+      await settle(10);
+    });
+    expect(onValuesChange).toHaveBeenCalled();
+    expect(onValuesChange.mock.calls.at(-1)[0].DescriptionCheckResult).toContain("текст с картинкой");
   });
 
   it("после заполнения отдаёт payload по колонкам (рич-текст, число, «Пользователь или группа»)", async () => {

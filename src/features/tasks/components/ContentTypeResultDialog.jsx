@@ -121,6 +121,14 @@ export default function ContentTypeResultDialog({
   // списка (resultField) — иначе форма оставалась без кнопок результата.
   listGuid = "",
   resultField = null,
+  // Картинки в rich-тексте сохраняются ВЛОЖЕНИЯМИ задачи (их может быть сколько
+  // угодно): страница даёт свои обработчики загрузки/прогресса.
+  onUploadImage = null,
+  onDeleteImage = null,
+  isUploading = false,
+  // Значения формы «наружу» — страница следит за картинками в rich-тексте
+  // (удалили картинку из текста → вложение тоже удаляем).
+  onValuesChange = null,
 }) {
   const [result, setResult] = React.useState(initialResult || "");
   const [values, setValues] = React.useState({});
@@ -182,7 +190,11 @@ export default function ContentTypeResultDialog({
   }, [resultChoices, form.resultBlock, resultField]);
 
   const setValue = (internal, value) => {
-    setValues((prev) => ({ ...prev, [internal]: value }));
+    setValues((prev) => {
+      const next = { ...prev, [internal]: value };
+      onValuesChange?.(next);
+      return next;
+    });
     if (touched && problems.length > 0) setProblems([]);
   };
 
@@ -321,6 +333,9 @@ export default function ContentTypeResultDialog({
                   value={values[mainControl.internalName] || ""}
                   readOnly={submitting}
                   onChange={(html) => setValue(mainControl.internalName, html)}
+                  onUploadImage={onUploadImage}
+                  onDeleteImage={onDeleteImage}
+                  isUploading={isUploading}
                 />
                 {mainControl.description && (
                   <Typography variant="caption" color="text.secondary">{mainControl.description}</Typography>
@@ -342,7 +357,10 @@ export default function ContentTypeResultDialog({
                   || (control.kind === "richtext" && plainText(value).length === 0)
                   || ((control.kind === "multichoice" || Array.isArray(value)) && normalizeChoiceValues(value).length === 0));
               const helper = control.description || (invalid ? "Обязательное поле" : "");
-              const common = { key: control.internalName, size: "small", fullWidth: true, disabled: submitting };
+              // ВАЖНО: key НЕ кладём в общий объект — React требует передавать его
+              // напрямую в JSX (<TextField key=… {...common} />), иначе варнинг
+              // «A props object containing a "key" prop is being spread into JSX».
+              const common = { size: "small", fullWidth: true, disabled: submitting };
 
               if (control.kind === "richtext") {
                 return (
@@ -354,6 +372,9 @@ export default function ContentTypeResultDialog({
                       value={value || ""}
                       readOnly={submitting}
                       onChange={(html) => setValue(control.internalName, html)}
+                      onUploadImage={onUploadImage}
+                      onDeleteImage={onDeleteImage}
+                      isUploading={isUploading}
                     />
                     {control.description && (
                       <Typography variant="caption" color="text.secondary">{control.description}</Typography>

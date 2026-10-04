@@ -21,7 +21,10 @@ import {
   resolveDistributionViaDcEmail,
   getTasksListFieldsOverview,
 } from "./tasks/distribution";
-import { TASKS_LIST_API, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
+import { TASKS_LIST_API, TASKS_LIST_GUID, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
+import { getSourceById } from "./tasks/sources";
+import { uploadDobAttachment, deleteDobAttachment } from "./features/dob/api/dobApi";
+import { fileNameFromSrc, removedImgSrcsByValues } from "./features/dob/lib/richImages";
 import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
 import { resolveTaskRule } from "./services/taskBehaviour";
 import { resolveResultFlow } from "./features/tasks/resultFlow";
@@ -365,6 +368,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // Диалог закрытия по типу контента (Behaviour.dlg / «Результат проверки ООБ»):
   // { task, rule, result } — форма строится по колонкам SharePoint.
   const [ctDialog, setCtDialog] = useState(null);
+  // Картинки rich-текста в попап-форме задачи: грузим вложениями (их может быть
+  // несколько), а удалённые из текста — удаляем из вложений (как на странице задачи).
+  const [ctUploading, setCtUploading] = useState(false);
+  const ctImagesRef = React.useRef({});
   // Выделенная строка таблицы (compositeId). Клик по строке только выделяет,
   // переход в форму — кнопкой «Изменить» или двойным кликом (как в «Заявки ДОБ»).
   const [selectedTableRow, setSelectedTableRow] = useState(null);
@@ -775,6 +782,47 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       return meta?.internalName || "";
     } catch (_e) { void _e; return ""; }
   }, [ctResultMap, resultFieldsMeta]);
+
+  // Список, в котором лежит задача попапа (main / dob-источник) — вложения кладём
+  // именно в него.
+  const ctListGuidOf = useCallback((task) => {
+    try {
+      const source = getSourceById(String(task?.sourceId || "main"));
+      return source?.listGuid || TASKS_LIST_GUID;
+    } catch (_e) { void _e; return TASKS_LIST_GUID; }
+  }, []);
+
+  const handleCtImageUpload = useCallback(async (file) => {
+    const id = Number(ctDialog?.task?.Id);
+    if (!file || !Number.isFinite(id)) return null;
+    setCtUploading(true);
+    try {
+      return await uploadDobAttachment(id, file, ctListGuidOf(ctDialog?.task));
+    } catch (e) {
+      console.error("[ct-modal] image upload failed", e?.response?.status, e?.message);
+      return null;
+    } finally {
+      setCtUploading(false);
+    }
+  }, [ctDialog, ctListGuidOf]);
+
+  const handleCtValuesChange = useCallback((next) => {
+    const id = Number(ctDialog?.task?.Id);
+    const prev = ctImagesRef.current || {};
+    const snapshot = {};
+    for (const [k, v] of Object.entries(next || {})) snapshot[k] = String(v ?? "");
+    ctImagesRef.current = snapshot;
+    if (!Number.isFinite(id)) return;
+    const guid = ctListGuidOf(ctDialog?.task);
+    for (const src of removedImgSrcsByValues(prev, next || {})) {
+      const fileName = fileNameFromSrc(src);
+      if (!fileName) continue;
+      deleteDobAttachment(id, fileName, guid).catch(() => {});
+    }
+  }, [ctDialog, ctListGuidOf]);
+
+  // Новая форма — новый набор картинок
+  useEffect(() => { ctImagesRef.current = {}; }, [ctDialog?.task?.Id]);
 
   const dialogContentTypeName = useCallback((task) => {
     try {
@@ -1260,6 +1308,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         submitLabel={ctDialog?.rule?.confirmTexts?.okText || ""}
         cancelLabel={ctDialog?.rule?.confirmTexts?.cancelText || ""}
         submitting={ctDialog?.task?.Id != null && updatingId === ctDialog.task.Id}
+        onUploadImage={handleCtImageUpload}
+        isUploading={ctUploading}
+        onValuesChange={handleCtValuesChange}
         onSubmit={handleCtDialogSubmit}
         onClose={() => setCtDialog(null)}
       />

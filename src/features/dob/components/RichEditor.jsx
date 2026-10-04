@@ -1,4 +1,9 @@
-// CKEditor 5 wrapper for ChekResult. Images remain embedded as base64 and are also uploaded as attachments.
+// CKEditor 5 wrapper для rich-полей (ChekResult, DescriptionCheckResult…).
+// Каждая вставленная картинка ЗАГРУЖАЕТСЯ ВЛОЖЕНИЕМ элемента (вложений может быть
+// несколько) — за это отвечает onUploadImage, который передаёт страница формы.
+// В текст при этом остаётся base64: картинка сразу видна в редакторе и не зависит
+// от прав на вложение/прокси. Если загрузка вложения не удалась — текст всё равно
+// не теряется (base64 остаётся).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CKEditor } from '@ckeditor/ckeditor5-react';
 import ClassicEditor from '@ckeditor/ckeditor5-build-classic';

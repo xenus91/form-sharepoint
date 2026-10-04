@@ -14,9 +14,9 @@ import NotificationsProvider from "./NotificationsProvider";
 // перезапуск dev-сервера / жёсткая перезагрузка страницы).
 // eslint-disable-next-line no-console
 console.info(
-  "[form-sharepoint] ct-detect v7: название и описание задачи в шапке/теле формы, " +
-  "кнопки результирующего выбора для OutcomeChoice и из метаданных списка, " +
-  "чип человека — только имя (свойства по клику), поля 40 px без «съехавших» подписей",
+  "[form-sharepoint] ct-detect v8: MERGE с Content-Type odata=verbose (ошибка " +
+  "PrimitiveValue/StartObject), картинки rich-текста — вложениями (сколько угодно), " +
+  "без React-варнинга key в спреде props формы результата",
 );
 
 

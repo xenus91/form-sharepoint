@@ -16,6 +16,7 @@ import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
+import { fileNameFromSrc, removedImgSrcs, removedImgSrcsByValues } from './lib/richImages';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
 import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
 import {
@@ -33,6 +34,57 @@ import {
   FORM_FIELD_WIDE_SX,
 } from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
+
+/** Ссылка на вложение: в dev — через прокси /dob-api, в prod — абсолютный origin. */
+function attachmentHref(serverRelativeUrl) {
+  if (!serverRelativeUrl) return '';
+  try {
+    const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
+    if (serverRelativeUrl.startsWith('/') && isDev) return `/dob-api${serverRelativeUrl}`;
+    if (serverRelativeUrl.startsWith('/') && typeof window !== 'undefined') {
+      return `${window.location.origin}${serverRelativeUrl}`;
+    }
+  } catch { /* оставляем как есть */ }
+  return serverRelativeUrl;
+}
+
+/**
+ * Вложения задачи/заявки (изображения из rich-текста попадают сюда, их может быть
+ * несколько). Один и тот же блок в обеих ветках формы.
+ */
+function renderAttachments({ attachments = [], onDelete, note = true } = {}) {
+  if (!attachments.length) return null;
+  return (
+    <Box sx={{ mt: 1 }} data-testid="dob-attachments">
+      <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <AttachFileIcon fontSize="small" /> Вложения ({attachments.length}):
+      </Typography>
+      <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
+        {attachments.map((a) => {
+          const fileName = a.FileName || a.ServerRelativeUrl?.split('/').pop();
+          const href = attachmentHref(a.ServerRelativeUrl);
+          return (
+            <Chip
+              key={a.FileName || a.ServerRelativeUrl || fileName}
+              label={fileName}
+              size="small"
+              clickable
+              onClick={() => { if (href) window.open(href, '_blank'); }}
+              onDelete={(e) => { e.preventDefault(); e.stopPropagation(); onDelete?.(a.FileName); }}
+              deleteIcon={<Tooltip title="Удалить вложение"><DeleteIcon fontSize="small" /></Tooltip>}
+              sx={{ maxWidth: 220 }}
+            />
+          );
+        })}
+      </Stack>
+      {note && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          Удаление вложения также уберёт картинку из текста (если она там есть) — не забудьте Сохранить.
+        </Typography>
+      )}
+    </Box>
+  );
+}
 
 /**
  * Описание задачи для тела формы: снимаем rich-теги, но СОХРАНЯЕМ абзацы —
@@ -123,20 +175,14 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // Read-only просмотр связанной заявки (RelatedItems задачи/заявки).
   const [relatedOpen, setRelatedOpen] = useState(false);
   const ctSubmitRef = useRef(null); // submit формы задачи (кнопка в шапке страницы)
+  const [ctValues, setCtValues] = useState({}); // значения формы задачи (CT) — для синхронизации вложений
+  const prevCtHtmlRef = useRef({});
   const prevChekHtmlRef = useRef(null);
   const pendingDeleteRef = useRef(new Set());
   const initialFormRef = useRef(null);
   const dirtySetRef = useRef(new Set());
 
   // helper: extract img srcs from html
-  const extractImgSrcs = useCallback((html) => {
-    if (!html || typeof html !== 'string') return [];
-    const srcs = [];
-    const re = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
-    let m;
-    while ((m = re.exec(html)) !== null) srcs.push(m[1]);
-    return srcs;
-  }, []);
 
   const { data: fields, isLoading: fieldsLoading, error: fieldsError } = useQuery({
     queryKey: ['dob-fields', listGuid],
@@ -576,6 +622,16 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   }, [id, listGuid, notify, chekInternal]);
 
   // Синхрон: если картинка удалена из ChekResult (в редакторе) — удалить вложение
+  // Удаляем вложения для картинок, которые убрали из rich-текста (обе ветки формы).
+  const deleteAttachmentForSrc = useCallback((src) => {
+    const fileName = fileNameFromSrc(src);
+    if (!fileName) return;
+    const exists = attachments.some(a => a.FileName === fileName || a.ServerRelativeUrl?.endsWith('/' + fileName));
+    if (!exists) return;
+    if (pendingDeleteRef.current.has(fileName)) return;
+    console.log('[DobEdit][sync-delete] auto-delete attachment for removed image', fileName, String(src).slice(0, 80));
+    handleDeleteAttachment(fileName);
+  }, [attachments, handleDeleteAttachment]);
   useEffect(() => {
     const curHtml = form[chekInternal];
     if (curHtml === undefined) return;
@@ -586,45 +642,29 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     }
     const prevHtml = prevChekHtmlRef.current;
     if (prevHtml === curHtml) return;
-    // Сравниваем src
-    const prevSrcs = extractImgSrcs(prevHtml);
-    const curSrcs = extractImgSrcs(curHtml);
-    // Находим удалённые src (были, теперь нет)
-    const removed = prevSrcs.filter(s => !curSrcs.includes(s));
+    // Удалённые картинки (были в тексте — теперь нет)
+    const removed = removedImgSrcs(prevHtml, curHtml);
     if (removed.length === 0) {
       prevChekHtmlRef.current = curHtml;
       return;
     }
     console.log('[DobEdit][sync-delete] removed srcs', removed);
-    // Для каждого удалённого src, если это не base64, найти fileName и удалить вложение если оно есть
-    removed.forEach(src => {
-      if (!src || src.startsWith('data:')) {
-        console.log('[DobEdit][sync-delete] skip base64', src?.slice(0,30));
-        return;
-      }
-      // Извлекаем имя файла
-      let fileName = '';
-      try {
-        const withoutQuery = src.split('?')[0].split('#')[0];
-        fileName = decodeURIComponent(withoutQuery.split('/').pop() || '');
-      } catch {}
-      if (!fileName) return;
-      // Проверяем что вложение существует
-      const exists = attachments.some(a => a.FileName === fileName || a.ServerRelativeUrl?.endsWith('/' + fileName));
-      if (!exists) {
-        console.log('[DobEdit][sync-delete] attachment not found for', fileName);
-        return;
-      }
-      // Дедуп
-      if (pendingDeleteRef.current.has(fileName)) {
-        console.log('[DobEdit][sync-delete] already pending', fileName);
-        return;
-      }
-      console.log('[DobEdit][sync-delete] auto-delete attachment for removed image', fileName, src.slice(0,80));
-      handleDeleteAttachment(fileName);
-    });
+    removed.forEach(deleteAttachmentForSrc);
     prevChekHtmlRef.current = curHtml;
-  }, [form[chekInternal], extractImgSrcs, attachments, handleDeleteAttachment, chekInternal]);
+  }, [form[chekInternal], attachments, deleteAttachmentForSrc, handleDeleteAttachment, chekInternal]);
+
+  // Та же логика для rich-текста ФОРМЫ ЗАДАЧИ (CT): значения формы нам отдаёт
+  // ContentTypeResultDialog через onValuesChange. Картинок может быть несколько —
+  // все они уже загружены вложениями, лишние вложения удаляем.
+  const handleCtValuesChange = useCallback((next) => setCtValues(next), []);
+  useEffect(() => {
+    const prev = prevCtHtmlRef.current || {};
+    const removedSrcs = removedImgSrcsByValues(prev, ctValues || {});
+    const snapshot = {};
+    for (const [key, html] of Object.entries(ctValues || {})) snapshot[key] = String(html ?? '');
+    prevCtHtmlRef.current = snapshot;
+    removedSrcs.forEach(deleteAttachmentForSrc);
+  }, [ctValues, deleteAttachmentForSrc]);
 
 
   if (loading) {
@@ -666,11 +706,16 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         </AppBar>
         {saveError && <Alert severity="error" onClose={() => setSaveError('')}>{saveError}</Alert>}
         {taskHead}
+        {isUploadingImage && <LinearProgress />}
         <ContentTypeResultDialog
           inline
           task={item}
           listGuid={listGuid}
           resultField={listResultField}
+          onUploadImage={handleUploadImage}
+          onDeleteImage={deleteAttachmentForSrc}
+          isUploading={isUploadingImage}
+          onValuesChange={handleCtValuesChange}
           contentTypeId={checkCtId}
           contentTypeName="Результат проверки ООБ"
           submitLabel="Сохранить"
@@ -680,6 +725,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           onSubmit={handleCheckResultSubmit}
           onClose={handleBack}
         />
+        {renderAttachments({ attachments, onDelete: handleDeleteAttachment })}
       </Box>
     );
   }
@@ -759,36 +805,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           }}
           isUploading={isUploadingImage}
         />
-        {attachments.length > 0 && (
-          <Box sx={{ mt: 1.5 }}>
-            <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5 }}><AttachFileIcon fontSize="small"/> Вложения ({attachments.length}):</Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
-              {attachments.map(a => {
-                const fileName = a.FileName || a.ServerRelativeUrl?.split('/').pop();
-                // build href correctly for dev proxy
-                let href = a.ServerRelativeUrl;
-                try {
-                  const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
-                  if (href && href.startsWith('/') && isDev) href = `/dob-api${href}`;
-                  else if (href && href.startsWith('/') && !isDev && typeof window !== 'undefined') href = `${window.location.origin}${href}`;
-                } catch {}
-                return (
-                  <Chip
-                    key={a.FileName || a.ServerRelativeUrl}
-                    label={a.FileName}
-                    size="small"
-                    clickable
-                    onClick={() => { if (href) window.open(href, '_blank'); }}
-                    onDelete={(e) => { e.preventDefault(); e.stopPropagation(); handleDeleteAttachment(a.FileName); }}
-                    deleteIcon={<Tooltip title="Удалить вложение"><DeleteIcon fontSize="small" /></Tooltip>}
-                    sx={{ maxWidth: 220 }}
-                  />
-                );
-              })}
-            </Stack>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>Удаление вложения также уберёт картинку из текста (если она там есть) — не забудьте Сохранить.</Typography>
-          </Box>
-        )}
+        {renderAttachments({ attachments, onDelete: handleDeleteAttachment })}
       </Box>
 
       <Box className="dob-fields-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 2, flex: '0 0 auto' }}>

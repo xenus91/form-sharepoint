@@ -219,6 +219,11 @@ export async function updateDobItem(id, payload, listGuid = DOB_LIST_GUID) {
     try {
       const { data } = await httpOf(listGuid).post(url, body, {
         headers: {
+          Accept: 'application/json;odata=verbose',
+          // Без verbose SharePoint падает на inline __metadata:
+          // «An unexpected 'PrimitiveValue' node was found when reading from the
+          // JSON reader. A 'StartObject' node was expected.»
+          'Content-Type': 'application/json;odata=verbose',
           'X-HTTP-Method': 'MERGE',
           'IF-MATCH': '*',
         },
@@ -416,6 +421,13 @@ export async function uploadDobAttachment(id, file, listGuid = DOB_LIST_GUID) {
 export async function deleteDobAttachment(id, fileName, listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
   const url = `${listApiOf(listGuid)}/items(${id})/AttachmentFiles/getByFileName('${encodeURIComponent(fileName).replace(/'/g, "''")}')`;
-  const { data } = await httpOf(listGuid).post(url, null, { headers: { 'X-HTTP-Method': 'DELETE', 'IF-MATCH': '*' } });
+  const { data } = await httpOf(listGuid).post(url, '', {
+    headers: {
+      Accept: 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'X-HTTP-Method': 'DELETE',
+      'IF-MATCH': '*',
+    },
+  });
   return data;
 }

@@ -255,3 +255,35 @@ rich-тегами, абзацы сохранены), затем результа
 (подпись перестала «съезжать» внутри поля); многострочные и множественные поля
 растут по содержимому. Единые правила — в `src/features/dob/lib/formStyles.js`,
 дизайн-система форм описана в `docs/decisions/form-ui-ux.md`.
+
+## Вложения rich-текста, варнинг key и Content-Type MERGE (2026-10-04, round 8)
+
+**1) `key` в спреде props (варнинг React).** В `ContentTypeResultDialog` общий объект
+`common` содержал `key` и спредился в `<TextField {...common} />` — React ругался
+«A props object containing a "key" prop is being spread into JSX». Теперь `key`
+передаётся явным пропом у каждого `TextField`, в `common` его нет.
+
+**2) Ошибка сохранения «unexpected node 'PrimitiveValue'. Expected 'StartObject'».**
+Причина — заголовок `Content-Type`: у основного клиента (`apiClient`, прокси `/api`)
+по умолчанию `application/json` (nometadata), а тело MERGE содержит inline
+`__metadata` (в т.ч. `Collection(Edm.Int32)` для «Пользователь или группа») — такие
+конструкции SharePoint читает только в режиме `odata=verbose`. Все остальные записи
+в проекте (`useTaskMutations`, `takeTaskInWork`, `updateTaskResult`, `App.jsx`) явно
+ставят verbose; `updateDobItem`/`deleteDobAttachment` этого не делали. Теперь MERGE и
+удаление вложения всегда идут с `Accept/Content-Type: application/json;odata=verbose`,
+`X-HTTP-Method` и `IF-MATCH`.
+
+**3) Картинки rich-текста — вложения (их может быть несколько).** Раньше
+`ContentTypeResultDialog` не передавал `onUploadImage` в `RichEditor`, поэтому в форме
+задачи типа контента картинки оставались только base64 и вложениями не сохранялись.
+Теперь и страница `#dob_tasks/<id>` (через `DobTaskEditView`), и попап-форма в таблице
+(через `TasksView`) передают загрузчик: каждая вставка картинки → `AttachmentFiles/add`
+в список задачи (main → `TASKS_LIST_GUID`, dob → список источника). Список вложений
+показан на странице (блок «Вложения», чипы), а картинка, удалённая из текста,
+удаляет своё вложение (diff по html — `src/features/dob/lib/richImages.js`).
+
+**4) Регрессионные тесты.** `tasks/__tests__/uiWarnings.test.jsx` — форма результата
+не должна писать в консоль React-варнинг про key в spread; `dob/__tests__/dobApi.updateItem.test.js` —
+MERGE идёт с `Content-Type: application/json;odata=verbose`, `X-HTTP-Method: MERGE`,
+`IF-MATCH: *` и типом элемента в `__metadata`; `dob/__tests__/richImages.test.js` и
+тест «две картинки → два вложения» — про вложения.

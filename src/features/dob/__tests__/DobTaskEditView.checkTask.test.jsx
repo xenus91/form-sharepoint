@@ -40,17 +40,42 @@ vi.mock("../api/dobApi", () => ({
   getDobContentTypeFields: vi.fn(async () => FIELDS),
   getDobItem: vi.fn(async () => ITEM),
   updateDobItem: vi.fn(async () => ({ ok: true })),
-  uploadDobAttachment: vi.fn(async () => ({})),
-  getDobAttachments: vi.fn(async () => []),
+  uploadDobAttachment: vi.fn(async (id, file) => {
+    const saved = {
+      FileName: file?.name || "image.png",
+      ServerRelativeUrl: `/sites/dob/Lists/Tasks/Attachments/${id}/${file?.name || "image.png"}`,
+    };
+    uploadedAttachments.push(saved);
+    return saved;
+  }),
+  getDobAttachments: vi.fn(async () => uploadedAttachments),
   deleteDobAttachment: vi.fn(async () => ({})),
   getDobItems: vi.fn(async () => ({ results: [], next: null })),
   getDobItemsPaged: vi.fn(async () => []),
   getDobEntityType: vi.fn(async () => "SP.Data.TasksListItem"),
 }));
 
+// RichEditor мокаем: важно, что он ПОЛУЧАЕТ onUploadImage (картинки → вложения,
+// их может быть несколько) и умеет отдать html в форму.
 vi.mock("../components/RichEditor", () => ({
-  default: ({ value, onChange }) => (
-    <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
+  default: ({ value, onChange, onUploadImage }) => (
+    <div>
+      <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
+      <button
+        type="button"
+        data-testid="rich-upload-1"
+        onClick={() => onUploadImage?.(new File(["a"], "photo_1.png", { type: "image/png" }))}
+      >
+        upload-1
+      </button>
+      <button
+        type="button"
+        data-testid="rich-upload-2"
+        onClick={() => onUploadImage?.(new File(["b"], "photo_2.png", { type: "image/png" }))}
+      >
+        upload-2
+      </button>
+    </div>
   ),
 }));
 
@@ -69,7 +94,9 @@ vi.mock("../../../tasks/contentTypeFields", async (importOriginal) => {
 
 const { default: DobTaskEditView } = await import("../DobTaskEditView");
 const NotificationsProvider = (await import("../../../NotificationsProvider")).default;
-const { updateDobItem } = await import("../api/dobApi");
+const { updateDobItem, uploadDobAttachment } = await import("../api/dobApi");
+
+const uploadedAttachments = [];
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -112,6 +139,8 @@ async function renderForm() {
 describe("DobTaskEditView — задача «Результат проверки ООБ»", () => {
   beforeEach(() => {
     updateDobItem.mockClear();
+    uploadDobAttachment.mockClear();
+    uploadedAttachments.length = 0;
     window.location.hash = `#dob_tasks/13?list=${MAIN_GUID}`;
     document.body.innerHTML = "";
   });
@@ -162,6 +191,26 @@ describe("DobTaskEditView — задача «Результат проверки
     ];
     order.forEach((pos) => expect(pos & window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy());
     expect(text.indexOf("Остальные поля")).toBeGreaterThan(text.indexOf("Описание результата проверки"));
+  });
+
+  it("картинки из rich-текста сохраняются ВЛОЖЕНИЯМИ задачи, их может быть несколько", async () => {
+    const { host } = await renderForm();
+    // аналог вставки картинки: редактор отдаёт файл странице → вложение
+    await act(async () => {
+      mouseClick(host.querySelector('[data-testid="rich-upload-1"]'));
+      await settle(60);
+    });
+    await act(async () => {
+      mouseClick(host.querySelector('[data-testid="rich-upload-2"]'));
+      await settle(60);
+    });
+    expect(uploadDobAttachment).toHaveBeenCalledTimes(2);
+    // оба файла ушли именно в список задачи
+    expect(uploadDobAttachment.mock.calls.map((c) => c[2])).toEqual([MAIN_GUID, MAIN_GUID]);
+    // и обе картинки видны как вложения
+    const chips = host.querySelectorAll('[data-testid="dob-attachments"] .MuiChip-root');
+    expect(chips.length).toBe(2);
+    expect(host.textContent).toContain("Вложения (2)");
   });
 
   it("«Сохранить» без обязательного описания ничего не пишет (обязательность из SP)", async () => {
