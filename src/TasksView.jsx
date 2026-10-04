@@ -53,7 +53,7 @@ import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import ContentTypeResultDialog from "./features/tasks/components/ContentTypeResultDialog";
-import { fetchTaskContentTypeId, isDialogRequired, taskContentTypeId, taskContentTypeName } from "./tasks/contentTypeFields";
+import { fetchTaskContentTypeMeta, isDialogRequired, isResultCheckTask, taskContentTypeId, taskContentTypeName } from "./tasks/contentTypeFields";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
 import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
 import { useHashElement } from "./features/tasks/hooks/useHashElement";
@@ -202,6 +202,56 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const ctFetchLoggedRef = React.useRef(null);
   if (ctFetchLoggedRef.current === null) ctFetchLoggedRef.current = new Set();
   const __CT_FETCH_LOGGED__ = ctFetchLoggedRef.current;
+  // Одна строка на задачу: без неё «открылась не та форма» невозможно отличить
+  // от ошибки детекта (и не нужно включать ?dbg=1).
+  const logCtDetect = useCallback((msg, payload) => {
+    try {
+      const key = `${msg}:${payload?.id ?? ""}`;
+      if (__CT_FETCH_LOGGED__.has(key)) return;
+      __CT_FETCH_LOGGED__.add(key);
+      console.info(`[ct-detect] ${msg}`, payload);
+    } catch (_e) { void _e; }
+  }, [__CT_FETCH_LOGGED__]);
+
+  // ⭐ Метаданные типа контента по Id задачи: у строки может не быть типа вовсе
+  // (select источника без ContentTypeId) или он может быть незнакомым. Дочитываем
+  // у элемента (в т.ч. ИМЯ типа) и обогащаем строку — меню действий и переходы
+  // должны вести себя как для карточки ДОБ.
+  const [ctMetaById, setCtMetaById] = React.useState({});
+  React.useEffect(() => {
+    const rows = tableData.rows || [];
+    const need = [];
+    for (const r of rows) {
+      if (!r || !r.Id || (r.sourceId && r.sourceId !== "main")) continue;
+      if (isResultCheckTask(r) || ctMetaById[r.Id]) continue;
+      need.push(r.Id);
+      if (need.length >= 20) break;
+    }
+    if (need.length === 0) return undefined;
+    let cancelled = false;
+    (async () => {
+      const found = {};
+      for (const id of need) {
+        const meta = await fetchTaskContentTypeMeta(id).catch(() => null);
+        if (cancelled) return;
+        if (meta && (meta.ctId || meta.ctName)) found[id] = meta;
+      }
+      if (!cancelled && Object.keys(found).length > 0) setCtMetaById((prev) => ({ ...prev, ...found }));
+    })();
+    return () => { cancelled = true; };
+  }, [tableData.rows, ctMetaById]);
+
+  const withCtMeta = useCallback((row) => {
+    if (!row || (row.sourceId && row.sourceId !== "main")) return row;
+    const meta = ctMetaById[row.Id];
+    if (!meta || isResultCheckTask(row)) return row;
+    return {
+      ...row,
+      contentTypeId: meta.ctId || row.contentTypeId || row.ContentTypeId || null,
+      contentTypeName: meta.ctName || row.contentTypeName || null,
+      raw: { ...(row.raw || {}), ContentTypeId: meta.ctId || row.raw?.ContentTypeId },
+    };
+  }, [ctMetaById]);
 
   // ⭐ Открытие формы задачи. Если у задачи (строки таблицы/карточки) НЕТ типа
   // контента — дочитываем его у самого элемента основного списка: иначе задача
@@ -214,20 +264,24 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     const mainTask = t ? (!t.sourceId || t.sourceId === "main") : true;
     if (t && mainTask && !taskContentTypeId(t)) {
       const rawId = t.Id ?? Number(String(cid || "").split(":").pop());
-      const ctId = await fetchTaskContentTypeId(rawId).catch(() => "");
-      // Пишем в консоль всегда (по одной строке на задачу): это нетипичный случай —
-      // строка пришла без ContentTypeId, тип дочитан у элемента. Без такого лога
-      // «открылась не та форма» невозможно отличить от ошибки детекта.
-      try {
-        if (!__CT_FETCH_LOGGED__.has(String(rawId))) {
-          __CT_FETCH_LOGGED__.add(String(rawId));
-          console.info("[ct-detect] у задачи не было ContentTypeId — дочитан у элемента", { id: rawId, ctId: ctId || null });
-        }
-      } catch (_e) { void _e; }
-      if (ctId) t = { ...t, contentTypeId: ctId, raw: { ...(t.raw || {}), ContentTypeId: ctId } };
+      const meta = await fetchTaskContentTypeMeta(rawId).catch(() => null);
+      if (meta && (meta.ctId || meta.ctName)) {
+        t = {
+          ...t,
+          contentTypeId: meta.ctId || taskContentTypeId(t) || null,
+          contentTypeName: meta.ctName || taskContentTypeName(t) || null,
+          raw: { ...(t.raw || {}), ContentTypeId: meta.ctId || t.raw?.ContentTypeId },
+        };
+      }
+      logCtDetect("открытие формы: тип контента дочитан у элемента", {
+        id: rawId,
+        ctId: meta?.ctId || null,
+        ctName: meta?.ctName || null,
+        resultCheck: isResultCheckTask(t),
+      });
     }
     return openTaskForm(cid, tableData.sources, t);
-  }, [tableData.sources, __CT_FETCH_LOGGED__]);
+  }, [tableData.sources, logCtDetect]);
 
   // Задачи из внешних источников (dob) — read-only карточки рядом с main-задачами.
   const externalTasks = useMemo(
@@ -860,34 +914,41 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [rowChoices, resultFieldMetaForRow, choices]);
 
   const getTableRowActions = useCallback((row) => {
-    // ?dbg=1: видно, почему строка считается «как dob» (или нет) — тип контента
-    // может прийти строкой, объектом {StringValue}, из raw или только по имени.
+    // Тип контента строки может быть незнакомым/отсутствовать — работаем с
+    // обогащённой строкой, чтобы попап не отличался от карточки.
+    const rowR = withCtMeta(row);
+    // Логируем всегда (одна строка на задачу + на тип): ?dbg=1 больше не нужен.
+    logCtDetect("меню строки", {
+      id: rowR?.Id,
+      sourceId: rowR?.sourceId ?? null,
+      ct: taskContentTypeId(rowR) || null,
+      ctName: taskContentTypeName(rowR) || null,
+      dobLike: isDobLikeTask(rowR),
+      status: rowR?.Status || "",
+    });
     if (__DBG_ENABLED__) {
       __dlog("[DBG:ct-detect]", {
-        id: row?.Id,
-        sourceId: row?.sourceId,
-        ct: taskContentTypeId(row),
-        ctName: row?.contentTypeName || row?.raw?.ContentType?.Name || "",
         rawCt: row?.raw?.ContentTypeId,
-        dobLike: isDobLikeTask(row),
+        rawCtName: row?.raw?.ContentType?.Name,
+        fromItem: !!(rowR !== row),
       });
     }
-    const actions = buildRowActions(row, {
-      canTake: canTakeTableRow(row),
-      taking: !!externalTakingId && externalTakingId === row?.compositeId,
-      updating: !!updatingId && updatingId === row?.Id,
-      takenByOther: isRowTakenByOther(row),
-      takerLabel: row?.EditorTitle || row?.Editor || "",
-      choices: choicesForRow(row),
-      resolveStyling: (choice) => resolveRowChoiceStyling(row, choice),
-      resolveIcon: (choice) => resolveRowChoiceIcon(row, choice),
-      takeStyling: resolveRowTakeStyling(row),
-      takeIcon: () => resolveRowTakeIcon(row),
-      onTake: () => handleTakeTableRow(row),
-      onResult: (choice) => handleResultClick(row, choice),
-      resolveEditor: (choice) => buildResultEditor(row, choice),
-      externalLike: isDobLikeTask(row),
-      onEdit: () => openTaskFormResolved(row, row?.compositeId),
+    const actions = buildRowActions(rowR, {
+      canTake: canTakeTableRow(rowR),
+      taking: !!externalTakingId && externalTakingId === rowR?.compositeId,
+      updating: !!updatingId && updatingId === rowR?.Id,
+      takenByOther: isRowTakenByOther(rowR),
+      takerLabel: rowR?.EditorTitle || rowR?.Editor || "",
+      choices: choicesForRow(rowR),
+      resolveStyling: (choice) => resolveRowChoiceStyling(rowR, choice),
+      resolveIcon: (choice) => resolveRowChoiceIcon(rowR, choice),
+      takeStyling: resolveRowTakeStyling(rowR),
+      takeIcon: () => resolveRowTakeIcon(rowR),
+      onTake: () => handleTakeTableRow(rowR),
+      onResult: (choice) => handleResultClick(rowR, choice),
+      resolveEditor: (choice) => buildResultEditor(rowR, choice),
+      externalLike: isDobLikeTask(rowR),
+      onEdit: () => openTaskFormResolved(rowR, rowR?.compositeId),
     });
     if (__DBG_ENABLED__) {
       __dlog("[DBG:rowActions]", {
@@ -902,6 +963,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     canTakeTableRow, externalTakingId, updatingId, isRowTakenByOther, choicesForRow,
     resolveRowChoiceStyling, resolveRowChoiceIcon, resolveRowTakeStyling, resolveRowTakeIcon,
     buildResultEditor, handleTakeTableRow, handleResultClick, openTaskFormResolved,
+    withCtMeta, logCtDetect,
   ]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
@@ -952,18 +1014,24 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     if (!t || (t.sourceId && t.sourceId !== "main")) return;
     let cancelled = false;
     (async () => {
-      let task = t;
-      if (!taskContentTypeId(task) && task.Id) {
-        const ctId = await fetchTaskContentTypeId(task.Id).catch(() => "");
-        if (!ctId) return;
-        task = { ...task, contentTypeId: ctId, raw: { ...(task.raw || {}), ContentTypeId: ctId } };
+      let task = withCtMeta(t);
+      if (!isDobLikeTask(task) && task?.Id) {
+        const meta = await fetchTaskContentTypeMeta(task.Id).catch(() => null);
+        if (meta && (meta.ctId || meta.ctName)) {
+          task = {
+            ...task,
+            contentTypeId: meta.ctId || taskContentTypeId(task) || null,
+            contentTypeName: meta.ctName || taskContentTypeName(task) || null,
+            raw: { ...(task.raw || {}), ContentTypeId: meta.ctId || task.raw?.ContentTypeId },
+          };
+        }
       }
       if (cancelled || !isDobLikeTask(task)) return;
       const hash = buildTaskFormHash(task.compositeId || `main:${task.Id}`, tableData.sources, task);
       if (hash && window.location.hash !== hash) window.location.hash = hash;
     })();
     return () => { cancelled = true; };
-  }, [elementTaskMatch, tableData.sources]);
+  }, [elementTaskMatch, tableData.sources, withCtMeta]);
   useTasksFocusPolling({ currentUserId, isHashMode, queryClient, lastFocusLoadRef });
 
   if (fieldsLoading) {
@@ -1063,10 +1131,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               loading={tableData.isLoading}
               error={tableData.error?.message || null}
               onSelectRow={setSelectedTableRow}
-              onRowOpen={(compositeId) => openTaskFormResolved((tableData.rows || []).find((r) => r.compositeId === compositeId) || null, compositeId)}
+              onRowOpen={(compositeId) => openTaskFormResolved(withCtMeta((tableData.rows || []).find((r) => r.compositeId === compositeId) || null), compositeId)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора
               getRowActions={getTableRowActions}
-              onEditRow={(row) => openTaskFormResolved(row, row?.compositeId)}
+              onEditRow={(row) => openTaskFormResolved(withCtMeta(row), row?.compositeId)}
               onTakeRow={handleTakeTableRow}
               canTakeRow={canTakeTableRow}
               takingId={externalTakingId}

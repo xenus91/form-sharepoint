@@ -8,6 +8,17 @@ import ItemViewer from "./ItemViewer.jsx";
 import "./index.css";
 import NotificationsProvider from "./NotificationsProvider";
 
+
+// Метка сборки: помогает отличить «не починилось» от «браузер открыл старую сборку».
+// Если этой строки нет в консоли при загрузке — работает старый бандл (нужен
+// перезапуск dev-сервера / жёсткая перезагрузка страницы).
+// eslint-disable-next-line no-console
+console.info(
+  "[form-sharepoint] ct-detect v3: тип контента по префиксу id и имени типа, " +
+  "дочитывание типа у элемента, логи [ct-detect] при открытии меню строки",
+);
+
+
 function hasIdParam() {
   const usp = new URLSearchParams(window.location.search || "");
   return usp.has("ID") || usp.has("Id") || usp.has("id");

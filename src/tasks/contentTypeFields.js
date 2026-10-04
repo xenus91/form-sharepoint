@@ -285,25 +285,51 @@ export function clearTaskContentTypeIdCache() {
  * @param {{ get?: Function, forceRefresh?: boolean, field?: string }} [opts]
  * @returns {Promise<string>}
  */
-export async function fetchTaskContentTypeId(id, opts = {}) {
+export async function fetchTaskContentTypeMeta(id, opts = {}) {
   const key = String(id ?? "").trim();
-  if (!key) return "";
+  if (!key) return { ctId: "", ctName: "" };
   if (!opts.forceRefresh && _taskCtIdCache.has(key)) return _taskCtIdCache.get(key);
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
   const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
-  const url = `${TASKS_LIST_API}/items(${encodeURIComponent(key)})?$select=${opts.field || "ContentTypeId"}`;
   let ctId = "";
+  let ctName = "";
+  // 1) тип + его ИМЯ: имя — самый устойчивый признак (у элемента id дочерний,
+  //    а имя типа в списке одно и то же для всех его версий).
   try {
-    const resp = await get(url, ACCEPT);
+    const resp = await get(
+      `${TASKS_LIST_API}/items(${encodeURIComponent(key)})?$select=ContentTypeId,ContentType/Name,ContentType/StringValue&$expand=ContentType`,
+      ACCEPT,
+    );
     const d = resp?.data?.d ?? resp?.data ?? null;
-    ctId = contentTypeIdOf(d?.ContentTypeId ?? d?.contentTypeId);
-  } catch (e) {
-    if (e?.response?.status && ![400, 404].includes(e.response.status)) {
-      console.warn("[contentTypeFields] item ContentTypeId failed", e.response.status);
+    ctId = contentTypeIdOf(d?.ContentTypeId ?? d?.contentTypeId ?? d?.ContentType);
+    ctName = String(d?.ContentType?.Name ?? d?.contentType?.name ?? "").trim();
+  } catch (_e) {
+    void _e;
+  }
+  // 2) Если $expand=ContentType на тенанте не разрешён — берём хотя бы id.
+  if (!ctId) {
+    try {
+      const resp = await get(
+        `${TASKS_LIST_API}/items(${encodeURIComponent(key)})?$select=${opts.field || "ContentTypeId"}`,
+        ACCEPT,
+      );
+      const d = resp?.data?.d ?? resp?.data ?? null;
+      ctId = contentTypeIdOf(d?.ContentTypeId ?? d?.contentTypeId);
+    } catch (e) {
+      if (e?.response?.status && ![400, 404].includes(e.response.status)) {
+        console.warn("[contentTypeFields] item ContentTypeId failed", e.response.status);
+      }
     }
   }
-  _taskCtIdCache.set(key, ctId);
-  return ctId;
+  const meta = { ctId, ctName };
+  if (ctId || ctName) _taskCtIdCache.set(key, meta);
+  return meta;
+}
+
+/** ContentTypeId элемента основного списка (обёртка над мета-версией). */
+export async function fetchTaskContentTypeId(id, opts = {}) {
+  const meta = await fetchTaskContentTypeMeta(id, opts);
+  return meta.ctId;
 }
 
 /**
