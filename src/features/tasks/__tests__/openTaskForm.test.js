@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from "vitest";
 import { buildTaskFormHash, isDialogResultTask } from "../lib/openTaskForm";
-import { RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
+import { RESULT_CHECK_OOO_CT_ID, RESULT_CHECK_OOO_CT_FULL_ID } from "../../../tasks/contentTypeFields";
 
 const MAIN = { id: "main", listGuid: "463B634E-A71A-4FEF-9A1F-B803431D8639" };
 const DOB = { id: "dob", listGuid: "03FC1B92-BAFF-44DC-B8A3-D04ACBE329D3" };
@@ -46,6 +46,14 @@ describe("buildTaskFormHash", () => {
     expect(buildTaskFormHash("dob", [MAIN, DOB])).toBeNull();
     expect(buildTaskFormHash("dob:abc", [MAIN, DOB])).toBeNull();
     expect(buildTaskFormHash(null, [MAIN, DOB])).toBeNull();
+  });
+
+  it("реальный id из списка (тип + дочерний сегмент) уводит на форму ДОБ", () => {
+    const task = { Id: 13, ContentTypeId: RESULT_CHECK_OOO_CT_FULL_ID };
+    expect(buildTaskFormHash("main:13", [MAIN, DOB], task)).toBe(
+      "#dob_tasks/13?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+    );
+    expect(isDialogResultTask(task)).toBe(true);
   });
 
   it("тип контента в объектной/raw-форме тоже уводит на форму ДОБ", () => {

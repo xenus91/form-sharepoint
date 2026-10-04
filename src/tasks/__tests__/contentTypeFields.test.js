@@ -5,6 +5,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   RESULT_CHECK_OOO_CT_ID,
   contentTypeIdOf,
+  contentTypeIdMatches,
+  fetchTaskContentTypeId,
+  clearTaskContentTypeIdCache,
+  RESULT_CHECK_OOO_CT_FULL_ID,
   isDialogRequired,
   isResultCheckTask,
   taskContentTypeId,
@@ -217,11 +221,56 @@ describe("распознавание типа контента «Результ�
     expect(isResultCheckTask(undefined)).toBe(false);
   });
 
+  it("id элемента приходит дочерним (тип + сегмент) — матчинг только по префиксу", () => {
+    // фактический ответ основного списка: наш «базовый» id — префикс реального
+    expect(RESULT_CHECK_OOO_CT_FULL_ID.startsWith(RESULT_CHECK_OOO_CT_ID)).toBe(true);
+    expect(contentTypeIdMatches(RESULT_CHECK_OOO_CT_FULL_ID, RESULT_CHECK_OOO_CT_ID)).toBe(true);
+    // обратное направление не матчится — иначе «0x0108»/родительский тип дали бы ложь
+    expect(contentTypeIdMatches(RESULT_CHECK_OOO_CT_ID, RESULT_CHECK_OOO_CT_FULL_ID)).toBe(false);
+    expect(contentTypeIdMatches("0x0108", RESULT_CHECK_OOO_CT_ID)).toBe(false);
+    // базовый id элемента закрывается списком известных id (сравнение по равенству)
+    expect(contentTypeIdMatches(RESULT_CHECK_OOO_CT_ID, RESULT_CHECK_OOO_CT_ID)).toBe(true);
+    expect(contentTypeIdMatches(RESULT_CHECK_OOO_CT_FULL_ID.toUpperCase(), RESULT_CHECK_OOO_CT_ID)).toBe(true);
+    // соседние типы того же родителя НЕ совпадают
+    expect(contentTypeIdMatches("0x0108003365C4474CAE8C42BCE396314E88E51F0001A4ABEEA9CB93478EEBA71D023E4D0700E86894FD720BCD49A61B7F23B3CFB36E", RESULT_CHECK_OOO_CT_ID)).toBe(false);
+    expect(isResultCheckTask({ ContentTypeId: RESULT_CHECK_OOO_CT_FULL_ID })).toBe(true);
+    expect(isDialogRequired(null, RESULT_CHECK_OOO_CT_FULL_ID)).toBe(true);
+  });
+
   it("isDialogRequired понимает объектный id и имя типа контента", () => {
     expect(isDialogRequired(null, { StringValue: RESULT_CHECK_OOO_CT_ID })).toBe(true);
     expect(isDialogRequired(null, "", "Результат проверки ООБ")).toBe(true);
     expect(isDialogRequired(null, "0x0108", "Задача рабочего процесса")).toBe(false);
+    expect(isDialogRequired(null, "0x01080100C9C9515DE4E24001905074F980F9316000171B790935C7B84786EA282A503FB52C")).toBe(false);
     expect(isDialogRequired({ requiresDialog: false }, RESULT_CHECK_OOO_CT_ID)).toBe(false);
     expect(isDialogRequired({ requiresDialog: true }, "0x0108")).toBe(true);
+  });
+});
+
+describe("ContentTypeId элемента, когда в строке его нет", () => {
+  it("дочитывается у элемента основного списка и кэшируется", async () => {
+    clearTaskContentTypeIdCache();
+    const calls = [];
+    const get = async (url) => {
+      calls.push(String(url));
+      return { data: { d: { ContentTypeId: RESULT_CHECK_OOO_CT_FULL_ID } } };
+    };
+    const id = await fetchTaskContentTypeId(13, { get });
+    expect(id).toBe(RESULT_CHECK_OOO_CT_FULL_ID);
+    expect(calls[0]).toContain("/items(13)");
+    expect(calls[0]).toContain("$select=ContentTypeId");
+    // второй запрос берётся из кэша — в сеть не идём
+    const again = await fetchTaskContentTypeId(13, { get: async () => { throw new Error("no network"); } });
+    expect(again).toBe(RESULT_CHECK_OOO_CT_FULL_ID);
+    expect(calls.length).toBe(1);
+    // и такой id сразу включает форму по колонкам типа контента
+    expect(isDialogRequired(null, again)).toBe(true);
+  });
+
+  it("ошибка запроса не ломает открытие формы (пустой id)", async () => {
+    clearTaskContentTypeIdCache();
+    const failing = async () => { const e = new Error("500"); e.response = { status: 500 }; throw e; };
+    await expect(fetchTaskContentTypeId(99, { get: failing })).resolves.toBe("");
+    expect(isDialogRequired(null, "", "")).toBe(false);
   });
 });

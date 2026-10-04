@@ -112,7 +112,13 @@ const CT_CHECK_FIELDS = [
   { InternalName: "ErrorCountValidation", Title: "ErrorCountValidation", TypeAsString: "Number", Required: false },
   { InternalName: "Guilty", Title: "Guilty", TypeAsString: "User", AllowMultipleValues: true, Required: false },
 ];
+// Тип контента задачи с Behaviour-кнопками результатов (не «Результат проверки ООБ»).
 const CT_OOB = "0x0108003365C4474CAE8C42BCE396314E88E51F0001A4ABEEA9CB93478EEBA71D023E4D0700E86894FD720BCD49A61B7F23B3CFB37F";
+// ⭐ id «Результат проверки ООБ» РОВНО такой, каким его отдаёт основной список:
+// базовый тип + дочерний сегмент. Строгое равенство с RESULT_CHECK_OOO_CT_ID
+// здесь не срабатывает — работает только сопоставление по префиксу.
+const CT_CHECK_FULL =
+  "0x0108003365C4474CAE8C42BCE396314E88E51F00DDA2B3C73567D14D8127B2CBCC18DC1900EA27BBB7EC9C434BA049A0C60A2EA435";
 // GUID основного списка задач (Tasks) — на него ведёт форма ДОБ для задач нового типа.
 const MAIN_GUID = "463b634e-a71a-4fef-9a1f-b803431d8639";
 const CT_META = [
@@ -207,11 +213,21 @@ const MAIN_CHECK_IN_PROGRESS = {
   Body: "Проверить результат",
   Status: "В работе",
   PercentComplete: 0,
-  ContentTypeId: CT_CHECK,
+  ContentTypeId: CT_CHECK_FULL,
   Guilty: { results: [{ Id: 5, Title: "Иванов Иван Иванович", LoginName: "i:0#.f|membership|ivanov.ii@lenta.com" }] },
 };
 
-const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS, 12: MAIN_THU_IN_PROGRESS, 13: MAIN_CHECK_IN_PROGRESS };
+// ⭐ Строка, в которой типа контента НЕТ вовсе (так выглядит таблица, если select
+// источника не содержал ContentTypeId). Тип дочитывается у самого элемента при
+// открытии формы — иначе «Изменить» уводит на #tasks/<Id> обычной карточкой.
+const MAIN_CHECK_NO_CT = {
+  ...MAIN_CHECK_IN_PROGRESS,
+  Id: 14,
+  Title: "Проверка ЕО без типа",
+  ContentTypeId: null,
+};
+
+const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS, 12: MAIN_THU_IN_PROGRESS, 13: MAIN_CHECK_IN_PROGRESS, 14: MAIN_CHECK_NO_CT };
 
 // Задача, назначенная на группу из DcEmail (Id 33 на сайте ДОБ)
 const DOB_GROUP_TASK = { ...DOB_TASK, Id: 2, Title: "Заявка ООБ (на группу)", AssignedTo: { results: [{ Id: 33, Title: "ООБ" }] }, Modified: "2026-10-02T00:00:00Z" };
@@ -276,10 +292,13 @@ vi.mock("../../../api", () => {
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
-      const base = MAIN_TASKS_BY_ID[Number(single[1])] || MAIN_TASK;
-      return { data: { d: { ...base, __metadata: { etag: '"1"', type: "SP.Data.TasksListItem" } } } };
+      const n = Number(single[1]);
+      const base = MAIN_TASKS_BY_ID[n] || MAIN_TASK;
+      // у элемента тип контента есть всегда — даже если его не было в select списка
+      const ctId = base.ContentTypeId || (n === 14 ? CT_CHECK_FULL : null);
+      return { data: { d: { ...base, ContentTypeId: ctId, __metadata: { etag: '"1"', type: "SP.Data.TasksListItem" } } } };
     }
-    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS, MAIN_CHECK_IN_PROGRESS] } } };
+    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS, MAIN_CHECK_IN_PROGRESS, MAIN_CHECK_NO_CT] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
     // TaskBehaviour / прочие списки — пусто
     return { data: { d: { results: [] } } };
@@ -369,6 +388,7 @@ const NotificationsProvider = (await import("../../../NotificationsProvider")).d
 // Кэш TaskBehaviour модульный (30 мин) и переживает тесты внутри файла: без сброса
 // тест с другим Behaviour получил бы запись, закэшированную предыдущими тестами.
 const { clearTaskBehaviourCache } = await import("../../../services/taskBehaviour");
+const { clearTaskContentTypeIdCache } = await import("../../../tasks/contentTypeFields");
 
 class RO {
   observe() {}
@@ -437,6 +457,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     localStorage.clear();
     sessionStorage.clear();
     clearTaskBehaviourCache();
+    clearTaskContentTypeIdCache();
   });
 
   it("карточный режим: заявка из dob-списка отрисована рядом с main-задачей", async () => {
@@ -503,7 +524,7 @@ describe("TasksView — multi-source (#tasks)", () => {
 
     const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
     // 3 main-задачи (ООБ «не начата», ООБ «в работе», ТНУ «в работе», Результат проверки ООБ) + 2 dob
-    expect(countRows()).toBe(6);
+    expect(countRows()).toBe(7);
 
     // колонки шапки — для проверки сортировки по клику
     const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell")];
@@ -521,7 +542,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       .sort((a, b) => a.index - b.index)
       .map((r) => r.title);
     const titlesInitial = readTitles();
-    expect(titlesInitial.length).toBe(6);
+    expect(titlesInitial.length).toBe(7);
 
     // AG Grid вешает обработчик сортировки на .ag-header-cell-label внутри ячейки
     const titleLabel = headerCells[titleIdx].querySelector(".ag-header-cell-label");
@@ -614,6 +635,38 @@ describe("TasksView — multi-source (#tasks)", () => {
     renderTasksView({ initialElementId: "13" });
     await settle(3500);
     expect(window.location.hash).toBe(`#dob_tasks/13?list=${MAIN_GUID}`);
+  }, 40000);
+
+  it("«Изменить» в таблице: строка без ContentTypeId — тип дочитывается, открывается форма ДОБ", async () => {
+    window.location.hash = "#tasks";
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+      .find((r) => /Проверка ЕО без типа/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    const cell = row.querySelector(".ag-cell");
+    await act(async () => {
+      cell.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 120, clientY: 140 }));
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')]
+      .filter((el) => el.style.opacity !== "0").pop() || null;
+    const edit = [...(popup?.querySelectorAll("button") || [])]
+      .find((b) => /^Изменить$/.test((b.textContent || "").trim()));
+    expect(edit).toBeTruthy();
+    await act(async () => {
+      edit.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    await settle(600);
+
+    // тип контента дочитан у элемента (items(14)) и увёл на форму ДОБ
+    expect(state.requests.some((r) => /items\(14\)/.test(r.url))).toBe(true);
+    expect(window.location.hash).toBe(`#dob_tasks/14?list=${MAIN_GUID}`);
   }, 40000);
 
   it("действия по задаче открываются В ТОЧКЕ КЛИКА по строке (popup, а не колонка)", async () => {

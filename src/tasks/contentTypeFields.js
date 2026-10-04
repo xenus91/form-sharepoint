@@ -23,9 +23,25 @@
 import apiClient from "../api";
 import { TASKS_LIST_API } from "./config";
 
-/** Тип контента «Результат проверки ООБ» (портал Лента, группа ProblemsPallet). */
+/**
+ * Тип контента «Результат проверки ООБ» (портал Лента, группа ProblemsPallet).
+ *
+ * ⚠️ SharePoint отдаёт у элементов ДОЧЕРНИЙ id: к типу добавляется ещё один
+ * сегмент. Фактический ответ основного списка (463b634e-…) — «Результат
+ * проверки ООБ» = RESULT_CHECK_OOO_CT_ID + "00EA27BBB7EC9C434BA049A0C60A2EA435",
+ * то есть сравнивать id можно ТОЛЬКО по префиксу (как это уже делают
+ * taskPromptFields/taskResultDefinitions/taskTypeConfiguration по CType из
+ * конфигурации). Строгое равенство здесь не срабатывает никогда.
+ */
 export const RESULT_CHECK_OOO_CT_ID =
   "0x0108003365C4474CAE8C42BCE396314E88E51F00DDA2B3C73567D14D8127B2CBCC18DC19";
+
+/** Фактический id типа в основном списке (тип + дочерний сегмент). */
+export const RESULT_CHECK_OOO_CT_FULL_ID =
+  "0x0108003365C4474CAE8C42BCE396314E88E51F00DDA2B3C73567D14D8127B2CBCC18DC1900EA27BBB7EC9C434BA049A0C60A2EA435";
+
+/** Известные id этого типа — база и фактический (с дочерним сегментом). */
+export const RESULT_CHECK_OOO_CT_IDS = [RESULT_CHECK_OOO_CT_ID, RESULT_CHECK_OOO_CT_FULL_ID];
 
 /** Имя типа контента, по которому включается закрытие через диалог (по названию). */
 export const RESULT_CHECK_OOO_CT_NAME = "Результат проверки ООБ";
@@ -251,6 +267,64 @@ export function taskContentTypeName(task) {
   return "";
 }
 
+const _taskCtIdCache = new Map(); // Id элемента основного списка -> ContentTypeId
+
+/** Сброс кэша ContentTypeId элементов (для тестов и «Обновить»). */
+export function clearTaskContentTypeIdCache() {
+  _taskCtIdCache.clear();
+}
+
+/**
+ * ContentTypeId конкретного элемента основного списка.
+ *
+ * Нужен, когда строка/карточка пришла БЕЗ типа контента (например, таблица
+ * собирает select из доступных полей источника и ContentTypeId в него не попал).
+ * Без этого «Изменить» в таблице уходило на #tasks/<Id> карточкой вместо формы ДОБ.
+ *
+ * @param {number|string} id — Id элемента основного списка задач
+ * @param {{ get?: Function, forceRefresh?: boolean, field?: string }} [opts]
+ * @returns {Promise<string>}
+ */
+export async function fetchTaskContentTypeId(id, opts = {}) {
+  const key = String(id ?? "").trim();
+  if (!key) return "";
+  if (!opts.forceRefresh && _taskCtIdCache.has(key)) return _taskCtIdCache.get(key);
+  const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
+  const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
+  const url = `${TASKS_LIST_API}/items(${encodeURIComponent(key)})?$select=${opts.field || "ContentTypeId"}`;
+  let ctId = "";
+  try {
+    const resp = await get(url, ACCEPT);
+    const d = resp?.data?.d ?? resp?.data ?? null;
+    ctId = contentTypeIdOf(d?.ContentTypeId ?? d?.contentTypeId);
+  } catch (e) {
+    if (e?.response?.status && ![400, 404].includes(e.response.status)) {
+      console.warn("[contentTypeFields] item ContentTypeId failed", e.response.status);
+    }
+  }
+  _taskCtIdCache.set(key, ctId);
+  return ctId;
+}
+
+/**
+ * Сравнение ContentTypeId по префиксу: SharePoint отдаёт у элементов дочерний
+ * тип («id типа» + сегмент), поэтому строгое равенство не работает. Матч
+ * однонаправленный — фактический id должен НАЧИНАТЬСЯ с известного id типа
+ * (обратное направление давало ложные срабатывания на «0x0108» и на родительские
+ * типы «Задача рабочего процесса»). Если элемент заведён с базовым id, его
+ * закроет тот же список известных id — сравнением по равенству.
+ *
+ * @param {any} actual — id у задачи/элемента
+ * @param {any} known — известный id типа
+ * @returns {boolean}
+ */
+export function contentTypeIdMatches(actual, known) {
+  const a = contentTypeIdOf(actual).toLowerCase();
+  const b = contentTypeIdOf(known).toLowerCase();
+  if (!a || !b) return false;
+  return a === b || a.startsWith(b);
+}
+
 /**
  * Задача типа контента «Результат проверки ООБ» (id ИЛИ имя — что доступно).
  * Такие задачи ведут себя как задачи сайта ДОБ: форма DobTaskEditView закрывает
@@ -260,8 +334,8 @@ export function taskContentTypeName(task) {
  * @returns {boolean}
  */
 export function isResultCheckTask(task) {
-  const id = taskContentTypeId(task).toLowerCase();
-  if (id && id === RESULT_CHECK_OOO_CT_ID.toLowerCase()) return true;
+  const id = taskContentTypeId(task);
+  if (id && RESULT_CHECK_OOO_CT_IDS.some((known) => contentTypeIdMatches(id, known))) return true;
   const name = taskContentTypeName(task).toLowerCase();
   return name !== "" && name === RESULT_CHECK_OOO_CT_NAME.toLowerCase();
 }
@@ -276,8 +350,8 @@ export function isResultCheckTask(task) {
 export function isDialogRequired(rule, ctId, ctName = "") {
   if (rule?.requiresDialog === false) return false;
   if (rule?.requiresDialog === true) return true;
-  const id = contentTypeIdOf(ctId).toLowerCase();
-  if (id !== "" && id === RESULT_CHECK_OOO_CT_ID.toLowerCase()) return true;
+  const id = contentTypeIdOf(ctId);
+  if (id !== "" && RESULT_CHECK_OOO_CT_IDS.some((known) => contentTypeIdMatches(id, known))) return true;
   const name = String(ctName || "").trim().toLowerCase();
   return name !== "" && name === RESULT_CHECK_OOO_CT_NAME.toLowerCase();
 }

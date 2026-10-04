@@ -53,7 +53,7 @@ import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import ContentTypeResultDialog from "./features/tasks/components/ContentTypeResultDialog";
-import { isDialogRequired, taskContentTypeId } from "./tasks/contentTypeFields";
+import { fetchTaskContentTypeId, isDialogRequired, taskContentTypeId, taskContentTypeName } from "./tasks/contentTypeFields";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
 import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
 import { useHashElement } from "./features/tasks/hooks/useHashElement";
@@ -197,6 +197,26 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     mode: viewModeView,
     enabled: !!currentUserId && !fieldsLoading,
   });
+
+  // ⭐ Открытие формы задачи. Если у задачи (строки таблицы/карточки) НЕТ типа
+  // контента — дочитываем его у самого элемента основного списка: иначе задача
+  // «Результат проверки ООБ» уходит на #tasks/<Id> обычной карточкой с кнопками,
+  // а не на форму ДОБ. Это же спасает, когда select источника не содержал
+  // ContentTypeId (тогда ни карточка, ни таблица тип не увидят).
+  const openTaskFormResolved = useCallback(async (task, compositeId) => {
+    const cid = compositeId || task?.compositeId || null;
+    let t = task || null;
+    const mainTask = t ? (!t.sourceId || t.sourceId === "main") : true;
+    if (t && mainTask && !taskContentTypeId(t)) {
+      const rawId = t.Id ?? Number(String(cid || "").split(":").pop());
+      const ctId = await fetchTaskContentTypeId(rawId).catch(() => "");
+      if (ctId) {
+        if (__DBG_ENABLED__) __dlog("[DBG:ct-detect] тип контента дочитан у элемента", { id: rawId, ctId });
+        t = { ...t, contentTypeId: ctId, raw: { ...(t.raw || {}), ContentTypeId: ctId } };
+      }
+    }
+    return openTaskForm(cid, tableData.sources, t);
+  }, [tableData.sources]);
 
   // Задачи из внешних источников (dob) — read-only карточки рядом с main-задачами.
   const externalTasks = useMemo(
@@ -524,7 +544,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     // ⭐ Закрытие через ДИАЛОГ по типу контента (Behaviour.dlg или сам тип контента
     // «Результат проверки ООБ»): форму строит ContentTypeResultDialog строго по
     // колонкам SharePoint, а карточка/таблица только передают выбранный результат.
-    if (isDialogRequired(rule, taskContentTypeId(task))) {
+    if (isDialogRequired(rule, taskContentTypeId(task), taskContentTypeName(task))) {
       runAfterAnimation(() => setCtDialog({ task, rule: rule || null, result: resultValue || "" }));
       return;
     }
@@ -575,7 +595,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
     if (_needsForm) {
       notify(`Результат «${resultValue}» требует заполнить поля — открываю карточку задачи #${task.Id}`, { severity: "info" });
-      openTaskForm(task?.compositeId, tableData.sources, task);
+      openTaskFormResolved(task, task?.compositeId);
       return;
     }
 
@@ -583,7 +603,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     // req = null → legacy-поля AdditionalsActionsRequired/AdditionalActions не отправляем
     // (в Behaviour нет aa; поля могут отсутствовать в типе контента или быть Boolean).
     runAfterAnimation(() => completeTask(task, resultValue, {}, null, []));
-  }, [fieldDefaultActions, taskConfiguration.data, completeTask, notify, tableData.sources]);
+  }, [fieldDefaultActions, taskConfiguration.data, completeTask, notify, openTaskFormResolved]);
 
   // ── Действия по строке таблицы ─────────────────────────────────────────────
   // Набор действий повторяет КАРТОЧКУ задачи (те же кнопки для того же статуса и
@@ -856,7 +876,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       onResult: (choice) => handleResultClick(row, choice),
       resolveEditor: (choice) => buildResultEditor(row, choice),
       externalLike: isDobLikeTask(row),
-      onEdit: () => openTaskForm(row?.compositeId, tableData.sources, row),
+      onEdit: () => openTaskFormResolved(row, row?.compositeId),
     });
     if (__DBG_ENABLED__) {
       __dlog("[DBG:rowActions]", {
@@ -870,7 +890,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [
     canTakeTableRow, externalTakingId, updatingId, isRowTakenByOther, choicesForRow,
     resolveRowChoiceStyling, resolveRowChoiceIcon, resolveRowTakeStyling, resolveRowTakeIcon,
-    buildResultEditor, handleTakeTableRow, handleResultClick, tableData.sources,
+    buildResultEditor, handleTakeTableRow, handleResultClick, openTaskFormResolved,
   ]);
 
   // Тексты диалога подтверждения из TaskBehaviour.Behaviour (ct/cm/ok/no) для текущего pending-результата.
@@ -918,9 +938,20 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     const t = elementTaskMatch;
     // sourceId может быть не проставлен (в hash-режиме задачи приходят из useTasksQuery
     // без markMainTasks) — отсутствие sourceId = основной список, а не внешний источник.
-    if (!t || (t.sourceId && t.sourceId !== "main") || !isDobLikeTask(t)) return;
-    const hash = buildTaskFormHash(t.compositeId || `main:${t.Id}`, tableData.sources, t);
-    if (hash && window.location.hash !== hash) window.location.hash = hash;
+    if (!t || (t.sourceId && t.sourceId !== "main")) return;
+    let cancelled = false;
+    (async () => {
+      let task = t;
+      if (!taskContentTypeId(task) && task.Id) {
+        const ctId = await fetchTaskContentTypeId(task.Id).catch(() => "");
+        if (!ctId) return;
+        task = { ...task, contentTypeId: ctId, raw: { ...(task.raw || {}), ContentTypeId: ctId } };
+      }
+      if (cancelled || !isDobLikeTask(task)) return;
+      const hash = buildTaskFormHash(task.compositeId || `main:${task.Id}`, tableData.sources, task);
+      if (hash && window.location.hash !== hash) window.location.hash = hash;
+    })();
+    return () => { cancelled = true; };
   }, [elementTaskMatch, tableData.sources]);
   useTasksFocusPolling({ currentUserId, isHashMode, queryClient, lastFocusLoadRef });
 
@@ -1021,10 +1052,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               loading={tableData.isLoading}
               error={tableData.error?.message || null}
               onSelectRow={setSelectedTableRow}
-              onRowOpen={(compositeId) => openTaskForm(compositeId, tableData.sources, (tableData.rows || []).find((r) => r.compositeId === compositeId) || null)}
+              onRowOpen={(compositeId) => openTaskFormResolved((tableData.rows || []).find((r) => r.compositeId === compositeId) || null, compositeId)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора
               getRowActions={getTableRowActions}
-              onEditRow={(row) => openTaskForm(row?.compositeId, tableData.sources, row)}
+              onEditRow={(row) => openTaskFormResolved(row, row?.compositeId)}
               onTakeRow={handleTakeTableRow}
               canTakeRow={canTakeTableRow}
               takingId={externalTakingId}
@@ -1078,7 +1109,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         currentUserId={currentUserId}
         currentUserTitle={currentUserTitle}
         onRetry={loadTasks}
-        onOpenExternalTask={(task) => openTaskForm(task?.compositeId, tableData.sources, task)}
+        onOpenExternalTask={(task) => openTaskFormResolved(task, task?.compositeId)}
         onTakeExternalTask={handleTakeTableRow}
         externalTakingId={externalTakingId}
         externalCurrentUserIds={Object.fromEntries(
