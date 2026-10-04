@@ -147,30 +147,159 @@ function listFields(data) {
   return Array.isArray(d.results) ? d.results : [];
 }
 
+function verboseList(data) {
+  const d = data?.d ?? data ?? null;
+  if (!d) return [];
+  if (Array.isArray(d)) return d;
+  if (Array.isArray(d.results)) return d.results;
+  if (Array.isArray(d.value)) return d.value;
+  return [];
+}
+
 /**
- * Поля типа контента (с учётом наследования от родительского шаблона).
+ * FieldLinks типа контента — ЕДИНСТВЕННЫЙ источник состава формы.
+ *
+ * ⚠️ Поля ВСЕГО списка (/fields) для этого не годятся: в списке есть колонки,
+ * которых нет в типе контента (AdditionalActions, AdditionalActionsRequired и
+ * прочая инфраструктура), и они попадали в форму. Состав берём из
+ * /contenttypes(…)?$expand=FieldLinks — ровно те колонки, что описаны в CT.
+ *
+ * @param {string} ctId — StringId типа контента
+ * @param {{ get?: Function, listApi?: string }} [opts]
+ * @returns {Promise<Array<object>>} FieldLink'и ({ Id, Name, DisplayName, Required, Hidden })
+ */
+export async function fetchContentTypeFieldLinks(ctId, opts = {}) {
+  const id = String(ctId || '').trim();
+  if (!id) return [];
+  const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
+  const listApi = opts.listApi || TASKS_LIST_API;
+  const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
+  // 1) Коллекция типов контента списка (тот же вызов, что в resultField.js).
+  try {
+    const resp = await get(
+      `${listApi}/contenttypes?$select=Id,StringId,Name&$expand=FieldLinks&$top=50`,
+      ACCEPT,
+    );
+    const types = verboseList(resp?.data);
+    const type = types.find((ct) => contentTypeIdMatches(ct?.StringId || ct?.Id, id));
+    const links = Array.isArray(type?.FieldLinks) ? type.FieldLinks : type?.FieldLinks?.results;
+    if (Array.isArray(links) && links.length > 0) return links;
+  } catch (e) {
+    if (e?.response?.status && ![400, 404].includes(e.response.status)) {
+      console.warn("[contentTypeFields] FieldLinks failed", e.response.status);
+    }
+  }
+  // 2) FieldLinks напрямую у типа контента (если список CT не отдал).
+  try {
+    const quoted = id.replace(/'/g, "''");
+    const resp = await get(`${listApi}/contenttypes('${quoted}')?$expand=FieldLinks`, ACCEPT);
+    const links = resp?.data?.d?.FieldLinks;
+    if (Array.isArray(links)) return links;
+    if (Array.isArray(links?.results)) return links.results;
+  } catch (e) {
+    if (e?.response?.status && ![400, 404].includes(e.response.status)) {
+      console.warn("[contentTypeFields] CT FieldLinks failed", e.response.status);
+    }
+  }
+  return [];
+}
+
+/** Все поля списка (нужны только для типов/Choices к FieldLinks). */
+async function fetchListFields(listApi, get) {
+  const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
+  const resp = await get(`${listApi}/fields?$top=500`, ACCEPT);
+  return listFields(resp.data);
+}
+
+function fieldFromLink(link) {
+  const internal = String(link?.Name || link?.InternalName || "").trim();
+  if (!internal) return null;
+  return {
+    InternalName: internal,
+    Title: String(link?.DisplayName || internal),
+    TypeAsString: "",
+    Required: link?.Required === true,
+    Hidden: link?.Hidden === true,
+    ReadOnlyField: link?.ReadOnly === true,
+    Id: link?.Id || null,
+    __fromFieldLink: true,
+  };
+}
+
+/**
+ * Поля типа контента (по FieldLinks, с наследованием от родительского шаблона —
+ * SharePoint уже отдаёт полный набор ссылок). Тип/Choices колонок добираются из
+ * метаданных полей списка.
+ *
  * @param {string} ctId — StringId типа контента (0x0108…)
- * @param {{ get?: Function, forceRefresh?: boolean }} [opts]
+ * @param {{ get?: Function, listApi?: string, forceRefresh?: boolean }} [opts]
  * @returns {Promise<Array<object>>}
  */
 export async function fetchContentTypeFields(ctId, opts = {}) {
   const id = String(ctId || "").trim();
   if (!id) return [];
+  const listApi = opts.listApi || TASKS_LIST_API;
+  const cacheKey = `${listApi}::${id}`;
   if (!opts.forceRefresh) {
-    const cached = cacheGet(id);
+    const cached = cacheGet(cacheKey);
     if (cached) return cached;
   }
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
-  const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
-  const quoted = id.replace(/'/g, "''");
 
-  // 1) Поля прямо у типа контента (самый точный источник)
+  // 0) Основной путь: состав — ровно FieldLinks типа контента.
   try {
-    const url = `${TASKS_LIST_API}/contenttypes('${quoted}')?$expand=Fields&$select=${FIELD_SELECT}`;
-    const resp = await get(url, ACCEPT);
+    const links = await fetchContentTypeFieldLinks(id, { get, listApi });
+    if (links.length > 0) {
+      let all = [];
+      try {
+        all = await fetchListFields(listApi, get);
+      } catch (e) {
+        if (e?.response?.status && ![400, 404].includes(e.response.status)) {
+          console.warn("[contentTypeFields] list fields failed", e.response.status);
+        }
+      }
+      const byId = new Map();
+      const byName = new Map();
+      for (const f of all) {
+        const key = String(f?.Id || "").toLowerCase();
+        if (key) byId.set(key, f);
+        const name = String(f?.InternalName || "").toLowerCase();
+        if (name) byName.set(name, f);
+      }
+      const fields = [];
+      const seen = new Set();
+      for (const link of links) {
+        const internal = String(link?.Name || link?.InternalName || "").trim();
+        const meta = byId.get(String(link?.Id || "").toLowerCase())
+          || byName.get(internal.toLowerCase());
+        const field = meta ? { ...meta, __fromFieldLink: true } : fieldFromLink(link);
+        if (!field || !field.InternalName || seen.has(field.InternalName)) continue;
+        if (meta) {
+          // Обязательность/скрытость берём у CT (так поле описано в этом типе).
+          if (link?.Required === true) field.Required = true;
+          if (link?.Hidden === true) field.Hidden = true;
+          if (link?.ReadOnly === true) field.ReadOnlyField = true;
+        }
+        seen.add(field.InternalName);
+        fields.push(field);
+      }
+      if (fields.length > 0) {
+        cacheSet(cacheKey, fields);
+        return fields;
+      }
+    }
+  } catch (e) {
+    console.warn("[contentTypeFields] FieldLinks path failed", e?.response?.status || e?.message);
+  }
+
+  // 1) Фолбэк: поля прямо у типа контента.
+  try {
+    const quoted = id.replace(/'/g, "''");
+    const url = `${listApi}/contenttypes('${quoted}')?$expand=Fields&$select=${FIELD_SELECT}`;
+    const resp = await get(url, { headers: { Accept: "application/json;odata=verbose" } });
     const fields = fieldResults(resp.data);
     if (fields.length > 0) {
-      cacheSet(id, fields);
+      cacheSet(cacheKey, fields);
       return fields;
     }
   } catch (e) {
@@ -179,22 +308,12 @@ export async function fetchContentTypeFields(ctId, opts = {}) {
     }
   }
 
-  // 2) Фолбэк: все поля списка + FieldLinks типа контента (по Id поля)
+  // 2) Последний фолбэк: все поля списка (тип контента недоступен).
   try {
-    const [allResp, linksResp] = await Promise.all([
-      get(`${TASKS_LIST_API}/fields?$top=500`, ACCEPT),
-      get(`${TASKS_LIST_API}/contenttypes('${quoted}')?$expand=FieldLinks`, ACCEPT),
-    ]);
-    const all = listFields(allResp.data);
-    const linksRaw = linksResp?.data?.d?.FieldLinks;
-    const links = Array.isArray(linksRaw) ? linksRaw : (Array.isArray(linksRaw?.results) ? linksRaw.results : []);
-    const linkIds = new Set(links.map((l) => String(l?.Id || "").toLowerCase()).filter(Boolean));
-    const fields = linkIds.size > 0
-      ? all.filter((f) => linkIds.has(String(f?.Id || "").toLowerCase()))
-      : all;
-    if (fields.length > 0) {
-      cacheSet(id, fields);
-      return fields;
+    const all = await fetchListFields(listApi, get);
+    if (all.length > 0) {
+      cacheSet(cacheKey, all);
+      return all;
     }
   } catch (e) {
     console.warn("[contentTypeFields] fallback failed", e?.response?.status || e?.message);
@@ -409,7 +528,9 @@ export function controlKindOf(field) {
     case "text":
       return "text";
     case "choice":
-      return "autocomplete";
+      // Выбор без свободного ввода — настоящий select; с FillInChoice — автокомплит
+      // (можно ввести своё значение).
+      return field?.FillInChoice === true ? "autocomplete" : "select";
     case "multichoice":
       return "multichoice";
     case "number":

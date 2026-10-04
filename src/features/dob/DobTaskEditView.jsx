@@ -10,14 +10,15 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment } from './api/dobApi';
+import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment, getDobContentTypeFields } from './api/dobApi';
 import { DOB_LIST_GUID } from './api/dobClient';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
-import { isDialogRequired } from '../../tasks/contentTypeFields';
+import { contentTypeIdOf, isDialogRequired, taskContentTypeName } from '../../tasks/contentTypeFields';
+import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
 import { resolveRelatedRef } from './lib/relatedItem';
 
 
@@ -38,6 +39,56 @@ function isEditableField(f) {
 // (например, RequestsTask ООБ), чтобы форма работала как dob_tasks/[id],
 // но с полями и сохранением именно в список задачи.
 // onBackHash — куда возвращает кнопка «Назад» (по умолчанию #dob_tasks).
+// ── Поля формы по ТИПАМ колонок SharePoint ────────────────────────────────────
+const CHOICE_TYPES = new Set(['choice', 'multichoice', 'gridchoice', 'combobox', 'outcomechoice']);
+const USER_TYPES = new Set(['user', 'usermulti']);
+
+function choicesOfField(field) {
+  const raw = field?.Choices;
+  const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.results) ? raw.results : []);
+  return list.map((v) => String(v).trim()).filter(Boolean);
+}
+
+function typeOfField(field) {
+  return String(field?.TypeAsString || '').trim().toLowerCase();
+}
+
+/** Поле выбора: тип из семейства Choice ЛИБО в метаданных есть Choices. */
+function isChoiceField(field) {
+  const t = typeOfField(field);
+  if (CHOICE_TYPES.has(t)) return true;
+  return choicesOfField(field).length > 0 && !USER_TYPES.has(t) && t !== 'lookup' && t !== 'lookupmulti';
+}
+
+function isMultiChoiceField(field) {
+  const t = typeOfField(field);
+  return t === 'multichoice' || t === 'gridchoice' || field?.AllowMultipleValues === true;
+}
+
+/** Значение MultiChoice: строка «a;#b», массив или объект {results}. */
+function multiChoiceValues(raw) {
+  if (raw === null || raw === undefined || raw === '') return [];
+  if (Array.isArray(raw)) return raw.map((v) => String(v?.Value ?? v)).filter(Boolean);
+  if (typeof raw === 'object') {
+    const list = Array.isArray(raw.results) ? raw.results : [];
+    return list.map((v) => String(v?.Value ?? v)).filter(Boolean);
+  }
+  return String(raw).split(';#').map((v) => v.trim()).filter(Boolean);
+}
+
+/** Пользователь или группа: значение поля → массив {Id, Title, LoginName}. */
+function peopleOfField(raw) {
+  const asUser = (v) => {
+    if (!v || typeof v !== 'object') return v ? { Id: null, Title: String(v), LoginName: '' } : null;
+    const id = v.Id ?? v.ID ?? null;
+    return { Id: id === null ? null : Number(id), Title: String(v.Title ?? v.Name ?? ''), LoginName: String(v.LoginName ?? v.Name ?? '') };
+  };
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(asUser).filter(Boolean);
+  if (Array.isArray(raw?.results)) return raw.results.map(asUser).filter(Boolean);
+  return [asUser(raw)].filter(Boolean);
+}
+
 export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = '#dob_tasks' }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
@@ -73,6 +124,17 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     queryFn: () => getDobItem(id, listGuid),
     enabled: !!id,
     staleTime: 30 * 1000,
+  });
+
+  // Тип контента элемента → состав формы. Форма строится ТОЛЬКО по полям типа
+  // контента (FieldLinks): в списке есть колонки, которых в типе нет, и раньше
+  // они попадали в «Остальные поля» (AdditionalActions, AdditionalActionsRequired).
+  const itemCtId = contentTypeIdOf(item?.ContentTypeId);
+  const { data: ctFields } = useQuery({
+    queryKey: ['dob-ct-fields', listGuid, itemCtId],
+    queryFn: () => getDobContentTypeFields(itemCtId, listGuid),
+    enabled: !!itemCtId,
+    staleTime: 30 * 60 * 1000,
   });
 
   // Load attachments separately for display
@@ -158,6 +220,24 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           }
           const meta = (fields || []).find(f => f.InternalName === k);
           const t = (meta?.TypeAsString || '').toLowerCase();
+          // MultiChoice SharePoint принимает строкой с разделителем «;#»
+          if ((t === 'multichoice' || t === 'gridchoice') && Array.isArray(v)) {
+            payload[odataK] = v.join(';#');
+            continue;
+          }
+          // «Пользователь или группа» (в т.ч. многократный) — Id в <Field>Id;
+          // для многократного — Collection(Edm.Int32).
+          if (t === 'usermulti' || (Array.isArray(v) && v.length > 0 && v.every((u) => u && typeof u === 'object' && ('Id' in u || 'Title' in u)))) {
+            const ids = (Array.isArray(v) ? v : [v])
+              .map((u) => (u && typeof u === 'object' ? Number(u.Id ?? u.ID) : Number(u)))
+              .filter((n) => Number.isFinite(n));
+            if (ids.length === 0) {
+              console.log('[DobEdit][save] skip UserMulti without Id', k);
+              continue;
+            }
+            payload[toODataKey(`${k}Id`)] = { __metadata: { type: 'Collection(Edm.Int32)' }, results: ids };
+            continue;
+          }
           // User/Lookup — нужен Id суффикс, иначе 400 "value without type"
           if (t === 'user' || t === 'lookup' || t === 'lookupmulti' || meta?.LookupList) {
             const idKeyRaw = `${k}Id`;
@@ -183,7 +263,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             continue;
           }
           // Пропускаем сложные типы которые требуют __metadata
-          if (['taxonomyfieldtype','taxonomyfieldtypemulti','user','lookup','lookupmulti','url','calculated','computed'].includes(t)) {
+          if (['taxonomyfieldtype','taxonomyfieldtypemulti','user','usermulti','lookup','lookupmulti','multichoice','gridchoice','url','calculated','computed'].includes(t)) {
             // URL — объект {Url, Description}, шлём только Url если строка
             if (t === 'url' && v && typeof v === 'object' && v.Url) {
               payload[odataK] = v.Url;
@@ -347,14 +427,20 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
   const editableFields = useMemo(() => {
     if (!fields) return [];
+    // Состав — по типу контента: если FieldLinks получены, показываем только их
+    // поля (нет типа — работаем как раньше, по колонкам списка).
+    const ctNames = Array.isArray(ctFields) && ctFields.length > 0
+      ? new Set(ctFields.map(f => String(f?.InternalName || '').toLowerCase()).filter(Boolean))
+      : null;
     return fields.filter(f => {
       if (['ID','Attachments','ContentType','ContentTypeId'].includes(f.InternalName)) return false;
       if (isHiddenFormField(f.InternalName)) return false;
       // Show all except hidden system, but mark readOnly
       if (f.Hidden) return false;
+      if (ctNames && !ctNames.has(String(f.InternalName || '').toLowerCase())) return false;
       return true;
     });
-  }, [fields]);
+  }, [fields, ctFields]);
 
   const chekField = useMemo(() => {
     if (!fields) return null;
@@ -480,8 +566,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // ⭐ «Результат проверки ООБ» (тип контента из группы ProblemsPallet) ведёт себя
   // как задача сайта ДОБ: вместо полей заявки показываем форму закрытия по колонкам
   // типа контента. Задача не закрывается мимо диалога.
-  const checkCtId = String(item?.ContentTypeId?.StringValue || item?.ContentTypeId || '');
-  if (item && isDialogRequired(null, checkCtId)) {
+  const checkCtId = itemCtId;
+  if (item && isDialogRequired(null, checkCtId, taskContentTypeName(item))) {
     return (
       <Box data-dob-edit-page="true" sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: .75, p: { xs: .5, md: .75 }, boxSizing: 'border-box' }}>
         <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1100, bgcolor: '#fff', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
@@ -630,22 +716,45 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
                 <TextField key={internal} label={title} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth />
               );
             }
-            if (t === 'choice') {
-              const rawChoices = Array.isArray(f.Choices) ? f.Choices : (f.Choices?.results || []);
-              const vals = (rawChoices || []).filter(Boolean);
+            // Поля типа «Пользователь или группа»: автокомплит по УЧЁТНОЙ ЗАПИСИ,
+            // у человека рядом с именем — ДОЛЖНОСТЬ и ДЕПАРТАМЕНТ, чтобы не
+            // ошибиться с выбором. Многократный выбор — если колонка это разрешает.
+            if (USER_TYPES.has(t)) {
+              const multiple = t === 'usermulti' || f.AllowMultipleValues === true;
+              return (
+                <Box key={internal} sx={{ minWidth: 0 }}>
+                  <PersonFieldAutocomplete
+                    label={title}
+                    required={f.Required === true}
+                    multiple={multiple}
+                    disabled={!editable}
+                    value={peopleOfField(value)}
+                    onChange={next => handleChange(internal, multiple ? (next || []) : (next || null))}
+                  />
+                </Box>
+              );
+            }
+            // Любое поле выбора — настоящий select (одиночный или многократный).
+            if (isChoiceField(f)) {
+              const vals = choicesOfField(f);
+              const multiple = isMultiChoiceField(f);
+              const selected = multiple ? multiChoiceValues(value) : (value === null || value === undefined ? '' : String(value));
               return (
                 <TextField
                   key={internal}
                   select
                   label={`${title}${f.Required ? ' *' : ''}`}
-                  value={value || ''}
-                  onChange={e=> handleChange(internal, e.target.value)}
+                  value={selected}
+                  onChange={e => handleChange(internal, multiple ? e.target.value : e.target.value)}
                   size="small"
                   fullWidth
                   disabled={!editable}
+                  SelectProps={multiple
+                    ? { multiple: true, renderValue: (sel) => (Array.isArray(sel) ? sel : []).join(', ') }
+                    : undefined}
                 >
-                  <MenuItem value=""><em>— не выбрано —</em></MenuItem>
-                  {vals.map(v=> <MenuItem key={v} value={v}>{v}</MenuItem>)}
+                  {!multiple && <MenuItem value=""><em>— не выбрано —</em></MenuItem>}
+                  {vals.map(v => <MenuItem key={v} value={v}>{v}</MenuItem>)}
                 </TextField>
               );
             }
@@ -728,12 +837,6 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
                   maxRows={6}
                   disabled={!editable}
                 />
-              );
-            }
-            if (t === 'user') {
-              const disp = item?.[internal]?.Title || value || '';
-              return (
-                <TextField key={internal} label={`${title}${f.Required ? ' *' : ''}`} value={disp} InputProps={{ readOnly: true }} size="small" fullWidth />
               );
             }
             if (t === 'url') {

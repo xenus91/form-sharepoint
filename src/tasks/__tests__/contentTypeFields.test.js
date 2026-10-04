@@ -14,6 +14,8 @@ import {
   taskContentTypeId,
   taskContentTypeName,
   controlKindOf,
+  fetchContentTypeFields,
+  clearContentTypeFieldsCache,
   isFormField,
   buildContentTypeForm,
   validateRequiredFields,
@@ -45,7 +47,9 @@ describe("contentTypeFields — тип контента «Результат п�
   it("контролы строятся по типам колонок SharePoint", () => {
     expect(controlKindOf(FIELD({ TypeAsString: "Note" }))).toBe("richtext");
     expect(controlKindOf(FIELD({ TypeAsString: "Number" }))).toBe("number");
-    expect(controlKindOf(FIELD({ TypeAsString: "Choice" }))).toBe("autocomplete");
+    expect(controlKindOf(FIELD({ TypeAsString: "Choice" }))).toBe("select");
+    expect(controlKindOf(FIELD({ TypeAsString: "Choice", FillInChoice: true }))).toBe("autocomplete");
+    expect(controlKindOf(FIELD({ TypeAsString: "MultiChoice" }))).toBe("multichoice");
     expect(controlKindOf(FIELD({ TypeAsString: "User" }))).toBe("person");
     expect(controlKindOf(FIELD({ TypeAsString: "UserMulti" }))).toBe("person");
     expect(controlKindOf(FIELD({ TypeAsString: "Calculated" }))).toBe(null);
@@ -132,6 +136,72 @@ describe("contentTypeFields — тип контента «Результат п�
 
     expect(taskContentTypeId({ ContentTypeId: ctId })).toBe(ctId);
     expect(taskContentTypeId({ raw: { ContentTypeId: { StringValue: ctId } } })).toBe(ctId);
+  });
+});
+
+describe("состав формы — только FieldLinks типа контента", () => {
+  const CT_ID = RESULT_CHECK_OOO_CT_FULL_ID;
+
+  it("колонки списка, которых нет в типе контента, в форму не попадают", async () => {
+    clearContentTypeFieldsCache();
+    const link = (Id, Name, DisplayName) => ({ Id, Name, DisplayName, Required: false, Hidden: false, ReadOnly: false });
+    const field = (Id, InternalName, TypeAsString, extra = {}) => ({
+      Id, InternalName, Title: InternalName, TypeAsString, Required: false, Hidden: false, ReadOnlyField: false, ...extra,
+    });
+    const get = async (url) => {
+      const u = String(url);
+      if (u.includes("/contenttypes?")) {
+        return {
+          data: {
+            d: {
+              results: [{
+                Id: "{99C7C1CB-2C1A-4A1F-9A4C-1E1E3D0B7A11}",
+                StringId: CT_ID,
+                Name: "Результат проверки ООБ",
+                FieldLinks: {
+                  results: [
+                    link("{11111111-1111-1111-1111-111111111111}", "DescriptionCheckResult", "Описание результата проверки"),
+                    link("{22222222-2222-2222-2222-222222222222}", "DobSearchResult", "Результат проверки"),
+                    link("{33333333-3333-3333-3333-333333333333}", "Guilty", "Виновный"),
+                  ],
+                },
+              }],
+            },
+          },
+        };
+      }
+      if (u.includes("/fields?")) {
+        return {
+          data: {
+            d: {
+              results: [
+                field("{11111111-1111-1111-1111-111111111111}", "DescriptionCheckResult", "Note", { Required: true }),
+                field("{22222222-2222-2222-2222-222222222222}", "DobSearchResult", "Choice", { Choices: { results: ["Годен"] } }),
+                field("{33333333-3333-3333-3333-333333333333}", "Guilty", "UserMulti", { AllowMultipleValues: true }),
+                // Этих колонок в типе контента нет — в форму они попадать не должны
+                field("{44444444-4444-4444-4444-444444444444}", "AdditionalActions", "MultiChoice", { Choices: { results: ["Перебрать"] } }),
+                field("{55555555-5555-5555-5555-555555555555}", "AdditionalActionsRequired", "Boolean"),
+              ],
+            },
+          },
+        };
+      }
+      return { data: { d: {} } };
+    };
+
+    const fields = await fetchContentTypeFields(CT_ID, { get, listApi: "/api/web/lists(guid'463b634e-a71a-4fef-9a1f-b803431d8639')" });
+    const names = fields.map((f) => f.InternalName);
+    expect(names).toEqual(["DescriptionCheckResult", "DobSearchResult", "Guilty"]);
+    expect(names).not.toContain("AdditionalActions");
+    expect(names).not.toContain("AdditionalActionsRequired");
+    // типы колонок подтянуты из метаданных списка (FieldLinks их не отдаёт)
+    expect(fields.find((f) => f.InternalName === "Guilty").TypeAsString).toBe("UserMulti");
+    expect(fields.find((f) => f.InternalName === "DescriptionCheckResult").Required).toBe(true);
+
+    // и форма строится ровно по этим полям: результат-кнопки + виновный, без доп. действий
+    const form = buildContentTypeForm(fields);
+    expect(form.resultBlock.internalName).toBe("DobSearchResult");
+    expect(form.controls.map((c) => c.internalName)).toEqual(["DescriptionCheckResult", "Guilty"]);
   });
 });
 

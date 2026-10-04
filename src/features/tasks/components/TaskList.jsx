@@ -61,7 +61,14 @@ const TaskList = React.memo(function TaskList({
           onOpen={onOpenExternalTask}
           onTake={onTakeExternalTask}
           taking={externalTakingId != null && externalTakingId === (task.compositeId || `${task.sourceId}:${task.Id}`)}
-          currentUserId={externalCurrentUserIds ? (externalCurrentUserIds[task.sourceId] ?? null) : null}
+          // Id текущего пользователя НА САЙТЕ ИСТОЧНИКА; для main/без источника —
+          // Id основного сайта. Плюс ФИО: по нему определяем «свою» задачу, когда
+          // Id на сайте источника не срезолвился.
+          currentUserId={task.sourceId && task.sourceId !== "main"
+            ? (externalCurrentUserIds?.[task.sourceId] ?? null)
+            : currentUserId}
+          currentUserTitle={currentUserTitle}
+          currentUserIdBySource={externalCurrentUserIds}
         />
       )
       : (

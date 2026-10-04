@@ -18,7 +18,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert, Autocomplete, Box, Checkbox, Button, Chip, CircularProgress, Dialog, DialogActions,
-  DialogContent, DialogTitle, FormControlLabel, Paper, Stack, TextField, Typography,
+  DialogContent, DialogTitle, FormControlLabel, MenuItem, Paper, Stack, TextField, Typography,
 } from "@mui/material";
 import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
@@ -311,6 +311,81 @@ export default function ContentTypeResultDialog({
                     error={Boolean(invalid)}
                     helperText={helper}
                   />
+                );
+              }
+
+              // Поле выбора без свободного ввода — настоящий select (как в форме ДОБ).
+              if (control.kind === "select") {
+                return (
+                  <TextField
+                    key={control.internalName}
+                    select
+                    {...common}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                    value={value || ""}
+                    onChange={(e) => setValue(control.internalName, e.target.value)}
+                    error={Boolean(invalid)}
+                    helperText={helper}
+                  >
+                    <MenuItem value=""><em>— не выбрано —</em></MenuItem>
+                    {(control.choices || []).map((choice) => (
+                      <MenuItem key={choice} value={choice}>{choice}</MenuItem>
+                    ))}
+                  </TextField>
+                );
+              }
+
+              // Многократный выбор: с FillInChoice — автокомплит (можно ввести своё),
+              // без — select с множественным выбором.
+              if (control.kind === "multichoice") {
+                const selected = Array.isArray(value)
+                  ? value
+                  : (value === null || value === undefined || value === ""
+                    ? []
+                    : String(value).split(";#").map((v) => v.trim()).filter(Boolean));
+                if (control.allowFillIn === true) {
+                  return (
+                    <Autocomplete
+                      key={control.internalName}
+                      multiple
+                      freeSolo
+                      disableCloseOnSelect
+                      disabled={submitting}
+                      options={control.choices || []}
+                      value={selected}
+                      onChange={(_e, next) => setValue(
+                        control.internalName,
+                        (Array.isArray(next) ? next : []).map((v) => String(v)).filter(Boolean),
+                      )}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label={`${control.title}${control.required ? " *" : ""}`}
+                          error={Boolean(invalid)}
+                          helperText={helper}
+                          size="small"
+                          fullWidth
+                        />
+                      )}
+                    />
+                  );
+                }
+                return (
+                  <TextField
+                    key={control.internalName}
+                    select
+                    {...common}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                    value={selected}
+                    onChange={(e) => setValue(control.internalName, e.target.value)}
+                    error={Boolean(invalid)}
+                    helperText={helper}
+                    SelectProps={{ multiple: true, renderValue: (sel) => (Array.isArray(sel) ? sel : []).join(", ") }}
+                  >
+                    {(control.choices || []).map((choice) => (
+                      <MenuItem key={choice} value={choice}>{choice}</MenuItem>
+                    ))}
+                  </TextField>
                 );
               }
 

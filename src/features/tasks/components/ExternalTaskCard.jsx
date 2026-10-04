@@ -20,6 +20,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../../../tasks/status";
 import { resolveTaker } from "../lib/resolveTaker";
+import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 
 function stripHtml(html) {
@@ -37,7 +38,7 @@ function stripHtml(html) {
  * @param {{task:any, isCompleted?:boolean, isOverdue?:boolean, onOpen?:(task:any)=>void,
  *          onTake?:(task:any)=>void, taking?:boolean, currentUserId?:number|null}} props
  */
-function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking = false, currentUserId = null }) {
+function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking = false, currentUserId = null, currentUserTitle = "", currentUserIdBySource = null }) {
   if (!task) return null;
   const title = stripHtml(task.Title) || stripHtml(task.Body).split("\n")[0] || "Без названия";
   const bodyRaw = stripHtml(task.Body);
@@ -53,8 +54,9 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
   // Кнопку показываем всегда, когда задачу можно взять (обработчик может быть не
   // передан в тестах/на других экранах — тогда клик ничего не делает).
   const canTake = !completed && !taken && (isNotStartedStatus(task.Status) || !task.Status);
-  const takerId = task.EditorId ?? null;
-  const isMine = !!takerId && !!currentUserId && Number(takerId) === Number(currentUserId);
+  // «Задача моя?» — Id взявшего на сайте источника ИЛИ совпадение ФИО
+  // (Id на разных сайтах не совпадают, а Editor может прийти строкой).
+  const isMine = isTaskTakenByCurrentUser(task, { currentUserId, currentUserTitle, currentUserIdBySource });
 
   return (
     <Paper

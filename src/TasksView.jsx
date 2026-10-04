@@ -54,6 +54,7 @@ import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import ContentTypeResultDialog from "./features/tasks/components/ContentTypeResultDialog";
 import { fetchTaskContentTypeMeta, isDialogRequired, isResultCheckTask, taskContentTypeId, taskContentTypeName } from "./tasks/contentTypeFields";
+import { isTaskTakenByCurrentUser } from "./features/tasks/lib/currentUserMatch";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
 import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
 import { useHashElement } from "./features/tasks/hooks/useHashElement";
@@ -301,9 +302,21 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       if (res.ok) {
         notify(`Задача #${task.Id} взята в работу`, { severity: "success" });
       } else if (res.reason === "already-taken") {
+        // Если «взял» — сам текущий пользователь (Id на сайте источника/ФИО),
+        // «возьмите другую» показывать нельзя: это его задача.
+        const mine = isTaskTakenByCurrentUser(
+          { sourceId: task?.sourceId, EditorId: res.editorId, EditorTitle: res.editorTitle },
+          {
+            currentUserId,
+            currentUserTitle,
+            currentUserIdBySource: { [task?.sourceId || "main"]: currentUserId },
+          },
+        );
         notify(
-          `Задача #${task.Id} уже в работе${res.editorTitle ? ` у ${res.editorTitle}` : ""}. Возьмите другую задачу.`,
-          { severity: "warning" }
+          mine
+            ? `Задача #${task.Id} уже в работе у вас${res.status ? ` (${res.status})` : ""}.`
+            : `Задача #${task.Id} уже в работе${res.editorTitle ? ` у ${res.editorTitle}` : ""}. Возьмите другую задачу.`,
+          { severity: mine ? "info" : "warning" }
         );
       } else if (res.reason === "completed") {
         notify(`Задача #${task.Id} уже завершена.`, { severity: "warning" });
@@ -316,7 +329,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     } finally {
       setExternalTakingId(null);
     }
-  }, [notify, tableData]);
+  }, [notify, tableData, currentUserId, currentUserTitle]);
 
   // enrich теперь внутри useTasksQuery (батч), здесь только expandedGroups для новых ТК
   useEffect(() => {
@@ -892,17 +905,27 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     resolveRowActionStyling, resolveRowActionIcon, submitInlineResult,
   ]);
 
+  // Id текущего пользователя по источникам: на разных сайтах Id не совпадают.
+  const siteUserIdsBySource = React.useMemo(() => Object.fromEntries(
+    Object.entries(tableData.sitePrincipalIds || {}).map(([sid, v]) => [sid, v?.userId ?? null]),
+  ), [tableData.sitePrincipalIds]);
+
   // Задачу уже взял кто-то другой (та же проверка, что в TaskCard).
   const isRowTakenByOther = useCallback((row) => {
     if (!currentUserId && !currentUserTitle) return false;
     const takerTitle = row?.EditorTitle || row?.Editor || "";
     const takerId = row?.EditorId ?? null;
     if (!takerTitle && !takerId) return false;
-    const mineById = !!takerId && !!currentUserId && Number(takerId) === Number(currentUserId);
-    const mineByTitle = !!currentUserTitle && !!takerTitle
-      && String(takerTitle).trim().toLowerCase() === String(currentUserTitle).trim().toLowerCase();
-    return !mineById && !mineByTitle;
-  }, [currentUserId, currentUserTitle]);
+    // «Моя» задача: Id взявшего НА САЙТЕ ИСТОЧНИКА либо совпадение ФИО
+    // («Поршаков Сергей» = «Сергей Поршаков Александрович»). Иначе исполнитель
+    // видел «Задача уже взята другим пользователем» про собственную задачу.
+    const mine = isTaskTakenByCurrentUser(row, {
+      currentUserId,
+      currentUserTitle,
+      currentUserIdBySource: siteUserIdsBySource,
+    });
+    return !mine;
+  }, [currentUserId, currentUserTitle, siteUserIdsBySource]);
 
   // Choices для строки — как в карточке: свежие по ContentType → кэш полей → общий список.
   const choicesForRow = useCallback((row) => {
@@ -1191,9 +1214,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onOpenExternalTask={(task) => openTaskFormResolved(task, task?.compositeId)}
         onTakeExternalTask={handleTakeTableRow}
         externalTakingId={externalTakingId}
-        externalCurrentUserIds={Object.fromEntries(
-          Object.entries(tableData.sitePrincipalIds || {}).map(([sid, v]) => [sid, v?.userId ?? null])
-        )}
+        externalCurrentUserIds={siteUserIdsBySource}
       />
       {tab === 1 && !isHashMode && completedTasks.length > 0 && (
         <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.75, pt: 1, pb: 2 }}>

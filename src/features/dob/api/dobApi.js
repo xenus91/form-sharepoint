@@ -3,6 +3,7 @@
 import { dobApiBase, dobListApi, dobAxios, DOB_LIST_GUID } from './dobClient';
 import apiClient from '../../../api';
 import { TASKS_LIST_API, TASKS_LIST_GUID } from '../../../tasks/config';
+import { fetchContentTypeFields } from '../../../tasks/contentTypeFields';
 
 // ⭐ Списки основного сайта (ProblemsPallet/Tasks) редактируются ТОЙ ЖЕ формой, что
 // заявки ДОБ: #dob_tasks/<id>?list=<GUID основного списка>. Для таких списков ходим
@@ -20,6 +21,20 @@ export function isMainSiteList(listGuid) {
 /** Путь к списку: основной сайт (относительно apiClient) или сайт ДОБ (абсолютный). */
 function listApiOf(listGuid) {
   return isMainSiteList(listGuid) ? TASKS_LIST_API : dobListApi(listGuid);
+}
+
+/**
+ * Поля ТИПА КОНТЕНТА списка — состав формы. Берём ровно FieldLinks типа
+ * контента (а не все колонки списка): иначе в форму попадают колонки, которых
+ * в типе нет (AdditionalActions/AdditionalActionsRequired и т.п.).
+ */
+export async function getDobContentTypeFields(ctId, listGuid = DOB_LIST_GUID) {
+  if (!ctId) return [];
+  const guid = normalizeListGuid(listGuid);
+  return fetchContentTypeFields(ctId, {
+    listApi: listApiOf(guid),
+    get: (url, cfg) => httpOf(guid).get(url, cfg ?? readConfig(guid)),
+  });
 }
 
 /** HTTP-клиент под сайт списка (у основного — свой digest и прокси /api). */

@@ -16,7 +16,7 @@
 import apiClient from "../api";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
-const POSITION_STORAGE_PREFIX = "sp:userPosition:";
+const POSITION_STORAGE_PREFIX = "sp:userOrg:"; // v2: должность + департамент
 const USERS_PAGE_LIMIT = 1000;
 
 const _positions = new Map();      // loginKey -> position|null
@@ -218,7 +218,9 @@ export async function searchSiteUsers(query, opts = {}) {
 }
 
 /**
- * Должность пользователя из профиля SharePoint (SPS-JobTitle).
+ * Должность и департамент пользователя из профиля SharePoint
+ * (SPS-JobTitle · SPS-Department) — одной подписью для подсказок и выбранных:
+ * «Главный специалист · Департамент ИТ».
  * @param {string} loginName — например «i:0#.f|membership|ivanov.ii@lenta.com»
  * @param {{ get?: Function }} [opts]
  * @returns {Promise<string|null>}
@@ -232,27 +234,36 @@ export async function getUserPosition(loginName, opts = {}) {
 
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
   const quoted = `'${escapeODataString(login)}'`;
-  try {
-    const resp = await get(
-      `/SP.UserProfiles.PeopleManager/GetUserProfilePropertyFor(accountName=@v,propertyName='SPS-JobTitle')?@v=${quoted}`,
-      ACCEPT,
-    );
-    const d = verboseBody(resp);
-    const value = typeof d === "string" ? d : (d?.GetUserProfilePropertyFor ?? d?.value ?? null);
-    const position = value ? String(value).trim() : null;
-    cacheWritePosition(key, position);
-    return position;
-  } catch (e) {
-    if (e?.response?.status && e.response.status !== 404 && e.response.status !== 400) {
-      console.warn("[userSearch] job title failed", e.response.status);
+  // Должность (SPS-JobTitle) и департамент (SPS-Department) — в одной подписи:
+  // при выборе человека важно видеть и то, и другое (однофамильцы/тёзки).
+  const readProperty = async (property) => {
+    try {
+      const resp = await get(
+        `/SP.UserProfiles.PeopleManager/GetUserProfilePropertyFor(accountName=@v,propertyName='${property}')?@v=${quoted}`,
+        ACCEPT,
+      );
+      const d = verboseBody(resp);
+      const value = typeof d === "string" ? d : (d?.GetUserProfilePropertyFor ?? d?.value ?? null);
+      return value ? String(value).trim() : null;
+    } catch (e) {
+      if (e?.response?.status && e.response.status !== 404 && e.response.status !== 400) {
+        console.warn("[userSearch] profile property failed", property, e.response.status);
+      }
+      return null;
     }
-    cacheWritePosition(key, null);
-    return null;
-  }
+  };
+  const [position, department] = await Promise.all([
+    readProperty("SPS-JobTitle"),
+    readProperty("SPS-Department"),
+  ]);
+  const label = [position, department].filter(Boolean).join(" · ") || null;
+  cacheWritePosition(key, label);
+  return label;
 }
 
 /**
- * Должности для набора пользователей (для подсказок автокомплита).
+ * Подписи «должность · департамент» для набора пользователей (для подсказок
+ * автокомплита и уже выбранных).
  * @param {Array<{LoginName?:string}>} users
  * @returns {Promise<Record<string, string|null>>} loginName(lower) → должность
  */

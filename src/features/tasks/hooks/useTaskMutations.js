@@ -8,6 +8,7 @@ import apiClient, { invalidate } from "../../../api";
 import { getResultFieldForTask } from "../../../tasks/resultField";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { TASKS_LIST_API } from "../../../tasks/config";
+import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
 
 // Минимальное время, которое карточка проводит в состоянии «Сохранение...» (мс).
 // Иначе при быстром ответе сервера оверлей мелькает и кажется, что карточка пропала мгновенно.
@@ -129,6 +130,10 @@ export function useTaskMutations({
   const [updatingId, setUpdatingId] = useState(null);
   const [updatingAction, setUpdatingAction] = useState(null); // take | found | notFound
 
+  // Взял ли задачу текущий пользователь — Id ИЛИ ФИО (Editor мог прийти строкой,
+  // а Id на разных сайтах не совпадают).
+  const takenByMe = (fields = {}) => isTaskTakenByCurrentUser({ ...fields }, { currentUserId, currentUserTitle });
+
   const handleTakeInWork = useCallback(async (task) => {
     setUpdatingId(task.Id);
     setUpdatingAction("take");
@@ -152,6 +157,9 @@ export function useTaskMutations({
         if (!isNotStartedStatus(freshStatus)) {
           if (isCompletedStatus(freshStatus, d?.PercentComplete)) {
             notify(`Задача #${task.Id} уже завершена пользователем ${freshEditor || "—"} (${freshStatus}). Возьмите другую задачу.`, { severity: "warning" });
+          } else if (isInProgressStatus(freshStatus) && takenByMe({ EditorId: freshEditorId, EditorTitle: freshEditor })) {
+            // «В работе» и исполнитель — я: это моя задача, «возьмите другую» не показываем.
+            notify(`Задача #${task.Id} уже в работе у вас (${freshStatus}).`, { severity: "info" });
           } else if (isInProgressStatus(freshStatus)) {
             notify(`Задача #${task.Id} уже в работе у ${freshEditor || "другого пользователя"} (${freshStatus}). Возьмите другую задачу.`, { severity: "warning" });
           } else {
@@ -190,8 +198,12 @@ export function useTaskMutations({
             const check = await apiClient.get(`${TASKS_LIST_API}/items(${task.Id})?$select=Status,Editor/Id,Editor/Title&$expand=Editor`, { headers: { Accept: "application/json;odata=verbose" } });
             const s = check?.data?.d?.Status || "";
             const ed = check?.data?.d?.Editor?.Title || "другим пользователем";
-            notify(`Задача #${task.Id} уже взята пользователем ${ed} (${s}). Возьмите другую задачу.`, { severity: "warning" });
             const edId = check?.data?.d?.Editor?.Id || null;
+            if (takenByMe({ EditorId: edId, EditorTitle: ed })) {
+              notify(`Задача #${task.Id} уже в работе у вас (${s}).`, { severity: "info" });
+            } else {
+              notify(`Задача #${task.Id} уже взята пользователем ${ed} (${s}). Возьмите другую задачу.`, { severity: "warning" });
+            }
             queryClient.setQueryData(
               ["tasks", currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
               (prev) => (Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, Status: s, EditorTitle: ed, Editor: ed, EditorId: edId } : t)) : prev)

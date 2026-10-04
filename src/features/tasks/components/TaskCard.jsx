@@ -15,6 +15,7 @@ import { parseRelatedRef, fetchRelatedFields } from "../../../tasks/relatedField
 import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
+import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
 import { resolveStylingIcon, isGradient } from "../../../services/stylingConfig";
 import { renderStylingIcon } from "../../../services/stylingIcons";
 import AdditionalActionsField from "./AdditionalActionsField";
@@ -1138,9 +1139,13 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
             const isMine = currentUserId && task.AssignedToId && Number(task.AssignedToId) === Number(currentUserId);
             const editorTitle = task.EditorTitle || task.raw?.Editor?.Title || task.Editor || "";
             const editorId = task.EditorId || task.raw?.Editor?.Id || null;
-            const currentTitleNorm = String(currentUserTitle || "").trim().toLowerCase();
-            const editorNorm = String(editorTitle || "").trim().toLowerCase();
-            const isEditorMine = (!!editorId && !!currentUserId && Number(editorId) === Number(currentUserId)) || (!!currentTitleNorm && !!editorNorm && currentTitleNorm === editorNorm);
+            // «Задача моя?»: Id взявшего (Editor) сверяем с Id текущего пользователя,
+            // а ФИО — по словам («Поршаков Сергей» = «Сергей Поршаков Александрович»).
+            // Иначе исполнитель видел «Задача уже взята другим пользователем».
+            const isEditorMine = isTaskTakenByCurrentUser(
+              { ...task, EditorId: editorId, EditorTitle: editorTitle },
+              { currentUserId, currentUserTitle },
+            );
             // Show "Взять в работу" only for Не начата
             if (notStarted && !isCompleted) {
               return (
