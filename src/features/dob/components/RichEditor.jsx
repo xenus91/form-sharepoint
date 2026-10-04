@@ -1,9 +1,11 @@
 // CKEditor 5 wrapper для rich-полей (ChekResult, DescriptionCheckResult…).
 // Каждая вставленная картинка ЗАГРУЖАЕТСЯ ВЛОЖЕНИЕМ элемента (вложений может быть
 // несколько) — за это отвечает onUploadImage, который передаёт страница формы.
-// В текст при этом остаётся base64: картинка сразу видна в редакторе и не зависит
-// от прав на вложение/прокси. Если загрузка вложения не удалась — текст всё равно
-// не теряется (base64 остаётся).
+// В текст при этом попадает ССЫЛКА на вложение (не base64): так заявка сохраняется
+// компактно, а картинка живёт в `Attachments` элемента. Ссылка хранится серверным
+// путём `/sites/…`, а показывается через прокси/абсолютный origin — см.
+// `lib/attachmentUrl.js`. Если загрузка не удалась — текст всё равно не теряется
+// (остаётся base64).
 /* eslint-disable react/prop-types */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CKEditor } from '@ckeditor/ckeditor5-react';
@@ -11,6 +13,7 @@ import ClassicEditor from '@ckeditor/ckeditor5-build-classic';
 import { Box, Button, MenuItem, Select, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import { makeUploadAdapter } from './richUploadAdapter';
 
 const TEMPLATE_KEY = 'dob-chekresult-templates';
 const DEFAULT_TEMPLATES = [
@@ -23,28 +26,6 @@ function readTemplates() {
     const saved = JSON.parse(localStorage.getItem(TEMPLATE_KEY) || '[]');
     return [...DEFAULT_TEMPLATES, ...(Array.isArray(saved) ? saved : [])];
   } catch { return DEFAULT_TEMPLATES; }
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-function makeUploadAdapter(loader, onUploadImage) {
-  return {
-    async upload() {
-      const file = await loader.file;
-      const base64 = await fileToBase64(file);
-      // Upload separately, but deliberately return base64 to CKEditor so ChekResult stores it inline.
-      if (onUploadImage) await onUploadImage(file);
-      return { default: base64 };
-    },
-    abort() {},
-  };
 }
 
 function UploadAdapterPlugin(onUploadImage) {

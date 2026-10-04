@@ -32,7 +32,10 @@ const CORE_FIELDS = [
 const SELECT_BASE_NO_DUE = CORE_FIELDS.join(",");
 const SELECT_BASE = [...CORE_FIELDS, "DueDate"].join(",");
 // Поля, которые добавляются только для основного сайта (профиль "main").
-const MAIN_ONLY_FIELDS = ["Location1", "ResultSearchTHU"];
+// IsDobTask — bool-флаг типа контента задачи: «задачу ведём нашей формой ДОБ»
+// (см. contentTypeFields.hasDobTaskFlag). Если поля в списке ещё нет, авто-ретрай
+// fetchTasksForSource уберёт его из $select и запомнит в omittedFields.
+const MAIN_ONLY_FIELDS = ["Location1", "ResultSearchTHU", "IsDobTask"];
 
 /**
  * @typedef {object} BuildTaskListQueryOpts

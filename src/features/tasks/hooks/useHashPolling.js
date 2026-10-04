@@ -5,6 +5,25 @@ import apiClient from "../../../api";
 import { createAdaptivePolling } from "../../../utils/polling";
 import { mapRawTask } from "../../../tasks/mapping";
 import { TASKS_LIST_API, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "../../../tasks/config";
+import { isDobTaskFlag } from "../../../tasks/contentTypeFields";
+
+/**
+ * Polling запрашивает короткий набор полей (HASH_POLL_SELECT), поэтому маппинг
+ * «теряет» признаки задачи (IsDobTask, ContentTypeId, raw). Раньше объект задачи
+ * в state ЗАМЕНЯЛСЯ на такой урезанный — и задача ДОБ после первого же опроса
+ * переставала опознаваться (её открывало обычной формой). Здесь признаки
+ * переносятся из предыдущего объекта.
+ */
+function mergePolledTask(prev, mapped, raw) {
+  if (!prev) return mapped;
+  return {
+    ...mapped,
+    ContentTypeId: mapped.ContentTypeId || prev.ContentTypeId || null,
+    IsDobTask: isDobTaskFlag(mapped.IsDobTask) || isDobTaskFlag(prev.IsDobTask)
+      || isDobTaskFlag(prev.raw?.IsDobTask) || isDobTaskFlag(raw?.IsDobTask),
+    raw: { ...(prev.raw || {}), ...(raw || {}) },
+  };
+}
 
 export function useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMatch, setIsHashTaskRefreshing, recipientField, scNumberField, currentUserId, distribution, taskFieldNames, resultFieldInternalNames, queryClient, lastHashFocusRef }) {
   useEffect(() => {
@@ -35,7 +54,7 @@ export function useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMat
         const data = _hashData;
         const raw = data?.d;
         if (!raw || cancelled) return;
-        const mapped = mapRawTask(raw, { recipientField, scNumberField });
+        const mapped = mergePolledTask(elementTaskMatch, mapRawTask(raw, { recipientField, scNumberField }), raw);
         setElementTaskMatch((prev) => {
           if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete) && prev.Location1 === mapped.Location1) return prev;
           return mapped;
@@ -55,7 +74,7 @@ export function useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMat
             const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${_fbSelect}${_fbExpand}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
             const raw = data?.d;
             if (!raw || cancelled) return;
-            const mapped = mapRawTask(raw, { recipientField, scNumberField });
+            const mapped = mergePolledTask(elementTaskMatch, mapRawTask(raw, { recipientField, scNumberField }), raw);
             setElementTaskMatch((prev) => {
               if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete)) return prev;
               return mapped;

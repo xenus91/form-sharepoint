@@ -2,7 +2,7 @@
 // Картинки rich-текста → вложения: разбор src, имя файла, diff удалённых картинок.
 
 import { describe, it, expect } from "vitest";
-import { extractImgSrcs, fileNameFromSrc, removedImgSrcs, removedImgSrcsByValues } from "../lib/richImages";
+import { extractImgSrcs, fileNameFromSrc, removedImgSrcs, removedImgSrcsByValues, mapImgSrcs, dataUrlSrcs, replaceImgSrc, dataUrlToFile } from "../lib/richImages";
 
 describe("richImages — картинки rich-текста и вложения", () => {
   it("достаёт все src картинок (их может быть несколько)", () => {
@@ -38,5 +38,35 @@ describe("richImages — картинки rich-текста и вложения"
       ErrorCountValidation: 4,
     };
     expect(removedImgSrcsByValues(prev, next)).toEqual(["/sites/a.png"]);
+  });
+});
+
+describe("richImages — base64 → вложение (материализация перед сохранением)", () => {
+  it("mapImgSrcs меняет адреса только у <img>", () => {
+    const html = '<p><a href="/x.png">a</a></p><img src="/a.png"><img src=\"/b.png\">';
+    expect(mapImgSrcs(html, (src) => `pre${src}`)).toBe(
+      '<p><a href="/x.png">a</a></p><img src="pre/a.png"><img src="pre/b.png">',
+    );
+    expect(mapImgSrcs("", () => "x")).toBe("");
+  });
+
+  it("dataUrlSrcs достаёт уникальные base64-картинки", () => {
+    const html = '<img src="data:image/png;base64,AAA"><img src="/a.png"><img src="data:image/png;base64,AAA">';
+    expect(dataUrlSrcs(html)).toEqual(["data:image/png;base64,AAA"]);
+  });
+
+  it("replaceImgSrc подменяет конкретный src", () => {
+    const html = '<img src="data:image/png;base64,AAA"><img src="/a.png">';
+    expect(replaceImgSrc(html, "data:image/png;base64,AAA", "/sites/x/a.png")).toBe(
+      '<img src="/sites/x/a.png"><img src="/a.png">',
+    );
+  });
+
+  it("dataUrlToFile превращает base64 в File с типом и именем", () => {
+    const file = dataUrlToFile("data:image/png;base64,AQID", () => "image_1.png");
+    expect(file).toBeTruthy();
+    expect(file.type).toBe("image/png");
+    expect(file.name).toBe("image_1.png");
+    expect(dataUrlToFile("/sites/a.png")).toBeNull();
   });
 });

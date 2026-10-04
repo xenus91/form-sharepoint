@@ -17,6 +17,8 @@ import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
 import { fileNameFromSrc, removedImgSrcs, removedImgSrcsByValues } from './lib/richImages';
+import { attachmentDisplayUrl, toDisplayImages, toStorageImages } from './lib/attachmentUrl';
+import { materializeRichValues } from './lib/materializeRichImages';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
 import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
 import {
@@ -37,17 +39,9 @@ import {
 } from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
 
-/** Ссылка на вложение: в dev — через прокси /dob-api, в prod — абсолютный origin. */
+/** Ссылка на вложение для браузера (в dev — через прокси /dob-api, в prod — origin). */
 function attachmentHref(serverRelativeUrl) {
-  if (!serverRelativeUrl) return '';
-  try {
-    const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
-    if (serverRelativeUrl.startsWith('/') && isDev) return `/dob-api${serverRelativeUrl}`;
-    if (serverRelativeUrl.startsWith('/') && typeof window !== 'undefined') {
-      return `${window.location.origin}${serverRelativeUrl}`;
-    }
-  } catch { /* оставляем как есть */ }
-  return serverRelativeUrl;
+  return attachmentDisplayUrl(serverRelativeUrl);
 }
 
 /**
@@ -294,11 +288,37 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     }
   }, []);
 
+  /**
+   * Rich-текст перед сохранением: каждая base64-картинка превращается в ВЛОЖЕНИЕ
+   * элемента, а в тексте остаётся ССЫЛКА `/sites/…/Attachments/<id>/<file>`.
+   * Служебные адреса (dev-прокси `/dob-api/…`, абсолютный origin) приводятся к
+   * серверному пути — в SharePoint не остаётся ни base64, ни прокси-ссылок.
+   */
+  const materializeFormValues = useCallback(async (values) => {
+    if (!id) return values;
+    return materializeRichValues(values, {
+      upload: (file) => uploadDobAttachment(id, file, listGuid),
+      onUploaded: (saved, link) => {
+        const fileName = saved?.FileName || String(link).split('/').pop();
+        if (!fileName) return;
+        setAttachments((prev) => (prev.some((a) => a.FileName === fileName)
+          ? prev
+          : [...prev, { FileName: fileName, ServerRelativeUrl: link }]));
+      },
+      onError: (e) => {
+        notify(`Не удалось сохранить картинку вложением: ${String(e?.message || e).slice(0, 160)}`, { severity: 'warning' });
+      },
+    });
+  }, [id, listGuid, notify]);
+
   const handleSave = useCallback(async () => {
     if (!id) return;
     setSaving(true);
     setSaveError('');
     try {
+      // Картинки rich-текста: base64 → вложение, в тексте — ссылка на него.
+      const prepared = await materializeFormValues(form);
+      if (prepared !== form) setForm(prepared);
       // Build payload — only editable fields, but include ChekResult always
       const payload = {};
       const editableSet = new Set((fields || []).filter(isEditableField).map(f=>f.InternalName));
@@ -322,7 +342,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       };
       // Always allow ChekResult even if metadata says readOnly? Ensure it saves. If ChekResult is note, it is editable.
       // Add all form keys that are in fields and editable, or ChekResult
-      for (const [k, v] of Object.entries(form)) {
+      for (const [k, v] of Object.entries(prepared)) {
         if (k === 'ID' || k === 'Id') continue;
         if (k === 'ChekResult' || k === '_x041a__x043e__x043c__x043c__x04' || k === chekInternal) {
           if (!isDirty(k, v)) { console.log('[DobEdit][save] skip unchanged ChekResult'); continue; }
@@ -435,15 +455,15 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         if (lower.includes('без имени типа') || lower.includes('without type') || lower.includes('expected type') || lower.includes('primitivevalue') || lower.includes('startobject') || lower.includes('непредвиденный узел')) {
           console.warn('[DobEdit][save] fallback to minimal payload (ChekResult only) due to type error', rawMsg.slice(0,300));
           const chekKey = toODataKey(chekInternal);
-          const minimal = { [chekKey]: payload[chekKey] ?? form[chekInternal] ?? '' };
+          const minimal = { [chekKey]: payload[chekKey] ?? prepared[chekInternal] ?? '' };
           // Title тоже попробуем если есть
           if (payload.Title) minimal.Title = payload.Title;
           if (payload['OData_Title']) minimal['OData_Title'] = payload['OData_Title'];
           console.log('[DobEdit][save] minimal keys', Object.keys(minimal));
           await updateDobItem(id, minimal, listGuid);
           // успех — не кидаем дальше, обновляем baseline для ChekResult и чистим dirty
-          if (initialFormRef.current) initialFormRef.current[chekInternal] = form[chekInternal];
-          else initialFormRef.current = { [chekInternal]: form[chekInternal] };
+          if (initialFormRef.current) initialFormRef.current[chekInternal] = prepared[chekInternal];
+          else initialFormRef.current = { [chekInternal]: prepared[chekInternal] };
           dirtySetRef.current.delete(chekInternal);
           notify(`Заявка ${id} сохранена (только ${chekKey})`, { severity: 'success' });
           qc.invalidateQueries({ queryKey: ['dob-items'] });
@@ -455,7 +475,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       }
       notify(`Заявка ${id} сохранена`, { severity: 'success' });
       // Обновляем baseline для dirty-check и чистим dirty
-      initialFormRef.current = { ...form };
+      initialFormRef.current = { ...prepared };
       dirtySetRef.current.clear();
       // Invalidate list and item
       qc.invalidateQueries({ queryKey: ['dob-items'] });
@@ -469,7 +489,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     } finally {
       setSaving(false);
     }
-  }, [id, listGuid, form, fields, notify, qc]);
+  }, [id, listGuid, form, fields, notify, qc, materializeFormValues]);
 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const handleUploadImage = useCallback(async (file) => {
@@ -518,10 +538,13 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     setSaving(true);
     setSaveError('');
     try {
+      // Картинки rich-текста (DescriptionCheckResult и т.п.): base64 → вложения,
+      // в тексте — ссылки на `/Attachments/<id>/<file>`.
+      const preparedValues = await materializeFormValues(values);
       const body = { Status: 'Завершена', PercentComplete: 1 };
       const field = resultField || 'DobSearchResult';
       if (result) body[field] = result;
-      for (const [name, value] of Object.entries(values || {})) {
+      for (const [name, value] of Object.entries(preparedValues || {})) {
         if (value === undefined || value === null) continue;
         // «Пользователь или группа» → <Field>Id (число или Collection(Edm.Int32))
         if (typeof value === 'object' && Array.isArray(value.__userIds)) {
@@ -544,7 +567,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     } finally {
       setSaving(false);
     }
-  }, [id, listGuid, notify, qc, handleBack]);
+  }, [id, listGuid, notify, qc, handleBack, materializeFormValues]);
 
   const handleCtValidationError = useCallback((problems) => {
     notify(`Заполните обязательные поля: ${(problems || []).join('; ')}`, { severity: 'warning' });
@@ -626,7 +649,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   }, [fields]);
 
   const chekInternal = chekField?.InternalName || 'ChekResult';
-  const chekValue = toEditorHtml(form[chekInternal] ?? getODataValue(item, chekInternal) ?? '');
+  const chekValue = toDisplayImages(toEditorHtml(form[chekInternal] ?? getODataValue(item, chekInternal) ?? ''));
   // Акцент блоков: «Результат проверки» (rich) и «Остальные поля» — по тому, ГДЕ
   // остались незаполненные обязательные поля.
   const richInvalid = invalidFields.has(chekInternal);
@@ -733,8 +756,11 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     }
     const prevHtml = prevChekHtmlRef.current;
     if (prevHtml === curHtml) return;
-    // Удалённые картинки (были в тексте — теперь нет)
-    const removed = removedImgSrcs(prevHtml, curHtml);
+    // Удалённые картинки (были в тексте — теперь нет). Сравниваем в «серверном»
+    // виде: в сохранённом значении путь «/sites/…», а редактор отдаёт рабочий адрес
+    // («/dob-api/sites/…» в dev или абсолютный origin) — без нормализации та же
+    // картинка считалась бы удалённой и вложение бы стёрлось.
+    const removed = removedImgSrcs(toStorageImages(prevHtml), toStorageImages(curHtml));
     if (removed.length === 0) {
       prevChekHtmlRef.current = curHtml;
       return;
@@ -749,8 +775,13 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // все они уже загружены вложениями, лишние вложения удаляем.
   const handleCtValuesChange = useCallback((next) => setCtValues(next), []);
   useEffect(() => {
+    // Сравниваем в «серверном» виде: значения могли прийти и как «/sites/…»
+    // (сохранённое), и как рабочий адрес редактора («/dob-api/…» / origin).
+    const norm = (dict) => Object.fromEntries(
+      Object.entries(dict || {}).map(([k, v]) => [k, toStorageImages(String(v ?? ''))]),
+    );
     const prev = prevCtHtmlRef.current || {};
-    const removedSrcs = removedImgSrcsByValues(prev, ctValues || {});
+    const removedSrcs = removedImgSrcsByValues(norm(prev), norm(ctValues));
     const snapshot = {};
     for (const [key, html] of Object.entries(ctValues || {})) snapshot[key] = String(html ?? '');
     prevCtHtmlRef.current = snapshot;
@@ -771,7 +802,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // как задача сайта ДОБ: вместо полей заявки показываем форму закрытия по колонкам
   // типа контента. Задача не закрывается мимо диалога.
   const checkCtId = itemCtId;
-  if (item && isDialogRequired(null, checkCtId, taskContentTypeName(item))) {
+  if (item && isDialogRequired(null, checkCtId, taskContentTypeName(item), item)) {
     return (
       <Box data-dob-edit-page="true" sx={FORM_PAGE_SX}>
         <AppBar position="sticky" elevation={0} sx={FORM_APPBAR_SX}>

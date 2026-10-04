@@ -42,3 +42,53 @@ export function removedImgSrcsByValues(prevValues = {}, nextValues = {}) {
   }
   return removed;
 }
+
+/** Заменить src у всех <img> в html (через mapper). */
+export function mapImgSrcs(html, mapper) {
+  if (!html || typeof html !== 'string') return html;
+  return html.replace(/(<img\b[^>]*?\ssrc=")([^"]*)(")/gi, (all, pre, src, post) => {
+    const next = mapper ? mapper(src) : src;
+    return `${pre}${next === undefined || next === null ? src : next}${post}`;
+  });
+}
+
+/** Все уникальные base64-картинки (data:image/…) из html. */
+export function dataUrlSrcs(html) {
+  const out = [];
+  for (const src of extractImgSrcs(html)) {
+    if (src.startsWith('data:image/') && !out.includes(src)) out.push(src);
+  }
+  return out;
+}
+
+/** Заменить один src на другой во всех <img> (например, base64 → ссылка вложения). */
+export function replaceImgSrc(html, from, to) {
+  if (!html || !from || !to) return html;
+  return mapImgSrcs(html, (src) => (src === from ? to : src));
+}
+
+const DATA_URL_RE = /^data:([^;,]+)?(;base64)?,(.*)$/s;
+
+/**
+ * base64-картинка → File для загрузки вложением.
+ * @param {string} src — data:image/png;base64,…
+ * @param {() => string} [nameOf] — как назвать файл (по умолчанию image_<ts>.<ext>)
+ * @returns {File|null}
+ */
+export function dataUrlToFile(src, nameOf) {
+  const m = String(src || '').match(DATA_URL_RE);
+  if (!m) return null;
+  const mime = m[1] || 'image/png';
+  const isBase64 = Boolean(m[2]);
+  try {
+    const bytes = isBase64
+      ? Uint8Array.from(atob(m[3]), (ch) => ch.charCodeAt(0))
+      : new TextEncoder().encode(decodeURIComponent(m[3]));
+    const ext = (mime.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
+    const name = (nameOf ? nameOf() : '') || `image_${Date.now()}.${ext}`;
+    if (typeof File === 'function') return new File([bytes], name, { type: mime });
+    return new Blob([bytes], { type: mime });
+  } catch {
+    return null;
+  }
+}

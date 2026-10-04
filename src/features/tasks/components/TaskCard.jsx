@@ -637,7 +637,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     // ⭐ dlg: закрытие через диалог по типу контента — его ведёт TasksView
     // (данные типа контента и колонок живут там), карточка только передаёт результат.
     // Диалог включается ключом Behaviour.dlg ИЛИ типом контента «Результат проверки ООБ».
-    if (isDialogRequired(rule, taskContentTypeId(task))) {
+    if (isDialogRequired(rule, taskContentTypeId(task), "", task)) {
       dbgClick(choice, "ct-dialog", rule);
       // Задачу этого типа нельзя завершить мимо диалога: если обработчика нет —
       // ничего не пишем (лучше «ничего не произошло», чем запись без формы).

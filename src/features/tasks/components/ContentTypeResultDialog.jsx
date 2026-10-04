@@ -23,6 +23,7 @@ import {
 } from "@mui/material";
 import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
+import { toDisplayImages, toStorageImages } from "../../dob/lib/attachmentUrl";
 import { getDobContentTypeFields } from "../../dob/api/dobApi";
 import {
   FORM_ACTIONS_SX,
@@ -192,6 +193,9 @@ export default function ContentTypeResultDialog({
       else if (control.kind === "number") next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
       else if (control.kind === "date") next[control.internalName] = toISODate(raw);
       else if (control.kind === "multichoice") next[control.internalName] = normalizeChoiceValues(raw);
+      // Rich-текст: в SharePoint хранится серверный путь вложения, а в редакторе
+      // картинка должна открываться (dev — через прокси, prod — origin).
+      else if (control.kind === "richtext") next[control.internalName] = toDisplayImages(raw === undefined || raw === null ? "" : String(raw));
       else if (control.kind === "select" || control.kind === "choice" || control.kind === "autocomplete") {
         next[control.internalName] = normalizeChoiceValue(raw);
       } else next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
@@ -273,7 +277,13 @@ export default function ContentTypeResultDialog({
       payload[control.internalName] = text;
     }
     // resultField — имя колонки результата (нужно форме ДОБ, чтобы записать MERGE)
-    onSubmit?.({ result, values: payload, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
+    // Наружу отдаём значения в виде для ХРАНЕНИЯ: ссылки на вложения — серверным
+    // путём (`/sites/…`), а не адресом dev-прокси `/dob-api/…`.
+    const stored = {};
+    for (const [key, value] of Object.entries(payload)) {
+      stored[key] = typeof value === "string" ? toStorageImages(value) : value;
+    }
+    onSubmit?.({ result, values: stored, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
   }, [form, values, result, resultFieldInternalName, onSubmit, onValidationError]);
 
   // Отдаём submit наружу (кнопка «Сохранить» в шапке страницы — как у заявки ДОБ).

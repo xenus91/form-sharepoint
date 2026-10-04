@@ -57,6 +57,8 @@ import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import ContentTypeResultDialog from "./features/tasks/components/ContentTypeResultDialog";
 import { fetchTaskContentTypeMeta, isDialogRequired, isResultCheckTask, taskContentTypeId, taskContentTypeName } from "./tasks/contentTypeFields";
+import { toStorageImages } from "./features/dob/lib/attachmentUrl";
+import { materializeRichValues } from "./features/dob/lib/materializeRichImages";
 import { isTaskTakenByCurrentUser } from "./features/tasks/lib/currentUserMatch";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
 import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
@@ -629,7 +631,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     // ⭐ Закрытие через ДИАЛОГ по типу контента (Behaviour.dlg или сам тип контента
     // «Результат проверки ООБ»): форму строит ContentTypeResultDialog строго по
     // колонкам SharePoint, а карточка/таблица только передают выбранный результат.
-    if (isDialogRequired(rule, taskContentTypeId(task), taskContentTypeName(task))) {
+    if (isDialogRequired(rule, taskContentTypeId(task), taskContentTypeName(task), task)) {
       runAfterAnimation(() => setCtDialog({ task, rule: rule || null, result: resultValue || "" }));
       return;
     }
@@ -814,7 +816,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     ctImagesRef.current = snapshot;
     if (!Number.isFinite(id)) return;
     const guid = ctListGuidOf(ctDialog?.task);
-    for (const src of removedImgSrcsByValues(prev, next || {})) {
+    // Значения могут быть и в сохранённом виде («/sites/…»), и в рабочем адресе
+    // редактора («/dob-api/…» / origin) — сравниваем в одном («серверном») виде.
+    const norm = (dict) => Object.fromEntries(
+      Object.entries(dict || {}).map(([k, v]) => [k, toStorageImages(String(v ?? ""))]),
+    );
+    for (const src of removedImgSrcsByValues(norm(prev), norm(next))) {
       const fileName = fileNameFromSrc(src);
       if (!fileName) continue;
       deleteDobAttachment(id, fileName, guid).catch(() => {});
@@ -833,12 +840,28 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [taskConfiguration.data]);
 
   // Отправка диалога: результат + поля типа контента, доп. действий нет (req = null).
-  const handleCtDialogSubmit = useCallback(({ result, values }) => {
+  const handleCtDialogSubmit = useCallback(async ({ result, values }) => {
     const dialogTask = ctDialog?.task;
     if (!dialogTask) return;
+    // Rich-текст: каждая оставшаяся base64-картинка (например, загрузка вложения
+    // не удалась) становится вложением задачи, а в SharePoint уходит ссылка на
+    // вложение серверным путём (`/sites/…`) — не base64 и не адрес `/dob-api/…`.
+    const id = Number(dialogTask.Id);
+    const guid = ctListGuidOf(dialogTask);
+    let storedValues = Object.fromEntries(
+      Object.entries(values || {}).map(([k, v]) => [k, typeof v === "string" ? toStorageImages(v) : v]),
+    );
+    try {
+      storedValues = await materializeRichValues(storedValues, {
+        upload: Number.isFinite(id) ? (file) => uploadDobAttachment(id, file, guid) : null,
+        onError: (e) => notify(`Не удалось сохранить картинку вложением: ${String(e?.message || e).slice(0, 160)}`, { severity: "warning" }),
+      });
+    } catch (e) {
+      notify(`Картинки не удалось сохранить вложениями: ${String(e?.message || e).slice(0, 160)}`, { severity: "warning" });
+    }
     setCtDialog(null);
-    completeTask(dialogTask, result, values || {}, null, []);
-  }, [ctDialog?.task, completeTask]);
+    completeTask(dialogTask, result, storedValues, null, []);
+  }, [ctDialog?.task, completeTask, ctListGuidOf, notify]);
 
   const resolveRowChoiceStyling = useCallback((row, choice) => {
     const tb = rowTaskBehaviour(row);

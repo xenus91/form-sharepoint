@@ -471,14 +471,56 @@ export function contentTypeIdMatches(actual, known) {
 }
 
 /**
- * Задача типа контента «Результат проверки ООБ» (id ИЛИ имя — что доступно).
- * Такие задачи ведут себя как задачи сайта ДОБ: форма DobTaskEditView закрывает
- * их через форму по колонкам типа контента.
+ * Значение bool-поля SharePoint → boolean. SharePoint отдаёт true/false, 1/0,
+ * «Да»/«Нет», строки, а в verbose-ответах — обёртки { Value } / { results: […] }.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isDobTaskFlag(value) {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0 || value === null || value === undefined) return false;
+  if (typeof value === "object") {
+    if (Array.isArray(value.results)) return value.results.some((v) => isDobTaskFlag(v));
+    return isDobTaskFlag(value.Value ?? value.LookupValue ?? value.Boolean ?? value.Text);
+  }
+  return /^(true|1|да|yes|истина)$/i.test(String(value).trim());
+}
+
+/**
+ * Задача помечена как задача ДОБ: bool-колонка `IsDobTask` = true.
+ *
+ * Это НАСТРОЙКА ТИПА КОНТЕНТА: значение по умолчанию проставляется в каждом типе
+ * контента задачи, поэтому флаг есть сразу у новых задач. Задачи с флагом ведут
+ * себя как заявки ДОБ: открываются формой DobTaskEditView (#dob_tasks/<id>?list=…),
+ * результат — через форму по колонкам типа контента.
+ *
+ * @param {any} task — задача (или элемент SharePoint)
+ * @returns {boolean}
+ */
+export function hasDobTaskFlag(task) {
+  if (!task || typeof task !== "object") return false;
+  const sources = [task, task.raw];
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    for (const key of ["IsDobTask", "OData_IsDobTask", "isDobTask"]) {
+      if (source[key] !== undefined && isDobTaskFlag(source[key])) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Задача ведёт себя как задача сайта ДОБ: форма DobTaskEditView закрывает её через
+ * форму по колонкам типа контента. Признаки:
+ *   • bool-флаг `IsDobTask` = true (новый способ — настройка типа контента);
+ *   • либо исторически «Результат проверки ООБ» (id ИЛИ имя типа контента).
  *
  * @param {any} task
  * @returns {boolean}
  */
 export function isResultCheckTask(task) {
+  if (hasDobTaskFlag(task)) return true;
   const id = taskContentTypeId(task);
   if (id && RESULT_CHECK_OOO_CT_IDS.some((known) => contentTypeIdMatches(id, known))) return true;
   const name = taskContentTypeName(task).toLowerCase();
@@ -487,12 +529,22 @@ export function isResultCheckTask(task) {
 
 /**
  * Нужно ли закрывать задачу через диалог по типу контента.
- *   • Behaviour `dlg: true` → да (для любого результата);
- *   • `dlg: false` → нет (явное отключение, даже для «Результат проверки ООБ»);
+ *   • Behaviour `dlg: false` → нет (явное отключение);
+ *   • `dlg: true` → да (для любого результата);
+ *   • задача с флагом `IsDobTask` → да (флаг типа контента решает, какой формой
+ *     ведётся задача; см. hasDobTaskFlag);
  *   • иначе — да, если тип контента задачи это «Результат проверки ООБ»:
  *     он по требованию закрывается ТОЛЬКО через диалог ДОБ.
+ *
+ * @param {any} rule — правило Behaviour (может быть null)
+ * @param {any} ctId — ContentTypeId задачи
+ * @param {string} [ctName]
+ * @param {any} [task] — задача/элемент: по нему читается флаг IsDobTask
  */
-export function isDialogRequired(rule, ctId, ctName = "") {
+export function isDialogRequired(rule, ctId, ctName = "", task = null) {
+  // Флаг IsDobTask — настройка ТИПА КОНТЕНТА задачи: такие задачи ВСЕГДА ведутся
+  // нашей формой, поэтому он приоритетнее правила Behaviour «dlg: false».
+  if (hasDobTaskFlag(task)) return true;
   if (rule?.requiresDialog === false) return false;
   if (rule?.requiresDialog === true) return true;
   const id = contentTypeIdOf(ctId);
