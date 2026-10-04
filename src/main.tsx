@@ -14,8 +14,8 @@ import NotificationsProvider from "./NotificationsProvider";
 // перезапуск dev-сервера / жёсткая перезагрузка страницы).
 // eslint-disable-next-line no-console
 console.info(
-  "[form-sharepoint] ct-detect v5: значения выбора без «[object Object]», " +
-  "профиль человека одним запросом (должность · департамент), " +
+  "[form-sharepoint] ct-detect v6: единый формат страниц форм, button group " +
+  "для результирующего выбора, у человека — должность · департамент · офис, " +
   "дочитывание типа у элемента, логи [ct-detect] при открытии меню строки",
 );
 

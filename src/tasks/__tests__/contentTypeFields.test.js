@@ -309,7 +309,7 @@ describe("userSearch — должность и департамент", () => {
         data: {
           d: {
             results: [
-              { Id: 5, UserName: LOGIN, JobTitle: "Главный специалист", Department: "Департамент ИТ" },
+              { Id: 5, UserName: LOGIN, JobTitle: "Главный специалист", Department: "Департамент ИТ", Office: "СПб, Ленинский 1" },
             ],
           },
         },
@@ -318,7 +318,13 @@ describe("userSearch — должность и департамент", () => {
     const map = await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get });
     expect(calls.length).toBe(1);
     expect(calls[0]).toContain("/web/SiteUserInfoList/items");
-    expect(map[LOGIN.toLowerCase()]).toBe("Главный специалист · Департамент ИТ");
+    expect(calls[0]).toContain("Office");
+    expect(map[LOGIN.toLowerCase()]).toMatchObject({
+      position: "Главный специалист",
+      department: "Департамент ИТ",
+      office: "СПб, Ленинский 1",
+      label: "Главный специалист · Департамент ИТ · СПб, Ленинский 1",
+    });
   });
 
   it("учётная запись кодируется целиком: `#` в логине обрывал запрос (accountName отсутствует)", async () => {
@@ -337,6 +343,7 @@ describe("userSearch — должность и департамент", () => {
               UserProfileProperties: [
                 { Key: "SPS-JobTitle", Value: "Начальник отдела" },
                 { Key: "SPS-Department", Value: "Департамент логистики" },
+                { Key: "Office", Value: "Москва, офис 5" },
               ],
             },
           },
@@ -351,19 +358,82 @@ describe("userSearch — должность и департамент", () => {
     expect(profileCall).toContain("%23");
     expect(profileCall).toContain("accountName=@v");
     expect(profileCall).toContain("@v='i%3A0%23.f%7Cmembership%7Cporshakov_sa%40lenta.com'");
-    expect(map[LOGIN.toLowerCase()]).toBe("Начальник отдела · Департамент логистики");
+    expect(map[LOGIN.toLowerCase()]).toMatchObject({
+      position: "Начальник отдела",
+      department: "Департамент логистики",
+      office: "Москва, офис 5",
+      label: "Начальник отдела · Департамент логистики · Москва, офис 5",
+    });
+  });
+
+  it("если в списке сведений нет колонки Office — запрос повторяется без неё, а офис добирается из профиля", async () => {
+    const calls = [];
+    const get = async (url) => {
+      const u = String(url);
+      calls.push(u);
+      if (u.includes("SiteUserInfoList")) {
+        if (u.includes("Office")) {
+          const e = new Error("no Office column");
+          e.response = { status: 400 };
+          throw e;
+        }
+        // в списке сведений Office-колонки нет: офис придёт из профиля
+        return { data: { d: { results: [{ Id: 5, UserName: LOGIN, JobTitle: "Специалист", Department: "ИТ" }] } } };
+      }
+      return {
+        data: {
+          d: {
+            GetPropertiesFor: {
+              UserProfileProperties: [{ Key: "Office", Value: "СПб, офис 12" }],
+            },
+          },
+        },
+      };
+    };
+    const map = await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get });
+    // одна попытка с Office, одна без него — и дальше только профиль
+    expect(calls.filter((u) => u.includes("SiteUserInfoList")).length).toBe(2);
+    const callsAfterBatch = calls.length;
+    expect(map[LOGIN.toLowerCase()].label).toBe("Специалист · ИТ");
+    expect(callsAfterBatch).toBeGreaterThanOrEqual(2);
+  });
+
+  it("офис из профиля: у человека вне списка сведений подпись включает офис", async () => {
+    const get = async (url) => {
+      if (String(url).includes("SiteUserInfoList")) return { data: { d: { results: [] } } };
+      return {
+        data: {
+          d: {
+            GetPropertiesFor: {
+              UserProfileProperties: [
+                { Key: "SPS-JobTitle", Value: "Ведущий специалист" },
+                { Key: "SPS-Department", Value: "Департамент ИТ" },
+                { Key: "Office", Value: "СПб, Ленинский 1" },
+              ],
+            },
+          },
+        },
+      };
+    };
+    const map = await getUserPositions([{ Id: 7, LoginName: LOGIN }], { get });
+    expect(map[LOGIN.toLowerCase()]).toMatchObject({
+      position: "Ведущий специалист",
+      department: "Департамент ИТ",
+      office: "СПб, Ленинский 1",
+      label: "Ведущий специалист · Департамент ИТ · СПб, Ленинский 1",
+    });
   });
 
   it("повторный запрос берётся из кэша — сеть не дёргаем", async () => {
     const calls = [];
     const get = async (url) => {
       calls.push(String(url));
-      return { data: { d: { results: [{ Id: 5, UserName: LOGIN, JobTitle: "Специалист", Department: "" }] } } };
+      return { data: { d: { results: [{ Id: 5, UserName: LOGIN, JobTitle: "Специалист", Department: "", Office: "" }] } } };
     };
     await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get });
     expect(calls.length).toBe(1);
     const again = await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get: async () => { throw new Error("no network"); } });
-    expect(again[LOGIN.toLowerCase()]).toBe("Специалист");
+    expect(again[LOGIN.toLowerCase()]).toMatchObject({ position: "Специалист", label: "Специалист" });
     expect(calls.length).toBe(1);
   });
 });

@@ -126,6 +126,13 @@ describe("DobTaskEditView — задача «Результат проверки
     expect(text).toContain("Кол-во ошибок");
     expect(text).toContain("Тип ошибки");
     expect(text).toContain("Виновный");
+    // результирующий выбор — группа кнопок, поля — в секции «Остальные поля»
+    const group = host.querySelector('[role="group"]');
+    expect(group).toBeTruthy();
+    expect(group.textContent).toContain("Годен");
+    expect(text).toContain("Остальные поля");
+    // кнопка «Сохранить» есть в шапке страницы — тот же формат, что у заявки ДОБ
+    expect([...host.querySelectorAll("button")].some((b) => b.textContent.trim() === "Сохранить")).toBe(true);
     // системные колонки задачи в форму не попали
     expect(text).not.toContain("Состояние задачи");
     // и это НЕ поля заявки ДОБ (нет «Результат проверки — главное поле»)

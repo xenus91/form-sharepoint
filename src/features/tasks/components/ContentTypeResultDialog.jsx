@@ -18,10 +18,19 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Alert, Autocomplete, Box, Checkbox, Button, Chip, CircularProgress, Dialog, DialogActions,
-  DialogContent, DialogTitle, FormControlLabel, MenuItem, Paper, Stack, TextField, Typography,
+  DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, TextField, ToggleButton,
+  ToggleButtonGroup, Typography,
 } from "@mui/material";
 import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
+import {
+  FORM_ACTIONS_SX,
+  FORM_FIELD_FULL_SX,
+  FORM_FIELD_GRID_SX,
+  FORM_PRIMARY_BUTTON_SX,
+  FORM_SECONDARY_BUTTON_SX,
+  FORM_SECTION_TITLE_SX,
+} from "../../dob/lib/formStyles";
 import {
   buildContentTypeForm,
   normalizeChoiceValue,
@@ -98,6 +107,9 @@ export default function ContentTypeResultDialog({
   // (страница #dob_tasks/<id>), чтобы задача «Результат проверки ООБ» закрывалась
   // кнопками результата прямо на экране задачи.
   inline = false,
+  // submitRef: страница (#dob_tasks/<id>) кладёт в него submit формы — кнопка
+  // «Сохранить» в шапке страницы работает так же, как в форме заявки ДОБ.
+  submitRef = null,
 }) {
   const [result, setResult] = React.useState(initialResult || "");
   const [values, setValues] = React.useState({});
@@ -154,7 +166,7 @@ export default function ContentTypeResultDialog({
     if (touched && problems.length > 0) setProblems([]);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = React.useCallback(() => {
     setTouched(true);
     const found = validateRequiredFields(form.controls, values, form.resultBlock, result);
     if (!result) found.unshift("Выберите результат проверки");
@@ -204,37 +216,20 @@ export default function ContentTypeResultDialog({
     }
     // resultField — имя колонки результата (нужно форме ДОБ, чтобы записать MERGE)
     onSubmit?.({ result, values: payload, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
-  };
+  }, [form, values, result, resultFieldInternalName, onSubmit]);
+
+  // Отдаём submit наружу (кнопка «Сохранить» в шапке страницы — как у заявки ДОБ).
+  React.useEffect(() => {
+    if (!submitRef) return undefined;
+    submitRef.current = handleSubmit;
+    return () => { submitRef.current = null; };
+  }, [submitRef, handleSubmit]);
 
   const title = confirmTexts?.title || `Закрытие задачи #${task?.Id ?? ""}`.trim();
   const message = confirmTexts?.message || "";
 
-  const Wrapper = inline ? Paper : Dialog;
-  const wrapperProps = inline
-    ? {
-      elevation: 0,
-      "data-testid": "ct-result-dialog",
-      sx: { borderRadius: "14px", border: "1px solid rgba(23,28,143,0.12)", background: "#fff" },
-    }
-    : {
-      open,
-      onClose: submitting ? undefined : onClose,
-      fullWidth: true,
-      maxWidth: "md",
-      PaperProps: { sx: { borderRadius: "14px" }, "data-testid": "ct-result-dialog" },
-    };
-
-  return (
-    <Wrapper {...wrapperProps}>
-      <DialogTitle sx={{ fontWeight: 800, pb: 0.5 }}>
-        {title}
-        {contentTypeName && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 500 }}>
-            {contentTypeName}
-          </Typography>
-        )}
-      </DialogTitle>
-      <DialogContent dividers>
+  const body = (
+    <>
         {message && (
           <Typography variant="body2" sx={{ mb: 1.5, color: "text.secondary" }}>{message}</Typography>
         )}
@@ -251,38 +246,59 @@ export default function ContentTypeResultDialog({
         )}
 
         {!fieldsQ.isLoading && (
-          <Stack spacing={1.5}>
+          <Stack spacing={1.25}>
             {choices.length > 0 && (
               <Box>
-                <Typography variant="caption" sx={{ display: "block", mb: 0.5, fontWeight: 700 }}>
+                <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
                   {form.resultBlock?.title || "Результат"}
                   {form.resultBlock?.required ? " *" : ""}
                 </Typography>
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
-                  {choices.map((choice) => {
-                    const active = choice === result;
-                    return (
-                      <Button
-                        key={choice}
-                        size="small"
-                        variant={active ? "contained" : "outlined"}
-                        disabled={submitting}
-                        onClick={() => { setResult(choice); if (problems.length) setProblems([]); }}
-                        sx={{
-                          borderRadius: "8px",
-                          textTransform: "none",
-                          fontWeight: 700,
-                          ...(active ? { backgroundColor: "#171c8f", color: "#fff", "&:hover": { backgroundColor: "#2a31a8" } } : {}),
-                        }}
-                      >
-                        {choice}
-                      </Button>
-                    );
-                  })}
-                </Box>
+                {/* Результирующий выбор — группа кнопок (button group), как в форме ДОБ */}
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={result || null}
+                  disabled={submitting}
+                  onChange={(_e, next) => {
+                    if (next === null) return;
+                    setResult(next);
+                    if (problems.length) setProblems([]);
+                  }}
+                  sx={{
+                    flexWrap: "wrap",
+                    gap: 0.5,
+                    "& .MuiToggleButton-root": {
+                      border: "1px solid rgba(23,28,143,.24)",
+                      borderRadius: 0.5,
+                      px: 1.5,
+                      height: 32,
+                      textTransform: "none",
+                      fontWeight: 700,
+                      color: "#171c8f",
+                    },
+                    "& .MuiToggleButton-root.Mui-selected": {
+                      backgroundColor: "#171c8f",
+                      color: "#fff",
+                      "&:hover": { backgroundColor: "#2a31a8" },
+                    },
+                  }}
+                >
+                  {choices.map((choice) => (
+                    <ToggleButton key={choice} value={choice} data-testid={`ct-result-choice-${choice}`}>
+                      {choice}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
               </Box>
             )}
 
+            {form.controls.length > 0 && (
+              <Typography variant="subtitle1" sx={{ ...FORM_SECTION_TITLE_SX, mb: 0.25 }}>
+                Остальные поля
+              </Typography>
+            )}
+
+            <Box sx={FORM_FIELD_GRID_SX}>
             {form.controls.map((control) => {
               const value = values[control.internalName];
               const invalid = touched && control.required
@@ -294,7 +310,7 @@ export default function ContentTypeResultDialog({
 
               if (control.kind === "richtext") {
                 return (
-                  <Box key={control.internalName}>
+                  <Box key={control.internalName} sx={FORM_FIELD_FULL_SX}>
                     <Typography variant="caption" sx={{ display: "block", mb: 0.5, fontWeight: 700, color: invalid ? "#c62828" : "text.primary" }}>
                       {control.title}{control.required ? " *" : ""}
                     </Typography>
@@ -506,6 +522,7 @@ export default function ContentTypeResultDialog({
                 />
               );
             })}
+            </Box>
 
             {form.controls.length === 0 && !fieldsQ.isLoading && (
               <Alert severity="info">
@@ -537,27 +554,59 @@ export default function ContentTypeResultDialog({
             </Box>
           </Stack>
         )}
-      </DialogContent>
-      <DialogActions sx={{ px: 3, py: 1.5 }}>
-        <Button onClick={onClose} disabled={submitting} variant="outlined" sx={{ borderRadius: "8px", textTransform: "none" }}>
-          {cancelLabel || "Отмена"}
-        </Button>
-        <Button
-          onClick={handleSubmit}
-          disabled={submitting || fieldsQ.isLoading}
-          variant="contained"
-          startIcon={submitting ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : null}
-          sx={{
-            borderRadius: "8px",
-            textTransform: "none",
-            fontWeight: 800,
-            backgroundColor: "#2e7d32",
-            "&:hover": { backgroundColor: "#388e3c" },
-          }}
-        >
-          {submitLabel || "Сохранить"}
-        </Button>
-      </DialogActions>
-    </Wrapper>
+    </>
+  );
+
+  const actions = (
+    <>
+      <Button onClick={onClose} disabled={submitting} variant="outlined" sx={FORM_SECONDARY_BUTTON_SX}>
+        {cancelLabel || "Отмена"}
+      </Button>
+      <Button
+        onClick={handleSubmit}
+        disabled={submitting || fieldsQ.isLoading}
+        variant="contained"
+        startIcon={submitting ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : null}
+        sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 140 }}
+        data-testid="ct-result-dialog-save"
+      >
+        {submitLabel || "Сохранить"}
+      </Button>
+    </>
+  );
+
+  // ⭐ Страница формы (#dob_tasks/<id>) — тот же формат, что у заявки ДОБ:
+  // секции с заголовками, компактные поля и кнопки внизу, без «диалоговой» рамки.
+  if (inline) {
+    return (
+      <Box
+        data-testid="ct-result-dialog"
+        sx={{ width: "100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 0.75 }}
+      >
+        {body}
+        <Box sx={FORM_ACTIONS_SX}>{actions}</Box>
+      </Box>
+    );
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={submitting ? undefined : onClose}
+      fullWidth
+      maxWidth="md"
+      PaperProps={{ sx: { borderRadius: 1 }, "data-testid": "ct-result-dialog" }}
+    >
+      <DialogTitle sx={{ fontWeight: 800, pb: 0.5 }}>
+        {title}
+        {contentTypeName && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 500 }}>
+            {contentTypeName}
+          </Typography>
+        )}
+      </DialogTitle>
+      <DialogContent dividers>{body}</DialogContent>
+      <DialogActions sx={{ px: 2, py: 1.25 }}>{actions}</DialogActions>
+    </Dialog>
   );
 }

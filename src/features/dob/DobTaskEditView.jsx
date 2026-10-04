@@ -18,6 +18,15 @@ import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
 import { contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
+import {
+  FORM_ACTIONS_SX,
+  FORM_APPBAR_SX,
+  FORM_FIELD_GRID_SX,
+  FORM_PAGE_SX,
+  FORM_PRIMARY_BUTTON_SX,
+  FORM_SECONDARY_BUTTON_SX,
+  FORM_SECTION_TITLE_SX,
+} from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
 import { resolveRelatedRef } from './lib/relatedItem';
 
@@ -87,6 +96,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   const [attachments, setAttachments] = useState([]);
   // Read-only просмотр связанной заявки (RelatedItems задачи/заявки).
   const [relatedOpen, setRelatedOpen] = useState(false);
+  const ctSubmitRef = useRef(null); // submit формы задачи (кнопка в шапке страницы)
   const prevChekHtmlRef = useRef(null);
   const pendingDeleteRef = useRef(new Set());
   const initialFormRef = useRef(null);
@@ -566,14 +576,24 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   const checkCtId = itemCtId;
   if (item && isDialogRequired(null, checkCtId, taskContentTypeName(item))) {
     return (
-      <Box data-dob-edit-page="true" sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: .75, p: { xs: .5, md: .75 }, boxSizing: 'border-box' }}>
-        <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1100, bgcolor: '#fff', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
+      <Box data-dob-edit-page="true" sx={FORM_PAGE_SX}>
+        <AppBar position="sticky" elevation={0} sx={FORM_APPBAR_SX}>
           <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
-            <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f' }} aria-label="Открыть меню"><MenuIcon /></IconButton>
-            <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f' }} aria-label="К задачам"><ArrowBackIcon fontSize="small" /></IconButton>
+            <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
+            <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="К задачам"><ArrowBackIcon fontSize="small" /></IconButton>
             <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>Задача #{id}</Typography>
             {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
-            <Button size="small" variant="outlined" onClick={() => refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={{ borderRadius: .5 }}>Обновить</Button>
+            <Button size="small" variant="outlined" onClick={() => refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={FORM_SECONDARY_BUTTON_SX}>Обновить</Button>
+            <Button
+              size="small"
+              variant="contained"
+              disabled={saving || itemLoading}
+              onClick={() => ctSubmitRef.current?.()}
+              startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+              sx={FORM_PRIMARY_BUTTON_SX}
+            >
+              {saving ? 'Сохранение…' : 'Сохранить'}
+            </Button>
           </Toolbar>
         </AppBar>
         {saveError && <Alert severity="error" onClose={() => setSaveError('')}>{saveError}</Alert>}
@@ -585,6 +605,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           submitLabel="Сохранить"
           cancelLabel="Отмена"
           submitting={saving}
+          submitRef={ctSubmitRef}
           onSubmit={handleCheckResultSubmit}
           onClose={handleBack}
         />
@@ -604,8 +625,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   }
 
   return (
-    <Box data-dob-edit-page="true" sx={{ width: '100%', maxWidth: 'none', mx: 0, display: 'flex', flexDirection: 'column', gap: .75, p: { xs: .5, md: .75 }, boxSizing: 'border-box', overflowX: 'hidden', minWidth: 0, '& .MuiOutlinedInput-root': { borderRadius: .5 }, '& .MuiInputBase-root:not(.MuiInputBase-multiline)': { height: 32, borderRadius: .5 }, '& .MuiInputBase-input': { py: .5, fontSize: 13 }, '& .MuiSelect-select': { py: .5, fontSize: 13 }, '& .MuiButton-root': { borderRadius: .5, minHeight: 32, height: 32 }, '& .MuiFormControlLabel-root': { minHeight: 32 } }}>
-      <AppBar position="sticky" elevation={0} sx={{ top: 0, zIndex: 1100, bgcolor: '#fff', color: '#171c8f', borderBottom: '1px solid rgba(23,28,143,.12)' }}>
+    <Box data-dob-edit-page="true" sx={FORM_PAGE_SX}>
+      <AppBar position="sticky" elevation={0} sx={FORM_APPBAR_SX}>
         <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
           <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
           <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label={isDefaultList ? 'К списку' : 'К задачам'}><ArrowBackIcon fontSize="small" /></IconButton>
@@ -634,8 +655,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               </Button>
             </span>
           </Tooltip>
-          <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={{ borderRadius: .5 }}>Обновить</Button>
-          <Button size="small" variant="contained" onClick={handleSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={{ borderRadius: .5, minWidth: 120, backgroundImage: 'linear-gradient(180deg,#171c8f 0%,#10146a 100%)', color: '#fff' }}>
+          <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={FORM_SECONDARY_BUTTON_SX}>Обновить</Button>
+          <Button size="small" variant="contained" onClick={handleSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={FORM_PRIMARY_BUTTON_SX}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </Button>
         </Toolbar>
@@ -645,7 +666,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
       <Box className="dob-rich-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 1, flex: '0 0 auto' }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1, color: '#171c8f' }}>Результат проверки — главное поле</Typography>
+        <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Результат проверки — главное поле</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
           Поддерживает таблицы, списки, форматирование и вставку изображений. Изображения автоматически загружаются как вложения заявки и вставляются как {'<img src="...">'}.
         </Typography>
@@ -697,8 +718,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       </Box>
 
       <Box className="dob-fields-section" sx={{ width: '100%', minWidth: 0, position: 'relative', zIndex: 2, flex: '0 0 auto' }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1.5, color: '#171c8f' }}>Остальные поля</Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))', xl: 'repeat(4, minmax(0, 1fr))' }, gap: { xs: .75, md: 1 } }}>
+        <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Остальные поля</Typography>
+        <Box sx={FORM_FIELD_GRID_SX}>
           {editableFields.filter(f => f.InternalName !== chekInternal && !/^(?:modified|откорректировано|изменено)$/i.test(String(f.InternalName || f.Title || '').trim()) && !/откорректировано|изменено/i.test(String(f.Title || ''))).map(f => {
             const internal = f.InternalName;
             const title = f.Title || internal;
@@ -873,7 +894,11 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
         <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
-        <Button onClick={handleSave} variant="contained" disabled={saving} startIcon={<SaveIcon />} sx={{ borderRadius: 2, minWidth: 160 }}>Сохранить</Button>
+        <Box sx={FORM_ACTIONS_SX}>
+          <Button onClick={handleSave} variant="contained" disabled={saving} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
+            {saving ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+        </Box>
       </Box>
 
       {/* Read-only просмотр связанной заявки: данные тянем из связанного элемента */}

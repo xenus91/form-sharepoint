@@ -16,7 +16,7 @@
 import apiClient from "../api";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
-const POSITION_STORAGE_PREFIX = "sp:userOrg:"; // v2: должность + департамент
+const POSITION_STORAGE_PREFIX = "sp:userOrg:v3:"; // v3: должность + департамент + офис (JSON)
 const USERS_PAGE_LIMIT = 1000;
 
 const _positions = new Map();      // loginKey -> «должность · департамент»|null
@@ -98,7 +98,7 @@ function cacheReadPosition(key) {
   try {
     const raw = sessionStorage.getItem(`${POSITION_STORAGE_PREFIX}${key}`);
     if (raw !== null) {
-      const parsed = raw === "null" ? null : raw;
+      const parsed = JSON.parse(raw);
       _positions.set(key, parsed);
       return parsed;
     }
@@ -109,7 +109,7 @@ function cacheReadPosition(key) {
 function cacheWritePosition(key, value) {
   _positions.set(key, value);
   try {
-    sessionStorage.setItem(`${POSITION_STORAGE_PREFIX}${key}`, value === null || value === undefined ? "null" : String(value));
+    sessionStorage.setItem(`${POSITION_STORAGE_PREFIX}${key}`, JSON.stringify(value ?? null));
   } catch (_e) { void _e; }
 }
 
@@ -221,10 +221,25 @@ export async function searchSiteUsers(query, opts = {}) {
   return users.slice(0, limit);
 }
 
-/** Подпись «Должность · Департамент» (что доступно). */
-export function positionLabel(position, department) {
-  const parts = [String(position || "").trim(), String(department || "").trim()].filter(Boolean);
+/**
+ * Подпись «Должность · Департамент · Офис» (что доступно).
+ * @param {string} position
+ * @param {string} department
+ * @param {string} office — поле Office сотрудника (из списка сведений о пользователях)
+ */
+export function positionLabel(position, department, office) {
+  const parts = [String(position || "").trim(), String(department || "").trim(), String(office || "").trim()].filter(Boolean);
   return parts.length ? parts.join(" · ") : null;
+}
+
+/** Структурированные сведения о человеке: то, что показываем в подсказке/чипе. */
+export function userOrgDetails(position, department, office) {
+  const info = {
+    position: String(position || "").trim(),
+    department: String(department || "").trim(),
+    office: String(office || "").trim(),
+  };
+  return { ...info, label: positionLabel(info.position, info.department, info.office) };
 }
 
 /**
@@ -249,8 +264,9 @@ function profilePropertyList(body) {
 }
 
 function profileValue(body, property) {
+  const needle = String(property).toLowerCase();
   const list = profilePropertyList(body);
-  const hit = list.find((p) => String(p?.Key || "").toLowerCase() === property.toLowerCase());
+  const hit = list.find((p) => String(p?.Key || "").toLowerCase() === needle);
   if (hit && hit.Value !== undefined && hit.Value !== null) {
     const value = String(hit.Value).trim();
     if (value) return value;
@@ -260,17 +276,30 @@ function profileValue(body, property) {
   return direct ? String(direct).trim() : "";
 }
 
+/** Офис из профиля: в разных тенантах свойство называется по-разному. */
+function profileOffice(body) {
+  for (const key of ["Office", "SPS-Office", "SPS-Location"]) {
+    const value = profileValue(body, key);
+    if (value) return value;
+  }
+  return "";
+}
+
 /**
- * Должность+департамент одного человека ОДНИМ запросом (GetPropertiesFor).
- * @returns {Promise<string|null>} «Главный специалист · Департамент ИТ»
+ * Должность+департамент+офис одного человека ОДНИМ запросом (GetPropertiesFor).
+ * @returns {Promise<{position:string,department:string,office:string,label:string|null}>}
  */
 async function fetchPositionFromProfile(login, get) {
   const url = `/SP.UserProfiles.PeopleManager/GetPropertiesFor(accountName=@v)?@v=${accountNameParam(login)}`;
   try {
     const resp = await get(url, ACCEPT);
     const body = verboseBody(resp);
-    const label = positionLabel(profileValue(body, "SPS-JobTitle"), profileValue(body, "SPS-Department"));
-    if (label) return label;
+    const details = userOrgDetails(
+      profileValue(body, "SPS-JobTitle"),
+      profileValue(body, "SPS-Department"),
+      profileOffice(body),
+    );
+    if (details.label) return details;
   } catch (e) {
     if (e?.response?.status && ![400, 403, 404].includes(e.response.status)) {
       console.warn("[userSearch] GetPropertiesFor failed", e.response.status);
@@ -291,8 +320,12 @@ async function fetchPositionFromProfile(login, get) {
       return "";
     }
   };
-  const [position, department] = await Promise.all([readOne("SPS-JobTitle"), readOne("SPS-Department")]);
-  return positionLabel(position, department);
+  const [position, department, office] = await Promise.all([
+    readOne("SPS-JobTitle"),
+    readOne("SPS-Department"),
+    readOne("Office"),
+  ]);
+  return userOrgDetails(position, department, office);
 }
 
 /**
@@ -300,17 +333,20 @@ async function fetchPositionFromProfile(login, get) {
  * пользователях» (SiteUserInfoList) хранит JobTitle/Department для участников сайта.
  * @returns {Promise<Record<string, string>>} loginName(lower) → подпись
  */
-async function fetchPositionsFromUserInfo(users, get) {
+async function fetchPositionsFromUserInfo(users, get, { withOffice = true } = {}) {
   const ids = [...new Set(users.map((u) => Number(u?.Id)).filter((n) => Number.isFinite(n) && n > 0))].slice(0, 50);
   if (ids.length === 0) return {};
   const filter = ids.map((n) => `Id eq ${n}`).join(" or ");
-  const url = `/web/SiteUserInfoList/items?$select=Id,UserName,JobTitle,Department&$filter=${encodeURIComponent(filter)}&$top=50`;
+  const select = withOffice
+    ? "Id,UserName,JobTitle,Department,Office"
+    : "Id,UserName,JobTitle,Department";
+  const url = `/web/SiteUserInfoList/items?$select=${select}&$filter=${encodeURIComponent(filter)}&$top=50`;
   const resp = await get(url, ACCEPT);
   const out = {};
   for (const item of resultsOf(resp)) {
-    const label = positionLabel(item?.JobTitle, item?.Department);
+    const details = userOrgDetails(item?.JobTitle, item?.Department, withOffice ? item?.Office : "");
     const key = lower(String(item?.UserName || ""));
-    if (label && key) out[key] = label;
+    if (details.label && key) out[key] = details;
   }
   return out;
 }
@@ -327,23 +363,39 @@ export async function getUserPosition(loginName, opts = {}) {
   if (!login) return null;
   const key = lower(login);
   const cached = cacheReadPosition(key);
+  if (cached !== undefined) return cached?.label ?? null;
+  const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
+  const details = await fetchPositionFromProfile(login, get);
+  cacheWritePosition(key, details.label ? details : null);
+  return details.label;
+}
+
+/** Сведения об организации человека (должность/департамент/офис) — из кэша или из профиля. */
+export async function getUserOrgDetails(loginName, opts = {}) {
+  const login = String(loginName || "").trim();
+  if (!login) return null;
+  const key = lower(login);
+  const cached = cacheReadPosition(key);
   if (cached !== undefined) return cached;
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
-  const label = await fetchPositionFromProfile(login, get);
-  cacheWritePosition(key, label);
-  return label;
+  const details = await fetchPositionFromProfile(login, get);
+  const value = details.label ? details : null;
+  cacheWritePosition(key, value);
+  return value;
 }
 
 /**
- * Подписи «должность · департамент» для набора пользователей (для подсказок
- * автокомплита и уже выбранных).
+ * Сведения о людях («должность · департамент · офис») для подсказок автокомплита
+ * и уже выбранных.
  *
- * Сначала — один пакетный запрос к списку сведений о пользователях; для тех, кого
- * там нет, — профиль (не больше 8 человек за раз, чтобы поиск не превращался в
- * лавину запросов). Уже известные значения берутся из кэша.
+ * Сначала — ОДИН пакетный запрос к списку сведений о пользователях (JobTitle,
+ * Department, Office); если в тенанте нет колонки Office, повторяем без неё.
+ * Для тех, кого в списке нет — профиль (не больше 8 человек за раз), тоже одним
+ * запросом на человека. Уже известные значения берутся из кэша.
  *
  * @param {Array<{LoginName?:string, Id?:number}>} users
- * @returns {Promise<Record<string, string|null>>} loginName(lower) → подпись
+ * @returns {Promise<Record<string, {position:string,department:string,office:string,label:string|null}>>}
+ *   loginName(lower) → сведения о человеке
  */
 export async function getUserPositions(users = [], opts = {}) {
   const out = {};
@@ -355,7 +407,7 @@ export async function getUserPositions(users = [], opts = {}) {
     const key = lower(login);
     const cached = opts.forceRefresh ? undefined : cacheReadPosition(key);
     if (cached !== undefined) {
-      out[key] = cached;
+      if (cached) out[key] = cached;
       continue;
     }
     unknown.push({ Id: u?.Id, LoginName: login, __key: key });
@@ -363,21 +415,32 @@ export async function getUserPositions(users = [], opts = {}) {
   if (unknown.length === 0) return out;
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
 
-  // 1) Один запрос: должность+департамент по всем, кого ищем.
+  // 1) Один запрос: должность+департамент(+офис) по всем, кого ищем.
   const resolved = new Set();
   if (!_userInfoBatchBroken) {
-    try {
-      const batch = await fetchPositionsFromUserInfo(unknown, get);
+    const writeBatch = (batch) => {
       for (const u of unknown) {
-        if (batch[u.__key] !== undefined) {
-          out[u.__key] = batch[u.__key];
-          cacheWritePosition(u.__key, batch[u.__key]);
-          resolved.add(u.__key);
-        }
+        const details = batch[u.__key];
+        if (!details || !details.label) continue;
+        out[u.__key] = details;
+        cacheWritePosition(u.__key, details);
+        resolved.add(u.__key);
       }
+    };
+    try {
+      writeBatch(await fetchPositionsFromUserInfo(unknown, get));
     } catch (e) {
       const status = e?.response?.status;
-      if (status === 400 || status === 403 || status === 404) {
+      if (status === 400) {
+        // В списке сведений нет колонки Office — пробуем без неё (и запоминаем).
+        try {
+          writeBatch(await fetchPositionsFromUserInfo(unknown, get, { withOffice: false }));
+        } catch (e2) {
+          const st = e2?.response?.status;
+          if (st === 400 || st === 403 || st === 404) _userInfoBatchBroken = true;
+          else if (st) console.warn("[userSearch] SiteUserInfoList failed", st);
+        }
+      } else if (status === 403 || status === 404) {
         // Поля/права недоступны — дальше идём профилем, пакет больше не пробуем.
         _userInfoBatchBroken = true;
       } else if (status) {
@@ -389,9 +452,13 @@ export async function getUserPositions(users = [], opts = {}) {
   // 2) Кого в списке сведений нет — смотрим профиль (ограниченно).
   const rest = unknown.filter((u) => !resolved.has(u.__key)).slice(0, 8);
   await Promise.all(rest.map(async (u) => {
-    const label = await fetchPositionFromProfile(u.LoginName, get);
-    out[u.__key] = label;
-    cacheWritePosition(u.__key, label);
+    const details = await fetchPositionFromProfile(u.LoginName, get);
+    if (details.label) {
+      out[u.__key] = details;
+      cacheWritePosition(u.__key, details);
+    } else {
+      cacheWritePosition(u.__key, null);
+    }
   }));
   return out;
 }

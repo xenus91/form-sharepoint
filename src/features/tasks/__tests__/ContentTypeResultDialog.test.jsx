@@ -131,6 +131,14 @@ describe("ContentTypeResultDialog — форма по типу контента"
     const text = document.body.textContent;
     expect(buttonByText("Годен")).toBeTruthy();
     expect(buttonByText("Брак")).toBeTruthy();
+    // результирующий выбор — ГРУППА кнопок (ToggleButtonGroup → role="group")
+    const group = document.body.querySelector('[role="group"]');
+    expect(group).toBeTruthy();
+    expect(group.textContent).toContain("Годен");
+    expect(group.textContent).toContain("Брак");
+    expect(group.querySelectorAll("button").length).toBe(2);
+    // поля — в секции «Остальные поля» (единый формат со страницей формы ДОБ)
+    expect(text).toContain("Остальные поля");
     // подписи полей: из SharePoint/понятные, обязательные — со звёздочкой
     expect(text).toContain("Описание результата проверки *");
     expect(text).toContain("Тип ошибки");

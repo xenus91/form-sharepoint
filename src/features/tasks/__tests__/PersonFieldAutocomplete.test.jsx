@@ -22,7 +22,14 @@ vi.mock("../../../tasks/userSearch", async (importOriginal) => {
   return {
     ...actual,
     searchSiteUsers: vi.fn(async (query) => (String(query).toLowerCase().includes("ivanov") ? [IVANOV] : [])),
-    getUserPositions: vi.fn(async () => ({ [IVANOV.LoginName.toLowerCase()]: "Главный специалист" })),
+    getUserPositions: vi.fn(async () => ({
+      [IVANOV.LoginName.toLowerCase()]: {
+        position: "Главный специалист",
+        department: "Департамент ИТ",
+        office: "СПб, Ленинский 1",
+        label: "Главный специалист · Департамент ИТ · СПб, Ленинский 1",
+      },
+    })),
     getUserPosition: vi.fn(async () => "Главный специалист"),
   };
 });
@@ -46,10 +53,13 @@ const settle = async (ms = 60) => {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 };
 
+const mountedRoots = [];
+
 function renderField(props = {}) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
+  mountedRoots.push(root);
   act(() => {
     root.render(
       <ThemeProvider theme={createTheme()}>
@@ -74,6 +84,10 @@ const typeInto = (el, value) => {
 
 describe("PersonFieldAutocomplete — «Пользователь или группа»", () => {
   beforeEach(() => {
+    // Размонтируем прошлые деревья (в них порталы Popover), потом чистим body.
+    for (const root of mountedRoots.splice(0)) {
+      act(() => { root.unmount(); });
+    }
     document.body.innerHTML = "";
     vi.clearAllMocks();
   });
@@ -103,13 +117,67 @@ describe("PersonFieldAutocomplete — «Пользователь или груп
     expect(onChange.mock.calls[0][0]).toEqual([IVANOV]);
   });
 
-  it("у выбранного пользователя в чипе видно имя и должность", async () => {
+  it("у выбранного пользователя в чипе видно имя, должность и офис", async () => {
     renderField({ value: [IVANOV] });
     await settle(80);
     const chip = document.body.querySelector(".MuiChip-root");
     expect(chip).toBeTruthy();
     expect(chip.textContent).toContain("Иванов Иван Иванович");
     expect(chip.textContent).toContain("Главный специалист");
+    expect(chip.textContent).toContain("Департамент ИТ");
+    expect(chip.textContent).toContain("СПб, Ленинский 1");
+  });
+
+  it("клик по выбранному чипу раскрывает свойства: должность, департамент, офис, учётная запись", async () => {
+    renderField({ value: [IVANOV] });
+    await settle(80);
+    const chip = document.querySelector('[data-testid="person-chip-7"]');
+    expect(chip).toBeTruthy();
+    expect(document.querySelector('[data-testid="person-details-body"]')).toBeNull();
+
+    await act(async () => {
+      chip.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await settle(80);
+    });
+    const body = document.querySelector('[data-testid="person-details-body"]');
+    expect(body).toBeTruthy();
+    const text = body.textContent || "";
+    expect(text).toContain("Должность");
+    expect(text).toContain("Главный специалист");
+    expect(text).toContain("Департамент");
+    expect(text).toContain("Департамент ИТ");
+    expect(text).toContain("Офис");
+    expect(text).toContain("СПб, Ленинский 1");
+    expect(text).toContain("Учётная запись");
+    expect(text).toContain(IVANOV.LoginName);
+
+    // повторный клик по тому же чипу закрывает свойства
+    await act(async () => {
+      chip.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await settle(200);
+    });
+    // jsdom не шлёт transitionend, поэтому узел выходящей анимации остаётся —
+    // закрытость проверяем по атрибуту модального корня Popover.
+    const details = document.querySelector('[data-testid="person-details-body"]');
+    const modalRoot = details?.closest(".MuiModal-root");
+    expect(modalRoot ? modalRoot.getAttribute("aria-hidden") : "true").toBe("true");
+  });
+
+  it("если профиль пуст — свойства честно сообщают об этом, без «undefined»", async () => {
+    const userSearch = await import("../../../tasks/userSearch");
+    userSearch.getUserPositions.mockResolvedValueOnce({});
+    renderField({ value: [IVANOV] });
+    await settle(80);
+    const chip = document.querySelector('[data-testid="person-chip-7"]');
+    await act(async () => {
+      chip.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await settle(80);
+    });
+    const body = document.querySelector('[data-testid="person-details-body"]');
+    // учётная запись подтянется из самого значения, остального нет
+    expect(body.textContent).toContain(IVANOV.LoginName);
+    expect(body.textContent).not.toContain("undefined");
+    expect(body.textContent).not.toContain("[object Object]");
   });
 
   it("короткий запрос не ходит на сервер", async () => {
