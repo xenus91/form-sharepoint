@@ -77,7 +77,17 @@ const RESULT_FIELD_OOB = {
   TypeShortDescription: "Результат задачи",
   Choices: { results: ["Исправлено", "Не исправлено"] },
 };
-const RESULT_FIELDS = [RESULT_FIELD_THU, RESULT_FIELD_OOB];
+// «Результат проверки ООБ»: своё поле результата — кнопки результата в диалоге.
+const RESULT_FIELD_CHECK = {
+  Id: "cccccccc-0000-0000-0000-000000000003",
+  InternalName: "DobSearchResult",
+  Title: "DobSearchResult",
+  TypeAsString: "Choice",
+  TypeDisplayName: "Результирующий выбор",
+  TypeShortDescription: "Результат задачи",
+  Choices: { results: ["Годен", "Брак"] },
+};
+const RESULT_FIELDS = [RESULT_FIELD_THU, RESULT_FIELD_OOB, RESULT_FIELD_CHECK];
 
 // Значения поля ТНУ можно переставить/дополнить: поведение не должно зависеть
 // от порядка значений в поле (иначе кнопка «Найдена» могла уехать в «дополнительные»).
@@ -89,10 +99,24 @@ const resultFieldsNow = () => RESULT_FIELDS.map((f) => (
 
 // Типы контента задач: ТНУ-задача → поле ResultSearchTHU, задача ООБ → ResultOOB.
 const CT_THU = MAIN_TASK.ContentTypeId;
+// Тип контента «Результат проверки ООБ» — закрывается ТОЛЬКО через диалог по колонкам.
+const CT_CHECK = "0x0108003365C4474CAE8C42BCE396314E88E51F00DDA2B3C73567D14D8127B2CBCC18DC19";
+
+// Колонки типа контента (как отдаёт SharePoint в $expand=Fields).
+const CT_CHECK_FIELDS = [
+  { InternalName: "Title", Title: "Имя задачи", TypeAsString: "Text", Required: false },
+  { InternalName: "TaskStatus", Title: "Состояние задачи", TypeAsString: "Choice", Required: false },
+  { InternalName: "DobSearchResult", Title: "DobSearchResult", TypeAsString: "Choice", Required: true, Choices: { results: ["Годен", "Брак"] } },
+  { InternalName: "DescriptionCheckResult", Title: "DescriptionCheckResult", TypeAsString: "Note", Required: true },
+  { InternalName: "ErrorTypeValidation", Title: "ErrorTypeValidation", TypeAsString: "Choice", FillInChoice: true, Choices: { results: ["Ошибка типа A", "Ошибка типа B"] } },
+  { InternalName: "ErrorCountValidation", Title: "ErrorCountValidation", TypeAsString: "Number", Required: false },
+  { InternalName: "Guilty", Title: "Guilty", TypeAsString: "User", AllowMultipleValues: true, Required: false },
+];
 const CT_OOB = "0x0108003365C4474CAE8C42BCE396314E88E51F0001A4ABEEA9CB93478EEBA71D023E4D0700E86894FD720BCD49A61B7F23B3CFB37F";
 const CT_META = [
   { StringId: CT_THU, Name: "Задача ТНУ", Id: { StringValue: CT_THU }, FieldLinks: { results: [{ Id: RESULT_FIELD_THU.Id }] } },
   { StringId: CT_OOB, Name: "Задача ООБ", Id: { StringValue: CT_OOB }, FieldLinks: { results: [{ Id: RESULT_FIELD_OOB.Id }] } },
+  { StringId: CT_CHECK, Name: "Результат проверки ООБ", Id: { StringValue: CT_CHECK }, FieldLinks: { results: [{ Id: RESULT_FIELD_CHECK.Id }] } },
 ];
 
 // TaskBehaviour (список настроек): у результата «Не исправлено» есть prompt-поле,
@@ -172,7 +196,20 @@ const MAIN_IN_PROGRESS = {
   ContentTypeId: CT_OOB,
 };
 
-const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS, 12: MAIN_THU_IN_PROGRESS };
+// Задача нового типа контента: у неё уже выбран виновный — проверяем, что диалог
+// отправит его как Collection(Edm.Int32) в GuiltyId.
+const MAIN_CHECK_IN_PROGRESS = {
+  ...MAIN_TASK,
+  Id: 13,
+  Title: "Проверка ЕО (ООБ)",
+  Body: "Проверить результат",
+  Status: "В работе",
+  PercentComplete: 0,
+  ContentTypeId: CT_CHECK,
+  Guilty: { results: [{ Id: 5, Title: "Иванов Иван Иванович", LoginName: "i:0#.f|membership|ivanov.ii@lenta.com" }] },
+};
+
+const MAIN_TASKS_BY_ID = { 10: MAIN_TASK, 11: MAIN_IN_PROGRESS, 12: MAIN_THU_IN_PROGRESS, 13: MAIN_CHECK_IN_PROGRESS };
 
 // Задача, назначенная на группу из DcEmail (Id 33 на сайте ДОБ)
 const DOB_GROUP_TASK = { ...DOB_TASK, Id: 2, Title: "Заявка ООБ (на группу)", AssignedTo: { results: [{ Id: 33, Title: "ООБ" }] }, Modified: "2026-10-02T00:00:00Z" };
@@ -209,6 +246,11 @@ vi.mock("../../../api", () => {
       throw err;
     }
     if (u.includes("/web/sitegroups/getbyid(33)")) return { data: { d: { Id: 33, Title: "ООБ" } } };
+    // Поля типа контента — диалог закрытия строит форму строго по колонкам
+    if (d.includes("/contenttypes('0x") && d.includes("$expand=Fields")) {
+      const isCheck = d.includes(CT_CHECK.toLowerCase()) || d.includes(CT_CHECK);
+      return { data: { d: { Fields: { results: isCheck ? CT_CHECK_FIELDS : [] } } } };
+    }
     if (d.includes(`${MAIN_LIST}/fields`)) {
       // $filter=TypeDisplayName — выборка полей результата
       if (/TypeDisplayName eq/.test(d)) return { data: { d: { results: resultFieldsNow() } } };
@@ -235,7 +277,7 @@ vi.mock("../../../api", () => {
       const base = MAIN_TASKS_BY_ID[Number(single[1])] || MAIN_TASK;
       return { data: { d: { ...base, __metadata: { etag: '"1"', type: "SP.Data.TasksListItem" } } } };
     }
-    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS] } } };
+    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS, MAIN_CHECK_IN_PROGRESS] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
     // TaskBehaviour / прочие списки — пусто
     return { data: { d: { results: [] } } };
@@ -311,6 +353,14 @@ vi.mock("../../dob/api/dobClient", () => {
     dobAxios: { get, post, interceptors: { request: { use() {} }, response: { use() {} } } },
   };
 });
+
+// CKEditor в jsdom не поднимается: рич-текст в диалоге подменяем textarea
+// с тем же контрактом value/onChange.
+vi.mock("../../dob/components/RichEditor", () => ({
+  default: ({ value, onChange }) => (
+    <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
+  ),
+}));
 
 const { default: TasksView } = await import("../../../TasksView");
 const NotificationsProvider = (await import("../../../NotificationsProvider")).default;
@@ -450,7 +500,8 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(search.tagName).toBe("INPUT");
 
     const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
-    expect(countRows()).toBe(5);
+    // 3 main-задачи (ООБ «не начата», ООБ «в работе», ТНУ «в работе», Результат проверки ООБ) + 2 dob
+    expect(countRows()).toBe(6);
 
     // колонки шапки — для проверки сортировки по клику
     const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell")];
@@ -468,7 +519,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       .sort((a, b) => a.index - b.index)
       .map((r) => r.title);
     const titlesInitial = readTitles();
-    expect(titlesInitial.length).toBe(5);
+    expect(titlesInitial.length).toBe(6);
 
     // AG Grid вешает обработчик сортировки на .ag-header-cell-label внутри ячейки
     const titleLabel = headerCells[titleIdx].querySelector(".ag-header-cell-label");
@@ -871,6 +922,94 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(write.url).toContain("items(12)");
   }, 40000);
 
+  it("«Результат проверки ООБ»: карточка закрывается через диалог по колонкам, обязательные поля из SP контролируются", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+
+    const card = cardByText(host, /Проверка ЕО \(ООБ\)/);
+    expect(card).toBeTruthy();
+    const resultBtn = cardButton(card, "Годен");
+    expect(resultBtn).toBeTruthy();
+
+    await act(async () => { mouseClick(resultBtn); await wait200(); });
+    await settle(300);
+
+    // «молча» ничего не пишем: открылся диалог, форма — по колонкам типа контента
+    expect(state.requests.some((r) => r.source === "main" && r.merge && r.body && r.body.DobSearchResult)).toBe(false);
+    const dialog = document.body.querySelector('[data-testid="ct-result-dialog"]');
+    expect(dialog).toBeTruthy();
+    const dtext = dialog.textContent;
+    expect(dtext).toContain("Результат проверки ООБ");
+    expect(dtext).toContain("Описание результата проверки *");
+    expect(dtext).toContain("Кол-во ошибок");
+    expect(dtext).toContain("Тип ошибки");
+    expect(dtext).toContain("Виновный");
+    // системные колонки задачи в форму не попали
+    expect(dtext).not.toContain("Состояние задачи");
+
+    // обязательное описание пустое → отправка блокируется
+    const save = [...dialog.querySelectorAll("button")].find((b) => /Сохранить/.test(b.textContent || ""));
+    expect(save).toBeTruthy();
+    await act(async () => { mouseClick(save); await wait200(); });
+    expect(document.body.querySelector('[data-testid="ct-result-dialog-problems"]').textContent)
+      .toContain("Заполните «Описание результата проверки»");
+
+    // заполняем рич-текст и сохраняем
+    const rich = dialog.querySelector("textarea");
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      setter.call(rich, "<p>Проверено, замечаний нет</p>");
+      rich.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await wait200();
+    });
+    await act(async () => { mouseClick(save); await wait200(); });
+    await settle(900);
+
+    const write = state.requests
+      .filter((r) => r.source === "main" && r.merge && r.body && r.body.DobSearchResult === "Годен")
+      .pop();
+    expect(write).toBeTruthy();
+    expect(String(write.body.DescriptionCheckResult)).toContain("Проверено");
+    expect(write.body.GuiltyId).toEqual({ __metadata: { type: "Collection(Edm.Int32)" }, results: [5] });
+    expect(write.body.Status).toBe("Завершена");
+    expect(write.body.PercentComplete).toBe(1);
+    // доп. действий у правила нет → legacy-поля не отправляем
+    expect("AdditionalsActionsRequired" in write.body).toBe(false);
+    expect("AdditionalActions" in write.body).toBe(false);
+  }, 40000);
+
+  it("«Результат проверки ООБ» в таблице: попап строки открывает тот же диалог по колонкам", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(3000);
+
+    const row = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+      .find((r) => /Проверка ЕО \(ООБ\)/.test(r.textContent || ""));
+    expect(row).toBeTruthy();
+    await act(async () => {
+      row.querySelector(".ag-cell").dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 260 })
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    });
+
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')]
+      .filter((el) => el.style.opacity !== "0" && /#13\b/.test(el.textContent || "")).pop();
+    expect(popup).toBeTruthy();
+    const found = [...popup.querySelectorAll("button")].find((b) => b.textContent.trim() === "Годен");
+    expect(found).toBeTruthy();
+
+    await act(async () => { mouseClick(found); await wait200(); });
+    await settle(300);
+
+    // диалог тот же, что в карточке; записи до заполнения обязательных полей нет
+    const dialog = document.body.querySelector('[data-testid="ct-result-dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain("Описание результата проверки *");
+    expect(state.requests.some((r) => r.source === "main" && r.merge && r.body && r.body.DobSearchResult)).toBe(false);
+  }, 40000);
+
   it("таблица + конфиг инлайном (p:[Location1], без aa): форма в поповере, как в карточке, без диалогов", async () => {
     // 1:1 настройка пользователя: у «Найдена» нет loc — только prompt-поле Location1
     // и подпись кнопки. Поведение обязано совпадать с карточкой: форма в месте, без диалога.
@@ -956,13 +1095,17 @@ describe("TasksView — multi-source (#tasks)", () => {
       await wait200();
     });
 
-    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    const popup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')]
+      .filter((el) => el.style.opacity !== "0" && /#12\b/.test(el.textContent || "")).pop();
     const found = [...(popup?.querySelectorAll("button") || [])].find((b) => b.textContent.trim() === "Найдена");
     expect(found).toBeTruthy();
+    // jsdom не размонтирует закрытые модалки: смотрим диалоги, появившиеся после клика
+    const dialogsBefore = new Set(document.querySelectorAll('.MuiDialog-root, [role="dialog"]'));
     await act(async () => { mouseClick(found); await wait200(); });
     await settle(2200);
 
-    const dialog = dialogEl();
+    const dialog = [...document.querySelectorAll('.MuiDialog-root, [role="dialog"]')]
+      .filter((d) => !dialogsBefore.has(d) && /Где найдена ЕО\?/.test(d.textContent || "")).pop();
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain("Где найдена ЕО?");
     expect(dialog.textContent).toContain("Местоположение (Location1)");

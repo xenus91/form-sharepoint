@@ -8,7 +8,8 @@ import React from "react";
 import apiClient from "../../../api";
 import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
-import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title
+import { resolveTaskBehaviourByName, findContentTypeMeta } from "../../../services/taskBehaviour";
+import { isDialogRequired, taskContentTypeId } from "../../../tasks/contentTypeFields"; // ⭐ v8: маппинг CT.Name → TaskBehaviour.Title
 import { resolveBehaviour, resolveBehaviourCard } from "../../../services/behaviourParser"; // ⭐ v8: парсер/резолвер Behaviour
 import { parseRelatedRef, fetchRelatedFields } from "../../../tasks/relatedFields"; // ⭐ поля из связанного элемента (Behaviour.rf)
 import { resolveStylingForChoice } from "../../../services/stylingConfig"; // ⭐ v8: парсер/резолвер StylingResultButton → sx
@@ -632,6 +633,17 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
       onResultClick(task, choice);
       return true;
     }
+    // ⭐ dlg: закрытие через диалог по типу контента — его ведёт TasksView
+    // (данные типа контента и колонок живут там), карточка только передаёт результат.
+    // Диалог включается ключом Behaviour.dlg ИЛИ типом контента «Результат проверки ООБ».
+    if (isDialogRequired(rule, taskContentTypeId(task))) {
+      dbgClick(choice, "ct-dialog", rule);
+      // Задачу этого типа нельзя завершить мимо диалога: если обработчика нет —
+      // ничего не пишем (лучше «ничего не произошло», чем запись без формы).
+      if (onResultClick) onResultClick(task, choice);
+      else dbgClick(choice, "ct-dialog:no-handler", rule);
+      return true;
+    }
     if (!needsForm && !ic) return false;
     dbgClick(choice, needsForm ? "form" : "inline-buttons", rule);
     if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
@@ -647,7 +659,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     setInlineConfirmOnly(ic);
     setInlineChoice(choice);
     return true;
-  }, [getBehaviourRuleForChoice, getDefaultsForThisTask, onResultClick, task, dbgClick]);
+  }, [getBehaviourRuleForChoice, getDefaultsForThisTask, onResultClick, onComplete, task, dbgClick]);
 
   React.useEffect(() => {
     if (showCelebrate) {

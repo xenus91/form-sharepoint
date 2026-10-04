@@ -194,6 +194,18 @@ export function validateBehaviour(obj) {
       rule.requiresLocation = rawLoc === true || rawLoc === 1 || String(rawLoc).trim().toLowerCase() === "true";
     }
 
+    // dlg → requiresDialog: закрывать задачу через ДИАЛОГ, форма которого строится
+    // строго по типу контента и типам колонок (rich-текст, автокомплиты, «Пользователь
+    // или группа» с поиском по учётной записи, числа). Синонимы: "dialog", "requiresDialog".
+    // Внутри диалога — только то, что разрешено метаданными SharePoint, обязательность
+    // полей берётся из столбцов (Required), поэтому настройку не нужно дублировать.
+    if (rawVal.dlg !== undefined || rawVal.dialog !== undefined || rawVal.requiresDialog !== undefined) {
+      const rawDlg = rawVal.dlg !== undefined ? rawVal.dlg
+        : rawVal.dialog !== undefined ? rawVal.dialog
+        : rawVal.requiresDialog;
+      rule.requiresDialog = rawDlg === true || rawDlg === 1 || String(rawDlg).trim().toLowerCase() === "true";
+    }
+
     // anim → animation при submit. Можно передать строку или объект с текстами:
     // "anim":"celebrate"
     // "anim":{"type":"celebrate","title":"Задача исправлена","text":"Отличная работа!"}
@@ -246,6 +258,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     animation: null,
     animationConfig: null,
     requiresLocation: null,
+    requiresDialog: null,
     confirmTexts: null,
     relatedFields: [],
     source: "empty",
@@ -270,6 +283,7 @@ export function resolveBehaviour(choiceValue, parsedBehaviour) {
     animation: rule.animation === undefined ? null : rule.animation,
     animationConfig: rule.animationConfig || null,
     requiresLocation: rule.requiresLocation === undefined ? null : !!rule.requiresLocation,
+    requiresDialog: rule.requiresDialog === undefined ? null : !!rule.requiresDialog,
     confirmTexts: rule.confirmTexts || null,
     relatedFields: Array.isArray(rule.relatedFields) ? rule.relatedFields : [],
     source: src,

@@ -99,6 +99,7 @@
         <option value="current">Моя текущая настройка (диалог местоположения + aa)</option>
         <option value="inline">Инлайн-форма без доп. действий (рекомендация)</option>
         <option value="icOnly">Только две кнопки (ic)</option>
+        <option value="dlgCheck">Новый тип «Результат проверки ООБ» (dlg — диалог по колонкам)</option>
         <option value="clean">Пусто (с нуля)</option>
       </select>
     </label>
@@ -113,7 +114,7 @@
     <div>
       <section class="panel" id="panelBehaviour">
         <h2>1. Behaviour — что происходит при нажатии результата</h2>
-        <p class="hint">Ключи: <code>loc</code> — диалог «Где найдена ЕО?», <code>p</code> — поля ввода, <code>ic</code> — две кнопки, <code>c</code> — подтверждение, <code>aa</code>/<code>aar</code> — доп. действия и их обязательность, <code>anim</code> — анимация.</p>
+        <p class="hint">Ключи: <code>loc</code> — диалог «Где найдена ЕО?», <code>dlg</code> — диалог закрытия по типу контента (по колонкам), <code>p</code> — поля ввода, <code>ic</code> — две кнопки, <code>c</code> — подтверждение, <code>aa</code>/<code>aar</code> — доп. действия и их обязательность, <code>anim</code> — анимация.</p>
         <h3>Поля заявки (rf) в шапке карточки</h3>
         <div id="rfList"></div>
         <div class="row"><button class="mini" data-action="add-rf">+ поле</button></div>
@@ -149,7 +150,8 @@
         <h2>Шпаргалка</h2>
         <table>
           <tr><th>Ключ</th><th>Что делает</th></tr>
-          <tr><td><code>loc</code></td><td>диалог «Где найдена ЕО?» (имеет приоритет надо всем; поля собирает диалог)</td></tr>
+          <tr><td><code>dlg</code></td><td>закрыть задачу через <b>диалог по типу контента</b>: форма собирается по колонкам SharePoint (rich-текст, автокомплиты, «Пользователь или группа», числа), обязательность — из <code>Required</code> колонок. Приоритетнее <code>loc</code>/<code>p</code>/<code>aa</code>/<code>ic</code>. Тип «Результат проверки ООБ» получает такой диалог автоматически, без записи в TaskBehaviour</td></tr>
+          <tr><td><code>loc</code></td><td>диалог «Где найдена ЕО?» (поля собирает диалог). Не действует, если задан <code>dlg</code></td></tr>
           <tr><td><code>ic</code></td><td>две кнопки подтверждения в карточке. Само по себе полей не показывает</td></tr>
           <tr><td><code>c</code></td><td>диалог подтверждения. Если рядом есть <code>p</code> — диалог появится ПОСЛЕ формы</td></tr>
           <tr><td><code>p</code></td><td>поля ввода в карточке: <code>f</code> имя, <code>ti</code> подпись, <code>t</code> тип, <code>r</code> обязательное</td></tr>
@@ -191,7 +193,7 @@
       </div>
     </div>
     <div id="importMsg"></div>
-    <p class="footer">Логика предпросмотра повторяет правила приложения: <code>loc</code> → диалог, <code>p</code>/<code>aa</code> → инлайн-форма, <code>ic</code> без полей → две кнопки, <code>c</code> без полей → диалог подтверждения, иначе — сразу завершение (+ <code>anim</code>, если задан).</p>
+    <p class="footer">Логика предпросмотра повторяет правила приложения: <code>dlg</code> → диалог по колонкам типа контента, <code>loc</code> → диалог местоположения, <code>p</code>/<code>aa</code> → инлайн-форма, <code>ic</code> без полей → две кнопки, <code>c</code> без полей → диалог подтверждения, иначе — сразу завершение (+ <code>anim</code>, если задан).</p>
   </section>
 </div>
 
@@ -202,7 +204,7 @@
 
   /* ── значения по умолчанию ─────────────────────────────────────────────── */
   function newResult(name){
-    return { name: name || "Результат", loc:false, ic:false, c:false,
+    return { name: name || "Результат", dlg:false, loc:false, ic:false, c:false,
              ok:"", no:"", ct:"", cm:"",
              p:[], aa:false, aar:false,
              anim:"none", animTitle:"", animText:"", animEmoji:"" };
@@ -231,6 +233,27 @@
           takeInWork:{ bg:"linear-gradient(180deg, #7b84ff 0%, #5a67d8 100%)", c:"#ffffff", v:"ctd", i:"" },
           confirm:{ bg:"linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", c:"#ffffff", v:"ctd", i:"" },
           cancel:{ bg:"", c:"#5f6368", v:"tx", i:"" },
+          promptSubmit:{ bg:"linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c:"#ffffff", v:"ctd", i:"" },
+          promptCancel:{ bg:"", c:"#5f6368", v:"tx", i:"" }
+        }
+      };
+    },
+    dlgCheck: function(){
+      // Новый тип контента «Результат проверки ООБ»: закрывается ТОЛЬКО через диалог,
+      // форма которого собирается по колонкам SharePoint (DobSearchResult — кнопки
+      // результата, DescriptionCheckResult — rich-текст, ErrorTypeValidation —
+      // автокомплит, ErrorCountValidation — число, Guilty — «Пользователь или группа»).
+      return {
+        rf: [],
+        iconsOff:false,
+        results:[
+          Object.assign(newResult("Годен"), { dlg:true, ok:"Сохранить", no:"Отмена" }),
+          Object.assign(newResult("Брак"), { dlg:true, ok:"Сохранить", no:"Отмена" })
+        ],
+        stylingDefault:{ bg:"linear-gradient(180deg, #5a67d8 0%, #434190 100%)", c:"#ffffff", v:"ctd", i:"" },
+        styling:{ "Годен":{ bg:"linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c:"#ffffff", v:"ctd", i:"" },
+                  "Брак":{ bg:"linear-gradient(180deg, #e53935 0%, #b71c1c 100%)", c:"#ffffff", v:"ctd", i:"" } },
+        actions:{
           promptSubmit:{ bg:"linear-gradient(180deg, #2e7d32 0%, #1b5e20 100%)", c:"#ffffff", v:"ctd", i:"" },
           promptCancel:{ bg:"", c:"#5f6368", v:"tx", i:"" }
         }
@@ -301,6 +324,7 @@
         +   '<button class="mini danger" data-action="del-result" data-i="'+i+'">Удалить</button>'
         + '</div>'
         + '<div class="toggles">'
+        +   '<label><input type="checkbox" data-path="results.'+i+'.dlg"'+(r.dlg?" checked":"")+'> dlg — диалог по колонкам типа контента</label>'
         +   '<label><input type="checkbox" data-path="results.'+i+'.loc"'+(r.loc?" checked":"")+'> loc — диалог местоположения</label>'
         +   '<label><input type="checkbox" data-path="results.'+i+'.ic"'+(r.ic?" checked":"")+'> ic — две кнопки</label>'
         +   '<label><input type="checkbox" data-path="results.'+i+'.c"'+(r.c?" checked":"")+'> c — подтверждение</label>'
@@ -422,6 +446,7 @@
     if(Object.keys(def).length) out._default = def;
     state.results.forEach(function(r){
       var rule = {};
+      if(r.dlg) rule.dlg = true;
       if(r.loc) rule.loc = true;
       if(r.ic) rule.ic = true;
       if(r.c) rule.c = true;
@@ -518,6 +543,7 @@
   }
 
   function flowKind(r){
+    if(r.dlg) return "ct-dialog";
     if(r.loc) return "location";
     if((r.p && r.p.length) || r.aa) return "form";
     if(r.ic) return "inline-buttons";
@@ -556,6 +582,11 @@
   function payloadHtml(r){
     var body = {};
     body["<поле результата>"] = r.name;
+    if(r.dlg){
+      body.DescriptionCheckResult = "<rich-текст>";
+      body.ErrorCountValidation = 0;
+      body.GuiltyId = { "__metadata": { type: "Collection(Edm.Int32)" }, results: [5] };
+    }
     (r.p||[]).forEach(function(f){ if(f.f) body[f.f] = preview.values[f.f] || "(пусто)"; });
     if(r.aa && preview.acts.length) body.AdditionalActions = preview.acts;
     body.Status = "Завершена";
@@ -591,6 +622,24 @@
         +   actionBtn("promptCancel","Пропустить",'data-flow="skip"')
         +   actionBtn("promptSubmit","Отправить",'data-flow="submit"')
         + '</div></div>';
+      return out;
+    }
+
+    if(kind === "ct-dialog"){
+      out += '<div class="dlg"><div class="dlg-title">Результат проверки ООБ</div>'
+        + '<p class="muted">Форма собрана из колонок типа контента: обязательные поля проверяются по SharePoint.</p>'
+        + '<div class="res-buttons" style="margin:6px 0 10px">'
+        +   ['Годен','Брак'].map(function(v){ return '<button class="res-btn">'+v+'</button>'; }).join("")
+        + '</div>'
+        + '<div class="field"><span>Описание результата проверки *</span><textarea rows="2" readonly>Проверено, замечаний нет</textarea></div>'
+        + '<div class="field"><span>Кол-во ошибок</span><input type="text" value="0"></div>'
+        + '<div class="field"><span>Тип ошибки (автокомплит, можно ввести своё)</span><input type="text" value=""></div>'
+        + '<div class="field"><span>Виновный — пользователь или группа (поиск по учётной записи)</span><input type="text" placeholder="ivanov.ii@lenta.com"></div>'
+        + '<div class="actions-row">'
+        +   actionBtn("promptCancel", r.no || "Отмена", 'data-flow="reset"')
+        +   actionBtn("promptSubmit", r.ok || "Сохранить", 'data-flow="submit"')
+        + '</div></div>';
+      if(r.loc || r.ic || r.c || r.aa || (r.p && r.p.length)) out += '<div class="warn">Приложение собирает форму по колонкам типа контента: <code>loc</code>/<code>p</code>/<code>aa</code>/<code>c</code> здесь не участвуют.</div>';
       return out;
     }
 
@@ -634,16 +683,18 @@
   }
 
   function flowName(kind){
-    return { location:"диалог местоположения", form:"инлайн-форма", "inline-buttons":"две кнопки (ic)",
-             confirm:"диалог подтверждения", direct:"сразу завершение" }[kind] || kind;
+    return { "ct-dialog":"диалог по колонкам типа контента", location:"диалог местоположения", form:"инлайн-форма",
+             "inline-buttons":"две кнопки (ic)", confirm:"диалог подтверждения", direct:"сразу завершение" }[kind] || kind;
   }
   function warningsHtml(r){
     var out = "";
+    if(r.dlg) out += '<div class="ok-note"><code>dlg</code>: форму собирает диалог по типу контента — поля <code>p</code>, <code>loc</code>, <code>aa</code> и <code>c</code> в нём не используются.</div>';
+    if(r.dlg && (r.loc || r.ic || r.c || r.aa || (r.p && r.p.length))) out += '<div class="warn">Вместе с <code>dlg</code> заданы другие ключи — приложение откроет диалог по колонкам, остальное проигнорирует.</div>';
     if(r.loc && r.p && r.p.length) out += '<div class="warn">Задан <code>loc</code>: поля из <code>p</code> в карточке не покажутся — их соберёт диалог.</div>';
     if(r.loc && r.aa) out += '<div class="warn">Доп. действия (<code>aa</code>) попадут в диалог местоположения.</div>';
     if(r.c && (r.p && r.p.length)) out += '<div class="warn">Задан <code>c</code> вместе с <code>p</code>: диалог подтверждения появится ПОСЛЕ формы. Нужна форма без диалога — снимите <code>c</code>.</div>';
     if(r.ic && ((r.p && r.p.length) || r.aa)) out += '<div class="ok-note"><code>ic</code> вместе с полями: отдельного шага подтверждения не будет — <code>ic</code> задаёт только подпись кнопки (<code>ok</code>).</div>';
-    if(!r.loc && !r.ic && !r.c && !(r.p && r.p.length) && !r.aa) out += '<div class="warn bad">Правил нет: результат завершит задачу сразу, без полей и подтверждений.</div>';
+    if(!r.dlg && !r.loc && !r.ic && !r.c && !(r.p && r.p.length) && !r.aa) out += '<div class="warn bad">Правил нет: результат завершит задачу сразу, без полей и подтверждений.</div>';
     return out;
   }
 
@@ -791,6 +842,7 @@
       if(key === "_default" || key === "*") return;
       var rule = obj[key] || {};
       var r = newResult(key);
+      r.dlg = rule.dlg === true || String(rule.dlg).toLowerCase() === "true";
       r.loc = rule.loc === true;
       r.ic = rule.ic === true;
       r.c = (rule.c === true) || String(rule.c).toLowerCase() === "inline" ? (rule.c === true) : false;

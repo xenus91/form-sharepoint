@@ -46,6 +46,17 @@ function applyPromptFieldsToPayload(payload, promptFieldValues) {
       console.warn(`[completeTask] поле '${fieldName}' отсутствует в списке Tasks — пропускаю`);
       continue;
     }
+    // ⭐ «Пользователь или группа»: диалог отдаёт { __userIds: [1,2], __userMulti }.
+    // REST ждёт <Field>Id: Collection(Edm.Int32) для многократного поля и число/одиночный Id.
+    if (value && typeof value === "object" && Array.isArray(value.__userIds)) {
+      const ids = value.__userIds.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+      if (ids.length === 0) continue;
+      const idKey = `${fieldName}Id`;
+      payload[idKey] = (value.__userMulti === true || ids.length > 1)
+        ? { __metadata: { type: "Collection(Edm.Int32)" }, results: ids }
+        : ids[0];
+      continue;
+    }
     payload[fieldName] = value;
   }
 }

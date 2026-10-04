@@ -6,7 +6,7 @@
 // по нажатию кнопки: никаких диалогов, подтверждений и анимаций.
 
 /**
- * @typedef {"complete"|"confirm"|"location"} ResultFlowAction
+ * @typedef {"complete"|"confirm"|"location"|"ct-dialog"|"open-card"} ResultFlowAction
  */
 
 /**
@@ -19,6 +19,12 @@
 export function resolveResultFlow(choiceValue, rule) {
   if (!rule || rule.source === "empty") {
     return { action: "complete", reason: "no-behaviour" };
+  }
+  // dlg → диалог закрытия, форма которого собирается по типу контента и типам колонок
+  // (карточка/таблица только передают выбранный результат). Приоритет выше loc/p/aa/ic:
+  // это «закрываем задачу целиком через диалог», он же собирает Location1 своим полем.
+  if (rule.requiresDialog === true) {
+    return { action: "ct-dialog", reason: "behaviour.dlg" };
   }
   if (rule.requiresLocation === true) {
     return { action: "location", reason: "behaviour.loc" };

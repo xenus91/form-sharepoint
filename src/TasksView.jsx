@@ -51,6 +51,8 @@ import { buildRowActions, stylingToSx } from "./features/tasks/lib/rowActions";
 import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
 import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
+import ContentTypeResultDialog from "./features/tasks/components/ContentTypeResultDialog";
+import { isDialogRequired, taskContentTypeId } from "./tasks/contentTypeFields";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
 import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
 import { useHashElement } from "./features/tasks/hooks/useHashElement";
@@ -261,6 +263,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // Значения инлайн-формы (поповер таблицы), если у результата ещё и Behaviour.c:
   // подтверждаем ПОСЛЕ формы и завершаем задачу уже с этими значениями.
   const [pendingInlineSubmit, setPendingInlineSubmit] = useState(null);
+  // Диалог закрытия по типу контента (Behaviour.dlg / «Результат проверки ООБ»):
+  // { task, rule, result } — форма строится по колонкам SharePoint.
+  const [ctDialog, setCtDialog] = useState(null);
   // Выделенная строка таблицы (compositeId). Клик по строке только выделяет,
   // переход в форму — кнопкой «Изменить» или двойным кликом (как в «Заявки ДОБ»).
   const [selectedTableRow, setSelectedTableRow] = useState(null);
@@ -515,6 +520,14 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       }, 1600);
     };
 
+    // ⭐ Закрытие через ДИАЛОГ по типу контента (Behaviour.dlg или сам тип контента
+    // «Результат проверки ООБ»): форму строит ContentTypeResultDialog строго по
+    // колонкам SharePoint, а карточка/таблица только передают выбранный результат.
+    if (isDialogRequired(rule, taskContentTypeId(task))) {
+      runAfterAnimation(() => setCtDialog({ task, rule: rule || null, result: resultValue || "" }));
+      return;
+    }
+
     // 🛡 Страховка: правило требует полей/доп. действий, но форму никто не показал
     // (клик пришёл не из карточки и не из поповера таблицы). «Молча» завершать нельзя:
     // Location1 соберёт диалог местоположения, остальные поля — форма карточки.
@@ -645,6 +658,41 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   // Вид кнопки результата — из Behaviour.stylingResultButton (тот же резолвер,
   // что в карточке): background/color/hover/variant.
+  // Варианты результата для диалога закрытия: поле результата типа контента задачи
+  // (DobSearchResult и т.п.), плюс свежие choices строки таблицы.
+  const dialogChoicesForTask = useCallback((task) => {
+    const fresh = rowChoices[task?.compositeId];
+    if (Array.isArray(fresh?.choices) && fresh.choices.length > 0) return fresh.choices;
+    try {
+      const meta = getResultFieldForTask(task, ctResultMap, resultFieldsMeta);
+      if (Array.isArray(meta?.choices) && meta.choices.length > 0) return meta.choices;
+    } catch (_e) { void _e; }
+    return Array.isArray(choices) ? choices : [];
+  }, [rowChoices, ctResultMap, resultFieldsMeta, choices]);
+
+  const dialogResultFieldName = useCallback((task) => {
+    try {
+      const meta = getResultFieldForTask(task, ctResultMap, resultFieldsMeta);
+      return meta?.internalName || "";
+    } catch (_e) { void _e; return ""; }
+  }, [ctResultMap, resultFieldsMeta]);
+
+  const dialogContentTypeName = useCallback((task) => {
+    try {
+      const ctId = taskContentTypeId(task);
+      const meta = findContentTypeMeta(ctId, taskConfiguration.data?.ctMetaMap);
+      return meta?.name || "";
+    } catch (_e) { void _e; return ""; }
+  }, [taskConfiguration.data]);
+
+  // Отправка диалога: результат + поля типа контента, доп. действий нет (req = null).
+  const handleCtDialogSubmit = useCallback(({ result, values }) => {
+    const dialogTask = ctDialog?.task;
+    if (!dialogTask) return;
+    setCtDialog(null);
+    completeTask(dialogTask, result, values || {}, null, []);
+  }, [ctDialog?.task, completeTask]);
+
   const resolveRowChoiceStyling = useCallback((row, choice) => {
     const tb = rowTaskBehaviour(row);
     if (!tb?.styling?.ok) return null;
@@ -715,7 +763,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     const showAA = rule.showAdditionalActions === true;
     // ic без полей/AA → две кнопки ok/no (как в карточке); с полями ic лишь подписывает submit
     const icMode = rule.inlineConfirm === true && fields.length === 0 && !showAA;
-    if (fields.length === 0 && !showAA && !icMode) return null; // loc / c / прямое завершение
+    // loc в Behaviour приоритетнее полей и доп. действий (как в карточке по §4):
+    // «Где найдена ЕО?» открывается диалогом, а не инлайн-формой в поповере.
+    // Иначе одно и то же правило давало бы в таблице форму, а в карточке — диалог.
+    if (rule.requiresLocation === true) return null;
+    if (fields.length === 0 && !showAA && !icMode) return null; // c / прямое завершение
 
     const ctId = String(row?.contentTypeId || row?.ContentTypeId || row?.raw?.ContentTypeId?.StringValue || "").trim();
     const ctCfg = taskConfiguration?.data?.ctConfigMap?.get(ctId) || taskConfiguration?.data?.ctConfigMap?.get("__default") || null;
@@ -1041,6 +1093,22 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
       </>
       )}
+            <ContentTypeResultDialog
+        open={Boolean(ctDialog)}
+        task={ctDialog?.task || null}
+        contentTypeId={taskContentTypeId(ctDialog?.task)}
+        contentTypeName={ctDialog ? dialogContentTypeName(ctDialog.task) : ""}
+        resultFieldInternalName={ctDialog ? dialogResultFieldName(ctDialog.task) : ""}
+        resultChoices={ctDialog ? dialogChoicesForTask(ctDialog.task) : []}
+        initialResult={ctDialog?.result || ""}
+        confirmTexts={ctDialog?.rule?.confirmTexts || null}
+        submitLabel={ctDialog?.rule?.confirmTexts?.okText || ""}
+        cancelLabel={ctDialog?.rule?.confirmTexts?.cancelText || ""}
+        submitting={ctDialog?.task?.Id != null && updatingId === ctDialog.task.Id}
+        onSubmit={handleCtDialogSubmit}
+        onClose={() => setCtDialog(null)}
+      />
+
             <TaskLocationDialog
         open={locationDialogOpen}
         onClose={() => setLocationDialogOpen(false)}
