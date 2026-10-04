@@ -70,6 +70,22 @@
 поэтому форма ДОБ читает и пишет элементы основного сайта. `ContentTypeResultDialog`
 получил режим `inline` (та же форма без модального окна) — его показывает форма ДОБ.
 
+**Почему таблица всё равно уходила в `#tasks/<Id>` (найдено и починено 2026-10-04).**
+Две причины, обе закрыты:
+
+1. `useHashElement` в hash-режиме отдаёт задачу из `useTasksQuery`, к которой `markMainTasks`
+   не применяется → `sourceId` пустой; guard в redirect-эффекте `TasksView.jsx` требовал
+   строго `sourceId === "main"` и молча выходил, поэтому deep-link `#tasks/<Id>` (именно его
+   ставит «Изменить» в таблице, когда строка пришла без типа контента) показывал карточку.
+   Теперь «нет `sourceId`» = основной список, guard не блокирует. Проверка: кейс в
+   `TasksView.multisource.test.jsx` («#tasks/13 … уводит на форму ДОБ»).
+2. Тип контента распознавался только как строка (`contentTypeId`/`ContentTypeId`/`raw.StringValue`).
+   Если SharePoint отдаёт его объектом (`{ StringValue }` / `{ Id: … }`), с OData-префиксом
+   (`OData__ContentTypeId`) или задачу можно опознать лишь по имени типа, детект молчал.
+   Теперь есть `contentTypeIdOf`/`taskContentTypeId`/`taskContentTypeName`/`isResultCheckTask`,
+   а `isDialogRequired(rule, ctId, ctName)` принимает и имя типа. Роут `?dbg=1` печатает
+   `[DBG:ct-detect]` со всеми формами id — этим и проверяется живой ответ SharePoint.
+
 ## Что НЕ делаем
 
 - никаких самодельных диалогов/маршрутов «закрыть задачу»;

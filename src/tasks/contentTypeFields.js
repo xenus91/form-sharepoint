@@ -186,11 +186,84 @@ export async function fetchContentTypeFields(ctId, opts = {}) {
   return [];
 }
 
-/** ContentTypeId задачи (в разных формах записи). */
+/**
+ * ContentTypeId из любого представления: строка, объект SharePoint
+ * ({ StringValue } / { StringId } / { Id }), с OData-префиксом, из raw-элемента.
+ * @param {any} value
+ * @returns {string}
+ */
+export function contentTypeIdOf(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object") {
+    const inner = value.StringValue || value.StringId || value.Value
+      || (typeof value.Id === "string" ? value.Id : value.Id?.StringValue);
+    return inner ? String(inner).trim() : "";
+  }
+  return "";
+}
+
+/**
+ * ContentTypeId задачи — в любой форме, в которой он пришёл из SharePoint:
+ * mapping (contentTypeId/ContentTypeId), raw-элемент, OData-префикс, объект.
+ * Раньше поддерживалась только строка + raw.StringValue — из-за этого задача
+ * «Результат проверки ООБ» могла не распознаваться и открывалась карточкой.
+ *
+ * @param {any} task
+ * @returns {string}
+ */
 export function taskContentTypeId(task) {
-  return String(
-    task?.contentTypeId || task?.ContentTypeId || task?.raw?.ContentTypeId?.StringValue || "",
-  ).trim();
+  if (!task || typeof task !== "object") return "";
+  const raw = task.raw || null;
+  const candidates = [
+    task.contentTypeId,
+    task.ContentTypeId,
+    task.OData__ContentTypeId,
+    task.ContentType,
+    raw?.contentTypeId,
+    raw?.ContentTypeId,
+    raw?.OData__ContentTypeId,
+    raw?.ContentType,
+    raw?.ContentTypeId?.Id,
+  ];
+  for (const candidate of candidates) {
+    const id = contentTypeIdOf(candidate);
+    if (id) return id;
+  }
+  return "";
+}
+
+/** Имя типа контента задачи (если SharePoint его отдал). */
+export function taskContentTypeName(task) {
+  if (!task || typeof task !== "object") return "";
+  const raw = task.raw || null;
+  const candidates = [
+    task.contentTypeName,
+    task.ContentTypeName,
+    raw?.ContentTypeName,
+    typeof task.ContentType === "object" ? task.ContentType?.Name : null,
+    typeof raw?.ContentType === "object" ? raw?.ContentType?.Name : null,
+  ];
+  for (const candidate of candidates) {
+    const name = String(candidate || "").trim();
+    if (name) return name;
+  }
+  return "";
+}
+
+/**
+ * Задача типа контента «Результат проверки ООБ» (id ИЛИ имя — что доступно).
+ * Такие задачи ведут себя как задачи сайта ДОБ: форма DobTaskEditView закрывает
+ * их через форму по колонкам типа контента.
+ *
+ * @param {any} task
+ * @returns {boolean}
+ */
+export function isResultCheckTask(task) {
+  const id = taskContentTypeId(task).toLowerCase();
+  if (id && id === RESULT_CHECK_OOO_CT_ID.toLowerCase()) return true;
+  const name = taskContentTypeName(task).toLowerCase();
+  return name !== "" && name === RESULT_CHECK_OOO_CT_NAME.toLowerCase();
 }
 
 /**
@@ -200,11 +273,13 @@ export function taskContentTypeId(task) {
  *   • иначе — да, если тип контента задачи это «Результат проверки ООБ»:
  *     он по требованию закрывается ТОЛЬКО через диалог ДОБ.
  */
-export function isDialogRequired(rule, ctId) {
+export function isDialogRequired(rule, ctId, ctName = "") {
   if (rule?.requiresDialog === false) return false;
   if (rule?.requiresDialog === true) return true;
-  const id = String(ctId || "").trim().toLowerCase();
-  return id !== "" && id === RESULT_CHECK_OOO_CT_ID.toLowerCase();
+  const id = contentTypeIdOf(ctId).toLowerCase();
+  if (id !== "" && id === RESULT_CHECK_OOO_CT_ID.toLowerCase()) return true;
+  const name = String(ctName || "").trim().toLowerCase();
+  return name !== "" && name === RESULT_CHECK_OOO_CT_NAME.toLowerCase();
 }
 
 function normType(field) {

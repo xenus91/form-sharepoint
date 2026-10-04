@@ -10,7 +10,7 @@
 // Вынесено отдельно от TasksView, чтобы поведение было тестируемым.
 
 import { parseCompositeId } from "../../../tasks/multiSource";
-import { taskContentTypeId, RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
+import { isResultCheckTask } from "../../../tasks/contentTypeFields";
 import { TASKS_LIST_GUID } from "../../../tasks/config";
 
 /**
@@ -20,8 +20,7 @@ import { TASKS_LIST_GUID } from "../../../tasks/config";
  * @returns {boolean}
  */
 export function isDialogResultTask(task) {
-  const ct = String(taskContentTypeId(task) || "").toLowerCase();
-  return ct !== "" && ct === String(RESULT_CHECK_OOO_CT_ID).toLowerCase();
+  return isResultCheckTask(task);
 }
 
 /**

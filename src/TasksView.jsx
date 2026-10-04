@@ -829,6 +829,18 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   }, [rowChoices, resultFieldMetaForRow, choices]);
 
   const getTableRowActions = useCallback((row) => {
+    // ?dbg=1: видно, почему строка считается «как dob» (или нет) — тип контента
+    // может прийти строкой, объектом {StringValue}, из raw или только по имени.
+    if (__DBG_ENABLED__) {
+      __dlog("[DBG:ct-detect]", {
+        id: row?.Id,
+        sourceId: row?.sourceId,
+        ct: taskContentTypeId(row),
+        ctName: row?.contentTypeName || row?.raw?.ContentType?.Name || "",
+        rawCt: row?.raw?.ContentTypeId,
+        dobLike: isDobLikeTask(row),
+      });
+    }
     const actions = buildRowActions(row, {
       canTake: canTakeTableRow(row),
       taking: !!externalTakingId && externalTakingId === row?.compositeId,
@@ -904,7 +916,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // а не стандартной карточкой: deep-link #tasks/<Id> уводим на #dob_tasks/<Id>?list=<основной список>.
   React.useEffect(() => {
     const t = elementTaskMatch;
-    if (!t || t.sourceId !== "main" || !isDobLikeTask(t)) return;
+    // sourceId может быть не проставлен (в hash-режиме задачи приходят из useTasksQuery
+    // без markMainTasks) — отсутствие sourceId = основной список, а не внешний источник.
+    if (!t || (t.sourceId && t.sourceId !== "main") || !isDobLikeTask(t)) return;
     const hash = buildTaskFormHash(t.compositeId || `main:${t.Id}`, tableData.sources, t);
     if (hash && window.location.hash !== hash) window.location.hash = hash;
   }, [elementTaskMatch, tableData.sources]);

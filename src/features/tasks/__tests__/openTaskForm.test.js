@@ -47,4 +47,16 @@ describe("buildTaskFormHash", () => {
     expect(buildTaskFormHash("dob:abc", [MAIN, DOB])).toBeNull();
     expect(buildTaskFormHash(null, [MAIN, DOB])).toBeNull();
   });
+
+  it("тип контента в объектной/raw-форме тоже уводит на форму ДОБ", () => {
+    const task = { Id: 7, raw: { ContentTypeId: { StringValue: RESULT_CHECK_OOO_CT_ID } } };
+    expect(buildTaskFormHash("main:7", [MAIN, DOB], task)).toBe(
+      "#dob_tasks/7?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+    );
+    const byName = { Id: 8, raw: { ContentType: { Name: "Результат проверки ООБ" } } };
+    expect(buildTaskFormHash("main:8", [MAIN, DOB], byName)).toBe(
+      "#dob_tasks/8?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+    );
+  });
+
 });

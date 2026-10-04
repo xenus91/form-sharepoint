@@ -4,15 +4,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   RESULT_CHECK_OOO_CT_ID,
-  SYSTEM_AND_TASK_FIELDS,
-  buildContentTypeForm,
-  clearContentTypeFieldsCache,
-  controlKindOf,
+  contentTypeIdOf,
   isDialogRequired,
-  isFormField,
-  plainText,
+  isResultCheckTask,
   taskContentTypeId,
+  taskContentTypeName,
+  controlKindOf,
+  isFormField,
+  buildContentTypeForm,
   validateRequiredFields,
+  SYSTEM_AND_TASK_FIELDS,
+  plainText,
 } from "../contentTypeFields";
 import {
   accountLocalPart,
@@ -190,5 +192,36 @@ describe("userSearch — поиск людей по учётной записи"
     expect(personDisplayName(user)).toBe("Иванов Иван");
     expect(personOptionLabel(user, "Главный специалист")).toBe("Иванов Иван — Главный специалист");
     expect(personOptionLabel(user, "")).toBe("Иванов Иван");
+  });
+});
+
+describe("распознавание типа контента «Результат проверки ООБ»", () => {
+  it("ContentTypeId читается из строки, объекта SharePoint, OData-префикса и raw", () => {
+    expect(contentTypeIdOf(RESULT_CHECK_OOO_CT_ID)).toBe(RESULT_CHECK_OOO_CT_ID);
+    expect(contentTypeIdOf({ StringValue: RESULT_CHECK_OOO_CT_ID })).toBe(RESULT_CHECK_OOO_CT_ID);
+    expect(contentTypeIdOf({ Id: { StringValue: RESULT_CHECK_OOO_CT_ID } })).toBe(RESULT_CHECK_OOO_CT_ID);
+    expect(taskContentTypeId({ ContentTypeId: { StringValue: RESULT_CHECK_OOO_CT_ID } })).toBe(RESULT_CHECK_OOO_CT_ID);
+    expect(taskContentTypeId({ raw: { ContentTypeId: RESULT_CHECK_OOO_CT_ID } })).toBe(RESULT_CHECK_OOO_CT_ID);
+    expect(taskContentTypeId({ raw: { ContentTypeId: { StringValue: RESULT_CHECK_OOO_CT_ID } } })).toBe(RESULT_CHECK_OOO_CT_ID);
+    expect(taskContentTypeId({ OData__ContentTypeId: RESULT_CHECK_OOO_CT_ID })).toBe(RESULT_CHECK_OOO_CT_ID);
+    expect(taskContentTypeId({ contentTypeId: RESULT_CHECK_OOO_CT_ID.toLowerCase() })).toBe(RESULT_CHECK_OOO_CT_ID.toLowerCase());
+    expect(taskContentTypeId(null)).toBe("");
+  });
+
+  it("задача опознаётся и по имени типа контента, если id не пришёл", () => {
+    expect(taskContentTypeName({ raw: { ContentType: { Name: "Результат проверки ООБ" } } })).toBe("Результат проверки ООБ");
+    expect(isResultCheckTask({ raw: { ContentType: { Name: "Результат проверки ООБ" } } })).toBe(true);
+    expect(isResultCheckTask({ raw: { ContentType: { Name: "Задача рабочего процесса" } } })).toBe(false);
+    expect(isResultCheckTask({ contentTypeId: RESULT_CHECK_OOO_CT_ID })).toBe(true);
+    expect(isResultCheckTask({ contentTypeId: "0x0108" })).toBe(false);
+    expect(isResultCheckTask(undefined)).toBe(false);
+  });
+
+  it("isDialogRequired понимает объектный id и имя типа контента", () => {
+    expect(isDialogRequired(null, { StringValue: RESULT_CHECK_OOO_CT_ID })).toBe(true);
+    expect(isDialogRequired(null, "", "Результат проверки ООБ")).toBe(true);
+    expect(isDialogRequired(null, "0x0108", "Задача рабочего процесса")).toBe(false);
+    expect(isDialogRequired({ requiresDialog: false }, RESULT_CHECK_OOO_CT_ID)).toBe(false);
+    expect(isDialogRequired({ requiresDialog: true }, "0x0108")).toBe(true);
   });
 });

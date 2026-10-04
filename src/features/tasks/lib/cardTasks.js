@@ -10,7 +10,7 @@
 // Дубликаты (по sourceId:Id) отбрасываются.
 
 import { mergeSort } from "../../../tasks/multiSource";
-import { taskContentTypeId, RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
+import { isResultCheckTask } from "../../../tasks/contentTypeFields";
 
 /** @param {any} task @returns {boolean} */
 export function isExternalTask(task) {
@@ -31,8 +31,7 @@ export function isExternalTask(task) {
 export function isDobLikeTask(task) {
   if (!task) return false;
   if (isExternalTask(task)) return true;
-  const ct = String(taskContentTypeId(task) || "").toLowerCase();
-  return ct !== "" && ct === String(RESULT_CHECK_OOO_CT_ID).toLowerCase();
+  return isResultCheckTask(task);
 }
 
 /**

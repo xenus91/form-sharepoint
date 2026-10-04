@@ -607,6 +607,15 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(state.requests.some((r) => /ProblemsPallet/i.test(r.url))).toBe(false);
   }, 30000);
 
+  it("#tasks/13 (тип «Результат проверки ООБ») уводит на форму ДОБ, а не в стандартную карточку", async () => {
+    // deep-link на задачу нового типа: карточку #tasks/<Id> показывать нельзя —
+    // задача ведёт себя как dob-задача и открывается формой DobTaskEditView.
+    window.location.hash = "#tasks/13";
+    renderTasksView({ initialElementId: "13" });
+    await settle(3500);
+    expect(window.location.hash).toBe(`#dob_tasks/13?list=${MAIN_GUID}`);
+  }, 40000);
+
   it("действия по задаче открываются В ТОЧКЕ КЛИКА по строке (popup, а не колонка)", async () => {
     const host = renderTasksView();
     await settle(3000);
