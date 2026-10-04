@@ -171,3 +171,31 @@ Id взявшего сверяется с Id текущего пользоват
 `isRowTakenByOther` (`TasksView`) и в мутациях взятия (`useTaskMutations`,
 `handleTakeExternalTask`) — при «взял я» показывается «В работе у вас» без предупреждения,
 вместо «Возьмите другую задачу».
+
+## Значения выбора и профиль человека: два «странных» места (2026-10-04, round 5)
+
+**1) «Тип ошибки» показывал `[object Object]` вместо пустоты.**
+SharePoint (`odata=verbose`) отдаёт MultiChoice объектом-коллекцией
+(`{ __metadata: { type: "Collection(Edm.String)" }, results: [] }`, элементы — `{ Value }`),
+а в форме значение приводилось к строке (`String(raw)`) — отсюда `[object Object]`.
+Добавлены `normalizeChoiceValues` / `normalizeChoiceValue` (`src/tasks/contentTypeFields.js`):
+понимают коллекцию, массив, `{ Value }`, строку «a;#b» и пустое значение; используются при
+инициализации формы, в рендере (select/autocomplete/multichoice) и в payload
+(MultiChoice уходит строкой «a;#b»). То же — в форме ДОБ (`DobTaskEditView`).
+
+**2) Должность/департамент: запросы обрывались на `#` в учётной записи.**
+URL вида
+`GetUserProfilePropertyFor(...)?@v='i:0#.f|membership|ivanov.ii@lenta.com'`
+обрывался на `#` (начало fragment) — SharePoint получал `@v='i:0` и отвечал
+«Строка запроса "accountName" отсутствует или недопустима». Плюс на каждого человека
+уходило ДВА запроса (JobTitle + Department), то есть до 40 запросов на один поиск.
+Теперь:
+* `accountNameParam()` кодирует учётную запись целиком (`encodeURIComponent`): `#` → `%23`,
+  `|` → `%7C`, `@` → `%40`;
+* сначала ОДИН пакетный запрос `/web/SiteUserInfoList/items?$select=Id,UserName,JobTitle,Department&$filter=Id eq … or …` —
+  должность и департамент сразу на всех найденных (`fetchPositionsFromUserInfo`);
+* для тех, кого в списке сведений нет, — профиль одним запросом
+  `GetPropertiesFor(accountName=@v)` (JobTitle + Department), не больше 8 человек за раз;
+* если пакетный запрос недоступен (нет полей/прав) — больше не пробуем (флаг на сессию);
+* результат по-прежнему кэшируется по логину (повторный поиск в сеть не идёт).
+Подпись человека: «Иванов Иван — Главный специалист · Департамент ИТ».

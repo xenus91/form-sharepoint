@@ -19,13 +19,17 @@ const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const POSITION_STORAGE_PREFIX = "sp:userOrg:"; // v2: должность + департамент
 const USERS_PAGE_LIMIT = 1000;
 
-const _positions = new Map();      // loginKey -> position|null
+const _positions = new Map();      // loginKey -> «должность · департамент»|null
+// Если пакетный запрос к списку сведений о пользователях недоступен (нет полей
+// JobTitle/Department или нет прав) — не долбим его на каждый поиск.
+let _userInfoBatchBroken = false;
 const _allUsers = { loaded: false, list: [] }; // фолбэк-страница siteusers
 let _allUsersPromise = null;
 
 /** Сброс кэшей (тесты/отладка). */
 export function clearUserSearchCache() {
   _positions.clear();
+  _userInfoBatchBroken = false;
   _allUsers.loaded = false;
   _allUsers.list = [];
   _allUsersPromise = null;
@@ -217,10 +221,103 @@ export async function searchSiteUsers(query, opts = {}) {
   return users.slice(0, limit);
 }
 
+/** Подпись «Должность · Департамент» (что доступно). */
+export function positionLabel(position, department) {
+  const parts = [String(position || "").trim(), String(department || "").trim()].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/**
+ * accountName для вызовов профиля.
+ *
+ * ⚠️ Кодировать ОБЯЗАТЕЛЬНО целиком: в учётной записи есть `#`
+ * («i:0#.f|membership|ivanov.ii@lenta.com»), а `#` в URL обрывает строку запроса
+ * и начинает fragment — SharePoint получает обрезанный `@v='i:0` и отвечает
+ * «Строка запроса "accountName" отсутствует или недопустима».
+ * encodeURIComponent превращает `#` в %23, `|` в %7C, `@` в %40.
+ */
+function accountNameParam(login) {
+  return encodeURIComponent(`'${escapeODataString(login)}'`);
+}
+
+/** Свойства профиля из ответа GetPropertiesFor/GetUserProfilePropertyFor. */
+function profilePropertyList(body) {
+  const node = body?.GetPropertiesFor ?? body;
+  const raw = node?.UserProfileProperties;
+  const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.results) ? raw.results : []);
+  return list;
+}
+
+function profileValue(body, property) {
+  const list = profilePropertyList(body);
+  const hit = list.find((p) => String(p?.Key || "").toLowerCase() === property.toLowerCase());
+  if (hit && hit.Value !== undefined && hit.Value !== null) {
+    const value = String(hit.Value).trim();
+    if (value) return value;
+  }
+  // Иногда значение приходит прямо в теле (фолбэк).
+  const direct = body?.[property] ?? body?.GetPropertiesFor?.[property];
+  return direct ? String(direct).trim() : "";
+}
+
+/**
+ * Должность+департамент одного человека ОДНИМ запросом (GetPropertiesFor).
+ * @returns {Promise<string|null>} «Главный специалист · Департамент ИТ»
+ */
+async function fetchPositionFromProfile(login, get) {
+  const url = `/SP.UserProfiles.PeopleManager/GetPropertiesFor(accountName=@v)?@v=${accountNameParam(login)}`;
+  try {
+    const resp = await get(url, ACCEPT);
+    const body = verboseBody(resp);
+    const label = positionLabel(profileValue(body, "SPS-JobTitle"), profileValue(body, "SPS-Department"));
+    if (label) return label;
+  } catch (e) {
+    if (e?.response?.status && ![400, 403, 404].includes(e.response.status)) {
+      console.warn("[userSearch] GetPropertiesFor failed", e.response.status);
+    }
+  }
+  // Фолбэк: по одному свойству (тоже с корректным кодированием учётной записи).
+  const readOne = async (property) => {
+    try {
+      const resp = await get(
+        `/SP.UserProfiles.PeopleManager/GetUserProfilePropertyFor(accountName=@v,propertyName='${property}')?@v=${accountNameParam(login)}`,
+        ACCEPT,
+      );
+      const d = verboseBody(resp);
+      const value = typeof d === "string" ? d : (d?.GetUserProfilePropertyFor ?? d?.value ?? null);
+      return value ? String(value).trim() : "";
+    } catch (_e) {
+      void _e;
+      return "";
+    }
+  };
+  const [position, department] = await Promise.all([readOne("SPS-JobTitle"), readOne("SPS-Department")]);
+  return positionLabel(position, department);
+}
+
+/**
+ * Должность+департамент ПАЧКОЙ — один запрос на всех: «Список сведений о
+ * пользователях» (SiteUserInfoList) хранит JobTitle/Department для участников сайта.
+ * @returns {Promise<Record<string, string>>} loginName(lower) → подпись
+ */
+async function fetchPositionsFromUserInfo(users, get) {
+  const ids = [...new Set(users.map((u) => Number(u?.Id)).filter((n) => Number.isFinite(n) && n > 0))].slice(0, 50);
+  if (ids.length === 0) return {};
+  const filter = ids.map((n) => `Id eq ${n}`).join(" or ");
+  const url = `/web/SiteUserInfoList/items?$select=Id,UserName,JobTitle,Department&$filter=${encodeURIComponent(filter)}&$top=50`;
+  const resp = await get(url, ACCEPT);
+  const out = {};
+  for (const item of resultsOf(resp)) {
+    const label = positionLabel(item?.JobTitle, item?.Department);
+    const key = lower(String(item?.UserName || ""));
+    if (label && key) out[key] = label;
+  }
+  return out;
+}
+
 /**
  * Должность и департамент пользователя из профиля SharePoint
- * (SPS-JobTitle · SPS-Department) — одной подписью для подсказок и выбранных:
- * «Главный специалист · Департамент ИТ».
+ * («Главный специалист · Департамент ИТ»).
  * @param {string} loginName — например «i:0#.f|membership|ivanov.ii@lenta.com»
  * @param {{ get?: Function }} [opts]
  * @returns {Promise<string|null>}
@@ -231,32 +328,8 @@ export async function getUserPosition(loginName, opts = {}) {
   const key = lower(login);
   const cached = cacheReadPosition(key);
   if (cached !== undefined) return cached;
-
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
-  const quoted = `'${escapeODataString(login)}'`;
-  // Должность (SPS-JobTitle) и департамент (SPS-Department) — в одной подписи:
-  // при выборе человека важно видеть и то, и другое (однофамильцы/тёзки).
-  const readProperty = async (property) => {
-    try {
-      const resp = await get(
-        `/SP.UserProfiles.PeopleManager/GetUserProfilePropertyFor(accountName=@v,propertyName='${property}')?@v=${quoted}`,
-        ACCEPT,
-      );
-      const d = verboseBody(resp);
-      const value = typeof d === "string" ? d : (d?.GetUserProfilePropertyFor ?? d?.value ?? null);
-      return value ? String(value).trim() : null;
-    } catch (e) {
-      if (e?.response?.status && e.response.status !== 404 && e.response.status !== 400) {
-        console.warn("[userSearch] profile property failed", property, e.response.status);
-      }
-      return null;
-    }
-  };
-  const [position, department] = await Promise.all([
-    readProperty("SPS-JobTitle"),
-    readProperty("SPS-Department"),
-  ]);
-  const label = [position, department].filter(Boolean).join(" · ") || null;
+  const label = await fetchPositionFromProfile(login, get);
   cacheWritePosition(key, label);
   return label;
 }
@@ -264,16 +337,61 @@ export async function getUserPosition(loginName, opts = {}) {
 /**
  * Подписи «должность · департамент» для набора пользователей (для подсказок
  * автокомплита и уже выбранных).
- * @param {Array<{LoginName?:string}>} users
- * @returns {Promise<Record<string, string|null>>} loginName(lower) → должность
+ *
+ * Сначала — один пакетный запрос к списку сведений о пользователях; для тех, кого
+ * там нет, — профиль (не больше 8 человек за раз, чтобы поиск не превращался в
+ * лавину запросов). Уже известные значения берутся из кэша.
+ *
+ * @param {Array<{LoginName?:string, Id?:number}>} users
+ * @returns {Promise<Record<string, string|null>>} loginName(lower) → подпись
  */
 export async function getUserPositions(users = [], opts = {}) {
   const out = {};
   const list = (Array.isArray(users) ? users : []).slice(0, 25);
-  await Promise.all(list.map(async (u) => {
+  const unknown = [];
+  for (const u of list) {
     const login = String(u?.LoginName || "").trim();
-    if (!login) return;
-    out[lower(login)] = await getUserPosition(login, opts);
+    if (!login) continue;
+    const key = lower(login);
+    const cached = opts.forceRefresh ? undefined : cacheReadPosition(key);
+    if (cached !== undefined) {
+      out[key] = cached;
+      continue;
+    }
+    unknown.push({ Id: u?.Id, LoginName: login, __key: key });
+  }
+  if (unknown.length === 0) return out;
+  const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
+
+  // 1) Один запрос: должность+департамент по всем, кого ищем.
+  const resolved = new Set();
+  if (!_userInfoBatchBroken) {
+    try {
+      const batch = await fetchPositionsFromUserInfo(unknown, get);
+      for (const u of unknown) {
+        if (batch[u.__key] !== undefined) {
+          out[u.__key] = batch[u.__key];
+          cacheWritePosition(u.__key, batch[u.__key]);
+          resolved.add(u.__key);
+        }
+      }
+    } catch (e) {
+      const status = e?.response?.status;
+      if (status === 400 || status === 403 || status === 404) {
+        // Поля/права недоступны — дальше идём профилем, пакет больше не пробуем.
+        _userInfoBatchBroken = true;
+      } else if (status) {
+        console.warn("[userSearch] SiteUserInfoList failed", status);
+      }
+    }
+  }
+
+  // 2) Кого в списке сведений нет — смотрим профиль (ограниченно).
+  const rest = unknown.filter((u) => !resolved.has(u.__key)).slice(0, 8);
+  await Promise.all(rest.map(async (u) => {
+    const label = await fetchPositionFromProfile(u.LoginName, get);
+    out[u.__key] = label;
+    cacheWritePosition(u.__key, label);
   }));
   return out;
 }

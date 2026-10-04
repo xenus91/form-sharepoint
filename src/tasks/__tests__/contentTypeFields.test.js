@@ -14,6 +14,8 @@ import {
   taskContentTypeId,
   taskContentTypeName,
   controlKindOf,
+  normalizeChoiceValue,
+  normalizeChoiceValues,
   fetchContentTypeFields,
   clearContentTypeFieldsCache,
   isFormField,
@@ -26,6 +28,7 @@ import {
   accountLocalPart,
   accountQueryVariants,
   clearUserSearchCache,
+  getUserPositions,
   matchesUser,
   normalizeAccountSeparators,
   personDisplayName,
@@ -266,6 +269,102 @@ describe("userSearch — поиск людей по учётной записи"
     expect(personDisplayName(user)).toBe("Иванов Иван");
     expect(personOptionLabel(user, "Главный специалист")).toBe("Иванов Иван — Главный специалист");
     expect(personOptionLabel(user, "")).toBe("Иванов Иван");
+  });
+});
+
+describe("значения полей выбора — без «[object Object]»", () => {
+  it("verbose-коллекция SharePoint приводится к массиву строк", () => {
+    // пустая коллекция: именно она показывалась как «[object Object]» в «Типе ошибки»
+    expect(normalizeChoiceValues({ __metadata: { type: "Collection(Edm.String)" }, results: [] })).toEqual([]);
+    expect(normalizeChoiceValues({ results: [{ Value: "Приёмка" }, { Value: "Порча" }] })).toEqual(["Приёмка", "Порча"]);
+    expect(normalizeChoiceValues(["Приёмка", "Порча"])).toEqual(["Приёмка", "Порча"]);
+    expect(normalizeChoiceValues("Приёмка;#Порча")).toEqual(["Приёмка", "Порча"]);
+    expect(normalizeChoiceValues("")).toEqual([]);
+    expect(normalizeChoiceValues(null)).toEqual([]);
+    expect(normalizeChoiceValues(undefined)).toEqual([]);
+    expect(normalizeChoiceValues({ __metadata: { type: "SP.Field" }, Value: "Перебрать" })).toEqual(["Перебрать"]);
+  });
+
+  it("одиночный выбор — строка, объекты тоже понимает", () => {
+    expect(normalizeChoiceValue("Годен")).toBe("Годен");
+    expect(normalizeChoiceValue({ results: [{ Value: "Годен" }] })).toBe("Годен");
+    expect(normalizeChoiceValue({ __metadata: { type: "SP.Field" }, results: [] })).toBe("");
+    expect(normalizeChoiceValue(null)).toBe("");
+    expect(normalizeChoiceValue(undefined)).toBe("");
+  });
+});
+
+describe("userSearch — должность и департамент", () => {
+  const LOGIN = "i:0#.f|membership|porshakov_sa@lenta.com";
+
+  beforeEach(() => {
+    clearUserSearchCache();
+  });
+
+  it("один пакетный запрос к списку сведений: должность+департамент сразу для всех", async () => {
+    const calls = [];
+    const get = async (url) => {
+      calls.push(String(url));
+      return {
+        data: {
+          d: {
+            results: [
+              { Id: 5, UserName: LOGIN, JobTitle: "Главный специалист", Department: "Департамент ИТ" },
+            ],
+          },
+        },
+      };
+    };
+    const map = await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get });
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toContain("/web/SiteUserInfoList/items");
+    expect(map[LOGIN.toLowerCase()]).toBe("Главный специалист · Департамент ИТ");
+  });
+
+  it("учётная запись кодируется целиком: `#` в логине обрывал запрос (accountName отсутствует)", async () => {
+    const calls = [];
+    const get = async (url) => {
+      calls.push(String(url));
+      if (String(url).includes("SiteUserInfoList")) {
+        const e = new Error("bad request");
+        e.response = { status: 400 };
+        throw e;
+      }
+      return {
+        data: {
+          d: {
+            GetPropertiesFor: {
+              UserProfileProperties: [
+                { Key: "SPS-JobTitle", Value: "Начальник отдела" },
+                { Key: "SPS-Department", Value: "Департамент логистики" },
+              ],
+            },
+          },
+        },
+      };
+    };
+    const map = await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get });
+    const profileCall = calls.find((u) => u.includes("GetPropertiesFor"));
+    expect(profileCall).toBeTruthy();
+    // главное: в URL нет «сырого» # — иначе SharePoint видит обрезанный accountName
+    expect(profileCall).not.toContain("#");
+    expect(profileCall).toContain("%23");
+    expect(profileCall).toContain("accountName=@v");
+    expect(profileCall).toContain("@v='i%3A0%23.f%7Cmembership%7Cporshakov_sa%40lenta.com'");
+    expect(map[LOGIN.toLowerCase()]).toBe("Начальник отдела · Департамент логистики");
+  });
+
+  it("повторный запрос берётся из кэша — сеть не дёргаем", async () => {
+    const calls = [];
+    const get = async (url) => {
+      calls.push(String(url));
+      return { data: { d: { results: [{ Id: 5, UserName: LOGIN, JobTitle: "Специалист", Department: "" }] } } };
+    };
+    await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get });
+    expect(calls.length).toBe(1);
+    const again = await getUserPositions([{ Id: 5, LoginName: LOGIN }], { get: async () => { throw new Error("no network"); } });
+    expect(again[LOGIN.toLowerCase()]).toBe("Специалист");
+    expect(calls.length).toBe(1);
   });
 });
 

@@ -24,6 +24,8 @@ import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
 import {
   buildContentTypeForm,
+  normalizeChoiceValue,
+  normalizeChoiceValues,
   fetchContentTypeFields,
   plainText,
   validateRequiredFields,
@@ -127,7 +129,10 @@ export default function ContentTypeResultDialog({
       else if (control.kind === "boolean") next[control.internalName] = raw === true || raw === 1 || String(raw).toLowerCase() === "true";
       else if (control.kind === "number") next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
       else if (control.kind === "date") next[control.internalName] = toISODate(raw);
-      else next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
+      else if (control.kind === "multichoice") next[control.internalName] = normalizeChoiceValues(raw);
+      else if (control.kind === "select" || control.kind === "choice" || control.kind === "autocomplete") {
+        next[control.internalName] = normalizeChoiceValue(raw);
+      } else next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
     }
     setValues(next);
     setProblems([]);
@@ -181,7 +186,19 @@ export default function ContentTypeResultDialog({
         payload[control.internalName] = Number.isFinite(num) ? num : text;
         continue;
       }
-      const text = String(value ?? "");
+      // Выбор: MultiChoice SharePoint принимает строкой «a;#b», одиночный — строкой.
+      if (control.kind === "multichoice") {
+        const list = normalizeChoiceValues(value);
+        if (list.length === 0) {
+          if (control.required) payload[control.internalName] = "";
+          continue;
+        }
+        payload[control.internalName] = list.join(";#");
+        continue;
+      }
+      const text = (control.kind === "select" || control.kind === "choice" || control.kind === "autocomplete")
+        ? normalizeChoiceValue(value)
+        : String(value ?? "");
       if (text.trim() === "" && !control.required) continue;
       payload[control.internalName] = text;
     }
@@ -271,7 +288,7 @@ export default function ContentTypeResultDialog({
               const invalid = touched && control.required
                 && (value === undefined || value === null || String(value).trim() === ""
                   || (control.kind === "richtext" && plainText(value).length === 0)
-                  || (Array.isArray(value) && value.length === 0));
+                  || ((control.kind === "multichoice" || Array.isArray(value)) && normalizeChoiceValues(value).length === 0));
               const helper = control.description || (invalid ? "Обязательное поле" : "");
               const common = { key: control.internalName, size: "small", fullWidth: true, disabled: submitting };
 
@@ -322,7 +339,7 @@ export default function ContentTypeResultDialog({
                     select
                     {...common}
                     label={`${control.title}${control.required ? " *" : ""}`}
-                    value={value || ""}
+                    value={normalizeChoiceValue(value)}
                     onChange={(e) => setValue(control.internalName, e.target.value)}
                     error={Boolean(invalid)}
                     helperText={helper}
@@ -338,11 +355,7 @@ export default function ContentTypeResultDialog({
               // Многократный выбор: с FillInChoice — автокомплит (можно ввести своё),
               // без — select с множественным выбором.
               if (control.kind === "multichoice") {
-                const selected = Array.isArray(value)
-                  ? value
-                  : (value === null || value === undefined || value === ""
-                    ? []
-                    : String(value).split(";#").map((v) => v.trim()).filter(Boolean));
+                const selected = normalizeChoiceValues(value);
                 if (control.allowFillIn === true) {
                   return (
                     <Autocomplete
@@ -398,7 +411,9 @@ export default function ContentTypeResultDialog({
                     multiple={control.multiple === true}
                     disabled={submitting}
                     options={control.choices}
-                    value={control.multiple ? (Array.isArray(value) ? value : []) : (value || "")}
+                    value={control.multiple
+                      ? normalizeChoiceValues(value)
+                      : normalizeChoiceValue(value)}
                     onChange={(_e, next) => setValue(control.internalName, next)}
                     onInputChange={freeSolo ? (_e, next, reason) => { if (reason === "input" && typeof value === "string") setValue(control.internalName, next); } : undefined}
                     renderInput={(params) => (

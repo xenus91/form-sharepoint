@@ -555,6 +555,46 @@ export function controlKindOf(field) {
 }
 
 /**
+ * Значения поля выбора в виде МАССИВА строк.
+ *
+ * SharePoint (odata=verbose) отдаёт MultiChoice как объект-коллекцию
+ * (`{ __metadata, results: [] }`, элементы — `{ Value }`), а хранит как строку
+ * «a;#b». Приводить объект к строке нельзя: в поле появляется «[object Object]»
+ * вместо пустоты — именно это показывал «Тип ошибки» (ErrorTypeValidation).
+ *
+ * @param {any} value
+ * @returns {string[]}
+ */
+export function normalizeChoiceValues(value) {
+  if (value === null || value === undefined || value === "") return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => (v && typeof v === "object" ? String(v.Value ?? v.Title ?? "") : String(v)))
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === "object") {
+    if (Array.isArray(value.results)) return normalizeChoiceValues(value.results);
+    if (value.Value !== undefined && value.Value !== null) return normalizeChoiceValues(value.Value);
+    return [];
+  }
+  return String(value)
+    .split(";#")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/** Значение одиночного выбора — одна строка (объекты/коллекции тоже понимает). */
+export function normalizeChoiceValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") {
+    const list = normalizeChoiceValues(value);
+    return list.length ? list[0] : "";
+  }
+  return String(value);
+}
+
+/**
  * Показываем ли поле в форме закрытия.
  * Скрытые/только для чтения/системные — нет; Calculated/Computed/Taxonomy — нет.
  */

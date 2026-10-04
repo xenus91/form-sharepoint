@@ -36,6 +36,7 @@ const ITEM = {
 // DOB-API: список — основной, поэтому все вызовы должны уйти с MAIN_GUID.
 vi.mock("../api/dobApi", () => ({
   getDobFields: vi.fn(async () => FIELDS),
+  getDobContentTypeFields: vi.fn(async () => FIELDS),
   getDobItem: vi.fn(async () => ITEM),
   updateDobItem: vi.fn(async () => ({ ok: true })),
   uploadDobAttachment: vi.fn(async () => ({})),

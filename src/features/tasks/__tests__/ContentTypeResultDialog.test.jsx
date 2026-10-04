@@ -52,9 +52,12 @@ const FIELDS = [
   { InternalName: "TaskStatus", Title: "TaskStatus", TypeAsString: "Choice" },
 ];
 
+// Набор полей можно подменить в отдельном тесте (например, для MultiChoice).
+let MOCK_FIELDS = FIELDS;
+
 vi.mock("../../../tasks/contentTypeFields", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, fetchContentTypeFields: vi.fn(async () => FIELDS) };
+  return { ...actual, fetchContentTypeFields: vi.fn(async () => MOCK_FIELDS) };
 });
 
 const { default: ContentTypeResultDialog } = await import("../components/ContentTypeResultDialog");
@@ -119,6 +122,7 @@ const typeInto = (el, value) => {
 describe("ContentTypeResultDialog — форма по типу контента", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
+    MOCK_FIELDS = FIELDS;
   });
 
   it("показывает кнопки результирующего выбора и поля по типам колонок", async () => {
@@ -169,6 +173,45 @@ describe("ContentTypeResultDialog — форма по типу контента"
     expect(payload.values.Guilty).toEqual({ __userIds: [5], __userMulti: true });
     // необязательное пустое поле не отправляем
     expect("ErrorTypeValidation" in payload.values).toBe(false);
+  });
+
+it("«Тип ошибки» не показывает «[object Object]»: verbose-коллекция → пустое поле", async () => {
+    // Ровно то, что приходит от SharePoint (odata=verbose) для MultiChoice:
+    // { __metadata, results: [] } — раньше печаталось как «[object Object]».
+    renderDialog({
+      task: {
+        Id: 501,
+        Title: "Результат проверки ООБ",
+        ErrorTypeValidation: { __metadata: { type: "Collection(Edm.String)" }, results: [] },
+      },
+      ErrorTypeValidation: undefined,
+    });
+    await settle(80);
+    expect(document.body.textContent).not.toContain("[object Object]");
+    const errInput = [...document.body.querySelectorAll("input")].find((i) => (i.value || "").includes("object"));
+    expect(errInput).toBeUndefined();
+  });
+
+  it("MultiChoice с заполненными значениями: select-варианты без объектов и «;#» в payload", async () => {
+    MOCK_FIELDS = [
+      { InternalName: "DobSearchResult", Title: "DobSearchResult", TypeAsString: "Choice", Required: true, Choices: { results: ["Годен"] } },
+      { InternalName: "ErrorTypeValidation", Title: "ErrorTypeValidation", TypeAsString: "MultiChoice", FillInChoice: true, Choices: { results: ["Приёмка", "Порча"] } },
+    ];
+    const { onSubmit } = renderDialog({
+      resultChoices: ["Годен"],
+      task: {
+        Id: 501,
+        ErrorTypeValidation: { __metadata: { type: "Collection(Edm.String)" }, results: [{ Value: "Приёмка" }] },
+      },
+    });
+    await settle(80);
+    expect(document.body.textContent).not.toContain("[object Object]");
+    // выбранное значение видно чипом/подписью, а не «[object Object]»
+    expect(document.body.textContent).toContain("Приёмка");
+    await act(async () => { click(buttonByText("Годен")); await settle(10); });
+    await act(async () => { click(buttonByText("Сохранить")); await settle(30); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].values.ErrorTypeValidation).toBe("Приёмка");
   });
 
   it("подписи кнопок берутся из Behaviour (ok/no)", async () => {

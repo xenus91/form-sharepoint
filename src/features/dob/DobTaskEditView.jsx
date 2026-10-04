@@ -17,7 +17,7 @@ import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
 import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
-import { contentTypeIdOf, isDialogRequired, taskContentTypeName } from '../../tasks/contentTypeFields';
+import { contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
 import { resolveRelatedRef } from './lib/relatedItem';
 
@@ -63,17 +63,6 @@ function isChoiceField(field) {
 function isMultiChoiceField(field) {
   const t = typeOfField(field);
   return t === 'multichoice' || t === 'gridchoice' || field?.AllowMultipleValues === true;
-}
-
-/** Значение MultiChoice: строка «a;#b», массив или объект {results}. */
-function multiChoiceValues(raw) {
-  if (raw === null || raw === undefined || raw === '') return [];
-  if (Array.isArray(raw)) return raw.map((v) => String(v?.Value ?? v)).filter(Boolean);
-  if (typeof raw === 'object') {
-    const list = Array.isArray(raw.results) ? raw.results : [];
-    return list.map((v) => String(v?.Value ?? v)).filter(Boolean);
-  }
-  return String(raw).split(';#').map((v) => v.trim()).filter(Boolean);
 }
 
 /** Пользователь или группа: значение поля → массив {Id, Title, LoginName}. */
@@ -221,8 +210,10 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           const meta = (fields || []).find(f => f.InternalName === k);
           const t = (meta?.TypeAsString || '').toLowerCase();
           // MultiChoice SharePoint принимает строкой с разделителем «;#»
-          if ((t === 'multichoice' || t === 'gridchoice') && Array.isArray(v)) {
-            payload[odataK] = v.join(';#');
+          if (t === 'multichoice' || t === 'gridchoice') {
+            const list = normalizeChoiceValues(v);
+            if (list.length === 0) continue;
+            payload[odataK] = list.join(';#');
             continue;
           }
           // «Пользователь или группа» (в т.ч. многократный) — Id в <Field>Id;
@@ -275,6 +266,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             }
           }
           let val = v;
+          if (t === 'choice' || t === 'combobox' || t === 'outcomechoice') {
+            const text = normalizeChoiceValue(v);
+            if (text.trim() === '') continue;
+            payload[odataK] = text;
+            continue;
+          }
           if (val && typeof val === 'object' && !Array.isArray(val)) {
             // Если объект с Url — берём Url, иначе скипаем (иначе 400 без типа)
             if ('Url' in val) val = val.Url;
@@ -738,7 +735,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             if (isChoiceField(f)) {
               const vals = choicesOfField(f);
               const multiple = isMultiChoiceField(f);
-              const selected = multiple ? multiChoiceValues(value) : (value === null || value === undefined ? '' : String(value));
+              // Значения выбора: SharePoint отдаёт коллекции объектами/строками «a;#b» —
+              // нормализуем, иначе в поле показывается «[object Object]».
+              const selected = multiple ? normalizeChoiceValues(value) : normalizeChoiceValue(value);
               return (
                 <TextField
                   key={internal}
