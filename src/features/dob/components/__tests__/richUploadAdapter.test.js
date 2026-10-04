@@ -58,6 +58,24 @@ describe("richUploadAdapter — картинки как вложения", () =>
     expect(uploadedLink(null)).toBe("");
   });
 
+  it("ссылка приводится к рабочему адресу, даже если ответ содержал прямой путь", () => {
+    vi.stubEnv("DEV", true);
+    // Так отдавал старый код dobApi: «/dob-api/sites/…» (прямой путь на файл).
+    // Прокси качал его как JSON → картинка была битой; теперь такой адрес
+    // нормализуется в REST-запрос содержимого.
+    expect(uploadedLink({ ServerRelativeUrl: "/sites/dob/Lists/L/Attachments/1/a.png" })).toBe(
+      "/dob-api/sites/dob/_api/web/getfilebyserverrelativeurl(" +
+      "'/sites/dob/Lists/L/Attachments/1/a.png')/$value",
+    );
+    expect(uploadedLink({ src: "/dob-api/sites/dob/Lists/L/Attachments/1/b.png" })).toBe(
+      "/dob-api/sites/dob/_api/web/getfilebyserverrelativeurl(" +
+      "'/sites/dob/Lists/L/Attachments/1/b.png')/$value",
+    );
+    // уже рабочий адрес — не переписываем
+    const rest = "/dob-api/sites/dob/_api/web/getfilebyserverrelativeurl('/sites/dob/Lists/L/Attachments/1/a.png')/$value";
+    expect(uploadedLink(rest)).toBe(rest);
+  });
+
   it("ошибка загрузки → base64 (текст не теряется)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const adapter = makeUploadAdapter(

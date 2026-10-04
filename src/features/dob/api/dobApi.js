@@ -1,6 +1,7 @@
 // src/features/dob/api/dobApi.js
 // High-level DOB list operations — fields, items, update
 import { dobApiBase, dobListApi, dobAxios, DOB_LIST_GUID } from './dobClient';
+import { attachmentDisplayUrl } from '../lib/attachmentUrl';
 import apiClient from '../../../api';
 import { TASKS_LIST_API, TASKS_LIST_GUID } from '../../../tasks/config';
 import { fetchContentTypeFields } from '../../../tasks/contentTypeFields';
@@ -496,7 +497,44 @@ export async function getDobAttachments(id, listGuid = DOB_LIST_GUID) {
   return results;
 }
 
+/**
+ * ОШИБКА «Конфликт сохранения» (409 / 0x81020014). Появляется, когда вложение
+ * добавляют в элемент ОДНОВРЕМЕННО (вставили две картинки из буфера — CKEditor
+ * грузит их параллельно) или элемент в этот момент правит кто-то ещё. Лечится
+ * повтором: имя файла уникально, повторная попытка ничего не портит.
+ */
+function isSaveConflictError(e) {
+  const status = Number(e?.response?.status) || 0;
+  if (status === 409 || status === 423) return true;
+  const message = String(e?.response?.data?.error?.message?.value || e?.message || '').toLowerCase();
+  return message.includes('конфликт сохранения')
+    || message.includes('save conflict')
+    || message.includes('0x81020014')
+    || message.includes('заблокирован');
+}
+
+/**
+ * Очередь загрузок вложений: SharePoint не допускает ОДНОВРЕМЕННЫЕ
+ * `AttachmentFiles/add` к одному элементу — второй запрос получает 409, и
+ * картинка оставалась base64 (в логе: «start image.png» ×2 → 409 → «test load
+ * FAIL»). Поэтому загрузки идут строго по одной, а конфликт всё равно
+ * повторяется (элемент мог быть занят другим пользователем).
+ */
+let attachmentUploadQueue = Promise.resolve();
+
+/**
+ * Загружает файл вложением элемента (последовательно, с повтором при конфликте).
+ * @returns {Promise<object>} результат SharePoint + ServerRelativeUrl (хранение)
+ *   и src/url (рабочий адрес для редактора).
+ */
 export async function uploadDobAttachment(id, file, listGuid = DOB_LIST_GUID) {
+  const run = attachmentUploadQueue.then(() => uploadDobAttachmentOnce(id, file, listGuid));
+  // Очередь не должна «залипать» на ошибке (иначе следующие вставки не загрузятся).
+  attachmentUploadQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function uploadDobAttachmentOnce(id, file, listGuid = DOB_LIST_GUID) {
   listGuid = normalizeListGuid(listGuid);
   if (!id || !file) throw new Error('uploadDobAttachment: id and file required');
   let fileName = file.name || `image_${Date.now()}.png`;
@@ -519,22 +557,26 @@ export async function uploadDobAttachment(id, file, listGuid = DOB_LIST_GUID) {
       const result = data?.d || data;
       let src = result?.ServerRelativeUrl || result?.ServerRelativePath?.DecodedUrl || null;
       if (!src) src = `/sites/dob/doblogistic/Lists/DobLogistic/Attachments/${id}/${fileName}`;
-      // В dev /sites/... не проксируется напрямую — нужно через /dob-api, в prod — абсолютный origin
-      let finalUrl = src;
-      try {
-        const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
-        if (isDev) {
-          finalUrl = `/dob-api${src}`;
-        } else {
-          const origin = typeof window !== 'undefined' ? window.location.origin : '';
-          if (src.startsWith('/')) finalUrl = `${origin}${src}`;
-        }
-      } catch { finalUrl = src; }
-      return { ...result, ServerRelativeUrl: src, fileName, url: finalUrl, src: finalUrl };
+      return {
+        ...result,
+        ServerRelativeUrl: src,
+        fileName,
+        // В редакторе картинка показывается РАБОЧИМ адресом (REST `…/$value`):
+        // прямой путь на файл прокси отдавал как JSON и картинка была битой.
+        url: attachmentDisplayUrl(src),
+        src: attachmentDisplayUrl(src),
+      };
     } catch (e) {
       lastError = e;
       const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
       const lower = String(rawMsg).toLowerCase();
+      // Конфликт сохранения — ждём и пробуем ещё раз (до 3 повторов).
+      if (isSaveConflictError(e) && attempt < 3) {
+        attempt += 1;
+        console.warn(`[dobApi] вложение: конфликт сохранения, повтор ${attempt}/3`);
+        await new Promise((r) => setTimeout(r, 250 * attempt));
+        continue;
+      }
       const isDuplicate = lower.includes('имя уже используется') || lower.includes('already exists') || lower.includes('already in use') || lower.includes('exists') && lower.includes('name');
       if (isDuplicate && attempt < 3) {
         const dot = fileName.lastIndexOf('.');

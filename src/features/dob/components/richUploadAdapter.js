@@ -14,7 +14,7 @@
 // Вынесено из RichEditor, чтобы файл компонента экспортировал только компонент
 // (react-refresh/only-export-components) и адаптер можно было тестировать отдельно.
 
-import { attachmentDisplayUrl } from '../lib/attachmentUrl';
+import { attachmentDisplayUrl, attachmentStorageUrl } from '../lib/attachmentUrl';
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -25,13 +25,20 @@ function fileToBase64(file) {
   });
 }
 
-/** Ссылка на вложение из ответа страницы (строка или объект сохранения). */
+/**
+ * Ссылка на вложение из ответа страницы (строка или объект сохранения).
+ *
+ * Всегда приводим к РАБОЧЕМУ адресу: сначала к серверному пути (убираем прокси-
+ * префиксы/абсолютный origin), потом к REST-запросу содержимого файла `…/$value`.
+ * Так в редакторе не может оказаться «прямой» путь `/sites/…` или `/dob-api/sites/…`,
+ * который прокси отдаёт как JSON (картинка была битой).
+ */
 export function uploadedLink(saved) {
   if (!saved) return '';
-  if (typeof saved === 'string') return attachmentDisplayUrl(saved);
-  return attachmentDisplayUrl(
-    saved.ServerRelativeUrl || saved.ServerRelativePath?.DecodedUrl || saved.src || saved.url || '',
-  );
+  const raw = typeof saved === 'string'
+    ? saved
+    : saved.ServerRelativeUrl || saved.ServerRelativePath?.DecodedUrl || saved.src || saved.url || '';
+  return attachmentDisplayUrl(attachmentStorageUrl(raw));
 }
 
 export function makeUploadAdapter(loader, onUploadImage) {

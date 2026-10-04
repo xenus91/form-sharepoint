@@ -545,7 +545,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       // Для сохранения в SharePoint нужен ServerRelativeUrl без /dob-api (иначе на проде 404). На проде это https://portal.lenta.com/sites/..., в dev — /sites/...
       const serverRelative = res?.ServerRelativeUrl || res?.ServerRelativePath?.DecodedUrl || null;
       const finalUrlForSave = serverRelative || res?.url || res?.src || null;
-      const finalUrlForTest = res?.url || res?.src || serverRelative;
+      // Проверочная загрузка картинки — РАБОЧИМ адресом (REST `…/$value`): прямой
+      // путь на файл прокси отдаёт как JSON, и картинка «не загружается».
+      const finalUrlForTest = serverRelative ? attachmentDisplayUrl(serverRelative) : (res?.url || res?.src || null);
       console.log('[DobEdit][upload] finalUrlForSave', finalUrlForSave, 'finalUrlForTest', finalUrlForTest);
       // Test image load — используем dev-прокси URL если есть
       if (finalUrlForTest) {
