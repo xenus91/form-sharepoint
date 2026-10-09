@@ -234,6 +234,20 @@ export default function ContentTypeResultDialog({
     return (resultField?.choices || []).map((c) => String(c)).filter(Boolean);
   }, [resultChoices, form.resultBlock, resultField]);
 
+  // Сообщение про результат — ОДНО и только здесь. Раньше результат проверялся
+  // дважды: validateRequiredFields давал «Укажите «Результат проверки»» (по
+  // Required из SharePoint), а следом жёстко добавлялся ещё один, зашитый в код
+  // «Выберите результат проверки» — в списке ошибок одно и то же поле выходило
+  // двумя строками.
+  const resultProblem = React.useMemo(() => {
+    if (result) return "";
+    // Колонка результата обязательна в SharePoint — сообщаем её названием.
+    if (form.resultBlock?.required) return `Укажите «${form.resultBlock.title}»`;
+    // Не обязательна, но кнопки на форме есть: закрывать задачу без результата
+    // нельзя — это единственное сообщение про результат.
+    return choices.length > 0 ? "Выберите результат проверки" : "";
+  }, [result, form.resultBlock, choices.length]);
+
   const setValue = (internal, value) => {
     const next = { ...valuesRef.current, [internal]: value };
     valuesRef.current = next;
@@ -279,8 +293,9 @@ export default function ContentTypeResultDialog({
 
   const handleSubmit = React.useCallback(() => {
     setTouched(true);
-    const found = validateRequiredFields(form.controls, values, form.resultBlock, result);
-    if (!result) found.unshift("Выберите результат проверки");
+    // resultBlock не передаём: про результат сообщает resultProblem (один раз).
+    const found = validateRequiredFields(form.controls, values, null, result);
+    if (resultProblem) found.unshift(resultProblem);
     if (found.length > 0) {
       setProblems(found);
       // Страница (#dob_tasks/<id>) показывает snackbar с предупреждением — форма
@@ -336,7 +351,7 @@ export default function ContentTypeResultDialog({
       stored[key] = typeof value === "string" ? toStorageImages(value) : value;
     }
     onSubmit?.({ result, values: stored, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
-  }, [form, values, result, resultFieldInternalName, onSubmit, onValidationError]);
+  }, [form, values, result, resultProblem, resultFieldInternalName, onSubmit, onValidationError]);
 
   // Отдаём submit наружу (кнопка «Сохранить» в шапке страницы — как у заявки ДОБ).
   React.useEffect(() => {
@@ -362,7 +377,7 @@ export default function ContentTypeResultDialog({
     if (!touched) return [];
     return form.controls.filter((c) => c.required && isControlEmpty(c, values[c.internalName]));
   }, [touched, form.controls, values]);
-  const resultInvalid = touched && !result && (choices.length > 0 || Boolean(form.resultBlock?.required));
+  const resultInvalid = touched && Boolean(resultProblem);
   const mainInvalid = missingControls.includes(mainControl);
   const otherInvalid = missingControls.some((c) => c !== mainControl);
 

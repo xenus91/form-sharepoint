@@ -166,9 +166,44 @@ describe("ContentTypeResultDialog — форма по типу контента"
     await act(async () => { click(buttonByText("Сохранить")); await settle(20); });
     const alert = document.body.querySelector('[data-testid="ct-result-dialog-problems"]');
     expect(alert).toBeTruthy();
-    expect(alert.textContent).toContain("Выберите результат проверки");
+    expect(alert.textContent).toContain("Укажите «Результат проверки»");
     expect(alert.textContent).toContain("Заполните «Описание результата проверки»");
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("про результат — ровно одна строка: без дубля «Выберите результат проверки»", async () => {
+    const onValidationError = vi.fn();
+    renderDialog({ onValidationError });
+    await settle(80);
+    await act(async () => { click(buttonByText("Сохранить")); await settle(20); });
+    const problems = onValidationError.mock.calls[0][0];
+    // Обязательная колонка результата называется своим именем из SharePoint…
+    expect(problems).toContain("Укажите «Результат проверки»");
+    // …и НЕ добавляется вторым, жёстко зашитым сообщением про то же поле.
+    expect(problems.filter((p) => p === "Выберите результат проверки")).toHaveLength(0);
+    // в списке ошибок нет повторов вообще
+    expect(new Set(problems).size).toBe(problems.length);
+    expect(problems).toHaveLength(2);
+  });
+
+  it("результат необязателен в SharePoint, но кнопки есть — сообщение одно, отправка закрыта", async () => {
+    MOCK_FIELDS = FIELDS.map((f) => (f.InternalName === "DobSearchResult" ? { ...f, Required: false } : f));
+    const onValidationError = vi.fn();
+    const { onSubmit } = renderDialog({ onValidationError });
+    await settle(80);
+    await act(async () => { click(buttonByText("Сохранить")); await settle(20); });
+    const problems = onValidationError.mock.calls[0][0];
+    expect(problems.filter((p) => p === "Выберите результат проверки")).toHaveLength(1);
+    expect(problems.some((p) => p.startsWith("Укажите «"))).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
+    // выбрали результат — сообщение ушло
+    await act(async () => { click(buttonByText("Годен")); await settle(10); });
+    await act(async () => {
+      typeInto(document.body.querySelector('[data-testid="rich-editor"]'), "<p>готово</p>");
+      await settle(10);
+    });
+    await act(async () => { click(buttonByText("Сохранить")); await settle(30); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
   it("ошибка валидации акцентирует незаполненные ПОЛЯ и БЛОКИ и уходит наружу (snackbar)", async () => {
@@ -185,7 +220,7 @@ describe("ContentTypeResultDialog — форма по типу контента"
     expect(mainBlock.querySelector('[data-testid="rich-editor-box"]').getAttribute("data-invalid")).toBe("1");
     // страница получает список проблем — покажет snackbar с предупреждением
     expect(onValidationError).toHaveBeenCalledTimes(1);
-    expect(onValidationError.mock.calls[0][0]).toContain("Выберите результат проверки");
+    expect(onValidationError.mock.calls[0][0]).toContain("Укажите «Результат проверки»");
     expect(onValidationError.mock.calls[0][0]).toContain("Заполните «Описание результата проверки»");
     expect(onSubmit).not.toHaveBeenCalled();
     // как только результат выбран и текст введён — подсветка снимается, отправка идёт
