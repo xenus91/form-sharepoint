@@ -5,6 +5,8 @@ import { attachmentDisplayUrl } from '../lib/attachmentUrl';
 import apiClient from '../../../api';
 import { TASKS_LIST_API, TASKS_LIST_GUID } from '../../../tasks/config';
 import { fetchContentTypeFields } from '../../../tasks/contentTypeFields';
+import { pickInProgressChoice } from '../../../tasks/mutations/takeTaskInWork';
+import { isCompletedStatus, isInProgressStatus } from '../../../tasks/status';
 
 // ⭐ Списки основного сайта (ProblemsPallet/Tasks) редактируются ТОЙ ЖЕ формой, что
 // заявки ДОБ: #dob_tasks/<id>?list=<GUID основного списка>. Для таких списков ходим
@@ -431,6 +433,66 @@ export async function createDobItem(payload, listGuid = DOB_LIST_GUID) {
   const url = `${listApiOf(listGuid)}/items`;
   const { data } = await httpOf(listGuid).post(url, body);
   return data?.d || data;
+}
+
+/**
+ * Взятие задачи/заявки в работу ПРЯМО в её списке (MERGE статуса «в работе»).
+ *
+ * Зачем: форма #dob_tasks/<id>?list=<GUID> открывается прямой ссылкой (из письма,
+ * из таблицы, из закладки) — кнопку «Взять в работу» в списке/таблице можно
+ * пропустить, и тогда результат сохранится без исполнителя и статуса. Форма
+ * поэтому ТРЕБУЕТ взятия в работу до ввода данных и зовёт этот метод.
+ *
+ * @param {number|string} id
+ * @param {string} [listGuid] — список задачи (основной сайт или сайт ДОБ)
+ * @param {{choices?:string[], targetStatus?:string}} [opts]
+ * @returns {Promise<{ok:boolean, reason?:'completed'|'already-taken'|'error', status?:string, previousStatus?:string, message?:string}>}
+ */
+export async function takeDobTaskInWork(id, listGuid = DOB_LIST_GUID, opts = {}) {
+  const guid = normalizeListGuid(listGuid);
+  const accept = { headers: { Accept: 'application/json;odata=verbose' } };
+  const cfg = readConfig(guid);
+  const getCfg = cfg ? { ...accept, ...cfg } : accept;
+  const errMessage = (e) => String(e?.response?.data?.error?.message?.value || e?.message || e);
+
+  // 1) Свежее состояние — не перетираем чужое взятие/завершение.
+  let fresh = null;
+  try {
+    const { data } = await httpOf(guid).get(`${listApiOf(guid)}/items(${id})?$select=Id,Status,PercentComplete`, getCfg);
+    fresh = data?.d || null;
+  } catch (e) {
+    return { ok: false, reason: 'error', message: errMessage(e) };
+  }
+  const status = fresh?.Status || '';
+  const percent = fresh?.PercentComplete ?? undefined;
+  if (isCompletedStatus(status, percent)) return { ok: false, reason: 'completed', status };
+  if (isInProgressStatus(status)) return { ok: false, reason: 'already-taken', status };
+
+  // 2) Статус «в работе»: вокабуляр у списков разный — берём из choices поля Status,
+  //    а не хардкодом (как в takeTaskInWork для внешних источников).
+  let choices = Array.isArray(opts.choices) ? opts.choices : null;
+  if (!choices) {
+    try {
+      const { data } = await httpOf(guid).get(
+        `${listApiOf(guid)}/fields?$filter=InternalName eq 'Status'&$select=InternalName,Choices`,
+        getCfg,
+      );
+      const raw = data?.d?.results?.[0]?.Choices ?? data?.d?.Choices;
+      choices = Array.isArray(raw) ? raw.map(String) : Array.isArray(raw?.results) ? raw.results.map(String) : [];
+    } catch {
+      // нет доступа к choices списка — ниже сработает фолбэк «В работе»
+      choices = [];
+    }
+  }
+  const target = opts.targetStatus || pickInProgressChoice(choices) || 'В работе';
+
+  // 3) MERGE — SharePoint сам проставит Editor (это и есть «взял в работу»).
+  try {
+    await updateDobItem(id, { Status: target }, guid);
+  } catch (e) {
+    return { ok: false, reason: 'error', status, message: errMessage(e) };
+  }
+  return { ok: true, status: target, previousStatus: status };
 }
 
 export async function getDobItem(id, listGuid = DOB_LIST_GUID) {

@@ -7,10 +7,11 @@ import MenuIcon from '@mui/icons-material/Menu';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment, getDobContentTypeFields } from './api/dobApi';
+import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment, getDobContentTypeFields, takeDobTaskInWork } from './api/dobApi';
 import { DOB_LIST_GUID } from './api/dobClient';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
@@ -134,6 +135,7 @@ function taskDescriptionText(raw) {
     .trim();
 }
 import { resolveRelatedRef } from './lib/relatedItem';
+import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from '../../tasks/status';
 
 
 function isEditableField(f) {
@@ -211,6 +213,10 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  // Задача ещё «Не начата»: форму закрываем «шлюзом» — сначала «Взять в работу».
+  // Иначе результат ушёл бы на сервер без исполнителя и смены статуса.
+  const [taking, setTaking] = useState(false);
+  const [takeError, setTakeError] = useState('');
   const [attachments, setAttachments] = useState([]);
   // Read-only просмотр связанной заявки (RelatedItems задачи/заявки).
   const [relatedOpen, setRelatedOpen] = useState(false);
@@ -572,11 +578,59 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     window.location.hash = onBackHash || '#dob_tasks';
   }, [onBackHash]);
 
+  // Статус задачи и choices поля Status — чтобы подобрать статус «в работе»
+  // именно из вокабуляра этого списка (у списков он разный).
+  const taskStatus = String(item?.Status ?? '').trim();
+  const statusChoices = useMemo(() => {
+    const f = (fields || []).find((x) => String(x?.InternalName || '').toLowerCase() === 'status');
+    const raw = f?.Choices;
+    if (Array.isArray(raw)) return raw.map(String);
+    if (Array.isArray(raw?.results)) return raw.results.map(String);
+    return [];
+  }, [fields]);
+  const taskCompleted = isCompletedStatus(taskStatus, item?.PercentComplete);
+  const taskInProgress = isInProgressStatus(taskStatus);
+  // Требовать взятие, только когда статус ЯВНО «не начата»: у заявок без поля
+  // Status форма остаётся доступной, как раньше.
+  const needsTake = !!item && isNotStartedStatus(taskStatus) && !taskCompleted && !taskInProgress;
+
+  const handleTakeInWork = useCallback(async () => {
+    if (!id) return;
+    setTaking(true);
+    setTakeError('');
+    try {
+      const res = await takeDobTaskInWork(id, listGuid, { choices: statusChoices });
+      if (res.ok) {
+        notify(`Задача #${id} взята в работу`, { severity: 'success' });
+        try { qc.invalidateQueries(); } catch (_e) { void _e; }
+        await refetch();
+      } else if (res.reason === 'completed') {
+        setTakeError(`Задача #${id} уже завершена — взять её в работу нельзя.`);
+        await refetch().catch(() => {});
+      } else if (res.reason === 'already-taken') {
+        // уже «в работе» — открываем форму (взятие просто не потребовалось)
+        await refetch();
+      } else {
+        setTakeError(`Не удалось взять задачу #${id} в работу: ${res.message || 'ошибка'}`);
+      }
+    } catch (e) {
+      setTakeError(`Не удалось взять задачу #${id} в работу: ${e?.message || 'ошибка'}`);
+    } finally {
+      setTaking(false);
+    }
+  }, [id, listGuid, statusChoices, notify, qc, refetch]);
+
   // ⭐ Задача типа «Результат проверки ООБ» живёт в основном списке, но ведёт себя
   // как задачи сайта ДОБ: закрывается ТОЛЬКО через форму по колонкам типа контента
   // (кнопки DobSearchResult + rich-текст/автокомплиты/число/«Пользователь или группа»).
   // Собираем MERGE вручную: результат + значения полей + Status/PercentComplete.
   const handleCheckResultSubmit = useCallback(async ({ result, values, resultField }) => {
+    // Шлюз: задача не взята в работу — форма закрыта, но сохранение могло
+    // прийти с клавиатуры/из кнопки шапки. Не пишем результат мимо взятия.
+    if (needsTake) {
+      setTakeError('Сначала возьмите задачу в работу.');
+      return;
+    }
     setSaving(true);
     setSaveError('');
     try {
@@ -616,7 +670,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     } finally {
       setSaving(false);
     }
-  }, [id, listGuid, notify, qc, handleBack, materializeFormValues]);
+  }, [id, listGuid, notify, qc, handleBack, materializeFormValues, needsTake]);
 
   const handleCtValidationError = useCallback((problems) => {
     notify(`Заполните обязательные поля: ${(problems || []).join('; ')}`, { severity: 'warning' });
@@ -641,6 +695,59 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       </Typography>
     </Box>
   ) : null;
+
+  // «Шлюз»: задача ещё не взята в работу — данных вносить нельзя, пока не взяли.
+  // Прямая ссылка (#dob_tasks/<id>?list=<GUID>) открывает форму в обход списка,
+  // где кнопка «Взять в работу» обязательна.
+  const takeGate = (
+    <Box sx={{ p: { xs: 1.5, md: 2 }, display: 'grid', placeItems: 'center', minHeight: 220 }} data-testid="dob-take-gate">
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2, md: 3 },
+          maxWidth: 520,
+          width: '100%',
+          textAlign: 'center',
+          borderRadius: 2,
+          border: '1px solid rgba(255,193,7,0.35)',
+          bgcolor: 'rgba(255,193,7,0.08)',
+        }}
+      >
+        <Typography sx={{ fontWeight: 800, fontSize: '1.05rem', mb: 0.5 }}>
+          Задача #{id} ещё не взята в работу
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Сначала возьмите задачу в работу — только потом можно вносить результат и сохранять форму.
+          Иначе данные сохранятся без исполнителя и без смены статуса задачи.
+        </Typography>
+        <Button
+          variant="contained"
+          size="large"
+          disabled={taking}
+          onClick={handleTakeInWork}
+          startIcon={taking ? <CircularProgress size={18} color="inherit" /> : <PlayArrowIcon />}
+          sx={{
+            borderRadius: '12px',
+            fontWeight: 800,
+            textTransform: 'none',
+            height: 48,
+            px: 3,
+            backgroundImage: 'linear-gradient(180deg,#7B84FF 0%,#5A67D8 100%)',
+            color: '#fff',
+            '&:hover': { backgroundImage: 'linear-gradient(180deg,#8D95FF 0%,#6B7CFF 100%)' },
+            '&.Mui-disabled': { backgroundImage: 'linear-gradient(180deg,#9BA3FF 0%,#7B84FF 100%)', color: '#fff', opacity: 1 },
+          }}
+        >
+          {taking ? 'Берём в работу…' : 'Взять в работу'}
+        </Button>
+        {takeError && (
+          <Alert severity="error" sx={{ mt: 2, textAlign: 'left' }} onClose={() => setTakeError('')}>
+            {takeError}
+          </Alert>
+        )}
+      </Paper>
+    </Box>
+  );
 
   // Результирующий выбор для этого списка: в FieldLinks типа контента колонки
   // результата может не быть (она заведена на уровне списка) — тогда берём её из
@@ -710,6 +817,11 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
    * первому пропуску — иначе сервер отвечает 400 и непонятно, что заполнять.
    */
   const validateAndSave = useCallback(() => {
+    // Шлюз: пока задача не взята в работу, сохранять нельзя (см. takeGate).
+    if (needsTake) {
+      setTakeError('Сначала возьмите задачу в работу.');
+      return;
+    }
     const missing = [];
     for (const f of editableFields) {
       if (f.Required !== true || !isEditableField(f)) continue;
@@ -729,7 +841,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     }
     setInvalidFields((prev) => (prev.size > 0 ? new Set() : prev));
     handleSave();
-  }, [editableFields, chekField, chekInternal, form, item, notify, focusFirstInvalid, handleSave]);
+  }, [editableFields, chekField, chekInternal, form, item, notify, focusFirstInvalid, handleSave, needsTake]);
 
   useEffect(() => {
     if (!fields || !item) return;
@@ -868,7 +980,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             <Button
               size="small"
               variant="contained"
-              disabled={saving || itemLoading}
+              disabled={saving || itemLoading || needsTake}
               onClick={() => ctSubmitRef.current?.()}
               startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
               sx={FORM_PRIMARY_BUTTON_SX}
@@ -880,6 +992,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         {saveError && <Alert severity="error" onClose={() => setSaveError('')}>{saveError}</Alert>}
         {taskHead}
         {isUploadingImage && <LinearProgress />}
+        {needsTake ? takeGate : (
         <ContentTypeResultDialog
           inline
           task={item}
@@ -901,6 +1014,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           onSubmit={handleCheckResultSubmit}
           onClose={handleBack}
         />
+        )}
       </Box>
     );
   }
@@ -950,7 +1064,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             </span>
           </Tooltip>
           <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={FORM_SECONDARY_BUTTON_SX}>Обновить</Button>
-          <Button size="small" variant="contained" onClick={validateAndSave} disabled={saving} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={FORM_PRIMARY_BUTTON_SX}>
+          <Button size="small" variant="contained" onClick={validateAndSave} disabled={saving || needsTake} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={FORM_PRIMARY_BUTTON_SX}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </Button>
         </Toolbar>
@@ -960,6 +1074,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
 
       {taskHead}
+      {needsTake ? takeGate : (
+      <>
       <Box
         className="dob-rich-section"
         data-dob-invalid={richInvalid ? 'true' : undefined}
@@ -1208,11 +1324,13 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           Серые — только чтение (Calculated/Computed/ReadOnly). Остальные уйдут PATCH MERGE по InternalName. `ChekResult` — rich-HTML с таблицами и {'<img>'} из вложений (`/AttachmentFiles/add`).
         </Typography>
       </Box>
+      </>
+      )}
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
         <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
         <Box sx={FORM_ACTIONS_SX}>
-          <Button onClick={validateAndSave} variant="contained" disabled={saving} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
+          <Button onClick={validateAndSave} variant="contained" disabled={saving || needsTake} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </Button>
         </Box>
