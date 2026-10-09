@@ -1217,6 +1217,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             elementTaskMatch={elementTaskMatch}
             elementData={elementData}
             elementError={elementError}
+            elementNotFound={elementNotFound}
             elementIdParam={elementIdParam}
             elementActionParam={elementActionParam}
             isHashTaskRefreshing={isHashTaskRefreshing}

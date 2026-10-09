@@ -1,5 +1,7 @@
+/* eslint-disable react/prop-types */
 // src/features/tasks/components/TasksHashContent.jsx
 // PR2 — hash-контент (лоадер / карточка / notFound) вынесен из TasksView без смены логики
+// (пропсы не валидируются — как в TasksGrid/ExternalTaskCard: их два десятка)
 import React from "react";
 import { Box, Paper, Typography, Button, CircularProgress } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
@@ -13,6 +15,7 @@ export default function TasksHashContent({
   elementTaskMatch,
   elementData,
   elementError,
+  elementNotFound = false,
   elementIdParam,
   elementActionParam,
   isHashTaskRefreshing,
@@ -30,15 +33,31 @@ export default function TasksHashContent({
   currentUserTitle,
   onClearElementHash,
 }) {
-  if (elementLoading || elementTaskSearching) {
+  // Поиск ЗАВЕРШЁН, только когда есть задача либо явный результат «не найдено»
+  // (elementNotFound) или ошибка. Пока этого нет — идёт загрузка: при первом
+  // переходе по #tasks/<ID> задача часто догружается с сервера, и раньше в этом
+  // окне на один кадр показывалась плашка «Элемент #… не найден», хотя карточка
+  // уже грузилась (пользователь видел ложное «не найдено»).
+  const searchFinished = !!elementTaskMatch || elementNotFound || !!elementError;
+
+  if (elementLoading || elementTaskSearching || !searchFinished) {
+    const isTask = matchMode === "task";
     return (
-      <Box sx={{ display: "grid", placeItems: "center", py: 6, gap: 1.5 }}>
+      <Box sx={{ display: "grid", placeItems: "center", py: 6, gap: 1.5 }} data-testid="hash-loading">
         <CircularProgress />
         <Typography variant="body2" color="text.secondary">
-          {matchMode === "task" ? `Загружаю задачу #${elementIdParam}...` : `Загружаю элемент #${elementIdParam}...`}
+          {isTask
+            ? `Загружаю задачу #${elementIdParam}...`
+            : matchMode === "element"
+              ? `Загружаю элемент #${elementIdParam}...`
+              : `Загружаю #${elementIdParam}...`}
         </Typography>
         <Typography variant="caption" color="text.secondary">
-          {matchMode === "task" ? "Открываю карточку задачи..." : "Ищу связанную задачу..."}
+          {isTask
+            ? "Открываю карточку задачи..."
+            : matchMode === "element"
+              ? "Ищу связанную задачу..."
+              : "Открываю..."}
         </Typography>
       </Box>
     );
