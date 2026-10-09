@@ -52,6 +52,7 @@ async function mountAndComplete({
   const loadTasks = vi.fn(async () => {});
   const setQueryData = vi.fn();
   const queryClient = makeQueryClient(setQueryData);
+  const setElementTaskMatch = vi.fn();
 
   apiState.get.mockReset();
   apiState.post.mockReset();
@@ -94,7 +95,7 @@ async function mountAndComplete({
       queryClient,
       loadTasks,
       notify,
-      setElementTaskMatch: vi.fn(),
+      setElementTaskMatch,
       pendingResult: null,
     });
     captured.mutations = m;
@@ -119,7 +120,7 @@ async function mountAndComplete({
   });
   container.remove();
 
-  return { notify, loadTasks, setQueryData, queryClient, apiState, elapsed, captured };
+  return { notify, loadTasks, setQueryData, queryClient, apiState, elapsed, captured, setElementTaskMatch };
 }
 
 describe("useTaskMutations.completeTask", () => {
@@ -157,6 +158,47 @@ describe("useTaskMutations.completeTask", () => {
       expect(patched.PercentComplete).toBe(0);
       expect(patched.ResultSearchTHU).toBe("Найдена");
     }
+  });
+
+  it("карточка #tasks/<id> закрывается СРАЗУ после записи (не ждёт опроса)", async () => {
+    // Регрессия: карточка в hash-режиме живёт в elementTaskMatch, а completeTask
+    // обновлял только список — задача оставалась «в работе» до следующего опроса.
+    const { setElementTaskMatch } = await mountAndComplete();
+    const patches = setElementTaskMatch.mock.calls
+      .map(([updater]) => updater({ Id: TASK.Id, Status: "В процессе", PercentComplete: 0 }))
+      .filter(Boolean);
+    const last = patches.at(-1);
+    expect(last.Status).toBe("Завершена");
+    expect(last.PercentComplete).toBe(1);
+    expect(last.ResultSearchTHU).toBe("Найдена");
+    // оптимистичный патч (до ответа сервера) статус НЕ трогает — иначе карточка
+    // исчезала бы до подтверждения записи
+    expect(patches[0].Status).toBe("В процессе");
+    expect(patches[0].PercentComplete).toBe(0);
+  });
+
+  it("задача уже закрыта на сервере — карточка #tasks/<id> тоже показывает «выполнено»", async () => {
+    const { setElementTaskMatch, notify } = await mountAndComplete({
+      apiImpl: {
+        get: async () => ({
+          data: {
+            d: {
+              Id: TASK.Id,
+              Status: "Завершена",
+              PercentComplete: 1,
+              ResultSearchTHU: "Найдена",
+              __metadata: { type: "SP.Data.TasksListItem", etag: '"7"' },
+            },
+          },
+          headers: {},
+        }),
+      },
+    });
+    const patches = setElementTaskMatch.mock.calls
+      .map(([updater]) => updater({ Id: TASK.Id, Status: "В процессе", PercentComplete: 0 }))
+      .filter(Boolean);
+    expect(patches.at(-1).Status).toBe("Завершена");
+    expect(notify.mock.calls.some(([m]) => /уже выполнена/.test(String(m)))).toBe(true);
   });
 
   it("держит оверлей не меньше MIN_OVERLAY_MS", async () => {

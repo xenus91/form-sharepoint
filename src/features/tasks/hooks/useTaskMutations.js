@@ -249,14 +249,20 @@ export function useTaskMutations({
 
   // Успешное завершение: держим оверлей минимум MIN_OVERLAY_MS, обновляем список и только
   // потом показываем snackbar — так карточка не «пропадает» раньше отклика сервера.
-  const finishSuccess = useCallback(async (message, startedAt) => {
+  const finishSuccess = useCallback(async (message, startedAt, elementPatch) => {
     const rest = MIN_OVERLAY_MS - (Date.now() - (startedAt || 0));
     if (rest > 0) await sleep(rest);
     queryClient.invalidateQueries({ queryKey: ["tasks"] });
     invalidate("/items");
     if (typeof loadTasks === "function") await loadTasks({ silent: true });
+    // Карточка в режиме #tasks/<ID> живёт в отдельном state (elementTaskMatch) и
+    // из списка НЕ обновляется: без этого патча задача оставалась «в работе» до
+    // следующего опроса (до 60 с). Запись подтверждена сервером — закрываем сразу.
+    if (elementPatch) {
+      setElementTaskMatch?.((prev) => (prev && prev.Id === elementPatch.Id ? { ...prev, ...elementPatch.patch } : prev));
+    }
     notify(message, { severity: "success" });
-  }, [queryClient, invalidate, loadTasks, notify]);
+  }, [queryClient, invalidate, loadTasks, notify, setElementTaskMatch]);
 
   const completeTask = useCallback(async (task, resultValue, promptFieldValues, additionalRequired, additionalActions) => {
     // Backward compat: legacy string → { Location1: string }
@@ -314,6 +320,17 @@ export function useTaskMutations({
     const qkBase = ["tasks", currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")];
     queryClient.setQueryData(qkBase, (prev) => (Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._optimistic } : t)) : prev));
     setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._optimistic } : prev));
+    // Патч «задача закрыта» для карточки #tasks/<ID>: Status/PercentComplete
+    // ТОЛЬКО после подтверждённой записи (см. _optimistic — там статус намеренно
+    // не выставляется, иначе карточка исчезала бы до ответа сервера).
+    const completedElementPatch = (status) => ({
+      ..._optimistic,
+      Status: status || completedStatusValue || "Завершена",
+      PercentComplete: 1,
+      Modified: new Date().toISOString(),
+      ...(currentUserTitle ? { EditorTitle: currentUserTitle, Editor: currentUserTitle } : {}),
+    });
+    const completeElementPatch = (status) => ({ Id: task.Id, patch: completedElementPatch(status) });
     try {
       let serverEtag = "*";
       let itemEntityType = null;
@@ -330,6 +347,8 @@ export function useTaskMutations({
           const _srvFieldName = _resultFieldName;
           const _srvVal = server[_srvFieldName] ?? server.ResultSearchTHU ?? "";
           queryClient.setQueryData(qkBase, (prev) => Array.isArray(prev) ? prev.map((t) => t.Id === task.Id ? { ...t, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: _srvVal, [_srvFieldName]: _srvVal, Modified: server.Modified } : t) : prev);
+          // карточка #tasks/<ID>: задача уже закрыта — показываем это сразу
+          setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, Status: server.Status, PercentComplete: server.PercentComplete, ResultSearchTHU: _srvVal, [_srvFieldName]: _srvVal, Modified: server.Modified } : prev));
           await loadTasks();
           return;
         }
@@ -485,7 +504,7 @@ export function useTaskMutations({
                 if (_isFound) flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false; else if (_isNotFound) flip.AdditionalsActionsRequired = false;
                 const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
                 await postUpdateSafe(_isNotFound ? flip : flipWithStatus, "*");
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
               } catch {}
             }
             if (msg.includes("additionalactions")) {
@@ -493,7 +512,7 @@ export function useTaskMutations({
                 const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
                 const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
                 try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
               } catch {}
             }
             const isFieldError = msg.includes("status") || msg.includes("percent");
@@ -516,7 +535,7 @@ export function useTaskMutations({
           if (msg.includes("edm.boolean")) {
             try {
               if (await retryRequiredAs(payloadWithStatus, true)) {
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
               }
             } catch {}
           }
@@ -524,7 +543,7 @@ export function useTaskMutations({
           if (msg.includes("edm.string")) {
             try {
               if (await retryRequiredAs(payloadWithStatus, false)) {
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
+                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
               }
             } catch {}
           }
@@ -533,7 +552,7 @@ export function useTaskMutations({
               const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
               const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
               try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
-              await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt); return;
+              await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
             } catch {}
           }
           const isFieldError = msg.includes("status") || msg.includes("percent");
@@ -552,6 +571,8 @@ export function useTaskMutations({
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       invalidate("/items");
       await loadTasks({ silent: true });
+      // закрываем карточку #tasks/<ID> (список обновлён, запись подтверждена)
+      setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ...completedElementPatch(targetStatus) } : prev));
       notify(`Задача #${task.Id} завершена: ${resultValue}`, { severity: "success" });
     } catch (e) {
       console.error("complete task error", e);
