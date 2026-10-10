@@ -96,17 +96,25 @@ export default function AssignedToButtons({
   onOpenPrincipal = null,
 }) {
   const assignees = useMemo(() => parseAssignees(task), [task]);
-  const [kinds, setKinds] = useState({});
+  // Уточнённые данные принципала по Id: { [id]: { kind, title } }.
+  // Кроме типа (человек/группа) держим и ИМЯ: задача нередко приходит только с
+  // AssignedToId (CAML-кандидат без $expand, 401/403 на fetchFullTask, внешние
+  // источники) — тогда в карточке и таблице вместо ФИО рисовалось «Id 10».
+  const [infos, setInfos] = useState({});
   const [open, setOpen] = useState(null);
 
-  // Тип принципала (человек/группа) — по Id, с кэшем и дедупом запросов.
+  // Тип принципала (человек/группа) и его имя — по Id, с кэшем и дедупом запросов.
   useEffect(() => {
     let alive = true;
     for (const person of assignees) {
       if (!person.id) continue;
       resolveAssigneeCached(task, person).then((info) => {
         if (!alive || !info) return;
-        setKinds((prev) => (prev[person.id] === info.kind ? prev : { ...prev, [person.id]: info.kind }));
+        setInfos((prev) => {
+          const known = prev[person.id];
+          if (known && known.kind === info.kind && known.title === (info.title || "")) return prev;
+          return { ...prev, [person.id]: { kind: info.kind, title: info.title || "" } };
+        });
       });
     }
     return () => { alive = false; };
@@ -123,7 +131,11 @@ export default function AssignedToButtons({
   return (
     <Box sx={{ display: "inline-flex", flexWrap: "wrap", gap: 0.25, alignItems: "center", minWidth: 0, maxWidth: "100%" }}>
       {assignees.map((person, i) => {
-        const kind = kinds[person.id] || "unknown";
+        const info = infos[person.id];
+        const kind = info?.kind || "unknown";
+        // Имя — из задачи, иначе из уточнения по Id. «Id 10» остаётся только
+        // как последний вариант (нет ни имени, ни доступа к SharePoint).
+        const label = person.title || info?.title || (person.id ? `Id ${person.id}` : "—");
         return (
           <Button
             key={`${person.id ?? "no-id"}:${person.title || i}`}
@@ -140,7 +152,9 @@ export default function AssignedToButtons({
             onClickCapture={(e) => {
               e.stopPropagation();
               e.preventDefault();
-              setOpen(person);
+              // В диалог отдаём уже уточнённое имя (иначе там на мгновение
+              // показался бы пустой «Имя», пока идёт запрос).
+              setOpen({ ...person, title: person.title || info?.title || "" });
               onOpenPrincipal?.(person);
             }}
             startIcon={<KindIcon kind={kind} />}
@@ -176,7 +190,7 @@ export default function AssignedToButtons({
               ...(sx || {}),
             }}
           >
-            {person.title || `Id ${person.id}`}
+            {label}
           </Button>
         );
       })}

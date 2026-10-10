@@ -78,14 +78,45 @@ html, body { overflow-x: hidden; }
 .dob-grid-shell > .MuiBox-root { min-height: 0; }
 .dob-grid-shell .ag-root-wrapper { flex: 1 1 0; min-height: 0; width: 100%; }
 
+/* Заливка строк таблицы задач (#tasks) ПО СТАТУСУ задачи — требование
+   2026-10-10 (классы ставит getRowClass в TasksGrid, см. lib/taskRowStatus.js):
+     • Не начата                 → без заливки (класса нет);
+     • В процессе выполнения     → бледно-оранжевый;
+     • Завершена                 → бледно-зелёный;
+     • просрочена и НЕ завершена → бледно-красный.
+   Селектор начинаем с .ag-theme-quartz намеренно: тему AG Grid (themeQuartz)
+   грид внедряет в <head> ПОСЛЕ этого файла, и правила той же специфичности
+   оттуда перекрывали бы заливку. Только background-color — .ag-row
+   позиционируется AG Grid абсолютно (см. про tasks-row-busy ниже). */
+.ag-theme-quartz .ag-row.tasks-row-progress {
+  background-color: #fff3e0;
+}
+.ag-theme-quartz .ag-row.tasks-row-progress .ag-cell {
+  background-color: transparent;
+}
+.ag-theme-quartz .ag-row.tasks-row-completed {
+  background-color: #e8f5e9;
+}
+.ag-theme-quartz .ag-row.tasks-row-completed .ag-cell {
+  background-color: transparent;
+}
+.ag-theme-quartz .ag-row.tasks-row-overdue {
+  background-color: #ffebee;
+}
+.ag-theme-quartz .ag-row.tasks-row-overdue .ag-cell {
+  background-color: transparent;
+}
+
 /* Строка таблицы, по которой идёт запись (результат) или взятие в работу —
    лёгкая подсветка + кружок-лоадер ВНУТРИ ячейки Id (см. IdCell в TasksGrid).
    ВАЖНО: никакого `position` и псевдоэлементов на .ag-row — AG Grid позиционирует
-   строки абсолютно, и любая правка раскладки строки «уезжает» и оставляет пропуск. */
-.ag-row.tasks-row-busy {
+   строки абсолютно, и любая правка раскладки строки «уезжает» и оставляет пропуск.
+   Правило стоит ПОСЛЕ статусных заливок и с той же специфичностью — пока задача
+   обновляется, видно именно «занятость». */
+.ag-theme-quartz .ag-row.tasks-row-busy {
   background-color: rgba(23, 28, 143, 0.07);
 }
-.ag-row.tasks-row-busy .ag-cell {
+.ag-theme-quartz .ag-row.tasks-row-busy .ag-cell {
   background-color: transparent;
 }
 /* Завершённая задача: строка только на просмотр (DobGrid, #dob_tasks).
@@ -96,5 +127,4 @@ html, body { overflow-x: hidden; }
 }
 .ag-row.dob-row-completed .ag-cell {
   background-color: transparent;
-}
 }

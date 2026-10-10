@@ -59,7 +59,10 @@ check(style.includes("321px") && style.includes("234px"), "меню позици
 
 const labels = [...(paper?.querySelectorAll("button") || [])].map((b) => (b.textContent || "").trim());
 console.log("   действия:", labels.join(" | ") || "(нет)");
-check(labels.some((t) => /Изменить/.test(t)), "есть «Изменить»");
+// Первая строка сцены — «Не начата»: пока задачу не взяли, «Изменить» недоступна
+// (правило 2026-10-04, см. src/features/tasks/lib/rowActions.js). У задачи
+// «в работе» она есть — это проверяется ниже.
+check(!labels.some((t) => /Изменить/.test(t)), "у невзятой задачи «Изменить» нет");
 
 // строка «в работе» → кнопки результатов (как в карточке)
 const inProgressRow = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
@@ -90,6 +93,13 @@ if (inProgressRow) {
   // «Изменить» закреплена внизу: она вне прокручиваемого списка действий
   const list = openPopup()?.querySelector('[data-testid="tasks-row-actions-list"]');
   check(!!list && !/Изменить/.test(list.textContent || ""), "«Изменить» закреплена внизу и не скроллится вместе со списком");
+
+  // Вид «Изменить» — вторичная кнопка, как в карточке внешней задачи
+  // (рамка/текст цвета #171c8f). Проверяем здесь: позже поповер перекроется
+  // меню другой строки.
+  const editBtn = buttonByText(/Изменить/) || null;
+  const editColor = editBtn ? window.getComputedStyle(editBtn).color : "";
+  check(/rgb\(23, 28, 143\)/.test(editColor), "«Изменить» — вторичная, как в карточке", editColor);
 }
 
 // строка «Не начата» → «Взять в работу»
@@ -106,11 +116,76 @@ if (notStartedCell) {
   const takeBtn = [...(openPopup()?.querySelectorAll("button") || [])].find((b) => /Взять в работу/.test(b.textContent || ""));
   const takeBg = window.getComputedStyle(takeBtn).backgroundImage;
   check(/linear-gradient\(180deg, (#7B84FF|rgb\(123, 132, 255\))/.test(takeBg), "«Взять в работу» — градиент карточки", takeBg);
-  // «Изменить» — вторичная: рамка/текст цвета #171c8f, как у кнопки внешней карточки
-  const editBtn = [...(openPopup()?.querySelectorAll("button") || [])].find((b) => /Изменить/.test(b.textContent || ""));
-  const editColor = window.getComputedStyle(editBtn).color;
-  check(/rgb\(23, 28, 143\)/.test(editColor), "«Изменить» — вторичная, как в карточке", editColor);
 }
+
+// ── заливка строк по статусу, «Срок» как в карточке, фильтр «Я исполнитель» ──
+// (требования 2026-10-10; см. docs/decisions/form-ui-ux.md §13)
+const rowsOf = () => [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
+// col-id колонки «Исполнитель» берём из шапки: у неё нет field/colId.
+const takerColId = [...host.querySelectorAll(".ag-header-cell")]
+  .find((h) => /Исполнитель/.test(h.textContent || ""))?.getAttribute("col-id") || null;
+const cellText = (row, colId) => row.querySelector(`[col-id="${colId}"]`)?.textContent?.trim() || "";
+const STATUS_CLASS = { progress: "tasks-row-progress", completed: "tasks-row-completed", overdue: "tasks-row-overdue" };
+
+// закрываем поповер, чтобы не мешал
+document.body.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+await settle(200);
+
+const all = rowsOf();
+const byClass = { progress: 0, completed: 0, overdue: 0, none: 0 };
+let noneWrong = 0;
+for (const row of all) {
+  const cls = row.className || "";
+  const kind = Object.keys(STATUS_CLASS).find((k) => cls.includes(STATUS_CLASS[k]));
+  if (kind) byClass[kind] += 1;
+  else {
+    byClass.none += 1;
+    // без заливки остаётся только «Не начата» со сроком вперёд
+    const due = cellText(row, "DueDate");
+    if (!/Не начата/.test(cellText(row, "Status")) || !/^Осталось/.test(due)) noneWrong += 1;
+  }
+}
+console.log("   строки:", JSON.stringify(byClass), "всего", all.length);
+check(all.length > 0 && byClass.progress + byClass.completed + byClass.overdue + byClass.none === all.length, "каждая строка получила ровно один статус");
+check(byClass.progress > 0, "есть оранжевые строки («В процессе выполнения» / «В работе»)", String(byClass.progress));
+check(byClass.completed > 0, "есть зелёные строки («Завершена»)", String(byClass.completed));
+check(byClass.overdue > 0, "есть красные строки (просрочены и не закрыты)", String(byClass.overdue));
+check(noneWrong === 0, "без заливки — только «Не начата» в срок");
+
+// «Срок» — как в карточке
+const dues = all.map((r) => cellText(r, "DueDate")).filter(Boolean);
+check(dues.some((d) => /^Осталось \d+д \d+ч$/.test(d)), "в «Сроке» есть «Осталось …д …ч»", dues.find((d) => /^Осталось/.test(d)) || "");
+check(dues.some((d) => /^Просрочено \d+д \d+ч назад$/.test(d)), "в «Сроке» есть «Просрочено … назад»", dues.find((d) => /^Просрочено/.test(d)) || "");
+check(!dues.some((d) => /^\d{2}\.\d{2}\.\d{4}$/.test(d)), "голых дат в «Сроке» не осталось");
+
+// «Кому назначено» без имени в задаче — имя доуточнено по Id (mockApi)
+check(!!takerColId, "колонка «Исполнитель» найдена в шапке", takerColId || "");
+const assignedCells = all.map((r) => cellText(r, "assignedTo"));
+check(assignedCells.length > 0 && !assignedCells.some((t) => /^Id \d+$/.test(t)), "в «Кому назначено» нет «Id <номер>»");
+
+// фильтр «Я исполнитель» — только то, что я веду.
+// ВАЖНО: AG Grid рендерит только видимые строки (виртуализация), поэтому
+// сравниваем не отрисованные строки, а счётчики: подпись на кнопке («N») и
+// «Найдено: X из Y» под поиском.
+const mineBtn = host.querySelector('[data-testid="tasks-grid-only-mine"]');
+check(!!mineBtn && mineBtn.disabled === false, "кнопка «Я исполнитель» доступна");
+const totalRows = Number((host.textContent.match(/Найдено: \d+ из (\d+)/) || [])[1] || 0);
+const mineCount = Number((mineBtn?.textContent || "").match(/\((\d+)\)/)?.[1] || 0);
+mineBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+await settle(400);
+const mineRows = rowsOf();
+const mineTakers = [...new Set(mineRows.map((r) => cellText(r, takerColId)))];
+const mineStatuses = [...new Set(mineRows.map((r) => cellText(r, "Status")))];
+const shownAfter = Number((host.textContent.match(/Найдено: (\d+) из/) || [])[1] || 0);
+console.log("   «Я исполнитель»:", mineCount, "из", totalRows, "| показано", shownAfter, "| исполнители:", mineTakers.join(", "), "| статусы:", mineStatuses.join(", "));
+check(totalRows > 0 && mineCount > 0 && mineCount < totalRows, "фильтр оставляет часть задач", `${mineCount}/${totalRows}`);
+check(shownAfter === mineCount, "таблица показывает ровно столько, сколько на кнопке", String(shownAfter));
+check(mineRows.length > 0 && mineTakers.length === 1 && mineTakers[0] === "Поршаков Сергей", "во всех строках исполнитель — я", mineTakers.join(", "));
+check(!mineStatuses.some((st) => /Не начата/.test(st)), "«Не начата» в отфильтрованном списке нет");
+// снятие фильтра возвращает всё
+mineBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+await settle(400);
+check(Number((host.textContent.match(/Найдено: (\d+) из/) || [])[1] || 0) === totalRows, "второй клик возвращает все строки");
 
 console.log(`\n=== Итог: ${problems === 0 ? "ОК — действия открываются в точке клика" : `проблем: ${problems}`} ===`);
 process.exit(problems === 0 ? 0 : 1);

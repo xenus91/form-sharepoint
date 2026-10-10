@@ -7,22 +7,39 @@
 //   • «Исполнитель» = Editor (кто взял в работу), с фолбэком на AssignedTo,
 //     чтобы колонка не пустовала у неподхваченных задач;
 //   • колонка источника — только в debug-режиме.
+// Требование 2026-10-10:
+//   • «Срок» — в том же формате, что и в карточке: «Осталось 3д 4ч» /
+//     «Просрочено 2д 5ч назад» (точная дата остаётся в подсказке);
+//   • подсветка статуса берётся из того же правила, что и заливка строки
+//     (см. taskRowStatus.js) — иначе ячейка и строка противоречат друг другу.
 //
 // Вынесено из TasksGrid: файл с компонентом не должен экспортировать константы
 // (react-refresh/only-export-components) + так проще тестировать.
 
 import { resolveTaker } from "./resolveTaker";
+import { taskRowStatus, isTaskCompleted, ROW_STATUS } from "./taskRowStatus";
+import { formatDueLeft, formatDueDateFull } from "../../../tasks/formatters";
 
-const STATUS_BG = {
-  "В работе": "#e3f2fd",
-  "Завершена": "#e8f5e9",
-  "Отменена": "#ffebee",
-  "На паузе": "#fff8e1",
+// Заливка ячейки «Статус» = заливка строки (тот же смысл, та же палитра).
+const STATUS_KIND_BG = {
+  [ROW_STATUS.PROGRESS]: "#fff3e0", // бледно-оранжевый
+  [ROW_STATUS.COMPLETED]: "#e8f5e9", // бледно-зелёный
+  [ROW_STATUS.OVERDUE]: "#ffebee", // бледно-красный
+};
+
+// Статусы вне четырёх категорий заливки строк (требование их не описывает),
+// но исторически подсвеченные в ячейке — оставляем, чтобы не терять сигнал.
+const STATUS_EXTRA_BG = {
+  "отменена": "#ffebee",
+  "на паузе": "#fff8e1",
 };
 
 export function statusCellStyle(params) {
-  const v = params?.value;
-  const bg = STATUS_BG[v];
+  const data = params?.data;
+  const value = String(data?.Status ?? params?.value ?? "").trim();
+  const bg = STATUS_KIND_BG[taskRowStatus(data ?? { Status: value })]
+    || STATUS_EXTRA_BG[value.toLowerCase()]
+    || null;
   if (!bg) return null;
   return {
     backgroundColor: bg,
@@ -56,6 +73,42 @@ function formatDate(value) {
     void _e;
     return String(value);
   }
+}
+
+/**
+ * «Срок» в таблице — как в карточке задачи: «Осталось 3д 4ч» /
+ * «Просрочено 2д 5ч назад» (formatDueLeft — тот же, что рисует чип в карточке).
+ * @param {any} row — строка таблицы
+ * @returns {string}
+ */
+export function dueCellText(row) {
+  const due = row?.DueDate;
+  if (!due) return "Без срока";
+  return formatDueLeft(due).label;
+}
+
+const DUE_TEXT_COLOR = {
+  success: "#2e7d32",
+  warning: "#b26a00",
+  info: "#0277bd",
+  error: "#c62828",
+};
+
+/**
+ * Цвет текста «Срока» — тот же смысл, что у чипа в карточке (success/warning/
+ * info/error). Просрочка у ЗАВЕРШЁННОЙ задачи показывается нейтрально: работу
+ * уже закрыли, красным пугать нечего.
+ */
+export function dueCellStyle(params) {
+  const row = params?.data;
+  const info = formatDueLeft(row?.DueDate);
+  let color = DUE_TEXT_COLOR[info.color] || "inherit";
+  if (info.overdue && isTaskCompleted(row)) color = "#616161";
+  return {
+    color,
+    fontWeight: info.overdue ? 700 : 500,
+    whiteSpace: "nowrap",
+  };
 }
 
 /**
@@ -123,11 +176,15 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
   });
   cols.push({
     headerName: "Срок",
+    // Значение колонки — по-прежнему дата (сортировка и фильтр по дате работают),
+    // а показываем её как в карточке: «Осталось …» / «Просрочено … назад».
     field: "DueDate",
-    width: 120,
+    width: 160,
     sortable: true,
     filter: "agDateColumnFilter",
-    valueFormatter: (p) => formatDate(p.value),
+    valueFormatter: (p) => dueCellText(p.data),
+    cellStyle: dueCellStyle,
+    tooltipValueGetter: (p) => (p.data?.DueDate ? formatDueDateFull(p.data.DueDate) : undefined),
   });
   cols.push({
     headerName: "Изменён",

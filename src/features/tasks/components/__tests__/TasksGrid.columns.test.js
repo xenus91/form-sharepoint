@@ -6,7 +6,13 @@
 //   • колонка источника — только в debug-режиме.
 
 import { describe, it, expect } from "vitest";
-import { buildTaskColumns, statusCellStyle, TASK_GRID_DEFAULT_COL_DEF } from "../../lib/taskTableColumns";
+import {
+  buildTaskColumns,
+  statusCellStyle,
+  dueCellStyle,
+  dueCellText,
+  TASK_GRID_DEFAULT_COL_DEF,
+} from "../../lib/taskTableColumns";
 
 function colByHeader(cols, header) {
   return cols.find((c) => c.headerName === header);
@@ -114,5 +120,75 @@ describe("TasksGrid.buildTaskColumns", () => {
   it("статус подсвечивается только для известных значений", () => {
     expect(statusCellStyle({ value: "В работе" }).backgroundColor).toBeTruthy();
     expect(statusCellStyle({ value: "Не начата" })).toBeNull();
+  });
+});
+
+// Требование 2026-10-10: «Срок» в таблице — в том же формате, что и в карточке
+// («Осталось …» / «Просрочено … назад»), а подсветка статуса совпадает с
+// заливкой строки (см. lib/taskRowStatus.js).
+describe("TasksGrid — колонка «Срок» как в карточке", () => {
+  const inDays = (days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+
+  it("показывает «Осталось …» до срока и «Просрочено … назад» после", () => {
+    const cols = buildTaskColumns();
+    const due = colByHeader(cols, "Срок");
+    expect(due.valueFormatter({ data: { DueDate: inDays(3) } })).toMatch(/^Осталось \d+д \d+ч$/);
+    expect(due.valueFormatter({ data: { DueDate: inDays(-3) } })).toMatch(/^Просрочено \d+д \d+ч назад$/);
+    expect(due.valueFormatter({ data: { DueDate: inDays(-3) } })).not.toContain("Осталось");
+    // срока нет — как в карточке
+    expect(due.valueFormatter({ data: {} })).toBe("Без срока");
+    expect(due.valueFormatter({ data: { DueDate: null } })).toBe("Без срока");
+  });
+
+  it("в подсказке остаётся точная дата и время", () => {
+    const due = colByHeader(buildTaskColumns(), "Срок");
+    const tip = due.tooltipValueGetter({ data: { DueDate: "2026-10-13T09:30:00" } });
+    expect(tip).toContain("2026");
+    expect(due.tooltipValueGetter({ data: {} })).toBeUndefined();
+  });
+
+  it("сортировка и фильтр — по-прежнему по дате (field = DueDate)", () => {
+    const due = colByHeader(buildTaskColumns(), "Срок");
+    expect(due.field).toBe("DueDate");
+    expect(due.filter).toBe("agDateColumnFilter");
+  });
+
+  it("dueCellText/dueCellStyle: цвет как у чипа карточки, просрочка завершённой — нейтральная", () => {
+    // просрочена и НЕ завершена → красный и жирный
+    const open = dueCellStyle({ data: { Status: "В процессе выполнения", DueDate: inDays(-2) } });
+    expect(open.color).toBe("#c62828");
+    expect(open.fontWeight).toBe(700);
+    // ещё не просрочена → не красный
+    const fresh = dueCellStyle({ data: { Status: "В процессе выполнения", DueDate: inDays(5) } });
+    expect(fresh.color).not.toBe("#c62828");
+    // закрыта с опозданием → нейтрально-серый (работа уже сделана)
+    const closed = dueCellStyle({ data: { Status: "Завершена", PercentComplete: 1, DueDate: inDays(-2) } });
+    expect(closed.color).toBe("#616161");
+    expect(dueCellStyle({ data: {} }).color).toBe("inherit");
+    expect(dueCellText({ DueDate: inDays(3) })).toMatch(/^Осталось /);
+  });
+});
+
+describe("TasksGrid — подсветка ячейки «Статус» = заливка строки", () => {
+  it("в работе — оранжевая, завершена — зелёная, просрочена — красная", () => {
+    const progress = statusCellStyle({ value: "В процессе выполнения", data: { Status: "В процессе выполнения", DueDate: null } });
+    const completed = statusCellStyle({ value: "Завершена", data: { Status: "Завершена", PercentComplete: 1 } });
+    const overdue = statusCellStyle({
+      value: "В процессе выполнения",
+      data: { Status: "В процессе выполнения", DueDate: new Date(Date.now() - 86400000).toISOString() },
+    });
+    expect(progress.backgroundColor).toBe("#fff3e0");
+    expect(completed.backgroundColor).toBe("#e8f5e9");
+    expect(overdue.backgroundColor).toBe("#ffebee");
+  });
+
+  it("«Не начата» в срок — без подсветки", () => {
+    expect(statusCellStyle({ value: "Не начата", data: { Status: "Не начата" } })).toBeNull();
+  });
+
+  it("работает и без data (только по значению ячейки)", () => {
+    expect(statusCellStyle({ value: "Завершена" }).backgroundColor).toBe("#e8f5e9");
+    expect(statusCellStyle({ value: "Отменена" }).backgroundColor).toBeTruthy();
+    expect(statusCellStyle({ value: "" })).toBeNull();
   });
 });

@@ -91,6 +91,25 @@ describe("AssignedToButtons — «Кому назначено» кнопкой",
     expect(host.querySelector('[data-testid="assigned-to-empty"]')).toBeTruthy();
   });
 
+  it("имени в задаче нет (пришёл только Id) — показываем ФИО из SharePoint, а не «Id 5»", async () => {
+    // Регрессия 2026-10-10: карточка #tasks/<id> рисовала «Исполнитель: Id 10»,
+    // когда задача приходила без Title принципала (CAML-кандидат без $expand,
+    // 401/403 на fetchFullTask, внешние источники).
+    const { host } = await render({ AssignedTo: "", AssignedToId: 5 });
+    const btn = host.querySelector('[data-testid="assigned-to-button"]');
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toContain("Иванов Иван");
+    expect(btn.textContent).not.toContain("Id 5");
+    expect(btn.getAttribute("data-principal-kind")).toBe("user");
+  });
+
+  it("группа без имени — тоже показываем названием, а не Id", async () => {
+    const { host } = await render({ AssignedToId: { results: [33] } });
+    const btn = host.querySelector('[data-testid="assigned-to-button"]');
+    expect(btn.textContent).toContain("ООБ");
+    expect(btn.getAttribute("data-principal-kind")).toBe("group");
+  });
+
   it("несколько исполнителей — кнопка на каждого", async () => {
     const { host } = await render({ AssignedTo: { results: [{ Id: 5, Title: "Иванов Иван" }, { Id: 33, Title: "ООБ" }] }, AssignedToId: { results: [5, 33] } });
     const buttons = [...host.querySelectorAll('[data-testid="assigned-to-button"]')];

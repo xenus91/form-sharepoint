@@ -1294,6 +1294,9 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               loading={tableLoading}
               error={tableError}
               currentUserIds={tableUserIds}
+              // ФИО нужно фильтру «Я исполнитель»: Editor (кто взял задачу)
+              // в строках часто приходит только строкой, без Id.
+              currentUserTitle={currentUserTitle}
               onSelectRow={handleSelectTableRow}
               onRowOpen={(compositeId) => openTaskFormResolved(withCtMeta((tableRows || []).find((r) => r.compositeId === compositeId) || null), compositeId)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора

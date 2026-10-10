@@ -12,17 +12,7 @@ import TasksGrid from "../src/features/tasks/components/TasksGrid";
 import ViewModeToggle from "../src/features/tasks/components/ViewModeToggle";
 import { buildRowActions } from "../src/features/tasks/lib/rowActions";
 import { renderStylingIcon } from "../src/services/stylingIcons";
-
-const TITLES = [
-  "Заявка ООБ",
-  "Основная задача ООБ",
-  "Заявка ООБ (на группу)",
-  "Проверить паллету на складе",
-  "Просмотр видеоархива",
-  "Согласовать выдачу ТМЦ",
-  "Инвентаризация зоны комплектации",
-  "Проверить целостность упаковки",
-];
+import { isNotStartedStatus, isInProgressStatus } from "../src/tasks/status";
 
 const DESCRIPTIONS = [
   "<p>Просмотр видеоархива за смену</p>",
@@ -53,40 +43,72 @@ const STYLE_BY_CHOICE = {
 };
 const ICON_BY_CHOICE = { "Найдена": "done", "Не найдена": "searchoff" };
 
-const STATUSES = ["Не начата", "В работе", "Завершена", "Отменена"];
-const ASSIGNEES = ["Поршаков Сергей", "Иванов Пётр", "Смирнова Анна", "Группа ООБ"];
-const TAKERS = ["Поршаков Сергей", "Иванов Пётр"];
 // Id принципалов: у одного и того же человека на разных сайтах Id РАЗНЫЙ.
 const ASSIGNEE_IDS = { "Поршаков Сергей": 207, "Иванов Пётр": 305, "Смирнова Анна": 411, "Группа ООБ": 33 };
 // «Я» — Поршаков: на main его Id 207, на сайте ДОБ — 42 (как в жизни).
 const CURRENT_USER_IDS = { main: 207, dob: 42 };
+const CURRENT_USER_TITLE = "Поршаков Сергей";
+const ME = "Поршаков Сергей";
+
+// Сценарии, которые должно быть видно «на глаз» (требования 2026-10-10):
+//   • заливка строки по статусу: не начата — без заливки, в работе — оранжевая,
+//     завершена — зелёная, просрочена и не закрыта — красная;
+//   • «Срок» — как в карточке: «Осталось 3д 4ч» / «Просрочено 2д 5ч назад»;
+//   • фильтр «Я исполнитель» — только те, что у меня в работе или закрыты мной
+//     (назначение в «Кому назначено» больше не считается);
+//   • «Кому назначено» без имени в задаче (только Id) — имя доуточняется с сервера.
+const SCENES = [
+  { title: "Проверить паллету на складе", status: "Не начата", assignee: ME, taker: null, dueIn: 4 },
+  { title: "Просмотр видеоархива", status: "В процессе выполнения", assignee: "Группа ООБ", taker: ME, dueIn: 3 },
+  // Словарь статусов у источников свой: основной список — «В процессе выполнения»,
+  // другие — «В работе». В таблице оба должны краситься одинаково.
+  { title: "Основная задача ООБ (в работе)", status: "В работе", assignee: "Группа ООБ", taker: ME, dueIn: 1 },
+  { title: "Заявка ООБ", status: "В процессе выполнения", assignee: "Группа ООБ", taker: "Иванов Пётр", dueIn: 5 },
+  { title: "Согласовать выдачу ТМЦ", status: "В процессе выполнения", assignee: ME, taker: ME, dueIn: -2 },
+  { title: "Найти проблемную ЕО (ТН № 456)", status: "Завершена", assignee: "Группа ООБ", taker: ME, dueIn: 6 },
+  { title: "Инвентаризация зоны комплектации", status: "Завершена", assignee: "Смирнова Анна", taker: "Иванов Пётр", dueIn: -5 },
+  { title: "Проверить целостность упаковки", status: "Не начата", assignee: "Иванов Пётр", taker: null, dueIn: -1 },
+  // «Кому назначено» пришло только Id — имя дорисуется из SharePoint (mockApi).
+  { title: "Основная задача ООБ (только Id исполнителя)", status: "Не начата", assignee: "", assigneeId: 207, taker: null, dueIn: 7 },
+  { title: "Заявка ООБ (на группу)", status: "В процессе выполнения", assignee: "Группа ООБ", taker: ME, dueIn: -6, dob: true },
+  { title: "Переместить паллет", status: "Завершена", assignee: "Группа ООБ", taker: ME, dueIn: 2, dob: true },
+];
+
+const isoInDays = (days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 
 function buildRows() {
-  return Array.from({ length: 30 }, (_, i) => {
-    const status = STATUSES[i % STATUSES.length];
-    const isDob = i % 3 === 0;
-    const sourceId = isDob ? "dob" : "main";
-    const assignee = ASSIGNEES[i % ASSIGNEES.length];
-    // На сайте ДОБ у «меня» другой Id — фильтр «Я исполнитель» это учитывает.
-    const assigneeId = assignee === "Поршаков Сергей" && isDob ? 42 : ASSIGNEE_IDS[assignee];
-    const taken = status === "В работе" || status === "Завершена";
-    const day = String(((i * 3) % 28) + 1).padStart(2, "0");
-    return {
-      compositeId: `${sourceId}:${i + 1}`,
-      sourceId,
-      sourceLabel: isDob ? "DOB Logistic" : "Main",
-      Id: i + 1,
-      Title: `${TITLES[i % TITLES.length]}${i >= TITLES.length ? ` №${i + 1}` : ""}`,
-      Body: DESCRIPTIONS[i % DESCRIPTIONS.length],
-      Status: status,
-      PercentComplete: status === "Завершена" ? 1 : 0,
-      AssignedTo: assignee,
-      AssignedToId: assigneeId,
-      EditorTitle: taken ? TAKERS[i % TAKERS.length] : "Автор задачи",
-      DueDate: `2026-10-${day}T12:00:00Z`,
-      Modified: `2026-09-${day}T09:30:00Z`,
-    };
-  });
+  const rows = [];
+  // Три «экрана» тех же сценариев — чтобы таблицу можно было прокрутить.
+  for (let round = 0; round < 3; round += 1) {
+    SCENES.forEach((scene, i) => {
+      const n = round * SCENES.length + i + 1;
+      const sourceId = scene.dob ? "dob" : "main";
+      // На сайте ДОБ у «меня» ДРУГОЙ Id — как в жизни (см. CURRENT_USER_IDS).
+      const takerId = scene.taker == null
+        ? null
+        : (scene.dob && scene.taker === ME ? 42 : ASSIGNEE_IDS[scene.taker] ?? null);
+      const assigneeId = scene.assigneeId ?? (scene.assignee ? ASSIGNEE_IDS[scene.assignee] ?? null : null);
+      const completed = scene.status === "Завершена";
+      rows.push({
+        compositeId: `${sourceId}:${n}`,
+        sourceId,
+        sourceLabel: scene.dob ? "DOB Logistic" : "Main",
+        Id: n,
+        Title: round === 0 ? scene.title : `${scene.title} №${n}`,
+        Body: DESCRIPTIONS[i % DESCRIPTIONS.length],
+        Status: scene.status,
+        PercentComplete: completed ? 1 : 0,
+        AssignedTo: scene.assignee,
+        AssignedToId: assigneeId,
+        // Кто взял задачу: Editor (до взятия — автор, исполнителем не считается).
+        EditorTitle: scene.taker || "Автор задачи",
+        EditorId: takerId,
+        DueDate: isoInDays(scene.dueIn),
+        Modified: isoInDays(scene.dueIn - 1),
+      });
+    });
+  }
+  return rows;
 }
 
 export default function TableScene() {
@@ -107,11 +129,13 @@ export default function TableScene() {
         <ViewModeToggle value={mode} onChange={setMode} />
       </Box>
       <Typography variant="body2" color="text.secondary">
-        Шапка закреплена: прокрутите список — заголовки останутся на месте.
-        Поиск над таблицей ищет по всем полям сразу, клик по заголовку — сортировка.
-        Клик по строке — выделение, а в ТОЧКЕ КЛИКА открывается меню действий по задаче:
-        «Взять в работу», результаты (как кнопки в карточке) и «Изменить»;
-        двойной клик по строке — тоже «изменить».
+        Заливка строк — по статусу задачи: <b>без заливки</b> «Не начата»,
+        <b> оранжевая</b> «В процессе выполнения», <b>зелёная</b> «Завершена»,
+        <b> красная</b> просроченная и не закрытая. «Срок» показан как в карточке —
+        «Осталось …» / «Просрочено … назад» (точная дата — в подсказке).
+        Кнопка «Я исполнитель» оставляет только задачи, которые у меня в работе
+        или завершены мной: «Поршаков Сергей» (Id 207 на main, 42 на сайте ДОБ).
+        Клик по строке — выделение и меню действий в точке клика, двойной клик — форма.
       </Typography>
 
       <Paper variant="outlined" sx={{ p: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
@@ -132,6 +156,9 @@ export default function TableScene() {
         <TasksGrid
           rows={rows}
           currentUserIds={CURRENT_USER_IDS}
+          // ФИО нужно фильтру «Я исполнитель»: Editor в строках часто приходит
+          // только строкой, без Id.
+          currentUserTitle={CURRENT_USER_TITLE}
           onSelectRow={setSelected}
           onRowOpen={(compositeId) => {
             const row = rows.find((r) => r.compositeId === compositeId);
@@ -140,8 +167,8 @@ export default function TableScene() {
           // Набор действий — тем же сборщиком, что и в приложении (rowActions.js):
           // для «в работе» это кнопки результатов по типу контента задачи.
           getRowActions={(row) => buildRowActions(row, {
-            canTake: row.Status === "Не начата",
-            choices: row.Status === "В работе"
+            canTake: isNotStartedStatus(row.Status),
+            choices: isInProgressStatus(row.Status)
               ? (row.sourceId === "main" ? CHOICES_BY_CT.main : [])
               : [],
             resolveStyling: (choice) => STYLE_BY_CHOICE[choice] || null,

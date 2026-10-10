@@ -38,6 +38,9 @@ import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
 import { buildRowActions } from "../lib/rowActions";
+import { taskRowClass } from "../lib/taskRowStatus";
+import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
+import { isCompletedStatus, isInProgressStatus } from "../../../tasks/status";
 import ResultInlineEditor from "./ResultInlineEditor";
 
 // Регистрируем все community-модули AG Grid (иначе AG Grid error #272
@@ -309,27 +312,16 @@ const GridTable = memo(function GridTable({
  * @param {Object<number>} [props.currentUserIds] — Id текущего пользователя на каждом
  *        сайте: { [sourceId]: userId }. Нужен фильтру «Я исполнитель»: на разных
  *        сайтах у одного человека РАЗНЫЕ Id, поэтому сравнивать надо с Id источника строки.
+ * @param {string} [props.currentUserTitle] — ФИО текущего пользователя. Второй
+ *        признак для «Я исполнитель»: Editor (кто взял задачу) часто приходит
+ *        только строкой, без Id.
  *
  * Поиск: одно поле над таблицей ищет по ВСЕМ колонкам сразу (AG Grid quick filter).
  * Строк фильтров под каждым заголовком (floating filter) нет — по требованию 2026-10-03.
  * Фильтр «Я исполнитель» — кнопка справа от поиска (режет строки до AG Grid).
+ *
+ * Заливка строк (требование 2026-10-10) — по статусу задачи: см. taskRowStatus.js.
  */
-
-/**
- * Id исполнителей строки. SharePoint отдаёт многозначное «Кому назначено»
- * по-разному: числом, массивом чисел или { results: [...] } — плюс источники
- * (основной список/ДОБ) отличаются формой ответа.
- */
-function assignedIdsOf(row) {
-  const raw = row?.AssignedToId ?? row?.assignedToIds ?? null;
-  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.results) ? raw.results : [raw];
-  const ids = [];
-  for (const v of list) {
-    const n = Number(typeof v === "object" ? (v?.Id ?? v?.id) : v);
-    if (Number.isFinite(n) && n > 0) ids.push(n);
-  }
-  return ids;
-}
 
 export default function TasksGrid({
   rows = [],
@@ -346,8 +338,10 @@ export default function TasksGrid({
   error = null,
   // Id ТЕКУЩЕГО пользователя на каждом сайте: { [sourceId]: userId }.
   // На разных сайтах один и тот же человек имеет РАЗНЫЕ Id, поэтому фильтр
-  // «Я исполнитель» сравнивает AssignedToId строки с Id ЕЁ ЖЕ источника.
+  // «Я исполнитель» сравнивает Id взявшего задачу с Id ЕЁ ЖЕ источника.
   currentUserIds = null,
+  // ФИО текущего пользователя — второй признак «моей» задачи (см. currentUserMatch).
+  currentUserTitle = "",
 }) {
   const gridRef = useRef(null);
   // Общий поиск по всем полям таблицы (AG Grid quick filter).
@@ -360,17 +354,18 @@ export default function TasksGrid({
   const [menuRow, setMenuRow] = useState(null);
   const [menuAnchor, setMenuAnchor] = useState(null);
 
-  // Фильтр «Я исполнитель» имеет смысл, только когда известен Id пользователя
-  // хотя бы на одном сайте.
-  const myIdsReady = useMemo(
-    () => !!currentUserIds && Object.values(currentUserIds).some((v) => Number(v) > 0),
-    [currentUserIds],
-  );
-  // Если Id пропадают (выход/смена пользователя) — фильтр снимаем, иначе таблица
-  // молча покажет ноль строк и это выглядит как «задач нет».
+  // Фильтр «Я исполнитель» имеет смысл, только когда текущий пользователь
+  // опознан: известен его Id хотя бы на одном сайте ИЛИ его ФИО (Editor в
+  // строках часто приходит только строкой — тогда сверяем по ФИО).
+  const meKnown = useMemo(() => {
+    const hasId = !!currentUserIds && Object.values(currentUserIds).some((v) => Number(v) > 0);
+    return hasId || !!String(currentUserTitle || "").trim();
+  }, [currentUserIds, currentUserTitle]);
+  // Если данные о пользователе пропадают (выход/смена пользователя) — фильтр
+  // снимаем, иначе таблица молча покажет ноль строк и это выглядит как «задач нет».
   useEffect(() => {
-    if (!myIdsReady && onlyMine) setOnlyMine(false);
-  }, [myIdsReady, onlyMine]);
+    if (!meKnown && onlyMine) setOnlyMine(false);
+  }, [meKnown, onlyMine]);
 
   const showDbg = useMemo(() => {
     try {
@@ -383,27 +378,36 @@ export default function TasksGrid({
     return false;
   }, []);
 
-  // Задача назначена на меня? Id пользователя берём ДЛЯ САЙТА ИСТОЧНИКА строки.
+  // «Я исполнитель» — задача, которую я ВЕДУ: взял в работу (и ещё не закрыл)
+  // или закрыл сам. Требование 2026-10-10: назначение в «Кому назначено» сюда
+  // БОЛЬШЕ не входит — на мне (или на моей группе) может висеть задача, по
+  // которой работает кто-то другой, и наоборот.
+  // Кто взял задачу — узнаём по тем же признакам, что и карточка: Id взявшего
+  // на сайте источника, ФИО, учётная запись (см. lib/currentUserMatch.js).
   const isMyTask = useCallback((row) => {
-    if (!row || !currentUserIds) return false;
-    const source = row.sourceId || "main";
-    const uid = Number(currentUserIds[source] ?? currentUserIds.main);
-    if (!Number.isFinite(uid) || uid <= 0) return false;
-    return assignedIdsOf(row).includes(uid);
-  }, [currentUserIds]);
+    if (!row) return false;
+    const status = row.Status ?? "";
+    const percent = row.PercentComplete;
+    // Ни «в работе», ни «завершена» → мне показывать нечего (в т.ч. «Не начата»).
+    if (!isInProgressStatus(status) && !isCompletedStatus(status, percent)) return false;
+    return isTaskTakenByCurrentUser(row, {
+      currentUserId: currentUserIds?.main ?? null,
+      currentUserTitle,
+      currentUserIdBySource: currentUserIds,
+    });
+  }, [currentUserIds, currentUserTitle]);
 
   // Фильтр «Я исполнитель» режет строки ДО AG Grid: quick filter умеет искать
-  // только по тексту, а здесь сравнение по Id принципала.
+  // только по тексту, а здесь сравнение по Id/ФИО принципала.
   const visibleRows = useMemo(() => {
     if (!onlyMine) return rows;
     return (rows || []).filter(isMyTask);
   }, [rows, onlyMine, isMyTask]);
 
-  // Id исполнителей строки: AssignedToId приходит числом, массивом или
-  // { results: [...] } — у внешних источников (ДОБ) по-разному.
+  // Сколько всего задач я веду — подпись на кнопке фильтра.
   const myCount = useMemo(
-    () => (currentUserIds ? (rows || []).filter(isMyTask).length : null),
-    [rows, isMyTask, currentUserIds],
+    () => (meKnown ? (rows || []).filter(isMyTask).length : null),
+    [rows, isMyTask, meKnown],
   );
 
   const columnDefs = useMemo(
@@ -458,8 +462,14 @@ export default function TasksGrid({
     if (!data) return undefined;
     const updating = updatingId != null && String(data.Id) === String(updatingId);
     const taking = takingId != null && data.compositeId === takingId;
-    if (!updating && !taking) return undefined;
-    return taking ? "tasks-row-busy tasks-row-taking" : "tasks-row-busy tasks-row-updating";
+    // Пока по строке идёт действие — её подсвечиваем «занятостью», иначе
+    // статусная заливка перекрывала бы сигнал о том, что задача обновляется.
+    if (updating || taking) {
+      return taking ? "tasks-row-busy tasks-row-taking" : "tasks-row-busy tasks-row-updating";
+    }
+    // Заливка по статусу: не начата — без заливки, в работе — оранжевая,
+    // завершена — зелёная, просрочена и не закрыта — красная (см. taskRowStatus).
+    return taskRowClass(data) || undefined;
   }, [updatingId, takingId]);
 
   // Полный набор действий строки: приоритет — getRowActions (TasksView собирает
@@ -612,18 +622,20 @@ export default function TasksGrid({
           }}
           sx={{ "& .MuiInputBase-root": { height: 36, borderRadius: 0.5, fontSize: 13 } }}
         />
-        {/* Фильтр «Я исполнитель»: показывает только задачи, где текущий
-            пользователь в «Кому назначено». Id сверяется по сайту источника —
-            иначе задачи ДОБ (другой site collection) не находились бы. */}
-        <Tooltip title={myIdsReady
-          ? (onlyMine ? "Показывать все задачи" : "Показывать только задачи, где я исполнитель")
+        {/* Фильтр «Я исполнитель»: показывает только задачи, которые я ВЕДУ —
+            взял в работу и ещё не закрыл, либо закрыл сам. Кто взял задачу,
+            определяется по Id на сайте источника / ФИО / учётной записи
+            (см. lib/currentUserMatch.js) — иначе задачи ДОБ (другая site
+            collection, свои Id) не находились бы. */}
+        <Tooltip title={meKnown
+          ? (onlyMine ? "Показывать все задачи" : "Показывать только задачи, которые у меня в работе или завершены мной")
           : "Не удалось определить вашего пользователя — фильтр недоступен"}>
           <span>
             <Button
               size="small"
               data-testid="tasks-grid-only-mine"
               aria-pressed={onlyMine}
-              disabled={!myIdsReady}
+              disabled={!meKnown}
               onClick={() => setOnlyMine((v) => !v)}
               variant={onlyMine ? "contained" : "outlined"}
               startIcon={<PersonIcon sx={{ fontSize: 16 }} />}

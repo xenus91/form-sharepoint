@@ -1,5 +1,16 @@
 // preview/mockApi.js — заглушка SharePoint-клиента для локального предпросмотра карточек.
 // НЕ используется в проде: подменяется только в preview/vite.config.js.
+
+// Принципалы User Information List (см. src/features/tasks/lib/assignees.js).
+// PrincipalType: 1 — пользователь, 8 — группа SharePoint.
+const PRINCIPALS = {
+  207: { Id: 207, Title: "Поршаков Сергей", LoginName: "i:0#.f|membership|porshakov@lenta.com", Email: "porshakov@lenta.com", PrincipalType: 1 },
+  305: { Id: 305, Title: "Иванов Пётр", LoginName: "i:0#.f|membership|ivanov@lenta.com", Email: "ivanov@lenta.com", PrincipalType: 1 },
+  411: { Id: 411, Title: "Смирнова Анна", LoginName: "i:0#.f|membership|smirnova@lenta.com", Email: "smirnova@lenta.com", PrincipalType: 1 },
+  33: { Id: 33, Title: "Группа ООБ", LoginName: "Группа ООБ", Email: null, PrincipalType: 8 },
+  42: { Id: 42, Title: "Поршаков Сергей", LoginName: "i:0#.f|membership|porshakov@lenta.com", Email: "porshakov@lenta.com", PrincipalType: 1 },
+};
+
 const RELATED_ROWS = [
   { Id: 24922, THU: "12345678901234567", DC_THU: "1050", Location1: "Ряд B, стеллаж 4", Recipient: { Title: "ООО Ромашка", SCNumberText: "SC-10234" } },
   { Id: 24923, THU: "76543210987654321", DC_THU: "1050", Location1: "Ряд A, стеллаж 1", Recipient: { Title: "ИП Иванов", SCNumberText: "SC-20001" } },
@@ -15,6 +26,20 @@ const apiClient = {
     // хотя CAML те же задачи отдаёт.
     if (decoded.includes("Status eq")) {
       return { data: { d: { results: [], __count: 0 } } };
+    }
+
+    // Уточнение принципала «Кому назначено»: задача может прийти только с Id
+    // (AssignedToId), тогда имя берётся отсюда (см. lib/assignees.js).
+    const byId = decoded.match(/getuserbyid\((\d+)\)/i);
+    if (byId) {
+      const p = PRINCIPALS[Number(byId[1])];
+      return { data: { d: p || { Id: Number(byId[1]), Title: "", LoginName: "", Email: "" } } };
+    }
+    const groupById = decoded.match(/sitegroups\/getbyid\((\d+)\)/i);
+    if (groupById) {
+      const p = PRINCIPALS[Number(groupById[1])];
+      if (p && p.PrincipalType !== 1) return { data: { d: p } };
+      return { data: { d: null } };
     }
 
     // Батч полей связанного элемента (relatedFields.js)
