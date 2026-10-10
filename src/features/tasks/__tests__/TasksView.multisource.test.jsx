@@ -523,7 +523,8 @@ describe("TasksView — multi-source (#tasks)", () => {
     await clickByText(host, /Таблица/);
     await settle(3000);
 
-    expect(host.textContent).toMatch(/Таблица задач · \d+ шт\./);
+    // В подписи видно, какой набор в таблице: активные или завершённые.
+    expect(host.textContent).toMatch(/Таблица задач · активные · \d+ шт\./);
     // строки обоих источников в таблице
     expect(host.textContent).toContain("Заявка ООБ");
     expect(host.textContent).toContain("Основная задача ООБ");

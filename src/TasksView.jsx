@@ -396,12 +396,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // Задача внешнего источника, которая сейчас берётся в работу (compositeId).
   const [externalTakingId, setExternalTakingId] = useState(null);
 
-  // Выделенная строка таблицы: объект + можно ли её взять в работу
-  // (внешний источник, ещё не начата и не завершена).
-  const selectedTableRowObj = useMemo(
-    () => (tableData.rows || []).find((r) => r.compositeId === selectedTableRow) || null,
-    [tableData.rows, selectedTableRow]
-  );
+
   // «Взять в работу» доступно для незавершённых задач; сама кнопка рисуется на
   // выделенной строке таблицы (см. TasksGrid → RowActionsCell).
   // main-задачи берём только из «Не начата» (как карточка), внешние — любые
@@ -1013,6 +1008,31 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     Object.entries(tableData.sitePrincipalIds || {}).map(([sid, v]) => [sid, v?.userId ?? null]),
   ), [tableData.sitePrincipalIds]);
 
+  // Строки таблицы с учётом вкладки: «Завершенные» — отдельный ленивый источник
+  // (completed). Без этого переключение вкладки в табличном режиме НИЧЕГО не
+  // меняло: TasksGrid всегда получал tableData.rows (только активные задачи).
+  const tableRows = useMemo(
+    () => (tab === 1 ? (completed.items || []) : (tableData.rows || [])),
+    [tab, completed.items, tableData.rows]
+  );
+  const tableLoading = tab === 1 ? completedLoading : tableData.isLoading;
+  const tableError = tab === 1
+    ? (completed.error ? "Не удалось загрузить завершённые задачи" : null)
+    : (tableData.error?.message || null);
+  // Id текущего пользователя для фильтра «Я исполнитель»: на сайте источника
+  // свой Id, плюс основной сайт («main»).
+  const tableUserIds = useMemo(() => ({
+    main: Number(currentUserId) || null,
+    ...siteUserIdsBySource,
+  }), [currentUserId, siteUserIdsBySource]);
+
+  // Выделенная строка таблицы: объект + можно ли её взять в работу
+  // (внешний источник, ещё не начата и не завершена).
+  const selectedTableRowObj = useMemo(
+    () => (tableRows || []).find((r) => r.compositeId === selectedTableRow) || null,
+    [tableRows, selectedTableRow]
+  );
+
   // Задачу уже взял кто-то другой (та же проверка, что в TaskCard).
   const isRowTakenByOther = useCallback((row) => {
     if (!currentUserId && !currentUserTitle) return false;
@@ -1239,8 +1259,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       ) : viewModeView === "table" ? (
         <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1, py: 0.5, borderBottom: "1px solid rgba(23,28,143,0.08)" }}>
-            <Typography variant="caption" sx={{ color: "text.secondary", flex: 1 }}>
-              Таблица задач · {tableData.rows.length} шт.
+            <Typography variant="caption" sx={{ color: "text.secondary", flex: 1 }} data-testid="table-mode-caption">
+              Таблица задач · {tab === 1 ? "завершённые" : "активные"} · {tableRows.length} шт.
             </Typography>
             {tableData.perSourceStats && Object.values(tableData.perSourceStats).some((s) => s?.error) && (
               <Typography variant="caption" sx={{ color: "warning.main" }}>
@@ -1264,11 +1284,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               внешний контейнер не скроллит. */}
           <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <TasksGrid
-              rows={tableData.rows}
-              loading={tableData.isLoading}
-              error={tableData.error?.message || null}
+              rows={tableRows}
+              loading={tableLoading}
+              error={tableError}
+              currentUserIds={tableUserIds}
               onSelectRow={handleSelectTableRow}
-              onRowOpen={(compositeId) => openTaskFormResolved(withCtMeta((tableData.rows || []).find((r) => r.compositeId === compositeId) || null), compositeId)}
+              onRowOpen={(compositeId) => openTaskFormResolved(withCtMeta((tableRows || []).find((r) => r.compositeId === compositeId) || null), compositeId)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора
               getRowActions={getTableRowActions}
               onEditRow={(row) => openTaskFormResolved(withCtMeta(row), row?.compositeId)}

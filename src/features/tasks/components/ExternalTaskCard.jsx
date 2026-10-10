@@ -231,7 +231,14 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
 
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1, gap: 1 }}>
         <Typography variant="caption" sx={{ color: "text.secondary", minWidth: 0 }}>
-          Кому назначено: <AssignedToButtons task={task} /> • Исполнитель: {taker || "—"} • Статус: {task.Status || "—"}
+          {/* Подписи и кнопка исполнителя — на одной линии (flex): раньше
+              inline-flex кнопка выравнивалась по низу иконки и строка «ехала
+              лесенкой». */}
+          <Box component="span" sx={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+            <Box component="span" sx={{ whiteSpace: "nowrap" }}>{"Кому назначено: "}</Box>
+            <AssignedToButtons task={task} />
+            <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • Исполнитель: "}{taker || "—"}{" • Статус: "}{task.Status || "—"}</Box>
+          </Box>
         </Typography>
         <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap" }}>
           #{task.Id}

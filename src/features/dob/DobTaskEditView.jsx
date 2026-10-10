@@ -41,6 +41,7 @@ import {
   FORM_NUMBER_FIELD_SX,
 } from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
+import { resolvePrincipal, principalGetForTask } from '../tasks/lib/assignees';
 
 /** Ссылка на вложение для браузера (в dev — через прокси /dob-api, в prod — origin). */
 function attachmentHref(serverRelativeUrl) {
@@ -209,6 +210,52 @@ function isFormValueEmpty(field, value) {
   return raw.trim().length === 0;
 }
 
+/** Id из lookup-поля: число, массив чисел или { results: [...] }. */
+function lookupIdsOf(raw) {
+  if (raw == null) return [];
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.results) ? raw.results : [raw];
+  const ids = [];
+  for (const v of list) {
+    const n = Number(typeof v === 'object' ? (v?.Id ?? v?.id) : v);
+    if (Number.isFinite(n) && n > 0) ids.push(n);
+  }
+  return ids;
+}
+
+/** Значение User-поля пустое? (С учётом всех форм ответа SharePoint.) */
+function isUserValueEmpty(v) {
+  if (v == null || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (Array.isArray(v?.results)) return v.results.length === 0;
+  if (typeof v === 'object') return !(v.Title || v.Name || v.Id || v.ID);
+  return String(v).trim() === '';
+}
+
+// Кэш принципалов сайта ДОБ: Id → { Id, Title, LoginName }. Живёт в сессии —
+// «Виновные» и прочие люди повторяются от задачи к задаче.
+const dobPrincipalCache = new Map();
+
+/**
+ * Принципал сайта ДОБ по Id. SharePoint НЕ ВСЕГДА раскрывает многозначное
+ * User-поле в $expand (колонка скрыта, слишком много expands, старая ферма) —
+ * тогда `item.Guilty` пустой, хотя `GuiltyId` приходит. Тянем человека (или
+ * группу) точечно: `getuserbyid` → `sitegroups/getbyid`.
+ */
+async function resolveDobPrincipal(id) {
+  const key = Number(id);
+  if (dobPrincipalCache.has(key)) return dobPrincipalCache.get(key);
+  let person = null;
+  try {
+    const get = principalGetForTask({ sourceId: 'dob' });
+    const info = await resolvePrincipal(get, key);
+    if (info?.title) person = { Id: info.id, Title: info.title, LoginName: info.loginName || '' };
+  } catch {
+    person = null;
+  }
+  dobPrincipalCache.set(key, person);
+  return person;
+}
+
 export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = '#dob_tasks' }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
@@ -299,6 +346,42 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     // сбрасываем prevChek для детекта удалений после загрузки
     // prevChekHtmlRef будет инициализирован в useEffect sync-delete
     prevChekHtmlRef.current = null;
+  }, [item, fields]);
+
+  // «Виновные» и другие люди: если SharePoint не раскрыл User-поле в $expand,
+  // в item приходят ТОЛЬКО Id (GuiltyId). Без этого в выполненной задаче вместо
+  // виновных была пустота. Достаём ФИО по Id с того же сайта (и в просмотре,
+  // и в правке — форма одна).
+  useEffect(() => {
+    if (!item || !fields?.length) return undefined;
+    const userFields = fields.filter((f) => {
+      const t = String(f.TypeAsString || '').toLowerCase();
+      const internal = f.InternalName;
+      return t === 'user' && internal !== 'Author' && internal !== 'Editor';
+    });
+    if (!userFields.length) return undefined;
+    let alive = true;
+    (async () => {
+      for (const f of userFields) {
+        if (!alive) return;
+        const internal = f.InternalName;
+        const current = getODataValue(item, internal) ?? item[internal];
+        if (!isUserValueEmpty(current)) continue; // поле раскрылось — не трогаем
+        const ids = lookupIdsOf(item[`${internal}Id`] ?? getODataValue(item, `${internal}Id`));
+        if (!ids.length) continue;
+        const people = [];
+        for (const one of ids) {
+          const person = await resolveDobPrincipal(one);
+          if (person) people.push(person);
+        }
+        if (!alive || !people.length) continue;
+        setForm((prev) => {
+          if (!isUserValueEmpty(prev?.[internal])) return prev; // успели прийти настоящие значения
+          return { ...prev, [internal]: people };
+        });
+      }
+    })();
+    return () => { alive = false; };
   }, [item, fields]);
 
   const handleChange = useCallback((internal, value) => {

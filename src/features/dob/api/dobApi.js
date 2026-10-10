@@ -512,11 +512,43 @@ export async function getDobItem(id, listGuid = DOB_LIST_GUID) {
     }
     return parts.join(',');
   }
-  const selectForExpand = buildSelectForExpands(expands);
-  const url = `${listApiOf(listGuid)}/items(${id})?$select=${selectForExpand}&$expand=${expands}`;
-  const { data } = await httpOf(listGuid).get(url, readConfig(listGuid));
-  const item = data?.d || data;
-  return item;
+  // Один элемент тянем С РЕТРАЯМИ, как список: если SharePoint не может
+  // раскрыть какое-то User-поле ($expand на колонку, которой нет / она скрыта /
+  // слишком много expands), он отвечает 400 — и БЕЗ ретрая элемент не открывался
+  // ВООБЩЕ (форма падала), а при «съехавшем» expand поля вроде «Виновные»
+  // приходили пустыми. Убираем проблемное поле из $expand и повторяем.
+  let currentExpands = expands;
+  let attempt = 0;
+  while (attempt < 5) {
+    const selectForExpand = buildSelectForExpands(currentExpands);
+    const url = `${listApiOf(listGuid)}/items(${id})?$select=${selectForExpand}&$expand=${currentExpands}`;
+    try {
+      const { data } = await httpOf(listGuid).get(url, readConfig(listGuid));
+      return data?.d || data;
+    } catch (e) {
+      const rawMsg = e?.response?.data?.error?.message?.value || e?.message || '';
+      const msg = String(rawMsg);
+      const lower = msg.toLowerCase();
+      console.warn(`[dobApi] getDobItem(${id}) failed attempt ${attempt}:`, msg.slice(0, 600));
+      if (lower.includes('does not exist') || lower.includes('не существует') || lower.includes('field') || lower.includes('column')) {
+        const bad = extractBadField(msg);
+        const inExpands = currentExpands.split(',').find((x) => x === bad || x.toLowerCase() === String(bad).toLowerCase());
+        if (inExpands) {
+          console.warn(`[dobApi] getDobItem: remove bad expand "${inExpands}" and retry`);
+          currentExpands = currentExpands.split(',').filter((x) => x !== inExpands).join(',') || 'Author,Editor';
+          attempt += 1;
+          continue;
+        }
+      }
+      if (lower.includes('expand') && currentExpands !== 'Author,Editor') {
+        currentExpands = 'Author,Editor';
+        attempt += 1;
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error(`getDobItem(${id}) failed after retries`);
 }
 
 // Элемент для read-only просмотра (диалог «Связанная заявка»): тянем сразу имя

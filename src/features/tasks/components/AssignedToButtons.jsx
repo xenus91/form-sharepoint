@@ -151,10 +151,18 @@ export default function AssignedToButtons({
               fontSize: "0.72rem",
               lineHeight: 1.25,
               letterSpacing: 0,
+              // Выравнивание ВНУТРИ строки подписей («Исполнитель: … • Статус: …»):
+              // inline-flex по умолчанию садится на baseline своей иконки, из-за
+              // чего подписи вокруг кнопки «ехали лесенкой». Держим кнопку по
+              // центру строки и не даём ей быть выше соседнего текста.
+              display: "inline-flex",
+              verticalAlign: "middle",
+              alignItems: "center",
+              height: 18,
+              minHeight: 0,
               px: 0.5,
               py: 0,
               minWidth: 0,
-              minHeight: 22,
               maxWidth: "100%",
               color: "#6b7280",
               borderRadius: 1,

@@ -35,6 +35,19 @@ import SearchOffIcon from "@mui/icons-material/SearchOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import AssignedToButtons from "./AssignedToButtons";
 
+// Нижняя строка карточки: «Исполнитель: … • Статус: …».
+// Раньше кнопка исполнителя (inline-flex) стояла ВНУТРИ текстового узла и
+// выравнивалась по низу своей иконки — подписи вокруг неё оказывались на
+// разных высотах («лесенкой»). Теперь строка — flex: подписи и кнопка на
+// одной линии, выровнены по центру.
+const CARD_FOOTER_ROW_SX = {
+  display: "inline-flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  minWidth: 0,
+};
+const CARD_FOOTER_TEXT_SX = { whiteSpace: "nowrap" };
+
 // DBG helper (shared with TasksView)
 const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return false; }catch(_e){ void _e; return false; } })();
 const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}catch{} };
@@ -1076,7 +1089,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography sx={{ fontWeight: 800, color: "#1b5e20", fontSize: "0.95rem", lineHeight: 1.2 }}>Задача выполнена</Typography>
               <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>
-                Исполнитель: {task.EditorTitle || task.Editor || "—"} • Кому назначено: <AssignedToButtons task={task} /> • {task.Modified ? new Date(task.Modified).toLocaleString("ru-RU") : "—"}{task.ResultSearchTHU ? ` • ${task.ResultSearchTHU}` : ""}{task.Location1 ? ` • ${task.Location1}` : ""}
+                <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
+                  <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{`Исполнитель: ${task.EditorTitle || task.Editor || "—"} • `}</Box>
+                  <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Кому назначено: "}</Box>
+                  <AssignedToButtons task={task} />
+                  <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • "}{task.Modified ? new Date(task.Modified).toLocaleString("ru-RU") : "—"}{task.ResultSearchTHU ? ` • ${task.ResultSearchTHU}` : ""}{task.Location1 ? ` • ${task.Location1}` : ""}</Box>
+                </Box>
               </Typography>
             </Box>
           </Box>
@@ -1181,7 +1199,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
+                      <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
+                        <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                        <AssignedToButtons task={task} />
+                        <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
+                      </Box>
                     </Typography>
                     <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                       #{task.Id}
@@ -1215,7 +1237,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     </Box>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                        Исполнитель: <AssignedToButtons task={task} emptyText={taker || "—"} /> • Статус: {task.Status || "—"}
+                        <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                          <AssignedToButtons task={task} emptyText={taker || "—"} />
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
+                        </Box>
                       </Typography>
                       <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                         #{task.Id}
@@ -1233,7 +1259,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     </Typography>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                        Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
+                        <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                          <AssignedToButtons task={task} />
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
+                        </Box>
                       </Typography>
                       <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                         #{task.Id}
@@ -1501,7 +1531,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     </Box>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                        Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
+                        <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                          <AssignedToButtons task={task} />
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
+                        </Box>
                       </Typography>
                       <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                         #{task.Id}
@@ -1665,7 +1699,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
+                      <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
+                        <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                        <AssignedToButtons task={task} />
+                        <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
+                      </Box>
                     </Typography>
                     <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                       #{task.Id}
@@ -1703,7 +1741,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 </Box>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
+                    <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
+                      <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                      <AssignedToButtons task={task} />
+                      <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
+                    </Box>
                   </Typography>
                   <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                     #{task.Id}

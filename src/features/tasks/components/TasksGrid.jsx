@@ -15,7 +15,7 @@
 
 import { AgGridReact } from "ag-grid-react";
 import AssignedToButtons, { AssignedToCell } from "./AssignedToButtons";
-import { memo, useMemo, useRef, useEffect, useState } from "react";
+import { memo, useMemo, useRef, useEffect, useState, useCallback } from "react";
 import {
   Box,
   Button,
@@ -33,6 +33,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 import EditIcon from "@mui/icons-material/Edit";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import PersonIcon from "@mui/icons-material/Person";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
 import { themeQuartz, ModuleRegistry, AllCommunityModule } from "ag-grid-community";
 import { buildTaskColumns, TASK_GRID_DEFAULT_COL_DEF } from "../lib/taskTableColumns";
@@ -305,9 +306,31 @@ const GridTable = memo(function GridTable({
  * @param {boolean} [props.loading]
  * @param {string} [props.error]
  *
+ * @param {Object<number>} [props.currentUserIds] — Id текущего пользователя на каждом
+ *        сайте: { [sourceId]: userId }. Нужен фильтру «Я исполнитель»: на разных
+ *        сайтах у одного человека РАЗНЫЕ Id, поэтому сравнивать надо с Id источника строки.
+ *
  * Поиск: одно поле над таблицей ищет по ВСЕМ колонкам сразу (AG Grid quick filter).
  * Строк фильтров под каждым заголовком (floating filter) нет — по требованию 2026-10-03.
+ * Фильтр «Я исполнитель» — кнопка справа от поиска (режет строки до AG Grid).
  */
+
+/**
+ * Id исполнителей строки. SharePoint отдаёт многозначное «Кому назначено»
+ * по-разному: числом, массивом чисел или { results: [...] } — плюс источники
+ * (основной список/ДОБ) отличаются формой ответа.
+ */
+function assignedIdsOf(row) {
+  const raw = row?.AssignedToId ?? row?.assignedToIds ?? null;
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.results) ? raw.results : [raw];
+  const ids = [];
+  for (const v of list) {
+    const n = Number(typeof v === "object" ? (v?.Id ?? v?.id) : v);
+    if (Number.isFinite(n) && n > 0) ids.push(n);
+  }
+  return ids;
+}
+
 export default function TasksGrid({
   rows = [],
   onSelectRow,
@@ -321,15 +344,33 @@ export default function TasksGrid({
   showSourceColumn = false,
   loading = false,
   error = null,
+  // Id ТЕКУЩЕГО пользователя на каждом сайте: { [sourceId]: userId }.
+  // На разных сайтах один и тот же человек имеет РАЗНЫЕ Id, поэтому фильтр
+  // «Я исполнитель» сравнивает AssignedToId строки с Id ЕЁ ЖЕ источника.
+  currentUserIds = null,
 }) {
   const gridRef = useRef(null);
   // Общий поиск по всем полям таблицы (AG Grid quick filter).
   const [quickFilter, setQuickFilter] = useState("");
+  // Фильтр «Я исполнитель» (кнопка рядом с поиском).
+  const [onlyMine, setOnlyMine] = useState(false);
   // Сколько строк осталось после поиска/фильтров — показываем рядом с полем.
   const [shownCount, setShownCount] = useState(null);
   // Popup действий: строка + координаты клика (viewport coordinates).
   const [menuRow, setMenuRow] = useState(null);
   const [menuAnchor, setMenuAnchor] = useState(null);
+
+  // Фильтр «Я исполнитель» имеет смысл, только когда известен Id пользователя
+  // хотя бы на одном сайте.
+  const myIdsReady = useMemo(
+    () => !!currentUserIds && Object.values(currentUserIds).some((v) => Number(v) > 0),
+    [currentUserIds],
+  );
+  // Если Id пропадают (выход/смена пользователя) — фильтр снимаем, иначе таблица
+  // молча покажет ноль строк и это выглядит как «задач нет».
+  useEffect(() => {
+    if (!myIdsReady && onlyMine) setOnlyMine(false);
+  }, [myIdsReady, onlyMine]);
 
   const showDbg = useMemo(() => {
     try {
@@ -341,6 +382,29 @@ export default function TasksGrid({
     } catch (_e) { void _e; }
     return false;
   }, []);
+
+  // Задача назначена на меня? Id пользователя берём ДЛЯ САЙТА ИСТОЧНИКА строки.
+  const isMyTask = useCallback((row) => {
+    if (!row || !currentUserIds) return false;
+    const source = row.sourceId || "main";
+    const uid = Number(currentUserIds[source] ?? currentUserIds.main);
+    if (!Number.isFinite(uid) || uid <= 0) return false;
+    return assignedIdsOf(row).includes(uid);
+  }, [currentUserIds]);
+
+  // Фильтр «Я исполнитель» режет строки ДО AG Grid: quick filter умеет искать
+  // только по тексту, а здесь сравнение по Id принципала.
+  const visibleRows = useMemo(() => {
+    if (!onlyMine) return rows;
+    return (rows || []).filter(isMyTask);
+  }, [rows, onlyMine, isMyTask]);
+
+  // Id исполнителей строки: AssignedToId приходит числом, массивом или
+  // { results: [...] } — у внешних источников (ДОБ) по-разному.
+  const myCount = useMemo(
+    () => (currentUserIds ? (rows || []).filter(isMyTask).length : null),
+    [rows, isMyTask, currentUserIds],
+  );
 
   const columnDefs = useMemo(
     () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg })
@@ -548,15 +612,46 @@ export default function TasksGrid({
           }}
           sx={{ "& .MuiInputBase-root": { height: 36, borderRadius: 0.5, fontSize: 13 } }}
         />
+        {/* Фильтр «Я исполнитель»: показывает только задачи, где текущий
+            пользователь в «Кому назначено». Id сверяется по сайту источника —
+            иначе задачи ДОБ (другой site collection) не находились бы. */}
+        <Tooltip title={myIdsReady
+          ? (onlyMine ? "Показывать все задачи" : "Показывать только задачи, где я исполнитель")
+          : "Не удалось определить вашего пользователя — фильтр недоступен"}>
+          <span>
+            <Button
+              size="small"
+              data-testid="tasks-grid-only-mine"
+              aria-pressed={onlyMine}
+              disabled={!myIdsReady}
+              onClick={() => setOnlyMine((v) => !v)}
+              variant={onlyMine ? "contained" : "outlined"}
+              startIcon={<PersonIcon sx={{ fontSize: 16 }} />}
+              sx={{
+                textTransform: "none",
+                fontWeight: 600,
+                fontSize: "0.72rem",
+                whiteSpace: "nowrap",
+                height: 36,
+                px: 1.25,
+                flexShrink: 0,
+                borderRadius: 0.5,
+                ...(onlyMine ? {} : { color: "text.secondary", borderColor: "divider" }),
+              }}
+            >
+              Я исполнитель{myCount != null ? ` (${myCount})` : ""}
+            </Button>
+          </span>
+        </Tooltip>
         <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-          {shownCount === null ? "" : `Найдено: ${shownCount} из ${rows.length}`}
+          {shownCount === null ? "" : `Найдено: ${shownCount} из ${(onlyMine ? visibleRows : rows).length}`}
         </Typography>
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, width: "100%" }}>
         <GridTable
           gridRef={gridRef}
           theme={themeQuartz}
-          rowData={rows}
+          rowData={visibleRows}
           columnDefs={columnDefs}
           context={gridContext}
           defaultColDef={defaultColDef}

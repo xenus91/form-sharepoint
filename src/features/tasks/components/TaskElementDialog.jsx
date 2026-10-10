@@ -86,7 +86,14 @@ export default function TaskElementDialog({
                     <Box sx={{ width: 36, height: 36, borderRadius: "50%", bgcolor: "rgba(46,125,50,0.14)", display: "grid", placeItems: "center", flexShrink: 0 }}><CheckCircleIcon sx={{ color: "#2e7d32", fontSize: 22 }} /></Box>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography sx={{ fontWeight: 800, color: "#1b5e20", fontSize: "0.95rem", lineHeight: 1.2 }}>Задача выполнена</Typography>
-                      <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>Исполнитель: {elementTaskMatch.EditorTitle || elementTaskMatch.Editor || "—"} • Кому назначено: <AssignedToButtons task={elementTaskMatch} /> • {elementTaskMatch.Modified ? new Date(elementTaskMatch.Modified).toLocaleString("ru-RU") : "—"}{elementTaskMatch.ResultSearchTHU ? ` • ${elementTaskMatch.ResultSearchTHU}` : ""}</Typography>
+                      <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>{/* Подписи и кнопка исполнителя — на одной линии (flex): иначе inline-flex
+                          кнопка выравнивалась по низу иконки и строка «ехала лесенкой». */}
+                        <Box component="span" sx={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>{`Исполнитель: ${elementTaskMatch.EditorTitle || elementTaskMatch.Editor || "—"} • `}</Box>
+                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>{"Кому назначено: "}</Box>
+                          <AssignedToButtons task={elementTaskMatch} />
+                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • "}{elementTaskMatch.Modified ? new Date(elementTaskMatch.Modified).toLocaleString("ru-RU") : "—"}{elementTaskMatch.ResultSearchTHU ? ` • ${elementTaskMatch.ResultSearchTHU}` : ""}</Box>
+                        </Box></Typography>
                     </Box>
                   </Box>
                 ) : (
