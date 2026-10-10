@@ -325,6 +325,8 @@ TasksHashContent.completed.test.jsx` (карточка переключаетс�
   `TasksGrid.onCellClicked/onRowDoubleClicked`: клик из
   `[data-testid="assigned-to-button"]` игнорируется.
   Оба слоя проверены по отдельности (убирали один — поповер не открывался);
+  Аналогичная ошибка исправлена в `src/tasks/principalDetails.js` — оттуда тип
+  принципала (`kindHint`) попадает в `distribution.classifyPrincipal`;
 * вид кнопки: серая (`#6b7280`), кегль `0.72rem`, высота 22 px — под подписи
   карточки, а не под кнопки действий; при наведении — фирменный синий.
 

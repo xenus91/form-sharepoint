@@ -18,6 +18,9 @@ import apiClient from "../api";
 const STORAGE_PREFIX = "sp:principalDetail:";
 const _mem = new Map();
 
+// SP.PrincipalType: 1 — пользователь, 2/4/8 — разновидности группы.
+const KIND_BY_PRINCIPAL_TYPE = { 1: "user", 2: "group", 4: "group", 8: "group" };
+
 /**
  * @typedef {object} PrincipalDetail
  * @property {number} id
@@ -74,14 +77,31 @@ export async function resolvePrincipalDetail(rawId, deps = {}) {
   const get = deps.get || ((url, opts) => apiClient.get(url, opts));
   const accept = { headers: { Accept: "application/json;odata=verbose" } };
 
-  // 1) Пользователь
+  // 1) User Information List: там лежат И пользователи, И группы.
+  //    Поэтому «нашлась запись ⇒ человек» — ОШИБКА: группа из UIL получала
+  //    kind "user" и считалась пользователем. Тип даёт PrincipalType
+  //    (SP.PrincipalType, битовая маска): 1 — пользователь,
+  //    2 — список рассылки, 4 — security-группа, 8 — группа SharePoint.
+  const groupHit = async () => {
+    try {
+      const resp = await get(`/web/sitegroups/getbyid(${id})`, accept);
+      const g = resp?.data?.d || resp?.data;
+      return g && (g.Title || g.LoginName) ? g : null;
+    } catch {
+      return null;
+    }
+  };
+
   try {
     const resp = await get(`/web/getuserbyid(${id})`, accept);
     const d = resp?.data?.d || resp?.data;
     if (d && (d.LoginName || d.Email || d.EMail || d.Title)) {
+      const fromType = KIND_BY_PRINCIPAL_TYPE[Number(d.PrincipalType)];
       const detail = {
         id,
-        kind: "user",
+        // PrincipalType не приехал (бывает) — уточняем группой: если Id есть
+        // только в sitegroups, это ГРУППА, а не человек.
+        kind: fromType || ((await groupHit()) ? "group" : "user"),
         title: d.Title || null,
         loginName: d.LoginName || null,
         email: d.Email || d.EMail || null,
@@ -95,25 +115,18 @@ export async function resolvePrincipalDetail(rawId, deps = {}) {
     }
   }
 
-  // 2) Группа
-  try {
-    const resp = await get(`/web/sitegroups/getbyid(${id})`, accept);
-    const d = resp?.data?.d || resp?.data;
-    if (d && (d.Title || d.LoginName)) {
-      const detail = {
-        id,
-        kind: "group",
-        title: d.Title || null,
-        loginName: d.LoginName || null,
-        email: d.Email || null,
-      };
-      cacheWrite(id, detail);
-      return detail;
-    }
-  } catch (e) {
-    if (e?.response?.status && e.response.status !== 404 && e.response.status !== 400) {
-      console.warn(`[principalDetails] sitegroups/getbyid(${id}) failed`, e.response.status);
-    }
+  // 2) Только группы
+  const group = await groupHit();
+  if (group) {
+    const detail = {
+      id,
+      kind: "group",
+      title: group.Title || null,
+      loginName: group.LoginName || null,
+      email: group.Email || null,
+    };
+    cacheWrite(id, detail);
+    return detail;
   }
   return null;
 }

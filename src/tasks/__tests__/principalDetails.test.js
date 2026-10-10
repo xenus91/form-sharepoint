@@ -54,6 +54,51 @@ describe("principalDetails.enrichDistribution", () => {
     expect(dist.Email.results[0].Title).toBeUndefined();
   });
 
+  it("PrincipalType = 8: группа лежит в User Information List — НЕ считаем её человеком", async () => {
+    // Регрессия: getuserbyid отдаёт и группы, поэтому «нашлась запись ⇒ user»
+    // давало неверный тип для групп из UIL.
+    const get = makeGet([
+      ["/web/getuserbyid(33)", { Id: 33, Title: "ООБ", LoginName: "ООБ", Email: "", PrincipalType: 8 }],
+    ]);
+    const detail = await resolvePrincipalDetail(33, { get });
+    expect(detail.kind).toBe("group");
+    expect(detail.title).toBe("ООБ");
+    // тип известен — дополнительный запрос к sitegroups не нужен
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("PrincipalType = 1 → пользователь", async () => {
+    const get = makeGet([
+      ["/web/getuserbyid(207)", { Id: 207, Title: "Поршаков Сергей", LoginName: "i:0#.f|membership|s@lenta.com", Email: "s@lenta.com", PrincipalType: 1 }],
+    ]);
+    const detail = await resolvePrincipalDetail(207, { get });
+    expect(detail.kind).toBe("user");
+    expect(detail.email).toBe("s@lenta.com");
+  });
+
+  it("PrincipalType = 4 (security-группа) → группа", async () => {
+    const get = makeGet([
+      ["/web/getuserbyid(11)", { Id: 11, Title: "Все кроме внешних", LoginName: "c:0-.f|rolemanager|x", PrincipalType: 4 }],
+    ]);
+    expect((await resolvePrincipalDetail(11, { get })).kind).toBe("group");
+  });
+
+  it("PrincipalType не приехал → уточняем: Id только в sitegroups — это группа", async () => {
+    const get = makeGet([
+      ["/web/getuserbyid(33)", { Id: 33, Title: "ООБ", LoginName: "ООБ" }],
+      ["/web/sitegroups/getbyid(33)", { Id: 33, Title: "ООБ", LoginName: "ООБ" }],
+    ]);
+    expect((await resolvePrincipalDetail(33, { get })).kind).toBe("group");
+  });
+
+  it("PrincipalType не приехал и это не группа — остаётся пользователем", async () => {
+    const get = makeGet([
+      ["/web/getuserbyid(207)", { Id: 207, Title: "Поршаков Сергей", LoginName: "i:0#.f|membership|s@lenta.com" }],
+      ["/web/sitegroups/getbyid(207)", "404"],
+    ]);
+    expect((await resolvePrincipalDetail(207, { get })).kind).toBe("user");
+  });
+
   it("группа: getuserbyid 404 → sitegroups/getbyid", async () => {
     const get = makeGet([
       ["/web/sitegroups/getbyid(33)", { Id: 33, Title: "ООБ", LoginName: "ООБ" }],
