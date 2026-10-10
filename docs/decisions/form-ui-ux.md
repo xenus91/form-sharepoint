@@ -374,7 +374,7 @@ TasksHashContent.completed.test.jsx` (карточка переключаетс�
   (`CARD_FOOTER_ROW_SX`: `display: inline-flex`, `align-items: center`) —
   в `TaskCard` (7 мест), `ExternalTaskCard`, `TaskElementDialog`;
 * сама кнопка: `vertical-align: middle`, высота 18 px, `min-height: 0`;
-* пробелы zwischen подписями заданы текстом (`"Исполнитель: "`, `" • Статус: "`) —
+* пробелы между подписями заданы текстом (`"Исполнитель: "`, `" • Статус: "`) —
   иначе flex их схлопнул бы и `textContent` карточки изменился.
 
 Тест: `tasks/__tests__/TaskCardFooterAlign.test.jsx` (4).
