@@ -23,6 +23,7 @@ import {
 } from 'ag-grid-community';
 import { Box, CircularProgress, Typography, Alert } from '@mui/material';
 import { useDobListState } from '../state/DobListStateContext';
+import { isRowCompleted, statusInternalOf } from '../lib/dobRowStatus';
 
 ModuleRegistry.registerModules([
   AllCommunityModule,
@@ -84,6 +85,8 @@ function htmlToCellText(value) {
 
 function buildColumnDefs(fields) {
   if (!fields || fields.length === 0) return [];
+  // Завершённые задачи — только просмотр (правило общее для всех интерфейсов).
+  const statusInternalGlobal = statusInternalOf(fields);
   const systemSkip = new Set([
     'File_x0020_Type', 'ComplianceAssetId', 'LinkTitle', 'LinkTitleNoMenu', 'PermMask',
     'MetaInfo', 'FileRef', 'FileDirRef', 'FileLeafRef', 'ContentType', 'ContentTypeId',
@@ -196,7 +199,8 @@ function buildColumnDefs(fields) {
       headerName: title + (f.Required ? ' *' : ''),
       flex: 1,
       minWidth: 120,
-      editable: editable && !isCalculated,
+      // editable как ФУНКЦИЯ: ячейка недоступна, если строка — завершённая задача.
+      editable: (p) => editable && !isCalculated && !isRowCompleted(p?.data, statusInternalGlobal),
       headerTooltip: `${internal} — ${f.TypeAsString}${f.Description ? ' | ' + String(f.Description).slice(0, 80) : ''}`,
       tooltipValueGetter: (p) => (p.value ? String(p.value).slice(0, 120) : ''),
       ...(isODataField
@@ -403,6 +407,12 @@ export default function DobGrid({ fields, rows }) {
   } = useDobListState();
 
   const baseColumnDefs = useMemo(() => buildColumnDefs(fields || ctxFields || []), [fields, ctxFields]);
+  const statusInternal = useMemo(() => statusInternalOf(fields || ctxFields || []), [fields, ctxFields]);
+  // Завершённую задачу нельзя править и пакетной записью (кнопка «Сохранить»).
+  const rowCompletedClassRules = useMemo(
+    () => ({ 'dob-row-completed': (p) => isRowCompleted(p?.data, statusInternal) }),
+    [statusInternal],
+  );
   const defaultColDef = useMemo(
     () => ({
       sortable: true,
@@ -458,6 +468,9 @@ export default function DobGrid({ fields, rows }) {
       const newVal = evt.newValue;
       const oldVal = evt.oldValue;
       if (newVal === oldVal) return;
+      // Завершённая задача — только просмотр: правку в dirty не копим
+      // (иначе «Сохранить» записало бы её пакетным MERGE).
+      if (isRowCompleted(evt.data, statusInternal)) return;
       const id = evt.data?.ID ?? evt.data?.Id ?? evt.data?.OData__ID ?? evt.data?.ID;
       if (!id) return;
       setDirty((prev) => {
@@ -470,7 +483,7 @@ export default function DobGrid({ fields, rows }) {
         return next;
       });
     },
-    [setDirty, fields, ctxFields],
+    [setDirty, fields, ctxFields, statusInternal],
   );
 
   const gridOptions = useMemo(
@@ -540,6 +553,7 @@ export default function DobGrid({ fields, rows }) {
             enableCellTextSelection
             onCellValueChanged={onCellValueChanged}
             onSelectionChanged={onSelectionChanged}
+            rowClassRules={rowCompletedClassRules}
             stopEditingWhenCellsLoseFocus
             getRowId={(p) => String(p.data?.ID ?? p.data?.Id ?? p.data?.ID ?? Math.random())}
             overlayNoRowsTemplate='<span style="padding:12px;color:#5b6273">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'

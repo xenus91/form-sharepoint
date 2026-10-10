@@ -318,3 +318,27 @@ TasksHashContent.completed.test.jsx` (карточка переключаетс�
 
 Тесты: `features/tasks/__tests__/AssignedToButtons.test.jsx` (8: пользователь с
 почтой, группа, пусто, несколько исполнителей, разбор `parseAssignees`).
+
+### 11.4 Завершённую задачу нельзя править и прямо в таблице ДОБ (2026-10-09)
+
+Список ДОБ (`#dob_tasks`, `DobGrid`) — это **editable-грид**: двойной клик по
+ячейке меняет значение, правки копятся в `dirty` и уезжают пакетным MERGE по
+кнопке «Сохранить». Ограничения «завершённую не править» там не было — строку
+со статусом «Завершена» можно было менять ячейкой.
+
+Теперь правило одно для всех интерфейсов и для таблицы тоже:
+
+* `lib/dobRowStatus.js` — `statusInternalOf(fields)` (колонка «Статус» может
+  называться `OData__…`) и `isRowCompleted(row, statusInternal)`
+  (`isCompletedStatus` по `Status`/`PercentComplete`);
+* в `DobGrid` `editable` у колонки — **функция**: ячейка недоступна, если строка
+  завершена (а также для Calculated, как раньше);
+* `onCellValueChanged` не копит правку по завершённой строке — «Сохранить» не
+  запишет её пакетом;
+* строка помечается классом `dob-row-completed` (`rowClassRules`), в
+  `src/index.css` — только `background-color` (`.ag-row` позиционируется AG Grid
+  абсолютно, см. §9).
+
+Тесты: `dob/__tests__/dobRowStatus.test.js` (9) и
+`dob/__tests__/DobGrid.completed.test.jsx` (2: строка помечена, редактор у
+завершённой строки не открывается при живом контроле на открытой задаче).

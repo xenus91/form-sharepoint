@@ -88,4 +88,13 @@ html, body { overflow-x: hidden; }
 .ag-row.tasks-row-busy .ag-cell {
   background-color: transparent;
 }
+/* Завершённая задача: строка только на просмотр (DobGrid, #dob_tasks).
+   Только background-color — .ag-row позиционируется AG Grid абсолютно
+   (см. задачи с классом tasks-row-busy). */
+.ag-row.dob-row-completed {
+  background-color: rgba(46, 125, 50, 0.06);
+}
+.ag-row.dob-row-completed .ag-cell {
+  background-color: transparent;
+}
 }
