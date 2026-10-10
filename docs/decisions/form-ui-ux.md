@@ -384,9 +384,20 @@ TasksHashContent.completed.test.jsx` (карточка переключаетс�
 Симптом: в `#dob_tasks/906?list=…` поле «Виновные» (`Guilty`, многозначное
 «Пользователь или группа») пустое, хотя в списке заполнено.
 
-Причина: SharePoint не всегда раскрывает многозначное User-поле в `$expand`
-(колонка скрыта, слишком много expands, старая ферма) — тогда в ответе есть
-только `GuiltyId`, а `Guilty` пуст. Раньше форма читала только `Guilty`.
+Причина (главная): в SharePoint многократная колонка людей отдаётся как
+`TypeAsString = "UserMulti"`, а одиночная — как `"User"`. Фильтр колонок для
+`$expand` проверял **только** `'user'`, поэтому «Виновные» в `$expand` вообще не
+попали и SharePoint их не возвращал: запрос уходил как
+`$expand=Author,Editor,AttachmentFiles,UserFail` — без `Guilty`.
+
+Вторая причина: SharePoint не всегда раскрывает многозначное User-поле даже с
+`expand` (колонка скрыта, слишком много expands, старая ферма) — тогда в ответе
+есть только `GuiltyId`, а `Guilty` пуст. Раньше форма читала только `Guilty`.
+
+* общий признак «поле людей» — `isUserFieldType` / `isUserField`
+  (`dob/lib/dobFormFields.js`): и `User`, и `UserMulti`. Он же используется в
+  `dobApi` (`$expand`), в `DobGrid` (колонка людей), в форме и в отображении
+  значений;
 
 * `DobTaskEditView`: людей дочитываем по Id с того же сайта — `getuserbyid` →
   `sitegroups/getbyid` (переиспользует `tasks/lib/assignees.resolvePrincipal`,
@@ -402,8 +413,10 @@ TasksHashContent.completed.test.jsx` (карточка переключаетс�
   убирается и запрос повторяется (до 5 попыток). Без этого элемент не открывался
   вообще, либо часть полей приходила пустой.
 
-Тест: `dob/__tests__/DobTaskEditView.guiltyById.test.jsx` (8 — оба случая,
-частичное заполнение, одиночное поле, кэш).
+Тесты: `dob/__tests__/DobTaskEditView.guiltyById.test.jsx` (9 — оба случая,
+частичное заполнение, одиночное поле, `UserMulti`, кэш) и
+`dob/__tests__/dobApi.userMultiExpand.test.js` (3 — `UserMulti` попадает в
+`$expand` и `$select`).
 
 ### 12.3 Переключатель «Карточки / Таблица» — только на десктопе
 
