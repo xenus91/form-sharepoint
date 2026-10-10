@@ -18,6 +18,12 @@ const FIELDS = [
   { InternalName: "Status", Title: "Status", TypeAsString: "Choice", Choices: { results: ["Не начата", "В работе", "Завершена"] } },
   { InternalName: "DobSearchResult", Title: "DobSearchResult", TypeAsString: "Choice", Required: true, Choices: { results: ["Годен", "Брак"] } },
   { InternalName: "DescriptionCheckResult", Title: "DescriptionCheckResult", TypeAsString: "Note", Required: true },
+  // разные типы полей: у завершённой задачи ВСЕ они должны быть закрыты
+  { InternalName: "ErrorCountValidation", Title: "Кол-во ошибок", TypeAsString: "Number" },
+  { InternalName: "CheckDate", Title: "Дата проверки", TypeAsString: "DateTime" },
+  { InternalName: "Comment", Title: "Комментарий", TypeAsString: "Text" },
+  { InternalName: "Reason", Title: "Причина", TypeAsString: "Choice", Choices: { results: ["Одна", "Две"] } },
+  { InternalName: "Guilty", Title: "Виновный", TypeAsString: "User", AllowMultipleValues: true },
 ];
 
 const ITEM = {
@@ -51,6 +57,7 @@ vi.mock("../components/RichEditor", () => ({
       <textarea
         data-testid="rich-editor"
         data-readonly={readOnly ? "1" : "0"}
+        readOnly={!!readOnly}
         value={value || ""}
         onChange={(e) => onChange?.(e.target.value)}
       />
@@ -152,6 +159,23 @@ describe("DobTaskEditView — завершённая задача только �
       await new Promise((r) => setTimeout(r, 30));
     });
     expect(state.saves).toHaveLength(0);
+  });
+
+  it("в завершённой задаче не остаётся НИ ОДНОГО редактируемого поля", async () => {
+    const { host } = await renderForm();
+
+    const controls = [...host.querySelectorAll("input, textarea, select")];
+    // форма действительно отрисовалась (иначе проверка была бы пустой)
+    expect(controls.length).toBeGreaterThan(4);
+    const editable = controls
+      .filter((el) => !el.disabled && !el.readOnly)
+      .map((el) => `${el.tagName.toLowerCase()}[type=${el.getAttribute("type") || "-"}]`);
+    expect(editable).toEqual([]);
+
+    // рич-текст — тоже только чтение
+    const rich = [...host.querySelectorAll('[data-testid="rich-editor"]')];
+    expect(rich.length).toBeGreaterThan(0);
+    expect(rich.every((el) => el.getAttribute("data-readonly") === "1")).toBe(true);
   });
 
   it("незавершённая задача редактируется как раньше (контроль)", async () => {

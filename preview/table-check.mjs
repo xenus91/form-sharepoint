@@ -157,6 +157,22 @@ const dues = all.map((r) => cellText(r, "DueDate")).filter(Boolean);
 check(dues.some((d) => /^Осталось \d+д \d+ч$/.test(d)), "в «Сроке» есть «Осталось …д …ч»", dues.find((d) => /^Осталось/.test(d)) || "");
 check(dues.some((d) => /^Просрочено \d+д \d+ч назад$/.test(d)), "в «Сроке» есть «Просрочено … назад»", dues.find((d) => /^Просрочено/.test(d)) || "");
 check(!dues.some((d) => /^\d{2}\.\d{2}\.\d{4}$/.test(d)), "голых дат в «Сроке» не осталось");
+// завершённая строка — время решения (как чип в карточке), а не «Просрочено»
+const doneDues = all.filter((r) => /Завершена/.test(cellText(r, "Status"))).map((r) => cellText(r, "DueDate"));
+check(doneDues.length > 0 && doneDues.every((d) => /^Решено( за \d+д \d+ч)?$/.test(d)),
+  "у завершённых — «Решено за …д …ч»", doneDues.join(" | "));
+
+// зебры нет: чётные и нечётные строки одного цвета
+const oddBg = getComputedStyle(host.querySelector(".ag-theme-quartz") || host).getPropertyValue("--ag-odd-row-background-color").trim();
+check(oddBg === "transparent" || oddBg === "rgba(0, 0, 0, 0)",
+  "переменной чередования строк нет (зебра выключена)", oddBg || "пусто");
+
+// «Исполнитель» — кнопка принципала, как «Кому назначено»
+const takerBtns = host.querySelectorAll('[data-testid="taker-button"]');
+const takerEmpty = host.querySelectorAll('[data-testid="taker-empty"]');
+check(takerBtns.length > 0 && takerEmpty.length > 0,
+  "в «Исполнителе» кнопки и прочерки (у невзятых — «—»)",
+  `кнопок ${takerBtns.length}, прочерков ${takerEmpty.length}`);
 
 // «Кому назначено» без имени в задаче — имя доуточнено по Id (mockApi)
 check(!!takerColId, "колонка «Исполнитель» найдена в шапке", takerColId || "");

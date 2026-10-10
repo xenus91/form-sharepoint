@@ -191,7 +191,7 @@ describe("TaskList — карточки из нескольких источни
     // Действий у завершённой задачи нет. Кнопка «Кому назначено»
     // (AssignedToButtons) — не действие, а ссылка на карточку исполнителя.
     const actions = [...card.querySelectorAll("button")]
-      .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button");
+      .filter((b) => !b.closest("[data-principal-button]"));
     expect(actions).toHaveLength(0);
   });
 

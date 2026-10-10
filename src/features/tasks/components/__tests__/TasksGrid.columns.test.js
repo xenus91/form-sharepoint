@@ -11,6 +11,7 @@ import {
   statusCellStyle,
   dueCellStyle,
   dueCellText,
+  dueCellTooltip,
   TASK_GRID_DEFAULT_COL_DEF,
 } from "../../lib/taskTableColumns";
 
@@ -153,7 +154,7 @@ describe("TasksGrid — колонка «Срок» как в карточке",
     expect(due.filter).toBe("agDateColumnFilter");
   });
 
-  it("dueCellText/dueCellStyle: цвет как у чипа карточки, просрочка завершённой — нейтральная", () => {
+  it("dueCellText/dueCellStyle: цвет как у чипа карточки", () => {
     // просрочена и НЕ завершена → красный и жирный
     const open = dueCellStyle({ data: { Status: "В процессе выполнения", DueDate: inDays(-2) } });
     expect(open.color).toBe("#c62828");
@@ -161,11 +162,34 @@ describe("TasksGrid — колонка «Срок» как в карточке",
     // ещё не просрочена → не красный
     const fresh = dueCellStyle({ data: { Status: "В процессе выполнения", DueDate: inDays(5) } });
     expect(fresh.color).not.toBe("#c62828");
-    // закрыта с опозданием → нейтрально-серый (работа уже сделана)
-    const closed = dueCellStyle({ data: { Status: "Завершена", PercentComplete: 1, DueDate: inDays(-2) } });
-    expect(closed.color).toBe("#616161");
     expect(dueCellStyle({ data: {} }).color).toBe("inherit");
     expect(dueCellText({ DueDate: inDays(3) })).toMatch(/^Осталось /);
+  });
+
+  it("завершённая задача — время решения (как чип в карточке), а не «просрочено»", () => {
+    const done = { Status: "Завершена", PercentComplete: 1, Created: inDays(-4), Modified: inDays(-1), DueDate: inDays(-2) };
+    // в карточке на месте чипа срока — formatSolveTime
+    expect(dueCellText(done)).toMatch(/^Решено( за \d+д \d+ч)?$/);
+    expect(dueCellText(done)).not.toContain("Просрочено");
+    // нейтральный цвет: это факт, а не предупреждение
+    expect(dueCellStyle({ data: done }).color).toBe("#455a64");
+    // в подсказке — когда создана, когда закрыта и сколько заняла
+    const tip = dueCellTooltip(done) || "";
+    expect(tip).toContain("Создана");
+    expect(tip).toContain("Завершена");
+    // колонка рисует именно этот текст
+    const due = colByHeader(buildTaskColumns(), "Срок");
+    expect(due.valueFormatter({ data: done })).toMatch(/^Решено/);
+    // у открытой задачи в подсказке — точный срок
+    expect(dueCellTooltip({ DueDate: "2026-10-13T09:30:00" })).toContain("2026");
+    expect(dueCellTooltip({})).toBeUndefined();
+    expect(dueCellTooltip(null)).toBeUndefined();
+  });
+
+  it("у колонки «Исполнитель» есть colId для кнопки (как у «Кому назначено»)", () => {
+    const cols = buildTaskColumns();
+    expect(colByHeader(cols, "Кому назначено").colId).toBe("assignedTo");
+    expect(colByHeader(cols, "Исполнитель").colId).toBe("taker");
   });
 });
 

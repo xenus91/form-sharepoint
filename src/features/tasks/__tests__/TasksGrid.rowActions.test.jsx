@@ -93,7 +93,7 @@ const openPopup = () => {
 // Кнопка «Кому назначено» (AssignedToButtons) лежит в шапке попапа, но это НЕ
 // действие по задаче — в проверках набора действий её не учитываем.
 const popupButtons = () => [...(openPopup()?.querySelectorAll("button") || [])]
-  .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button");
+  .filter((b) => !b.closest("[data-principal-button]"));
 
 const rowByText = (host, re) => [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
   .find((r) => re.test(r.textContent || ""));

@@ -33,9 +33,11 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchOffIcon from "@mui/icons-material/SearchOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
-import AssignedToButtons from "./AssignedToButtons";
+import AssignedToButtons, { TakerButtons } from "./AssignedToButtons";
 
-// Нижняя строка карточки: «Исполнитель: … • Статус: …».
+// Нижняя строка карточки: «Исполнитель: <кнопка> • Кому назначено: <кнопка> • Статус: …»
+// (требование 2026-10-10: у «Исполнителя» — та же кнопка принципала, что и у
+// «Кому назначено», а не просто текст).
 // Раньше кнопка исполнителя (inline-flex) стояла ВНУТРИ текстового узла и
 // выравнивалась по низу своей иконки — подписи вокруг неё оказывались на
 // разных высотах («лесенкой»). Теперь строка — flex: подписи и кнопка на
@@ -1090,8 +1092,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               <Typography sx={{ fontWeight: 800, color: "#1b5e20", fontSize: "0.95rem", lineHeight: 1.2 }}>Задача выполнена</Typography>
               <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>
                 <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
-                  <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{`Исполнитель: ${task.EditorTitle || task.Editor || "—"} • `}</Box>
-                  <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Кому назначено: "}</Box>
+                  <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                  {/* Исполнитель — такая же кнопка принципала, как «Кому назначено»
+                      (требование 2026-10-10): иконка человек/группа, клик — карточка. */}
+                  <TakerButtons task={task} />
+                  <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
                   <AssignedToButtons task={task} />
                   <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • "}{task.Modified ? new Date(task.Modified).toLocaleString("ru-RU") : "—"}{task.ResultSearchTHU ? ` • ${task.ResultSearchTHU}` : ""}{task.Location1 ? ` • ${task.Location1}` : ""}</Box>
                 </Box>
@@ -1172,7 +1177,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 <>
                   <Box sx={{ mt: 1.5 }}>
                     <Button
-                      variant="contained"
                       size="large"
                       disabled={isUpdating}
                       onClick={() => onTakeInWork?.(task)}
@@ -1188,11 +1192,12 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         "&:hover": { backgroundImage: "linear-gradient(180deg, #8D95FF 0%, #6B7CFF 100%)" },
                         "&.Mui-disabled": { backgroundImage: "linear-gradient(180deg, #9BA3FF 0%, #7B84FF 100%)", color: "#fff", opacity: 1 },
                         // ⭐ StylingActions.takeInWork (если задан)
-                          // ⭐ StylingActions.takeInWork (если задан)
                       ...(getActionSx("takeInWork") || {}),
                       }}
-                    variant={getActionVariant("takeInWork") || "contained"}
-                  startIcon={getActionIcon("takeInWork") || undefined}
+                      // variant — только ОДИН: из TaskBehaviour (fallback «contained»).
+                      // Раньше «contained» был продублирован выше по списку пропов.
+                      variant={getActionVariant("takeInWork") || "contained"}
+                      startIcon={getActionIcon("takeInWork") || undefined}
                     >
                       {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "Взять в работу"}
                     </Button>
@@ -1201,6 +1206,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
                       <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                        {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
+                        <TakerButtons task={task} />
+                        <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
                         <AssignedToButtons task={task} />
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                       </Box>
@@ -1239,7 +1247,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
                         <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
-                          <AssignedToButtons task={task} emptyText={taker || "—"} />
+                          <TakerButtons task={task} />
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
+                          <AssignedToButtons task={task} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                         </Box>
                       </Typography>
@@ -1261,6 +1271,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
                         <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                          {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
+                          <TakerButtons task={task} />
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
                           <AssignedToButtons task={task} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                         </Box>
@@ -1458,7 +1471,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       {/* Кнопки сохранить/отмена нужны только если есть что заполнять */}
                       {(promptFields.length > 0 || showAAInline || inlineConfirmOnly) && (
                       <Button
-                        variant="contained"
                         color="success"
                         disabled={isUpdating}
                         onClick={() => {
@@ -1510,7 +1522,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       )}
                       {(promptFields.length > 0 || showAAInline || inlineConfirmOnly) && (
                       <Button
-                        variant="text"
                         onClick={() => {
                           setInlineChoice(null);
                           setInlineConfirmPending(null);
@@ -1533,6 +1544,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
                         <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                          {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
+                          <TakerButtons task={task} />
+                          <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
                           <AssignedToButtons task={task} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                         </Box>
@@ -1701,6 +1715,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
                       <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                        {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
+                        <TakerButtons task={task} />
+                        <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
                         <AssignedToButtons task={task} />
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                       </Box>
@@ -1717,7 +1734,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               <>
                 <Box sx={{ mt: 1.5 }}>
                   <Button
-                    variant="contained"
                     size="large"
                     disabled={isUpdating}
                     onClick={() => onTakeInWork?.(task)}
@@ -1733,8 +1749,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       "&:hover": { backgroundImage: "linear-gradient(180deg, #8D95FF 0%, #6B7CFF 100%)" },
                     ...(getActionSx("takeInWork") || {}),
                     }}
-                  variant={getActionVariant("takeInWork") || "contained"}
-                  startIcon={getActionIcon("takeInWork") || undefined}
+                    // variant — только ОДИН: из TaskBehaviour (fallback «contained»).
+                    variant={getActionVariant("takeInWork") || "contained"}
+                    startIcon={getActionIcon("takeInWork") || undefined}
                   >
                     {isUpdating ? <CircularProgress size={22} thickness={4} sx={{ color: "#fff" }} /> : "Взять в работу"}
                   </Button>
@@ -1743,6 +1760,9 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
                     <Box component="span" data-testid="task-card-footer-row" sx={CARD_FOOTER_ROW_SX}>
                       <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
+                      {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
+                      <TakerButtons task={task} />
+                      <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
                       <AssignedToButtons task={task} />
                       <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                     </Box>

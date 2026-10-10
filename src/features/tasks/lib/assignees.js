@@ -17,6 +17,8 @@
 import apiClient from "../../../api";
 import { dobApiBase, dobAxios } from "../../dob/api/dobClient";
 import { toRequestUrl } from "../../../tasks/sourceClient";
+import { isInProgressStatus, isCompletedStatus } from "../../../tasks/status";
+import { takerTitleOf } from "./currentUserMatch";
 
 const MAIN_TASKS_GUID = "463B634E-A71A-4FEF-9A1F-B803431D8639";
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
@@ -76,6 +78,65 @@ export function parseAssignees(task) {
   // Один Id на несколько имён (или наоборот) — Id относим к первому.
   if (ids.length === 1) return titles.map((title, i) => ({ title, id: i === 0 ? ids[0] : null }));
   return titles.map((title, i) => ({ title, id: ids[i] ?? null }));
+}
+
+/**
+ * Id исполнителя (Editor) — ТОЛЬКО из Editor-полей.
+ *
+ * Намеренно не используем `takerIdOf` из currentUserMatch: там есть фолбэк на
+ * `AuthorId`, и для проверки «моя ли задача» это правильно, а для ПОКАЗА имени
+ * исполнитель превратился бы в автора задачи.
+ *
+ * @param {object|null} task
+ * @returns {number|null}
+ */
+export function takerPrincipalIdOf(task) {
+  if (!task || typeof task !== "object") return null;
+  const raw = task.raw || {};
+  const candidates = [
+    task.EditorId, task.editorId, task.OData__EditorId,
+    raw.EditorId, raw.OData__EditorId,
+    raw.Editor?.Id, raw.Editor?.results?.[0]?.Id,
+    typeof task.Editor === "object" ? task.Editor?.Id : null,
+  ];
+  for (const c of candidates) {
+    if (c === null || c === undefined || c === "") continue;
+    const n = Number(c);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  // Editor может прийти строкой-Id (Id на разных сайтах не совпадают, а поле
+  // иногда отдаётся без $expand) — тогда это Id, а не ФИО.
+  const asId = typeof task.Editor === "string" ? task.Editor.trim() : "";
+  if (/^\d+$/.test(asId)) {
+    const n = Number(asId);
+    if (n > 0) return n;
+  }
+  return null;
+}
+
+/**
+ * Исполнитель задачи (кто ВЗЯЛ её в работу) — списком принципалов, как
+ * `parseAssignees` для «Кому назначено».
+ *
+ * Пусто, пока задачу не взяли: поле Editor SharePoint проставляет и при
+ * СОЗДАНИИ элемента, поэтому до взятия в работу там автор, а не исполнитель
+ * (то же правило, что в lib/resolveTaker.js).
+ *
+ * @param {object|null} task
+ * @returns {{title:string, id:number|null}[]}
+ */
+export function parseEditors(task) {
+  if (!task) return [];
+  const status = task.Status ?? task.status ?? "";
+  const percent = task.PercentComplete ?? task.percentComplete;
+  if (!isInProgressStatus(status) && !isCompletedStatus(status, percent)) return [];
+  let title = takerTitleOf(task);
+  const id = takerPrincipalIdOf(task);
+  // В поле имени оказался сам Id — не показываем его как ФИО: кнопка и так
+  // выведет «Id N», а потом подставит настоящее имя по запросу.
+  if (id !== null && /^\d+$/.test(String(title).trim())) title = "";
+  if (!title && !id) return [];
+  return [{ title, id }];
 }
 
 /** Задача НЕ из основного списка (сайт ДОБ и т.п.)? */

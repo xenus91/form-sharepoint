@@ -16,10 +16,12 @@ import { sameFormValues } from "../../dob/lib/richImages";
 
 // CKEditor в jsdom не поднимаем: рич-текст подменяем textarea с тем же контрактом.
 vi.mock("../../dob/components/RichEditor", () => ({
-  default: ({ value, onChange, onUploadImage, isUploading, footer, invalid }) => (
-    <div data-testid="rich-editor-box" data-invalid={invalid ? "1" : "0"}>
+  default: ({ value, onChange, onUploadImage, isUploading, footer, invalid, readOnly }) => (
+    <div data-testid="rich-editor-box" data-invalid={invalid ? "1" : "0"} data-readonly={readOnly ? "1" : "0"}>
     <textarea
       data-testid="rich-editor"
+      data-readonly={readOnly ? "1" : "0"}
+      readOnly={!!readOnly}
       value={value || ""}
       onChange={(e) => onChange?.(e.target.value)}
     />
@@ -436,5 +438,62 @@ it("«Тип ошибки» не показывает «[object Object]»: verbo
     expect(buttonByText("Закрыть задачу")).toBeTruthy();
     expect(buttonByText("Вернуться")).toBeTruthy();
     expect(document.body.textContent).toContain("Результат проверки ООБ");
+  });
+});
+
+// Регрессия 2026-10-10: у завершённой задачи (#dob_tasks/<id>) часть полей
+// формы оставалась редактируемой. Причина — общий объект пропов полей
+// (`common`) содержал только `disabled: submitting`, а `readOnly` проставляли
+// вручную и не у всех видов полей: select, multichoice-select, number, date и
+// обычное текстовое поле правились даже в режиме просмотра.
+describe("ContentTypeResultDialog — readOnly (завершённая задача)", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    MOCK_FIELDS = [
+      ...FIELDS,
+      { InternalName: "CheckDate", Title: "Дата проверки", TypeAsString: "DateTime" },
+      { InternalName: "CheckMulti", Title: "Виды ошибок", TypeAsString: "MultiChoice", Choices: { results: ["A", "B"] } },
+      { InternalName: "CheckText", Title: "Комментарий", TypeAsString: "Text" },
+      { InternalName: "CheckFlag", Title: "Флаг", TypeAsString: "Boolean" },
+      { InternalName: "CheckNote", Title: "Примечание", TypeAsString: "Note" },
+      { InternalName: "CheckSingle", Title: "Причина", TypeAsString: "Choice", Choices: { results: ["Одна", "Две"] } },
+    ];
+  });
+
+  const describeControl = (el) => `${el.tagName.toLowerCase()}[type=${el.getAttribute("type") || "-"}] label=${el.getAttribute("aria-label") || el.name || "-"}`;
+
+  it("ни одно поле формы не редактируется", async () => {
+    renderDialog({ readOnly: true, initialResult: "Годен" });
+    await settle(120);
+
+    const controls = [...document.body.querySelectorAll("input, textarea, select")];
+    // форма действительно отрисовалась (иначе тест vacuously passed)
+    expect(controls.length).toBeGreaterThan(5);
+    const editable = controls.filter((el) => !el.disabled && !el.readOnly);
+    expect(editable.map(describeControl)).toEqual([]);
+  });
+
+  it("рич-текст, кнопки результата и чекбоксы тоже закрыты", async () => {
+    renderDialog({ readOnly: true, initialResult: "Годен" });
+    await settle(120);
+
+    expect(document.body.querySelector('[data-testid="rich-editor"]')?.getAttribute("data-readonly")).toBe("1");
+    const goden = buttonByText("Годен");
+    expect(goden).toBeTruthy();
+    expect(goden.disabled).toBe(true);
+    const flag = document.body.querySelector('input[type="checkbox"]');
+    expect(flag).toBeTruthy();
+    expect(flag.disabled).toBe(true);
+    // сохранять нечего — только «Закрыть»
+    expect(document.body.querySelector('[data-testid="ct-result-dialog-save"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="ct-result-dialog-close"]')).toBeTruthy();
+  });
+
+  it("контроль: без readOnly те же поля редактируются", async () => {
+    renderDialog({ initialResult: "" });
+    await settle(120);
+    const controls = [...document.body.querySelectorAll("input, textarea, select")];
+    const editable = controls.filter((el) => !el.disabled && !el.readOnly);
+    expect(editable.length).toBeGreaterThan(3);
   });
 });

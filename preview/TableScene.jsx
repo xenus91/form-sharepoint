@@ -104,6 +104,9 @@ function buildRows() {
         EditorTitle: scene.taker || "Автор задачи",
         EditorId: takerId,
         DueDate: isoInDays(scene.dueIn),
+        // Время решения: задача создана на 3 дня раньше, чем закрыта — в «Сроке»
+        // завершённой строки видно «Решено за 3д 0ч» (требование 2026-10-10).
+        Created: isoInDays(scene.dueIn - 4),
         Modified: isoInDays(scene.dueIn - 1),
       });
     });

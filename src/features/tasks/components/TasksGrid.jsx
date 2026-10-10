@@ -14,7 +14,7 @@
 // Сама таблица read-only: MERGE/PUT делает TasksView по колбэкам.
 
 import { AgGridReact } from "ag-grid-react";
-import AssignedToButtons, { AssignedToCell } from "./AssignedToButtons";
+import AssignedToButtons, { AssignedToCell, TakerCell } from "./AssignedToButtons";
 import { memo, useMemo, useRef, useEffect, useState, useCallback } from "react";
 import {
   Box,
@@ -415,8 +415,9 @@ export default function TasksGrid({
       .map((col) => {
         // кружок-лоадер живёт внутри ячейки Id (не сдвигает строки)
         if (col.field === "Id") return { ...col, cellRenderer: IdCell };
-        // «Кому назначено» — кнопка с иконкой человека/группы
+        // «Кому назначено» и «Исполнитель» — кнопки с иконкой человека/группы
         if (col.colId === "assignedTo") return { ...col, cellRenderer: AssignedToCell };
+        if (col.colId === "taker") return { ...col, cellRenderer: TakerCell };
         return col;
       }),
     [showSourceColumn, showDbg]
@@ -508,12 +509,13 @@ export default function TasksGrid({
   }, [onSelectRow]);
 
   // Клик по строке: выделение + popup действий В ТОЧКЕ КЛИКА.
-  // Клик по кнопке «Кому назначено» (AssignedToButtons) — это запрос информации
-  // об исполнителе, а не действие над строкой: поповер не открываем.
+  // Клик по кнопке принципала («Кому назначено» / «Исполнитель») — это запрос
+  // информации о человеке/группе, а не действие над строкой: поповер не открываем.
   const fromAssigneeButton = (nativeEvent) => {
     const target = nativeEvent?.target;
     return !!(target && typeof target.closest === "function"
-      && target.closest('[data-testid="assigned-to-button"]'));
+      && (target.closest("[data-principal-button]")
+        || target.closest('[data-testid="assigned-to-button"]')));
   };
 
   const onCellClicked = useMemo(() => (event) => {
@@ -590,7 +592,9 @@ export default function TasksGrid({
         ["--ag-font-size"]: "13px",
         ["--ag-row-hover-color"]: "#f5f7fa",
         ["--ag-selected-row-background-color"]: "#e3f2fd",
-        ["--ag-odd-row-background-color"]: "#fcfcfd",
+        // Чередование «через строку» (зебра) ВЫКЛЮЧЕНО — требование 2026-10-10:
+        // серый фон мешал читать заливку строк по статусу задачи (см. taskRowStatus).
+        ["--ag-odd-row-background-color"]: "transparent",
         ["--ag-header-background-color"]: "#fafbfc",
         ["--ag-border-color"]: "#e0e0e0",
         ["--ag-cell-horizontal-border"]: "1px solid #f0f0f0",

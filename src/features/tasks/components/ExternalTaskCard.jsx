@@ -22,7 +22,7 @@ import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../..
 import { resolveTaker } from "../lib/resolveTaker";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
-import AssignedToButtons from "./AssignedToButtons";
+import AssignedToButtons, { TakerButtons } from "./AssignedToButtons";
 
 function stripHtml(html) {
   if (!html) return "";
@@ -237,7 +237,11 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
           <Box component="span" sx={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
             <Box component="span" sx={{ whiteSpace: "nowrap" }}>{"Кому назначено: "}</Box>
             <AssignedToButtons task={task} />
-            <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • Исполнитель: "}{taker || "—"}{" • Статус: "}{task.Status || "—"}</Box>
+            {/* «Исполнитель» — такая же кнопка принципала, как «Кому назначено»
+                (требование 2026-10-10): иконка человек/группа, клик — карточка. */}
+            <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • Исполнитель: "}</Box>
+            <TakerButtons task={task} />
+            <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • Статус: "}{task.Status || "—"}</Box>
           </Box>
         </Typography>
         <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap" }}>

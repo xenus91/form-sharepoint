@@ -506,7 +506,11 @@ export default function ContentTypeResultDialog({
               // ВАЖНО: key НЕ кладём в общий объект — React требует передавать его
               // напрямую в JSX (<TextField key=… {...common} />), иначе варнинг
               // «A props object containing a "key" prop is being spread into JSX».
-              const common = { size: "small", fullWidth: true, disabled: submitting };
+              // disabled включает и readOnly: этот объект раскладывается во ВСЕ
+              // текстовые/select/число/дату-поля, и раньше режим просмотра
+              // (завершённая задача) закрывал только часть из них — те, у которых
+              // readOnly/disabled проставлялись вручную.
+              const common = { size: "small", fullWidth: true, disabled: submitting || readOnly };
 
               if (control.kind === "richtext") {
                 return (

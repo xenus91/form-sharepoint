@@ -6,7 +6,7 @@ import AssignmentIcon from "@mui/icons-material/Assignment";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import TaskCard from "./TaskCard";
 import { isCompletedStatus } from "../../../tasks/status";
-import AssignedToButtons from "./AssignedToButtons";
+import AssignedToButtons, { TakerButtons } from "./AssignedToButtons";
 
 export default function TaskElementDialog({
   open,
@@ -89,8 +89,10 @@ export default function TaskElementDialog({
                       <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>{/* Подписи и кнопка исполнителя — на одной линии (flex): иначе inline-flex
                           кнопка выравнивалась по низу иконки и строка «ехала лесенкой». */}
                         <Box component="span" sx={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>{`Исполнитель: ${elementTaskMatch.EditorTitle || elementTaskMatch.Editor || "—"} • `}</Box>
-                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>{"Кому назначено: "}</Box>
+                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>{"Исполнитель: "}</Box>
+                          {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
+                          <TakerButtons task={elementTaskMatch} />
+                          <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • Кому назначено: "}</Box>
                           <AssignedToButtons task={elementTaskMatch} />
                           <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • "}{elementTaskMatch.Modified ? new Date(elementTaskMatch.Modified).toLocaleString("ru-RU") : "—"}{elementTaskMatch.ResultSearchTHU ? ` • ${elementTaskMatch.ResultSearchTHU}` : ""}</Box>
                         </Box></Typography>

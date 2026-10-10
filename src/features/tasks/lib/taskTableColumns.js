@@ -4,12 +4,15 @@
 // Требования 2026-10-03:
 //   • поля результата в таблице НЕ показываются;
 //   • «Кому назначено» = AssignedTo (на кого назначена задача);
-//   • «Исполнитель» = Editor (кто взял в работу), с фолбэком на AssignedTo,
-//     чтобы колонка не пустовала у неподхваченных задач;
+//   • «Исполнитель» = Editor (кто взял в работу). Фолбэка на AssignedTo нет:
+//     Editor SharePoint проставляет и при создании, поэтому до взятия в работу
+//     колонка пустая, а не «автор задачи»;
 //   • колонка источника — только в debug-режиме.
 // Требование 2026-10-10:
 //   • «Срок» — в том же формате, что и в карточке: «Осталось 3д 4ч» /
-//     «Просрочено 2д 5ч назад» (точная дата остаётся в подсказке);
+//     «Просрочено 2д 5ч назад» (точная дата остаётся в подсказке),
+//     а у ЗАВЕРШЁННОЙ задачи — время решения «Решено за 3д 4ч»;
+//   • «Исполнитель» рисуется кнопкой принципала (TakerCell), как «Кому назначено»;
 //   • подсветка статуса берётся из того же правила, что и заливка строки
 //     (см. taskRowStatus.js) — иначе ячейка и строка противоречат друг другу.
 //
@@ -18,7 +21,7 @@
 
 import { resolveTaker } from "./resolveTaker";
 import { taskRowStatus, isTaskCompleted, ROW_STATUS } from "./taskRowStatus";
-import { formatDueLeft, formatDueDateFull } from "../../../tasks/formatters";
+import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 
 // Заливка ячейки «Статус» = заливка строки (тот же смысл, та же палитра).
 const STATUS_KIND_BG = {
@@ -76,15 +79,31 @@ function formatDate(value) {
 }
 
 /**
- * «Срок» в таблице — как в карточке задачи: «Осталось 3д 4ч» /
- * «Просрочено 2д 5ч назад» (formatDueLeft — тот же, что рисует чип в карточке).
+ * «Срок» в таблице — как в карточке задачи (требования 2026-10-10):
+ *   • задача открыта  → «Осталось 3д 4ч» / «Просрочено 2д 5ч назад» (formatDueLeft);
+ *   • задача ЗАВЕРШЕНА → «Решено за 3д 4ч» (formatSolveTime) — карточка на месте
+ *     чипа срока рисует именно время решения, срок закрытой задачи уже не важен;
+ *   • срока нет — «Без срока».
  * @param {any} row — строка таблицы
  * @returns {string}
  */
 export function dueCellText(row) {
+  if (isTaskCompleted(row)) return formatSolveTime(row).label;
   const due = row?.DueDate;
   if (!due) return "Без срока";
   return formatDueLeft(due).label;
+}
+
+/**
+ * Подсказка к «Сроку»: у завершённой — когда создана и когда закрыта
+ * (и сколько заняла), у открытой — точные дата и время срока.
+ * @param {any} row
+ * @returns {string|undefined}
+ */
+export function dueCellTooltip(row) {
+  if (!row) return undefined;
+  if (isTaskCompleted(row)) return formatSolveTime(row).title;
+  return row.DueDate ? formatDueDateFull(row.DueDate) : undefined;
 }
 
 const DUE_TEXT_COLOR = {
@@ -96,16 +115,17 @@ const DUE_TEXT_COLOR = {
 
 /**
  * Цвет текста «Срока» — тот же смысл, что у чипа в карточке (success/warning/
- * info/error). Просрочка у ЗАВЕРШЁННОЙ задачи показывается нейтрально: работу
- * уже закрыли, красным пугать нечего.
+ * info/error). Время решения завершённой задачи — нейтральное: это факт, а не
+ * предупреждение.
  */
 export function dueCellStyle(params) {
   const row = params?.data;
+  if (isTaskCompleted(row)) {
+    return { color: "#455a64", fontWeight: 500, whiteSpace: "nowrap" };
+  }
   const info = formatDueLeft(row?.DueDate);
-  let color = DUE_TEXT_COLOR[info.color] || "inherit";
-  if (info.overdue && isTaskCompleted(row)) color = "#616161";
   return {
-    color,
+    color: DUE_TEXT_COLOR[info.color] || "inherit",
     fontWeight: info.overdue ? 700 : 500,
     whiteSpace: "nowrap",
   };
@@ -167,24 +187,30 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
   });
   cols.push({
     headerName: "Исполнитель",
+    // colId — чтобы TasksGrid прицепил к колонке кнопку TakerCell
+    // (тот же вид, что у «Кому назначено» — требование 2026-10-10).
+    colId: "taker",
     // ВСЕГДА тот, кто ВЗЯЛ задачу в работу. До взятия — пусто: Editor у SharePoint
     // проставляется и при создании, поэтому напрямую его показывать нельзя.
     valueGetter: (p) => resolveTaker(p.data),
-    width: 170,
+    width: 190,
     sortable: true,
     filter: "agTextColumnFilter",
   });
   cols.push({
     headerName: "Срок",
     // Значение колонки — по-прежнему дата (сортировка и фильтр по дате работают),
-    // а показываем её как в карточке: «Осталось …» / «Просрочено … назад».
+    // а показываем её как в карточке: «Осталось …» / «Просрочено … назад»,
+    // а у ЗАВЕРШЁННОЙ задачи — время решения («Решено за 3д 4ч»), потому что
+    // карточка на месте чипа срока рисует именно его.
     field: "DueDate",
-    width: 160,
+    width: 170,
     sortable: true,
     filter: "agDateColumnFilter",
+    headerTooltip: "Срок задачи. У завершённой — время решения (создана → завершена).",
     valueFormatter: (p) => dueCellText(p.data),
     cellStyle: dueCellStyle,
-    tooltipValueGetter: (p) => (p.data?.DueDate ? formatDueDateFull(p.data.DueDate) : undefined),
+    tooltipValueGetter: (p) => dueCellTooltip(p.data),
   });
   cols.push({
     headerName: "Изменён",

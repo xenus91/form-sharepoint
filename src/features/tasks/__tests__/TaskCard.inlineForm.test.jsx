@@ -145,7 +145,7 @@ async function mountCard(behaviour, spies = {}) {
   await settle(600);
   // Кнопка «Кому назначено» (AssignedToButtons) — не действие карточки.
   const buttons = () => [...host.querySelectorAll("button")]
-    .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button")
+    .filter((b) => !b.closest("[data-principal-button]"))
     .map((b) => b.textContent.trim())
     .filter(Boolean);
   const findButton = (re) => [...host.querySelectorAll("button")].find((b) => re.test(b.textContent || ""));

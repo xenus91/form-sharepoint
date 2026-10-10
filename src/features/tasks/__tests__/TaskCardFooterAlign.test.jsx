@@ -108,9 +108,13 @@ describe("TaskCard — нижняя строка без «лесенки»", () 
     // Кнопка лежит внутри обёртки AssignedToButtons — исключаем её по наличию
     // кнопки внутри, а не сравнением ссылок.
     const labels = [...row.children]
-      .filter((el) => !el.querySelector('[data-testid="assigned-to-button"]'))
+      // подписи — всё, что не кнопка принципала и не её прочерк
+      .filter((el) => !el.querySelector("[data-principal-button]") && !el.hasAttribute("data-testid"))
       .map((el) => (el.textContent || "").trim());
-    expect(labels).toEqual(["Исполнитель:", "• Статус: Не начата"]);
+    expect(labels).toEqual(["Исполнитель:", "• Кому назначено:", "• Статус: Не начата"]);
+    // обе подписи — кнопки принципала: исполнитель и «кому назначено»
+    expect(row.querySelector('[data-testid="taker-empty"]')).toBeTruthy();
+    expect(row.querySelector('[data-testid="assigned-to-button"]')).toBeTruthy();
   });
 
   it("кнопка выровнена по центру строки, а не по низу иконки", () => {

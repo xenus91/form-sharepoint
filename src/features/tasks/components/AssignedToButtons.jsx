@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import GroupsIcon from "@mui/icons-material/Groups";
-import { parseAssignees, resolveAssigneeCached } from "../lib/assignees";
+import { parseAssignees, parseEditors, resolveAssigneeCached } from "../lib/assignees";
 
 const KIND_LABEL = { user: "Пользователь", group: "Группа", unknown: "Тип не определён" };
 
@@ -79,23 +79,31 @@ export function PrincipalInfoDialog({ open = false, task = null, assignee = null
 }
 
 /**
- * Кнопки «Кому назначено». Обычно принципал один, но колонка может быть
- * многозначной — тогда кнопка на каждого.
+ * Кнопка(и) принципала: иконка «человек/группа» + имя, клик открывает карточку
+ * принципала. ОДИН компонент на два поля — «Кому назначено» (AssignedTo) и
+ * «Исполнитель» (Editor): вид и поведение должны совпадать (требование
+ * 2026-10-10), различаются только тем, откуда берётся список людей.
  *
  * @param {object} props
- * @param {object} props.task — задача (AssignedTo / AssignedToId)
+ * @param {object} props.task — задача (нужна, чтобы понять САЙТ принципала)
+ * @param {Array<{title:string,id:number|null}>} props.people — кого показать
+ * @param {string} [props.testId] — data-testid кнопки
  * @param {"small"|"medium"} [props.size]
  * @param {object} [props.sx]
  * @param {string} [props.emptyText]
  */
-export default function AssignedToButtons({
+export function PrincipalButtons({
   task = null,
+  people = [],
+  testId = "assigned-to-button",
+  emptyTestId = "assigned-to-empty",
+  buttonTitle = "Кому назначено — нажмите, чтобы посмотреть",
   size = "small",
   sx = null,
   emptyText = "—",
   onOpenPrincipal = null,
 }) {
-  const assignees = useMemo(() => parseAssignees(task), [task]);
+  const assignees = people;
   // Уточнённые данные принципала по Id: { [id]: { kind, title } }.
   // Кроме типа (человек/группа) держим и ИМЯ: задача нередко приходит только с
   // AssignedToId (CAML-кандидат без $expand, 401/403 на fetchFullTask, внешние
@@ -122,7 +130,7 @@ export default function AssignedToButtons({
 
   if (assignees.length === 0) {
     return (
-      <Typography component="span" variant="caption" color="text.secondary" data-testid="assigned-to-empty">
+      <Typography component="span" variant="caption" color="text.secondary" data-testid={emptyTestId}>
         {emptyText}
       </Typography>
     );
@@ -141,10 +149,13 @@ export default function AssignedToButtons({
             key={`${person.id ?? "no-id"}:${person.title || i}`}
             size={size}
             variant="text"
-            data-testid="assigned-to-button"
+            data-testid={testId}
+            // Общий признак «это кнопка принципала»: по нему строка таблицы
+            // понимает, что клик был НЕ по строке (не открывать поповер действий).
+            data-principal-button="true"
             data-principal-id={person.id ?? ""}
             data-principal-kind={kind}
-            title="Кому назначено — нажмите, чтобы посмотреть"
+            title={buttonTitle}
             // Клик перехватываем В ФАЗЕ ПОГРУЖЕНИЯ и гасим событие: строка
             // таблицы (AG Grid) слушает клик на своём контейнере, а React
             // навешивает обработчики на корень — обычный stopPropagation в
@@ -204,7 +215,41 @@ export default function AssignedToButtons({
   );
 }
 
+/**
+ * Кнопки «Кому назначено» (AssignedTo). Обычно принципал один, но колонка может
+ * быть многозначной — тогда кнопка на каждого.
+ */
+export default function AssignedToButtons({ task = null, ...rest }) {
+  const people = useMemo(() => parseAssignees(task), [task]);
+  return <PrincipalButtons task={task} people={people} {...rest} />;
+}
+
+/**
+ * Кнопка «Исполнитель» (Editor — тот, кто ВЗЯЛ задачу в работу). Требование
+ * 2026-10-10: вид и поведение — как у «Кому назначено» (иконка человек/группа,
+ * клик открывает карточку принципала). Пока задачу не взяли — прочерк: Editor
+ * у SharePoint проставляется и при создании, показывать автора нельзя.
+ */
+export function TakerButtons({ task = null, ...rest }) {
+  const people = useMemo(() => parseEditors(task), [task]);
+  return (
+    <PrincipalButtons
+      task={task}
+      people={people}
+      testId="taker-button"
+      emptyTestId="taker-empty"
+      buttonTitle="Исполнитель — нажмите, чтобы посмотреть"
+      {...rest}
+    />
+  );
+}
+
 /** Ячейка AG Grid «Кому назначено» — та же кнопка с иконкой человека/группы. */
 export function AssignedToCell({ data }) {
   return <AssignedToButtons task={data} />;
+}
+
+/** Ячейка AG Grid «Исполнитель» — та же кнопка, что и «Кому назначено». */
+export function TakerCell({ data }) {
+  return <TakerButtons task={data} />;
 }
