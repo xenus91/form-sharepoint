@@ -22,6 +22,7 @@ import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../..
 import { resolveTaker } from "../lib/resolveTaker";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
+import AssignedToButtons from "./AssignedToButtons";
 
 function stripHtml(html) {
   if (!html) return "";
@@ -46,9 +47,9 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
   const completed = isCompleted ?? isCompletedStatus(task.Status, task.PercentComplete);
   const due = formatDueLeft(task.DueDate);
   const overdue = isOverdue ?? due.overdue;
-  // «Кому назначено» — всегда AssignedTo, «Исполнитель» — всегда тот, кто ВЗЯЛ
-  // задачу в работу (до взятия исполнителя нет — см. resolveTaker).
-  const assignedTo = task.AssignedTo || "";
+  // «Кому назначено» — всегда AssignedTo (кнопкой с иконкой человека/группы,
+  // см. AssignedToButtons), «Исполнитель» — всегда тот, кто ВЗЯЛ задачу в работу
+  // (до взятия исполнителя нет — см. resolveTaker).
   const taker = resolveTaker(task);
   const taken = isInProgressStatus(task.Status);
   // Кнопку показываем всегда, когда задачу можно взять (обработчик может быть не
@@ -230,7 +231,7 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
 
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1, gap: 1 }}>
         <Typography variant="caption" sx={{ color: "text.secondary", minWidth: 0 }}>
-          Кому назначено: {assignedTo || "—"} • Исполнитель: {taker || "—"} • Статус: {task.Status || "—"}
+          Кому назначено: <AssignedToButtons task={task} /> • Исполнитель: {taker || "—"} • Статус: {task.Status || "—"}
         </Typography>
         <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap" }}>
           #{task.Id}

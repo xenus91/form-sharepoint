@@ -51,7 +51,7 @@ function attachmentHref(serverRelativeUrl) {
  * Вложения задачи/заявки (изображения из rich-текста попадают сюда, их может быть
  * несколько). Один и тот же блок в обеих ветках формы.
  */
-function renderAttachments({ attachments = [], onDelete, note = true, inside = false, emptyHint = false } = {}) {
+function renderAttachments({ attachments = [], onDelete, note = true, inside = false, emptyHint = false, readOnly = false } = {}) {
   if (!attachments.length) {
     if (!emptyHint) return null;
     return (
@@ -78,14 +78,16 @@ function renderAttachments({ attachments = [], onDelete, note = true, inside = f
               size="small"
               clickable
               onClick={() => { if (href) window.open(href, '_blank'); }}
-              onDelete={(e) => { e.preventDefault(); e.stopPropagation(); onDelete?.(a.FileName); }}
-              deleteIcon={<Tooltip title="Удалить вложение"><DeleteIcon fontSize="small" /></Tooltip>}
+              {...(readOnly ? {} : {
+                onDelete: (e) => { e.preventDefault(); e.stopPropagation(); onDelete?.(a.FileName); },
+                deleteIcon: <Tooltip title="Удалить вложение"><DeleteIcon fontSize="small" /></Tooltip>,
+              })}
               sx={{ maxWidth: 220 }}
             />
           );
         })}
       </Stack>
-      {note && (
+      {note && !readOnly && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
           Удаление вложения также уберёт картинку из текста (если она там есть) — не забудьте Сохранить.
         </Typography>
@@ -589,6 +591,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     return [];
   }, [fields]);
   const taskCompleted = isCompletedStatus(taskStatus, item?.PercentComplete);
+  // Завершённую задачу править нельзя — НИ в таблице, НИ по прямой ссылке
+  // (#dob_tasks/<id>?list=<GUID>): форма открывается только на просмотр.
+  const readOnly = taskCompleted;
   const taskInProgress = isInProgressStatus(taskStatus);
   // Требовать взятие, только когда статус ЯВНО «не начата»: у заявок без поля
   // Status форма остаётся доступной, как раньше.
@@ -631,6 +636,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       setTakeError('Сначала возьмите задачу в работу.');
       return;
     }
+    // Завершённая задача — только просмотр (закрывать дважды нельзя).
+    if (readOnly) return;
     setSaving(true);
     setSaveError('');
     try {
@@ -670,7 +677,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     } finally {
       setSaving(false);
     }
-  }, [id, listGuid, notify, qc, handleBack, materializeFormValues, needsTake]);
+  }, [id, listGuid, notify, qc, handleBack, materializeFormValues, needsTake, readOnly]);
 
   const handleCtValidationError = useCallback((problems) => {
     notify(`Заполните обязательные поля: ${(problems || []).join('; ')}`, { severity: 'warning' });
@@ -694,6 +701,13 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         {taskBody}
       </Typography>
     </Box>
+  ) : null;
+
+  // Задача завершена: форма доступна ТОЛЬКО для просмотра — данных вносить нельзя.
+  const readOnlyBanner = readOnly ? (
+    <Alert severity="info" data-testid="dob-readonly-banner" sx={{ borderRadius: 0 }}>
+      Задача завершена — форма открыта только для просмотра. Изменить данные нельзя.
+    </Alert>
   ) : null;
 
   // «Шлюз»: задача ещё не взята в работу — данных вносить нельзя, пока не взяли.
@@ -822,6 +836,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       setTakeError('Сначала возьмите задачу в работу.');
       return;
     }
+    // Завершённая задача — только просмотр.
+    if (readOnly) return;
     const missing = [];
     for (const f of editableFields) {
       if (f.Required !== true || !isEditableField(f)) continue;
@@ -841,7 +857,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     }
     setInvalidFields((prev) => (prev.size > 0 ? new Set() : prev));
     handleSave();
-  }, [editableFields, chekField, chekInternal, form, item, notify, focusFirstInvalid, handleSave, needsTake]);
+  }, [editableFields, chekField, chekInternal, form, item, notify, focusFirstInvalid, handleSave, needsTake, readOnly]);
 
   useEffect(() => {
     if (!fields || !item) return;
@@ -888,6 +904,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     onDelete: handleDeleteAttachment,
     inside: true,
     emptyHint: true,
+    readOnly,
   });
 
   const deleteAttachmentForSrc = useCallback((src) => {
@@ -977,6 +994,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             </Typography>
             {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
             <Button size="small" variant="outlined" onClick={() => refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={FORM_SECONDARY_BUTTON_SX}>Обновить</Button>
+            {readOnly ? (
+              <Chip size="small" label="Завершена · только просмотр" data-testid="dob-readonly-chip" sx={{ fontWeight: 800, bgcolor: 'rgba(46,125,50,.12)', color: '#2e7d32' }} />
+            ) : (
             <Button
               size="small"
               variant="contained"
@@ -987,19 +1007,22 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             >
               {saving ? 'Сохранение…' : 'Сохранить'}
             </Button>
+            )}
           </Toolbar>
         </AppBar>
         {saveError && <Alert severity="error" onClose={() => setSaveError('')}>{saveError}</Alert>}
+        {readOnlyBanner}
         {taskHead}
         {isUploadingImage && <LinearProgress />}
         {needsTake ? takeGate : (
         <ContentTypeResultDialog
+          readOnly={readOnly}
           inline
           task={item}
           listGuid={listGuid}
           resultField={listResultField}
-          onUploadImage={handleUploadImage}
-          onDeleteImage={deleteAttachmentForSrc}
+          onUploadImage={readOnly ? null : handleUploadImage}
+          onDeleteImage={readOnly ? null : deleteAttachmentForSrc}
           isUploading={isUploadingImage}
           onValuesChange={handleCtValuesChange}
           richFooter={attachmentsBlock}
@@ -1064,14 +1087,19 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             </span>
           </Tooltip>
           <Button size="small" variant="outlined" onClick={()=> refetch()} disabled={isFetching} startIcon={<RefreshIcon />} sx={FORM_SECONDARY_BUTTON_SX}>Обновить</Button>
+          {readOnly ? (
+            <Chip size="small" label="Завершена · только просмотр" data-testid="dob-readonly-chip" sx={{ fontWeight: 800, bgcolor: 'rgba(46,125,50,.12)', color: '#2e7d32' }} />
+          ) : (
           <Button size="small" variant="contained" onClick={validateAndSave} disabled={saving || needsTake} startIcon={saving ? <CircularProgress size={16} color="inherit"/> : <SaveIcon />} sx={FORM_PRIMARY_BUTTON_SX}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </Button>
+          )}
         </Toolbar>
       </AppBar>
 
       {saveError && <Alert severity="error" onClose={()=> setSaveError('')}>{saveError}</Alert>}
       {fieldsError && <Alert severity="warning">Не удалось загрузить метаданные полей: {String(fieldsError?.message || fieldsError).slice(0,400)}</Alert>}
+      {readOnlyBanner}
 
       {taskHead}
       {needsTake ? takeGate : (
@@ -1097,9 +1125,10 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         <RichEditor
           value={chekValue || ''}
           onChange={(html)=> handleChange(chekInternal, html)}
-          onUploadImage={handleUploadImage}
-          onDeleteImage={deleteAttachmentForSrc}
+          onUploadImage={readOnly ? null : handleUploadImage}
+          onDeleteImage={readOnly ? null : deleteAttachmentForSrc}
           isUploading={isUploadingImage}
+          readOnly={readOnly}
           invalid={richInvalid}
           footer={attachmentsBlock}
         />
@@ -1126,7 +1155,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             const internal = f.InternalName;
             const title = f.Title || internal;
             const t = (f.TypeAsString || '').toLowerCase();
-            const editable = isEditableField(f);
+            const editable = isEditableField(f) && !readOnly;
             const value = form[internal] ?? getODataValue(item, internal) ?? '';
             const isCalculated = t === 'calculated' || t === 'computed';
             const isInvalid = invalidFields.has(internal);
@@ -1260,8 +1289,8 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
                     readOnly={!editable}
                     invalid={isInvalid}
                     onChange={html => handleChange(internal, html)}
-                    onUploadImage={handleUploadImage}
-                    onDeleteImage={deleteAttachmentForSrc}
+                    onUploadImage={readOnly ? null : handleUploadImage}
+                    onDeleteImage={readOnly ? null : deleteAttachmentForSrc}
                     isUploading={isUploadingImage}
                   />
                 </Box>
@@ -1330,7 +1359,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
         <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
         <Box sx={FORM_ACTIONS_SX}>
-          <Button onClick={validateAndSave} variant="contained" disabled={saving || needsTake} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
+          <Button onClick={validateAndSave} variant="contained" disabled={saving || needsTake || readOnly} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </Button>
         </Box>

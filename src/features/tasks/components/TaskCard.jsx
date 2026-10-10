@@ -33,6 +33,7 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import HourglassEmptyIcon from "@mui/icons-material/HourglassEmpty";
 import SearchOffIcon from "@mui/icons-material/SearchOff";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import AssignedToButtons from "./AssignedToButtons";
 
 // DBG helper (shared with TasksView)
 const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return false; }catch(_e){ void _e; return false; } })();
@@ -1180,7 +1181,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      Исполнитель: {task.AssignedTo || "—"} • Статус: {task.Status || "—"}
+                      Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
                     </Typography>
                     <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                       #{task.Id}
@@ -1214,7 +1215,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     </Box>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                        Исполнитель: {task.AssignedTo || taker || "—"} • Статус: {task.Status || "—"}
+                        Исполнитель: <AssignedToButtons task={task} emptyText={taker || "—"} /> • Статус: {task.Status || "—"}
                       </Typography>
                       <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                         #{task.Id}
@@ -1232,7 +1233,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     </Typography>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                        Исполнитель: {task.AssignedTo || "—"} • Статус: {task.Status || "—"}
+                        Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
                       </Typography>
                       <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                         #{task.Id}
@@ -1500,7 +1501,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                     </Box>
                     <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                       <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                        Исполнитель: {task.AssignedTo || "—"} • Статус: {task.Status || "—"}
+                        Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
                       </Typography>
                       <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                         #{task.Id}
@@ -1664,7 +1665,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                     <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                      Исполнитель: {task.AssignedTo || "—"} • Статус: {task.Status || "—"}
+                      Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
                     </Typography>
                     <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                       #{task.Id}
@@ -1702,7 +1703,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                 </Box>
                 <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 1 }}>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>
-                    Исполнитель: {task.AssignedTo || "—"} • Статус: {task.Status || "—"}
+                    Исполнитель: <AssignedToButtons task={task} /> • Статус: {task.Status || "—"}
                   </Typography>
                   <Typography variant="caption" sx={{ color: "rgba(0,0,0,0.35)", fontSize: "0.65rem", fontWeight: 500, whiteSpace: "nowrap", ml: 1 }}>
                     #{task.Id}

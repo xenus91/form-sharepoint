@@ -103,6 +103,9 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
   });
   cols.push({
     headerName: "Кому назначено",
+    // colId — чтобы TasksGrid прицепил к колонке кнопку AssignedToButtons
+    // (файл колонок — не компонент, react-refresh/only-export-components).
+    colId: "assignedTo",
     // ВСЕГДА AssignedTo (на кого назначена задача) — см. требование 2026-10-03.
     valueGetter: (p) => p.data?.AssignedTo || p.data?.assignedTo?.title || "",
     width: 190,

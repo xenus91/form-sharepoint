@@ -134,7 +134,7 @@ function stripHtml(html) {
 // и стабилен между рендерами, поэтому достаточно одного объявления.
 
 // eslint-disable-next-line no-unused-vars
-export default function TasksView({ userProfile: propUserProfile, currentUserId: propCurrentUserId, onBack: _onBack, onCountChange, initialElementId, initialElementAction, initialElementKind = "auto", onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
+export default function TasksView({ userProfile: propUserProfile, currentUserId: propCurrentUserId, onBack: _onBack, onTasksChanged, initialElementId, initialElementAction, initialElementKind = "auto", onClearElementHash, isLocalRcActive, localRcValue, localRcOffice, onClearLocalRc }) {
   const { notify } = useNotifications();
   // fieldsLoading + taskConfiguration теперь внутри useTasksMetadata (PR1)
   const [isTabPending, startTabTransition] = useTransition();
@@ -496,14 +496,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     return res.data;
   }, [queryClient, refetchTasks]);
 
-  // onCountChange + expandedGroups — теперь через эффект от tasks (раньше было внутри loadTasks)
+  // Данные изменились → просим пересчитать бейдж «активные задачи».
+  // НЕ передаём своё число: оно считалось по загруженной (отфильтрованной)
+  // выборке и при переключении интерфейсов затирало настоящий счётчик
+  // (см. useActiveTasksCount — там единственный источник правды).
   useEffect(() => {
     if (!tasksData) return;
-    if (onCountChange) {
-      // Счётчик — по всем источникам (main + dob), а не только по main
-      const activeCountTmp = cardTasks.filter((t)=> !isCompletedStatus(t.Status, t.PercentComplete)).length;
-      onCountChange(activeCountTmp);
-    }
+    onTasksChanged?.();
     const newGroups = new Set(tasks.map((m)=> extractTKNumberFromTask(m)));
     setExpandedGroups((prev)=>{
       if (prev.size===0) return newGroups;
@@ -512,7 +511,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       newGroups.forEach((g)=>{ if(!prev.has(g)){ next.add(g); changed=true; }});
       return changed? next: prev;
     });
-  }, [tasksData, tasks, cardTasks]);
+  }, [tasksData, tasks, cardTasks, onTasksChanged]);
 
   const { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask } = useTaskMutations({
     entityType,

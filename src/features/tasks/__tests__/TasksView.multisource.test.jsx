@@ -705,7 +705,9 @@ describe("TasksView — multi-source (#tasks)", () => {
       const el = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop() || null;
       return el && el.style.opacity === "0" ? null : el;
     };
-    const popupButtons = () => [...(popup()?.querySelectorAll("button") || [])];
+    // Кнопка «Кому назначено» (AssignedToButtons) — не действие по задаче.
+    const popupButtons = () => [...(popup()?.querySelectorAll("button") || [])]
+      .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button");
     const findButton = (re) => popupButtons().find((b) => re.test(b.textContent || ""));
     const centerRows = () => [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
     const rowByText = (re) => centerRows().find((r) => re.test(r.textContent || ""));
@@ -786,7 +788,9 @@ describe("TasksView — multi-source (#tasks)", () => {
 
     const buttons = () => {
       const el = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop() || null;
-      return el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
+      // Кнопка «Кому назначено» (AssignedToButtons) — не действие строки.
+      const list = el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
+      return list.filter((b) => b.getAttribute("data-testid") !== "assigned-to-button");
     };
     const texts = buttons().map((b) => b.textContent || "");
     // «Не начата» → задача ещё не взята в работу: только «Взять в работу»
@@ -845,7 +849,9 @@ describe("TasksView — multi-source (#tasks)", () => {
       await new Promise((r) => setTimeout(r, 250));
     });
     const idlePopup = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
-    const idleLabels = [...idlePopup.querySelectorAll("button")].map((b) => b.textContent.trim());
+    const idleLabels = [...idlePopup.querySelectorAll("button")]
+      .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button")
+      .map((b) => b.textContent.trim());
     expect(idleLabels).toEqual(["Взять в работу"]);
   }, 30000);
 
@@ -930,7 +936,9 @@ describe("TasksView — multi-source (#tasks)", () => {
 
     const buttons = () => {
       const el = [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop() || null;
-      return el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
+      // Кнопка «Кому назначено» (AssignedToButtons) — не действие строки.
+      const list = el && el.style.opacity !== "0" ? [...el.querySelectorAll("button")] : [];
+      return list.filter((b) => b.getAttribute("data-testid") !== "assigned-to-button");
     };
     const findButton = (re) => buttons().find((b) => re.test(b.textContent || ""));
     // Кнопки — из поля результата ЭТОГО типа контента (ООБ), а не из общего списка
@@ -1210,7 +1218,9 @@ describe("TasksView — multi-source (#tasks)", () => {
 
     const card = cardByText(host, /Поиск ЕО \(ТНУ\)/);
     expect(card).toBeTruthy();
-    expect([...card.querySelectorAll("button")].map((b) => b.textContent.trim()).filter(Boolean).sort())
+    expect([...card.querySelectorAll("button")]
+      .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button")
+      .map((b) => b.textContent.trim()).filter(Boolean).sort())
       .toEqual(["Найдена", "Не найдена"]);
 
     const dialogsBefore = new Set(document.querySelectorAll('.MuiDialog-root, [role="dialog"]'));

@@ -143,7 +143,11 @@ async function mountCard(behaviour, spies = {}) {
     );
   });
   await settle(600);
-  const buttons = () => [...host.querySelectorAll("button")].map((b) => b.textContent.trim()).filter(Boolean);
+  // Кнопка «Кому назначено» (AssignedToButtons) — не действие карточки.
+  const buttons = () => [...host.querySelectorAll("button")]
+    .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button")
+    .map((b) => b.textContent.trim())
+    .filter(Boolean);
   const findButton = (re) => [...host.querySelectorAll("button")].find((b) => re.test(b.textContent || ""));
   const inputs = () => [...host.querySelectorAll("input, textarea")];
   const click = async (el) => {

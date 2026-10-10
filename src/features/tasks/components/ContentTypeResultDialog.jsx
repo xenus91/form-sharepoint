@@ -125,6 +125,9 @@ export default function ContentTypeResultDialog({
   submitLabel = "",
   cancelLabel = "",
   submitting = false,
+  // readOnly: задача ЗАВЕРШЕНА — форму показываем, но править нельзя: все
+  // контролы недоступны, «Сохранить» нет, остаётся только «Закрыть».
+  readOnly = false,
   onSubmit,
   onClose,
   // inline: та же форма, но не в модальном окне — её показывает форма ДОБ
@@ -292,6 +295,8 @@ export default function ContentTypeResultDialog({
   }, [valuesControlRef]);
 
   const handleSubmit = React.useCallback(() => {
+    // Завершённую задачу править нельзя — форма только на просмотр.
+    if (readOnly) return;
     setTouched(true);
     // resultBlock не передаём: про результат сообщает resultProblem (один раз).
     const found = validateRequiredFields(form.controls, values, null, result);
@@ -351,7 +356,7 @@ export default function ContentTypeResultDialog({
       stored[key] = typeof value === "string" ? toStorageImages(value) : value;
     }
     onSubmit?.({ result, values: stored, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
-  }, [form, values, result, resultProblem, resultFieldInternalName, onSubmit, onValidationError]);
+  }, [form, values, result, resultProblem, resultFieldInternalName, onSubmit, onValidationError, readOnly]);
 
   // Отдаём submit наружу (кнопка «Сохранить» в шапке страницы — как у заявки ДОБ).
   React.useEffect(() => {
@@ -436,7 +441,7 @@ export default function ContentTypeResultDialog({
                   exclusive
                   size="small"
                   value={result || null}
-                  disabled={submitting}
+                  disabled={submitting || readOnly}
                   onChange={(_e, next) => {
                     if (next === null) return;
                     setResult(next);
@@ -467,7 +472,7 @@ export default function ContentTypeResultDialog({
                 </Box>
                 <RichEditor
                   value={values[mainControl.internalName] || ""}
-                  readOnly={submitting}
+                  readOnly={submitting || readOnly}
                   onChange={(html) => setValue(mainControl.internalName, html)}
                   onUploadImage={onUploadImage}
                   onDeleteImage={onDeleteImage}
@@ -511,7 +516,7 @@ export default function ContentTypeResultDialog({
                     </Typography>
                     <RichEditor
                       value={value || ""}
-                      readOnly={submitting}
+                      readOnly={submitting || readOnly}
                       onChange={(html) => setValue(control.internalName, html)}
                       onUploadImage={onUploadImage}
                       onDeleteImage={onDeleteImage}
@@ -542,7 +547,7 @@ export default function ContentTypeResultDialog({
                       onChange={(next) => setValue(control.internalName, next)}
                       multiple={control.multiple !== false}
                       required={control.required}
-                      disabled={submitting}
+                      disabled={submitting || readOnly}
                       error={Boolean(invalid)}
                       helperText={helper}
                     />
@@ -582,7 +587,7 @@ export default function ContentTypeResultDialog({
                       multiple
                       freeSolo
                       disableCloseOnSelect
-                      disabled={submitting}
+                      disabled={submitting || readOnly}
                       options={control.choices || []}
                       value={selected}
                       onChange={(_e, next) => setValue(
@@ -628,7 +633,7 @@ export default function ContentTypeResultDialog({
                     key={control.internalName}
                     freeSolo={freeSolo}
                     multiple={control.multiple === true}
-                    disabled={submitting}
+                    disabled={submitting || readOnly}
                     options={control.choices}
                     value={control.multiple
                       ? normalizeChoiceValues(value)
@@ -690,7 +695,7 @@ export default function ContentTypeResultDialog({
                     control={(
                       <Checkbox
                         checked={value === true}
-                        disabled={submitting}
+                        disabled={submitting || readOnly}
                         onChange={(e) => setValue(control.internalName, e.target.checked)}
                       />
                     )}
@@ -754,7 +759,11 @@ export default function ContentTypeResultDialog({
     </>
   );
 
-  const actions = (
+  const actions = readOnly ? (
+    <Button onClick={onClose} variant="outlined" sx={FORM_SECONDARY_BUTTON_SX} data-testid="ct-result-dialog-close">
+      Закрыть
+    </Button>
+  ) : (
     <>
       <Button onClick={onClose} disabled={submitting} variant="outlined" sx={FORM_SECONDARY_BUTTON_SX}>
         {cancelLabel || "Отмена"}

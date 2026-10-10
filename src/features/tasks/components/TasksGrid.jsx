@@ -14,6 +14,7 @@
 // Сама таблица read-only: MERGE/PUT делает TasksView по колбэкам.
 
 import { AgGridReact } from "ag-grid-react";
+import AssignedToButtons, { AssignedToCell } from "./AssignedToButtons";
 import { memo, useMemo, useRef, useEffect, useState } from "react";
 import {
   Box,
@@ -196,7 +197,11 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontSize: "0.7rem", lineHeight: 1.3 }}>
           {row?.Status || "—"}
-          {row?.AssignedTo ? ` • ${row.AssignedTo}` : ""}
+          {row?.AssignedTo ? (
+            <Box component="span" sx={{ display: "inline-flex", alignItems: "center", gap: 0.25, ml: 0.5 }}>
+              • <AssignedToButtons task={row} emptyText="" />
+            </Box>
+          ) : null}
         </Typography>
       </Box>
       <Divider sx={{ mb: 0.5 }} />
@@ -339,8 +344,13 @@ export default function TasksGrid({
 
   const columnDefs = useMemo(
     () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg })
-      // кружок-лоадер живёт внутри ячейки Id (не сдвигает строки)
-      .map((col) => (col.field === "Id" ? { ...col, cellRenderer: IdCell } : col)),
+      .map((col) => {
+        // кружок-лоадер живёт внутри ячейки Id (не сдвигает строки)
+        if (col.field === "Id") return { ...col, cellRenderer: IdCell };
+        // «Кому назначено» — кнопка с иконкой человека/группы
+        if (col.colId === "assignedTo") return { ...col, cellRenderer: AssignedToCell };
+        return col;
+      }),
     [showSourceColumn, showDbg]
   );
 

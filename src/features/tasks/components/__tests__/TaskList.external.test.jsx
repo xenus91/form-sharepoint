@@ -188,7 +188,11 @@ describe("TaskList — карточки из нескольких источни
       />
     );
     const card = host.querySelector('[data-testid="external-task-card"]');
-    expect(card.querySelectorAll("button")).toHaveLength(0);
+    // Действий у завершённой задачи нет. Кнопка «Кому назначено»
+    // (AssignedToButtons) — не действие, а ссылка на карточку исполнителя.
+    const actions = [...card.querySelectorAll("button")]
+      .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button");
+    expect(actions).toHaveLength(0);
   });
 
   it("без внешних задач карточек внешнего источника нет", () => {

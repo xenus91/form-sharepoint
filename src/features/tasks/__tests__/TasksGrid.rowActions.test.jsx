@@ -90,7 +90,10 @@ const openPopup = () => {
   const el = popupEl();
   return el && el.style.opacity !== "0" ? el : null;
 };
-const popupButtons = () => [...(openPopup()?.querySelectorAll("button") || [])];
+// Кнопка «Кому назначено» (AssignedToButtons) лежит в шапке попапа, но это НЕ
+// действие по задаче — в проверках набора действий её не учитываем.
+const popupButtons = () => [...(openPopup()?.querySelectorAll("button") || [])]
+  .filter((b) => b.getAttribute("data-testid") !== "assigned-to-button");
 
 const rowByText = (host, re) => [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
   .find((r) => re.test(r.textContent || ""));
@@ -105,6 +108,20 @@ const clickCell = async (row, x = 180, y = 240) => {
 };
 
 describe("TasksGrid — действия в точке клика", () => {
+  it("колонка «Кому назначено» — кнопка с иконкой, а не просто текст", async () => {
+    const { host } = renderGrid();
+    await settle(250);
+    const rows = [...host.querySelectorAll(".ag-center-cols-container .ag-row")];
+    // колонка «Кому назначено» — в центральной части таблицы
+    const cell = rows
+      .flatMap((r) => [...r.querySelectorAll(".ag-cell")])
+      .find((c) => (c.getAttribute("col-id") === "assignedTo"));
+    expect(cell).toBeTruthy();
+    const btn = cell?.querySelector('[data-testid="assigned-to-button"]');
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toContain("Поршаков Сергей");
+  });
+
   it("открывает popup в точке клика и показывает ВСЕ действия по задаче", async () => {
     const onTake = vi.fn();
     const onResult = vi.fn();

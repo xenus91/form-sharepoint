@@ -68,6 +68,7 @@ import TableChartIcon from "@mui/icons-material/TableChart";
 const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
 const DobTaskEditView = React.lazy(() => import("./features/dob/DobTaskEditView"));
 import TasksView from "./TasksView";
+import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
 import { useNotifications } from './NotificationsProvider';
 import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
 
@@ -1526,7 +1527,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
   const [hashElementListGuid, setHashElementListGuid] = useState(() => parseHash().elementListGuid);
   const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
-  const [tasksActiveCount, setTasksActiveCount] = useState(0);
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
 
@@ -1603,38 +1603,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   const TASKS_LIST_GUID = "463B634E-A71A-4FEF-9A1F-B803431D8639";
   const TASKS_LIST_API = `/web/lists(guid'${TASKS_LIST_GUID}')`;
   const DCEMAIL_LIST_TITLE = "DcEmail";
-
-  function getGroupIdsFromDistributionApp(dist) {
-    if (!dist) return [];
-    const extractIds = (val) => {
-      if (val == null) return [];
-      if (Array.isArray(val)) return val.map((v) => (v != null && typeof v === "object" ? v.Id ?? v : v)).filter((v) => v != null && v !== "").map(Number).filter((n) => !Number.isNaN(n));
-      if (typeof val === "object") {
-        if (Array.isArray(val.results)) return val.results.map((v) => (v != null && typeof v === "object" ? v.Id ?? v : v)).filter((v) => v != null && v !== "").map(Number).filter((n) => !Number.isNaN(n));
-        if (val.Id != null) { const n = Number(val.Id); return Number.isNaN(n) ? [] : [n]; }
-        if (val.__deferred) return [];
-      }
-      if (typeof val === "number" || typeof val === "string") { const n = Number(val); return Number.isNaN(n) ? [] : [n]; }
-      return [];
-    };
-    if (dist.Email != null) {
-      const ids = extractIds(dist.Email);
-      if (ids.length) return [...new Set(ids)];
-    }
-    for (const key of ["EmailId", "Email_x002e_Id", "Email_x0020_Id", "EMailId", "Email_X002e_Id"]) {
-      if (dist[key] != null) {
-        const ids = extractIds(dist[key]);
-        if (ids.length) return [...new Set(ids)];
-      }
-    }
-    for (const k of Object.keys(dist)) {
-      if (/email/i.test(k) && /id/i.test(k) && dist[k] != null) {
-        const ids = extractIds(dist[k]);
-        if (ids.length) return [...new Set(ids)];
-      }
-    }
-    return [];
-  }
 
   async function resolveDistributionViaDcEmailApp(office, department) {
     if (!office && !department) return null;
@@ -1721,65 +1689,15 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     prevOfficeRef.current = effectiveOfficeForTasks;
   }, [effectiveOfficeForTasks, isDcThuActive]);
 
-  useEffect(() => {
-    if (!currentUserId) return;
-    let cancelled = false;
-    async function fetchBadgeCountSimple() {
-      try {
-        // Build filter based on distribution (group assignment) if available
-        // Email — поле Пользователь/Группа, берем Id групп для AssignedToId
-        let filter;
-        if (taskDistribution) {
-          const groupIds = getGroupIdsFromDistributionApp(taskDistribution);
-          if (groupIds.length > 0) {
-            const allIds = [...new Set([...groupIds.map(Number), currentUserId].filter((v) => v != null && !Number.isNaN(v)).map(Number))];
-            if (allIds.length === 1) filter = `AssignedToId eq ${allIds[0]}`;
-            else if (allIds.length > 1) filter = `(${allIds.map((id) => `AssignedToId eq ${id}`).join(" or ")})`;
-            else filter = `AssignedToId eq ${currentUserId}`;
-          } else {
-            filter = `AssignedToId eq ${currentUserId}`;
-          }
-        } else {
-          filter = `AssignedToId eq ${currentUserId}`;
-        }
-        const url = `${TASKS_LIST_API}/items?$select=Id,Status,PercentComplete&$filter=${filter}&$top=100`;
-        try {
-          const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
-          const results = data?.d?.results || [];
-          let cnt = 0;
-          for (const r of results) {
-            const s = String(r.Status || "").toLowerCase();
-            const pc = r.PercentComplete;
-            const isCompleted = pc === 1 || pc === 100 || s.includes("заверш") || s.includes("completed") || (s.includes("выполн") && !s.includes("в процессе")) || s === "5";
-            if (!isCompleted) cnt += 1;
-          }
-          if (!cancelled) setTasksActiveCount(cnt);
-        } catch (e) {
-          // Fallback to AssignedTo/Id if primary filter failed (e.g., field not exists)
-          const altUrl = `${TASKS_LIST_API}/items?$select=Id,Status,PercentComplete&$filter=AssignedTo/Id eq ${currentUserId}&$top=100`;
-          try {
-            const { data } = await apiClient.get(altUrl, { headers: { Accept: "application/json;odata=verbose" } });
-            const results = data?.d?.results || [];
-            let cnt = 0;
-            for (const r of results) {
-              const s = String(r.Status || "").toLowerCase();
-              const pc = r.PercentComplete;
-              const isCompleted = pc === 1 || pc === 100 || s.includes("заверш") || s.includes("completed") || (s.includes("выполн") && !s.includes("в процессе")) || s === "5";
-              if (!isCompleted) cnt += 1;
-            }
-            if (!cancelled) setTasksActiveCount(cnt);
-          } catch {}
-        }
-      } catch {}
-    }
-    fetchBadgeCountSimple();
-    const id = setInterval(fetchBadgeCountSimple, 60000);
-    const onFocus = () => fetchBadgeCountSimple();
-    const onVisible = () => { if (document.visibilityState === "visible") fetchBadgeCountSimple(); };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => { cancelled = true; clearInterval(id); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVisible); };
-  }, [currentUserId, taskDistribution, taskFieldsApp]);
+  // Бейдж «активные задачи» в бургер-меню: ОДИН источник правды —
+  // useActiveTasksCount (считает по фильтру «я + мои группы» на сервере).
+  // Раньше число ещё писал TasksView по СВОЕЙ загруженной выборке (фильтры,
+  // поиск, источники), а при уходе из интерфейса задач просто переставал
+  // писать — из-за этого при переключении интерфейсов бейдж «слетал».
+  const { count: tasksActiveCount, refresh: refreshActiveTasksCount } = useActiveTasksCount({
+    currentUserId,
+    distribution: taskDistribution,
+  });
 
   if (currentView === "manager") {
     return (
@@ -1935,7 +1853,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         </Drawer>
         {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
-          <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onCountChange={setTasksActiveCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} initialElementKind={hashElementKind} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
+          <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onTasksChanged={refreshActiveTasksCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} initialElementKind={hashElementKind} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
         </Box>
         {/* Keep modals for operation date etc accessible in tasks view as well */}
       </ThemeProvider>

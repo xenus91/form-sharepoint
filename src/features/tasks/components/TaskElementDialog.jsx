@@ -6,6 +6,7 @@ import AssignmentIcon from "@mui/icons-material/Assignment";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import TaskCard from "./TaskCard";
 import { isCompletedStatus } from "../../../tasks/status";
+import AssignedToButtons from "./AssignedToButtons";
 
 export default function TaskElementDialog({
   open,
@@ -85,7 +86,7 @@ export default function TaskElementDialog({
                     <Box sx={{ width: 36, height: 36, borderRadius: "50%", bgcolor: "rgba(46,125,50,0.14)", display: "grid", placeItems: "center", flexShrink: 0 }}><CheckCircleIcon sx={{ color: "#2e7d32", fontSize: 22 }} /></Box>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography sx={{ fontWeight: 800, color: "#1b5e20", fontSize: "0.95rem", lineHeight: 1.2 }}>Задача выполнена</Typography>
-                      <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>Исполнитель: {elementTaskMatch.EditorTitle || elementTaskMatch.Editor || elementTaskMatch.AssignedTo || "—"} • {elementTaskMatch.Modified ? new Date(elementTaskMatch.Modified).toLocaleString("ru-RU") : "—"}{elementTaskMatch.ResultSearchTHU ? ` • ${elementTaskMatch.ResultSearchTHU}` : ""}</Typography>
+                      <Typography variant="caption" sx={{ color: "#2e7d32", fontSize: "0.78rem", lineHeight: 1.3, display: "block", mt: 0.15, wordBreak: "break-word" }}>Исполнитель: {elementTaskMatch.EditorTitle || elementTaskMatch.Editor || "—"} • Кому назначено: <AssignedToButtons task={elementTaskMatch} /> • {elementTaskMatch.Modified ? new Date(elementTaskMatch.Modified).toLocaleString("ru-RU") : "—"}{elementTaskMatch.ResultSearchTHU ? ` • ${elementTaskMatch.ResultSearchTHU}` : ""}</Typography>
                     </Box>
                   </Box>
                 ) : (
