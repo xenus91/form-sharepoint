@@ -194,6 +194,30 @@ describe("DobTaskEditView — виновные в выполненной зая�
     expect(guiltyValue(host)).toBe("Иванов Иван, ООБ (группа)");
   });
 
+  it("поле раскрыто, но БЕЗ имён (только Id) — имена всё равно подтягиваются", async () => {
+    // Частый случай: $expand отработал, а $select не содержал <Поле>/Title —
+    // в форме были бы пустые чипы.
+    state.item = { ...COMPLETED_ITEM_NO_EXPAND, Guilty: { results: [{ Id: 12 }, { Id: 33 }] } };
+    const { host } = await renderForm();
+    await settle(250);
+    expect(guiltyValue(host)).toBe("Иванов Иван, ООБ");
+  });
+
+  it("заполненное имя не затираем, тянем только отсутствующие", async () => {
+    state.item = { ...COMPLETED_ITEM_NO_EXPAND, Guilty: { results: [{ Id: 12, Title: "Иванов Иван" }, { Id: 51 }] } };
+    const { host } = await renderForm();
+    await settle(250);
+    // своё имя осталось, второе дотянулось по Id
+    expect(guiltyValue(host)).toBe("Иванов Иван, Петров Пётр");
+  });
+
+  it("одиночное User-поле раскрыто без имени — имя подтягивается", async () => {
+    state.item = { ...COMPLETED_ITEM_NO_EXPAND, Guilty: { Id: 12 } };
+    const { host } = await renderForm();
+    await settle(250);
+    expect(guiltyValue(host)).toBe("Иванов Иван");
+  });
+
   it("одиночный Id (не коллекция) тоже подтягивается", async () => {
     state.item = { ...COMPLETED_ITEM_NO_EXPAND, GuiltyId: 12 };
     const { host } = await renderForm();

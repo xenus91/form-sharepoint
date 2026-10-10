@@ -222,15 +222,37 @@ function lookupIdsOf(raw) {
   return ids;
 }
 
-/** Значение User-поля пустое? (С учётом всех форм ответа SharePoint.) */
-function isUserValueEmpty(v) {
-  if (v == null || v === '') return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (Array.isArray(v?.results)) return v.results.length === 0;
-  if (typeof v === 'object') return !(v.Title || v.Name || v.Id || v.ID);
-  return String(v).trim() === '';
+/**
+ * Значение User-поля как список записей { Id, Title }.
+ * SharePoint отдаёт по-разному: объект, массив, { results: [...] }, а при
+ * «свёрнутом» $expand — вообще только Id (тогда Title пустой).
+ */
+function userEntriesOf(raw) {
+  if (raw == null || raw === '') return [];
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.results) ? raw.results : [raw];
+  const out = [];
+  for (const v of list) {
+    if (v == null) continue;
+    if (typeof v === 'object') {
+      const id = Number(v.Id ?? v.ID ?? v.id ?? null);
+      out.push({ Id: Number.isFinite(id) ? id : null, Title: String(v.Title ?? v.Name ?? '') });
+    } else {
+      const n = Number(v);
+      out.push({ Id: Number.isFinite(n) ? n : null, Title: String(v) });
+    }
+  }
+  return out;
 }
 
+/** Собираем значение обратно в той же форме, в которой оно пришло. */
+function shapeUserValue(current, people, multiple) {
+  if (Array.isArray(current)) return people;
+  if (Array.isArray(current?.results)) return { results: people };
+  if (current && typeof current === 'object') return people[0] || current;
+  return multiple ? people : (people[0] || people);
+}
+
+/** Значение User-поля пустое? (С учётом всех форм ответа SharePoint.) */
 // Кэш принципалов сайта ДОБ: Id → { Id, Title, LoginName }. Живёт в сессии —
 // «Виновные» и прочие люди повторяются от задачи к задаче.
 const dobPrincipalCache = new Map();
@@ -366,18 +388,43 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         if (!alive) return;
         const internal = f.InternalName;
         const current = getODataValue(item, internal) ?? item[internal];
-        if (!isUserValueEmpty(current)) continue; // поле раскрылось — не трогаем
-        const ids = lookupIdsOf(item[`${internal}Id`] ?? getODataValue(item, `${internal}Id`));
-        if (!ids.length) continue;
-        const people = [];
-        for (const one of ids) {
+        const entries = userEntriesOf(current);
+        // Id БЕЗ имени: поле раскрылось частично (в $select не было <Поле>/Title)
+        // — чипы в форме всё равно пустые, имя надо дотянуть.
+        const missingIds = entries
+          .filter((e) => !e.Title && Number(e.Id) > 0)
+          .map((e) => Number(e.Id));
+        // Поле не раскрылось вовсе — берём Id из lookup-поля (<Поле>Id).
+        const fallbackIds = entries.length === 0
+          ? lookupIdsOf(item[`${internal}Id`] ?? getODataValue(item, `${internal}Id`))
+          : [];
+        const needIds = [...new Set([...missingIds, ...fallbackIds])];
+        if (!needIds.length) continue;
+        const resolved = new Map();
+        for (const one of needIds) {
           const person = await resolveDobPrincipal(one);
-          if (person) people.push(person);
+          if (person) resolved.set(Number(one), person);
         }
-        if (!alive || !people.length) continue;
+        if (!alive || !resolved.size) continue;
         setForm((prev) => {
-          if (!isUserValueEmpty(prev?.[internal])) return prev; // успели прийти настоящие значения
-          return { ...prev, [internal]: people };
+          const cur = prev?.[internal];
+          const list = userEntriesOf(cur);
+          const merged = [];
+          const used = new Set();
+          let filled = 0;
+          for (const e of list) {
+            const id = Number(e.Id);
+            const full = !e.Title && resolved.has(id) ? resolved.get(id) : e;
+            if (!e.Title && full?.Title) filled += 1;
+            if (Number.isFinite(id) && id > 0) used.add(id);
+            merged.push(full);
+          }
+          for (const [id, person] of resolved) {
+            if (!used.has(id)) { merged.push(person); used.add(id); filled += 1; }
+          }
+          // ничего не уточнилось (или пришли настоящие значения) — не трогаем форму
+          if (!filled || !merged.length) return prev;
+          return { ...prev, [internal]: shapeUserValue(cur, merged, f.AllowMultipleValues === true) };
         });
       }
     })();
