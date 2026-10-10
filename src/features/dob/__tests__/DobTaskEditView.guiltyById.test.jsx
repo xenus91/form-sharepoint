@@ -46,11 +46,11 @@ const COMPLETED_ITEM_EXPANDED = {
   Guilty: { results: [{ Id: 12, Title: "Иванов Иван" }, { Id: 33, Title: "ООБ (группа)" }] },
 };
 
-const state = vi.hoisted(() => ({ item: null, calls: [] }));
+const state = vi.hoisted(() => ({ item: null, calls: [], fields: null }));
 
 vi.mock("../api/dobApi", () => ({
-  getDobFields: vi.fn(async () => LIST_FIELDS),
-  getDobContentTypeFields: vi.fn(async () => LIST_FIELDS),
+  getDobFields: vi.fn(async () => state.fields),
+  getDobContentTypeFields: vi.fn(async () => state.fields),
   getDobItem: vi.fn(async () => state.item),
   updateDobItem: vi.fn(async () => ({ ok: true })),
   uploadDobAttachment: vi.fn(async () => ({})),
@@ -155,6 +155,7 @@ describe("DobTaskEditView — виновные в выполненной зая�
     window.location.hash = `#dob_tasks/906?list=${LIST_GUID}`;
     document.body.innerHTML = "";
     state.calls.length = 0;
+    state.fields = LIST_FIELDS;
   });
 
   it("выполненная задача — только просмотр (форма закрыта для правки)", async () => {
@@ -216,6 +217,18 @@ describe("DobTaskEditView — виновные в выполненной зая�
     const { host } = await renderForm();
     await settle(250);
     expect(guiltyValue(host)).toBe("Иванов Иван");
+  });
+
+  it("многозначное поле SharePoint называется UserMulti — его тоже чиним", async () => {
+    // В SharePoint многократная колонка людей отдаётся как TypeAsString
+    // "UserMulti"; проверка только на "User" теряла её полностью.
+    state.fields = LIST_FIELDS.map((f) => (
+      f.InternalName === "Guilty" ? { ...f, TypeAsString: "UserMulti" } : f
+    ));
+    state.item = COMPLETED_ITEM_NO_EXPAND;
+    const { host } = await renderForm();
+    await settle(250);
+    expect(guiltyValue(host)).toBe("Иванов Иван, ООБ");
   });
 
   it("одиночный Id (не коллекция) тоже подтягивается", async () => {

@@ -2,6 +2,7 @@
 // High-level DOB list operations — fields, items, update
 import { dobApiBase, dobListApi, dobAxios, DOB_LIST_GUID } from './dobClient';
 import { attachmentDisplayUrl } from '../lib/attachmentUrl';
+import { isUserFieldType } from '../lib/dobFormFields';
 import apiClient from '../../../api';
 import { TASKS_LIST_API, TASKS_LIST_GUID } from '../../../tasks/config';
 import { fetchContentTypeFields } from '../../../tasks/contentTypeFields';
@@ -109,7 +110,7 @@ export async function getDobItems({ top = 100, orderBy = 'Created', orderDesc = 
   // expands: Author/Editor всегда, + динамические User поля из fields
   let expands = ['Author','Editor','AttachmentFiles'].join(',');
   if (Array.isArray(fields) && fields.length) {
-    const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && !['Author','Editor'].includes(f.InternalName) && !f.Hidden).map(f=>f.InternalName);
+    const userFields = fields.filter(f=> isUserFieldType(f.TypeAsString) && !['Author','Editor'].includes(f.InternalName) && !f.Hidden).map(f=>f.InternalName);
     if (userFields.length) {
       expands = [...new Set([...expands.split(','), ...userFields])].join(',');
     }
@@ -501,7 +502,7 @@ export async function getDobItem(id, listGuid = DOB_LIST_GUID) {
   const fields = await getDobFields(listGuid).catch(()=>[]);
   let expands = ['Author','Editor','AttachmentFiles'].join(',');
   if (Array.isArray(fields) && fields.length) {
-    const userFields = fields.filter(f=> (f.TypeAsString||'').toLowerCase()==='user' && !['Author','Editor'].includes(f.InternalName) && !f.Hidden).map(f=>f.InternalName);
+    const userFields = fields.filter(f=> isUserFieldType(f.TypeAsString) && !['Author','Editor'].includes(f.InternalName) && !f.Hidden).map(f=>f.InternalName);
     if (userFields.length) expands = [...new Set([...expands.split(','), ...userFields])].join(',');
   }
   function buildSelectForExpands(exp) {
@@ -562,7 +563,7 @@ export async function getDobItemForView(id, listGuid = DOB_LIST_GUID) {
   const expands = ['ContentType', 'Author', 'Editor'];
   if (Array.isArray(fields) && fields.length) {
     const userFields = fields
-      .filter(f => (f.TypeAsString || '').toLowerCase() === 'user' && !['Author', 'Editor'].includes(f.InternalName) && !f.Hidden)
+      .filter(f => isUserFieldType(f.TypeAsString) && !['Author', 'Editor'].includes(f.InternalName) && !f.Hidden)
       .map(f => f.InternalName);
     if (userFields.length) expands.push(...userFields);
   }

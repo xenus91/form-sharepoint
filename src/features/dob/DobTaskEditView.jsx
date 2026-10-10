@@ -16,7 +16,7 @@ import { DOB_LIST_GUID } from './api/dobClient';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
 import RelatedItemDialog from './components/RelatedItemDialog';
-import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml } from './lib/dobFormFields';
+import { isHiddenFormField, getODataValue, looksLikeHtml, normalizeHtmlValue, toEditorHtml, isUserField, isUserFieldType } from './lib/dobFormFields';
 import { fileNameFromSrc, removeImgByFileName, removedImgSrcs, removedImgSrcsByValues, sameFormValues } from './lib/richImages';
 import { attachmentDisplayUrl, toDisplayImages, toStorageImages } from './lib/attachmentUrl';
 import { fieldsWithBase64, materializeRichValues } from './lib/materializeRichImages';
@@ -376,10 +376,10 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // и в правке — форма одна).
   useEffect(() => {
     if (!item || !fields?.length) return undefined;
+    // «Пользователь или группа» — и одиночный (User), и многократный (UserMulti).
     const userFields = fields.filter((f) => {
-      const t = String(f.TypeAsString || '').toLowerCase();
       const internal = f.InternalName;
-      return t === 'user' && internal !== 'Author' && internal !== 'Editor';
+      return isUserField(f) && internal !== 'Author' && internal !== 'Editor';
     });
     if (!userFields.length) return undefined;
     let alive = true;
@@ -557,7 +557,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
             continue;
           }
           // User/Lookup — нужен Id суффикс, иначе 400 "value without type"
-          if (t === 'user' || t === 'lookup' || t === 'lookupmulti' || meta?.LookupList) {
+          if (isUserFieldType(t) || t === 'lookup' || t === 'lookupmulti' || meta?.LookupList) {
             const idKeyRaw = `${k}Id`;
             const odataIdKey = toODataKey(idKeyRaw);
             let val = v;

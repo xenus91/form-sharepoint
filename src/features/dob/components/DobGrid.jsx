@@ -7,6 +7,7 @@
 // The grid fills the remaining viewport height after the sticky AppBar.
 import PropTypes from 'prop-types';
 import { useMemo, useRef, useCallback, useEffect } from 'react';
+import { isUserField } from "../lib/dobFormFields";
 import { AgGridReact } from 'ag-grid-react';
 import {
   ModuleRegistry,
@@ -154,7 +155,7 @@ function buildColumnDefs(fields) {
       });
       continue;
     }
-    if ((f.TypeAsString || '').toLowerCase() === 'user') {
+    if (isUserField(f)) { // «Пользователь или группа»: User и UserMulti
       const lowTitle = (title || '').toLowerCase();
       const isDupAuthor = lowTitle.includes('кем создано') || lowTitle.includes('создал') || lowTitle === 'автор';
       const isDupEditor = lowTitle.includes('кем измен') || lowTitle.includes('изменил') || lowTitle.includes('изменено');

@@ -27,6 +27,27 @@ export function isHiddenFormField(internal = '') {
 }
 
 /** Читает значение поля из элемента SharePoint с учётом OData-префиксов. */
+/**
+ * Поле «Пользователь или группа»?
+ *
+ * SharePoint отдаёт ДВА разных TypeAsString:
+ *   • "User"      — одиночный выбор;
+ *   • "UserMulti" — многократный («Виновные», «Участники», «Кому назначено»).
+ *
+ * Проверка только на 'user' теряла многократные колонки: они не попадали в
+ * $expand запроса, поэтому значение приходило пустым (или только в <Поле>Id),
+ * и в форме вместо виновных была пустота. См. docs/decisions/form-ui-ux.md §12.2.
+ */
+export function isUserFieldType(typeAsString) {
+  const t = String(typeAsString || '').trim().toLowerCase();
+  return t === 'user' || t === 'usermulti';
+}
+
+/** То же самое по объекту колонки (метаданные /fields). */
+export function isUserField(field) {
+  return !!field && isUserFieldType(field.TypeAsString);
+}
+
 export function getODataValue(row, internal) {
   if (!row || !internal) return undefined;
   if (row[internal] !== undefined) return row[internal];
@@ -194,7 +215,7 @@ export function formatFieldValue(field, item) {
     return { kind: 'text', text: truthy ? 'Да' : 'Нет' };
   }
   if (type === 'datetime') return { kind: 'text', text: formatDateTime(raw) };
-  if (type === 'user' || type === 'lookup' || type === 'lookupmulti' || field?.LookupList) {
+  if (isUserFieldType(type) || type === 'lookup' || type === 'lookupmulti' || field?.LookupList) {
     return { kind: 'text', text: titleOf(item, internal, raw) };
   }
   if (type === 'url') {
