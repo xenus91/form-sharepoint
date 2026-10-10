@@ -9,6 +9,7 @@
 import { createElement, useMemo, useState } from "react";
 import { Box, Paper, Typography } from "@mui/material";
 import TasksGrid from "../src/features/tasks/components/TasksGrid";
+import ViewModeToggle from "../src/features/tasks/components/ViewModeToggle";
 import { buildRowActions } from "../src/features/tasks/lib/rowActions";
 import { renderStylingIcon } from "../src/services/stylingIcons";
 
@@ -55,12 +56,19 @@ const ICON_BY_CHOICE = { "Найдена": "done", "Не найдена": "searc
 const STATUSES = ["Не начата", "В работе", "Завершена", "Отменена"];
 const ASSIGNEES = ["Поршаков Сергей", "Иванов Пётр", "Смирнова Анна", "Группа ООБ"];
 const TAKERS = ["Поршаков Сергей", "Иванов Пётр"];
+// Id принципалов: у одного и того же человека на разных сайтах Id РАЗНЫЙ.
+const ASSIGNEE_IDS = { "Поршаков Сергей": 207, "Иванов Пётр": 305, "Смирнова Анна": 411, "Группа ООБ": 33 };
+// «Я» — Поршаков: на main его Id 207, на сайте ДОБ — 42 (как в жизни).
+const CURRENT_USER_IDS = { main: 207, dob: 42 };
 
 function buildRows() {
   return Array.from({ length: 30 }, (_, i) => {
     const status = STATUSES[i % STATUSES.length];
     const isDob = i % 3 === 0;
     const sourceId = isDob ? "dob" : "main";
+    const assignee = ASSIGNEES[i % ASSIGNEES.length];
+    // На сайте ДОБ у «меня» другой Id — фильтр «Я исполнитель» это учитывает.
+    const assigneeId = assignee === "Поршаков Сергей" && isDob ? 42 : ASSIGNEE_IDS[assignee];
     const taken = status === "В работе" || status === "Завершена";
     const day = String(((i * 3) % 28) + 1).padStart(2, "0");
     return {
@@ -72,7 +80,8 @@ function buildRows() {
       Body: DESCRIPTIONS[i % DESCRIPTIONS.length],
       Status: status,
       PercentComplete: status === "Завершена" ? 1 : 0,
-      AssignedTo: ASSIGNEES[i % ASSIGNEES.length],
+      AssignedTo: assignee,
+      AssignedToId: assigneeId,
       EditorTitle: taken ? TAKERS[i % TAKERS.length] : "Автор задачи",
       DueDate: `2026-10-${day}T12:00:00Z`,
       Modified: `2026-09-${day}T09:30:00Z`,
@@ -84,14 +93,19 @@ export default function TableScene() {
   const rows = useMemo(buildRows, []);
   const [selected, setSelected] = useState(null);
   const [message, setMessage] = useState("");
+  const [mode, setMode] = useState("table"); // переключатель — только для предпросмотра
 
   const selectedRow = rows.find((r) => r.compositeId === selected) || null;
 
   return (
     <Box sx={{ p: 2, height: "100vh", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: 1.5 }}>
-      <Typography variant="h6" sx={{ fontWeight: 600 }}>
-        Таблица задач — предпросмотр (мок-данные)
-      </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+        <Typography variant="h6" sx={{ fontWeight: 600, flex: 1 }}>
+          Таблица задач — предпросмотр (мок-данные)
+        </Typography>
+        {/* Тот же переключатель, что в #tasks: на узком экране (<900 px) он скрыт. */}
+        <ViewModeToggle value={mode} onChange={setMode} />
+      </Box>
       <Typography variant="body2" color="text.secondary">
         Шапка закреплена: прокрутите список — заголовки останутся на месте.
         Поиск над таблицей ищет по всем полям сразу, клик по заголовку — сортировка.
@@ -117,6 +131,7 @@ export default function TableScene() {
       <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <TasksGrid
           rows={rows}
+          currentUserIds={CURRENT_USER_IDS}
           onSelectRow={setSelected}
           onRowOpen={(compositeId) => {
             const row = rows.find((r) => r.compositeId === compositeId);
