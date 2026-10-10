@@ -10,13 +10,27 @@ import { act } from "react-dom/test-utils";
 import { ThemeProvider, createTheme } from "@mui/material";
 
 // Уточнение принципала — «сервер»: 5 → пользователь, 33 → группа.
-const state = { principals: { 5: { id: 5, kind: "user", title: "Иванов Иван", loginName: "i:0#.f|membership|ivanov@lenta.com", email: "ivanov@lenta.com" }, 33: { id: 33, kind: "group", title: "ООБ", loginName: "ООБ", email: null } } };
+// Само определение типа (PrincipalType) проверяется в lib/__tests__/assignees.test.js.
+const state = {
+  principals: {
+    5: { id: 5, kind: "user", title: "Иванов Иван", loginName: "i:0#.f|membership|ivanov@lenta.com", email: "ivanov@lenta.com" },
+    33: { id: 33, kind: "group", title: "ООБ", loginName: "ООБ", email: null },
+  },
+};
 
-vi.mock("../../../tasks/principalDetails", () => ({
-  resolvePrincipalDetail: vi.fn(async (id) => state.principals[Number(id)] || null),
-  clearPrincipalDetailsCache: vi.fn(),
-  enrichDistribution: vi.fn(async (d) => d),
-}));
+vi.mock("../lib/assignees", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual, // parseAssignees — настоящий
+    resolveAssigneeCached: vi.fn(async (_task, person) => ({
+      id: person?.id ?? null,
+      kind: state.principals[Number(person?.id)]?.kind || "unknown",
+      title: state.principals[Number(person?.id)]?.title || person?.title || "",
+      loginName: state.principals[Number(person?.id)]?.loginName || null,
+      email: state.principals[Number(person?.id)]?.email || null,
+    })),
+  };
+});
 
 const { default: AssignedToButtons } = await import("../components/AssignedToButtons");
 const { parseAssignees } = await import("../lib/assignees");

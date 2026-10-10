@@ -133,9 +133,11 @@ export default function AssignedToButtons({
             data-principal-id={person.id ?? ""}
             data-principal-kind={kind}
             title="Кому назначено — нажмите, чтобы посмотреть"
-            onClick={(e) => {
-              // Кнопка живёт внутри строки таблицы/карточки: клик по ней не
-              // должен открывать саму задачу.
+            // Клик перехватываем В ФАЗЕ ПОГРУЖЕНИЯ и гасим событие: строка
+            // таблицы (AG Grid) слушает клик на своём контейнере, а React
+            // навешивает обработчики на корень — обычный stopPropagation в
+            // onClick сработал бы уже ПОСЛЕ того, как грид открыл поповер.
+            onClickCapture={(e) => {
               e.stopPropagation();
               e.preventDefault();
               setOpen(person);
@@ -143,15 +145,22 @@ export default function AssignedToButtons({
             }}
             startIcon={<KindIcon kind={kind} />}
             sx={{
+              // Серый и компактный — как подписи в карточке, а не как действие.
               textTransform: "none",
-              fontWeight: 600,
-              px: 0.75,
-              py: 0.25,
+              fontWeight: 500,
+              fontSize: "0.72rem",
+              lineHeight: 1.25,
+              letterSpacing: 0,
+              px: 0.5,
+              py: 0,
               minWidth: 0,
+              minHeight: 22,
               maxWidth: "100%",
-              color: "#171c8f",
+              color: "#6b7280",
               borderRadius: 1,
-              "& .MuiButton-startIcon": { mr: 0.5 },
+              bgcolor: "transparent",
+              "&:hover": { bgcolor: "rgba(23,28,143,0.06)", color: "#171c8f" },
+              "& .MuiButton-startIcon": { mr: 0.25, minWidth: 0, "& > svg": { fontSize: 14 } },
               "& .MuiButton-label, & > span": { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
               ...(sx || {}),
             }}

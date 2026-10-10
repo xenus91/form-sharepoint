@@ -434,10 +434,19 @@ export default function TasksGrid({
   }, [onSelectRow]);
 
   // Клик по строке: выделение + popup действий В ТОЧКЕ КЛИКА.
+  // Клик по кнопке «Кому назначено» (AssignedToButtons) — это запрос информации
+  // об исполнителе, а не действие над строкой: поповер не открываем.
+  const fromAssigneeButton = (nativeEvent) => {
+    const target = nativeEvent?.target;
+    return !!(target && typeof target.closest === "function"
+      && target.closest('[data-testid="assigned-to-button"]'));
+  };
+
   const onCellClicked = useMemo(() => (event) => {
     const row = event?.data;
     if (!row) return;
     const native = event?.event;
+    if (fromAssigneeButton(native)) return;
     let left = Number(native?.clientX);
     let top = Number(native?.clientY);
     if (!Number.isFinite(left) || !Number.isFinite(top)) {
@@ -452,6 +461,7 @@ export default function TasksGrid({
 
   const onRowDoubleClicked = useMemo(() => (event) => {
     if (typeof onRowOpen !== "function") return;
+    if (fromAssigneeButton(event?.event)) return;
     const id = event?.data?.compositeId;
     if (id) onRowOpen(id);
   }, [onRowOpen]);

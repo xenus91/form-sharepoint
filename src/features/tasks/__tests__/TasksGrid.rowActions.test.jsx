@@ -108,6 +108,7 @@ const clickCell = async (row, x = 180, y = 240) => {
 };
 
 describe("TasksGrid — действия в точке клика", () => {
+
   it("колонка «Кому назначено» — кнопка с иконкой, а не просто текст", async () => {
     const { host } = renderGrid();
     await settle(250);
@@ -467,5 +468,37 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(document.body.querySelector('[data-testid="tasks-row-result-editor"]')).toBeFalsy();
     expect(popupButtons().map((b) => b.textContent)).toEqual(["Найдена"]);
     expect(onResult).not.toHaveBeenCalled();
+  });
+
+  // Тест — последний в файле: MUI-порталы (карточка исполнителя, поповер строки)
+  // в jsdom не закрываются сами (нет transitionend) и иначе протекали бы в
+  // следующие тесты.
+  it("клик по «Кому назначено» смотрит исполнителя, а НЕ открывает поповер строки", async () => {
+    const { host } = renderGrid();
+    await settle(250);
+    // Поповеры предыдущих тестов остаются в DOM (в jsdom нет transitionend),
+    // поэтому сравниваем КОЛИЧЕСТВО: клик по кнопке не должен его увеличить.
+    const popoverCount = () => document.body.querySelectorAll('[data-testid="tasks-row-actions"]').length;
+    const before = popoverCount();
+
+    const cell = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+      .flatMap((r) => [...r.querySelectorAll(".ag-cell")])
+      .find((c) => c.getAttribute("col-id") === "assignedTo");
+    const btn = cell?.querySelector('[data-testid="assigned-to-button"]');
+    expect(btn).toBeTruthy();
+
+    await act(async () => {
+      btn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
+    });
+    // поповера действий нет — клик ушёл кнопке, а не строке
+    expect(popoverCount()).toBe(before);
+    // зато открылась карточка исполнителя
+    expect(document.body.querySelector('[data-testid="principal-info-dialog"]')).toBeTruthy();
+
+    // контроль: обычный клик по строке поповер открывает (проверка осмысленна)
+    const row = rowByText(host, /Основная задача ООБ/);
+    await clickCell(row, 180, 300);
+    expect(popoverCount()).toBeGreaterThan(before);
   });
 });
