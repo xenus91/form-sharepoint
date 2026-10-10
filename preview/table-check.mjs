@@ -157,6 +157,22 @@ const dues = all.map((r) => cellText(r, "DueDate")).filter(Boolean);
 check(dues.some((d) => /^Осталось \d+д \d+ч$/.test(d)), "в «Сроке» есть «Осталось …д …ч»", dues.find((d) => /^Осталось/.test(d)) || "");
 check(dues.some((d) => /^Просрочено \d+д \d+ч назад$/.test(d)), "в «Сроке» есть «Просрочено … назад»", dues.find((d) => /^Просрочено/.test(d)) || "");
 check(!dues.some((d) => /^\d{2}\.\d{2}\.\d{4}$/.test(d)), "голых дат в «Сроке» не осталось");
+// порядок по умолчанию — от самых старых к самым новым (движок сортирует по Created)
+const dueHeader = [...host.querySelectorAll(".ag-header-cell")].find((h) => /Срок/.test(h.textContent || ""));
+check(dueHeader?.getAttribute("aria-sort") === "ascending",
+  "«Срок» по умолчанию отсортирован по возрастанию", dueHeader?.getAttribute("aria-sort") || "нет");
+// В сцене Created растёт вместе с порядком сценария (см. preview/TableScene.jsx),
+// поэтому «от старых к новым» = первые сценарии сверху. Берём первые четыре.
+const EXPECTED_FIRST = [
+  "Проверить паллету на складе",
+  "Просмотр видеоархива",
+  "Основная задача ООБ (в работе)",
+  "Заявка ООБ",
+];
+const shownTitles = all.map((r) => cellText(r, "Title"));
+check(EXPECTED_FIRST.every((t, i) => shownTitles[i] === t),
+  "первые строки — самые старые задачи (по дате создания)", shownTitles.slice(0, 4).join(" → "));
+
 // завершённая строка — время решения (как чип в карточке), а не «Просрочено»
 const doneDues = all.filter((r) => /Завершена/.test(cellText(r, "Status"))).map((r) => cellText(r, "DueDate"));
 check(doneDues.length > 0 && doneDues.every((d) => /^Решено( за \d+д \d+ч)?$/.test(d)),

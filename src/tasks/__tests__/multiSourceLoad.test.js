@@ -11,8 +11,8 @@ const state = vi.hoisted(() => ({
   dobMissingFields: ["ResultSearchTHU", "Location1", "OffDepKey", "AdditionalsActionsRequired", "AdditionalActions"],
 }));
 
-const MAIN_ITEM = { Id: 10, Title: "Основная задача", Status: "Не начата", Modified: "2026-10-03T10:00:00Z", AssignedTo: { Id: 5, Title: "Текущий" } };
-const DOB_ITEM = { Id: 1, Title: "Заявка ООБ", Body: "Просмотр видеоархива", Status: "Не начата", PercentComplete: 0, Modified: "2026-10-03T00:29:42Z", AssignedTo: { Id: 207, Title: "Поршаков Сергей" } };
+const MAIN_ITEM = { Id: 10, Title: "Основная задача", Status: "Не начата", Created: "2026-10-01T10:00:00Z", Modified: "2026-10-03T10:00:00Z", AssignedTo: { Id: 5, Title: "Текущий" } };
+const DOB_ITEM = { Id: 1, Title: "Заявка ООБ", Body: "Просмотр видеоархива", Status: "Не начата", PercentComplete: 0, Created: "2026-10-02T00:29:42Z", Modified: "2026-10-03T00:29:42Z", AssignedTo: { Id: 207, Title: "Поршаков Сергей" } };
 
 vi.mock("../sourceClient", () => ({
   makeSourceClient: (source) => {
@@ -77,7 +77,8 @@ describe("fetchTasksMultiSource — сквозная загрузка main + dob
     expect(dob.compositeId).toBe("dob:1");
     expect(dob.sourceLabel).toBe("DOB Logistic");
     expect(dob.Title).toBe("Заявка ООБ");
-    // сортировка Modified desc
+    // сортировка — от самых старых к самым новым (Created asc, требование 2026-10-10):
+    // main создана 10-01, dob — 10-02. Modified на порядок больше не влияет.
     expect(res.items.map((t) => t.compositeId)).toEqual(["main:10", "dob:1"]);
     expect(res.errors).toEqual([]);
   });

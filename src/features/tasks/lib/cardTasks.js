@@ -6,7 +6,8 @@
 // табличном режиме они уже грузились (useTasksTableData → multi-source).
 //
 // Здесь: main-задачи (богатые, с enrich) помечаем sourceId="main" и склеиваем
-// с «внешними» строками (dob и др. источники). Итог сортируется по Modified desc.
+// с «внешними» строками (dob и др. источники). Итог сортируется по Created asc
+// (от самых старых к самым новым — требование 2026-10-10).
 // Дубликаты (по sourceId:Id) отбрасываются.
 
 import { mergeSort } from "../../../tasks/multiSource";
@@ -74,5 +75,7 @@ export function mergeCardTasks(mainTasks, extraRows, opts = {}) {
     seen.add(key);
     merged.push({ ...row, sourceId, compositeId: row.compositeId || `${sourceId}:${row.Id}` });
   }
-  return mergeSort(merged.filter(Boolean), opts.orderByField || "Modified", opts.dir || "desc");
+  // От самых старых к самым новым (Created asc). НЕ Modified: при взятии задачи
+  // в работу Modified обновляется, и карточка улетала в самый верх списка.
+  return mergeSort(merged.filter(Boolean), opts.orderByField || "Created", opts.dir || "asc");
 }

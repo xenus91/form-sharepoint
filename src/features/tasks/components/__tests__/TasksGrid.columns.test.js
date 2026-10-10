@@ -12,6 +12,8 @@ import {
   dueCellStyle,
   dueCellText,
   dueCellTooltip,
+  compareDueColumnByCreated,
+  compareDatesChrono,
   TASK_GRID_DEFAULT_COL_DEF,
 } from "../../lib/taskTableColumns";
 
@@ -184,6 +186,69 @@ describe("TasksGrid — колонка «Срок» как в карточке",
     expect(dueCellTooltip({ DueDate: "2026-10-13T09:30:00" })).toContain("2026");
     expect(dueCellTooltip({})).toBeUndefined();
     expect(dueCellTooltip(null)).toBeUndefined();
+  });
+
+  it("«Срок» сортируется по дате создания, а не по дедлайну и не по тексту", () => {
+    // Регрессия 2026-10-10: ячейка завершённой показывает «Решено за …», поэтому
+    // сортировка по DueDate читалась «как по тексту». Движок сортирует по Created.
+    const rows = [
+      { Created: "2026-09-03T08:00:00Z", DueDate: "2026-11-01T00:00:00Z" }, // старая
+      { Created: "2026-09-01T08:00:00Z", DueDate: "2026-09-20T00:00:00Z" }, // самая старая
+      { Created: "2026-09-02T08:00:00Z", DueDate: "2026-12-31T00:00:00Z" },
+    ];
+    // Компаратор AG Grid всегда отвечает «кто старше», а направление движок
+    // делает сам: compareRowNodes умножает результат на -1 при sort === "desc".
+    const gridSort = (items, cmp, isDesc) => [...items].sort(
+      (a, b) => cmp(a.DueDate, b.DueDate, { data: a }, { data: b }, isDesc) * (isDesc ? -1 : 1),
+    );
+    const asc = gridSort(rows, compareDueColumnByCreated, false);
+    expect(asc.map((r) => r.Created)).toEqual([
+      "2026-09-01T08:00:00Z",
+      "2026-09-02T08:00:00Z",
+      "2026-09-03T08:00:00Z",
+    ]);
+    const desc = gridSort(rows, compareDueColumnByCreated, true);
+    expect(desc.map((r) => r.Created)).toEqual([
+      "2026-09-03T08:00:00Z",
+      "2026-09-02T08:00:00Z",
+      "2026-09-01T08:00:00Z",
+    ]);
+    // без Created — в конце в обоих направлениях
+    const withEmpty = [
+      { Created: "", DueDate: "2026-11-01T00:00:00Z" },
+      { Created: "2026-09-01T08:00:00Z", DueDate: "2026-12-01T00:00:00Z" },
+    ];
+    expect(gridSort(withEmpty, compareDueColumnByCreated, false).at(-1).Created).toBe("");
+    expect(gridSort(withEmpty, compareDueColumnByCreated, true).at(-1).Created).toBe("");
+    // Created может лежать и в raw
+    expect(compareDueColumnByCreated(null, null, { data: { raw: { Created: "2026-09-01T00:00:00Z" } } }, { data: { raw: { Created: "2026-09-02T00:00:00Z" } } }, false)).toBeLessThan(0);
+  });
+
+  it("«Срок» по умолчанию отсортирован по возрастанию (от старых к новым)", () => {
+    const due = colByHeader(buildTaskColumns(), "Срок");
+    expect(due.sort).toBe("asc");
+    expect(typeof due.comparator).toBe("function");
+  });
+
+  it("«Изменён» сортируется хронологически, а не лексикографически", () => {
+    // «09.10.2026» как строка больше «10.01.2026» — компаратор обязан это понимать
+    const values = ["2026-10-09T10:00:00Z", "13.10.2026 09:30", "02.01.2026", "", null];
+    const gridSort = (isDesc) => [...values].sort(
+      (a, b) => compareDatesChrono(a, b, null, null, isDesc) * (isDesc ? -1 : 1),
+    );
+    const sorted = gridSort(false);
+    expect(sorted[0]).toBe("02.01.2026");
+    expect(sorted[1]).toBe("2026-10-09T10:00:00Z");
+    expect(sorted[2]).toBe("13.10.2026 09:30");
+    // пустые — всегда в конце
+    expect(sorted[3] === "" || sorted[3] === null).toBe(true);
+    expect(sorted[4] === "" || sorted[4] === null).toBe(true);
+    const desc = gridSort(true);
+    expect(desc[0]).toBe("13.10.2026 09:30");
+    expect(desc[1]).toBe("2026-10-09T10:00:00Z");
+    expect(desc[2]).toBe("02.01.2026");
+    expect(compareDatesChrono(new Date("2026-01-01T00:00:00Z"), new Date("2026-02-01T00:00:00Z"))).toBeLessThan(0);
+    expect(colByHeader(buildTaskColumns(), "Изменён").comparator).toBe(compareDatesChrono);
   });
 
   it("у колонки «Исполнитель» есть colId для кнопки (как у «Кому назначено»)", () => {

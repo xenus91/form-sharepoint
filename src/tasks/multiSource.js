@@ -37,26 +37,69 @@ export function parseCompositeId(key) {
 }
 
 /**
- * Детерминированная сортировка после слияния.
- * По умолчанию — Modified desc; отсутствующий Modified в шапке строки = -Infinity.
- * @param {Array<any>} items
- * @param {string} [orderByField="Modified"]
- * @param {"asc"|"desc"} [dir="desc"]
+ * Timestamp для сортировки: сначала запрошенное поле (в шапке строки или в raw),
+ * затем фолбэк Created → Modified. У строк сайтов-источников нужного поля может
+ * не быть вовсе — тогда лучше сортировать по тому, что приехало, чем сваливать
+ * задачу в конец списка.
+ * @param {any} item
+ * @param {string} orderByField
+ * @returns {number|null}
  */
-export function mergeSort(items, orderByField = "Modified", dir = "desc") {
+function sortTimeOf(item, orderByField) {
+  const candidates = [
+    item?.[orderByField], item?.raw?.[orderByField],
+    item?.Created, item?.raw?.Created,
+    item?.Modified, item?.raw?.Modified,
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    const t = c instanceof Date ? c.getTime() : Date.parse(c);
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
+}
+
+/**
+ * Стабильный tiebreak при равных датах: сначала числовой Id (в SharePoint он
+ * растёт вместе с временем создания), затем compositeId.
+ * @param {any} a
+ * @param {any} b
+ * @returns {number}
+ */
+function mergeTiebreak(a, b) {
+  const aId = Number(a?.Id);
+  const bId = Number(b?.Id);
+  if (Number.isFinite(aId) && Number.isFinite(bId) && aId !== bId) return aId - bId;
+  const aKey = a?.compositeId ?? String(a?.Id ?? "");
+  const bKey = b?.compositeId ?? String(b?.Id ?? "");
+  return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+}
+
+/**
+ * Детерминированная сортировка после слияния.
+ *
+ * По умолчанию — Created ASC: список задач читается «от самых старых к самым
+ * новым» (требование 2026-10-10). Именно Created, а не Modified: когда задачу
+ * берут в работу, SharePoint обновляет Modified, и при Modified desc карточка
+ * улетала в самый верх списка.
+ *
+ * Строки, у которых дату определить не удалось, всегда в конце — и при asc, и
+ * при desc (иначе они прыгали бы из конца в начало при смене направления).
+ *
+ * @param {Array<any>} items
+ * @param {string} [orderByField="Created"]
+ * @param {"asc"|"desc"} [dir="asc"]
+ */
+export function mergeSort(items, orderByField = "Created", dir = "asc") {
   const sign = dir === "asc" ? 1 : -1;
   return [...items].sort((a, b) => {
-    const aRaw = a?.raw?.[orderByField] ?? a?.[orderByField] ?? null;
-    const bRaw = b?.raw?.[orderByField] ?? b?.[orderByField] ?? null;
-    const aT = aRaw ? Date.parse(aRaw) : NaN;
-    const bT = bRaw ? Date.parse(bRaw) : NaN;
-    const aN = Number.isFinite(aT) ? aT : -Infinity;
-    const bN = Number.isFinite(bT) ? bT : -Infinity;
+    const aN = sortTimeOf(a, orderByField);
+    const bN = sortTimeOf(b, orderByField);
+    if (aN === null && bN === null) return mergeTiebreak(a, b);
+    if (aN === null) return 1;
+    if (bN === null) return -1;
     if (aN !== bN) return (aN - bN) * sign;
-    // стабильный tiebreak по compositeId (или Id+sourceId)
-    const aKey = a?.compositeId ?? String(a?.Id ?? "");
-    const bKey = b?.compositeId ?? String(b?.Id ?? "");
-    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+    return mergeTiebreak(a, b);
   });
 }
 
@@ -274,7 +317,8 @@ export async function fetchTasksMultiSource(opts) {
   }
 
   return {
-    items: mergeSort(all),
+    // По умолчанию — от самых старых к самым новым (Created asc).
+    items: mergeSort(all, "Created", "asc"),
     errors,
     perSourceStats,
   };

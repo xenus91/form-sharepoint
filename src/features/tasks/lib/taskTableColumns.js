@@ -118,6 +118,74 @@ const DUE_TEXT_COLOR = {
  * info/error). Время решения завершённой задачи — нейтральное: это факт, а не
  * предупреждение.
  */
+/**
+ * Значение даты → timestamp. Понимает и ISO-строку из OData, и «13.10.2026 09:30»
+ * (CAML RenderListDataAsStream отдаёт дату в региональном формате сайта).
+ * @param {any} value
+ * @returns {number|null}
+ */
+function dateValueOf(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    const t = value.getTime();
+    return Number.isFinite(t) ? t : null;
+  }
+  let t = Date.parse(value);
+  if (Number.isFinite(t)) return t;
+  const m = String(value).trim().match(/^(\d{2})\.(\d{2})\.(\d{4})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!m) return null;
+  t = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), Number(m[4] || 0), Number(m[5] || 0)).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Компаратор AG Grid для ДАТ: хронологически, а не «по тексту».
+ *
+ * Пустые даты — всегда в конце, в обоих направлениях (AG Grid умножает результат
+ * компаратора на -1 для desc, поэтому направление приходится учитывать самому —
+ * 5-й аргумент).
+ *
+ * @param {any} valueA
+ * @param {any} valueB
+ * @param {any} _nodeA
+ * @param {any} _nodeB
+ * @param {boolean} [isDescending]
+ * @returns {number}
+ */
+export function compareDatesChrono(valueA, valueB, _nodeA, _nodeB, isDescending) {
+  const a = dateValueOf(valueA);
+  const b = dateValueOf(valueB);
+  if (a === null && b === null) return 0;
+  if (a === null) return isDescending ? -1 : 1;
+  if (b === null) return isDescending ? 1 : -1;
+  return a - b;
+}
+
+/**
+ * Компаратор колонки «Срок» — по ДАТЕ СОЗДАНИЯ задачи (требование 2026-10-10).
+ *
+ * Зачем: у завершённой задачи ячейка показывает «Решено за 3д 4ч», у открытой —
+ * «Осталось …»/«Просрочено … назад». Если сортировать по дедлайну, текст в
+ * колонке идёт вперемешку и порядок читается «как по тексту». Пользователь
+ * договорился так: отображение оставляем, а движок сортирует по Created — тогда
+ * список сверху вниз читается ровно как «от самых старых к самым новым».
+ *
+ * @param {any} _valueA — значение колонки (DueDate), намеренно не используем
+ * @param {any} _valueB
+ * @param {any} nodeA
+ * @param {any} nodeB
+ * @param {boolean} [isDescending]
+ * @returns {number}
+ */
+export function compareDueColumnByCreated(_valueA, _valueB, nodeA, nodeB, isDescending) {
+  const a = dateValueOf(nodeA?.data?.Created ?? nodeA?.data?.raw?.Created);
+  const b = dateValueOf(nodeB?.data?.Created ?? nodeB?.data?.raw?.Created);
+  if (a === null && b === null) return 0;
+  if (a === null) return isDescending ? -1 : 1;
+  if (b === null) return isDescending ? 1 : -1;
+  return a - b;
+}
+
 export function dueCellStyle(params) {
   const row = params?.data;
   if (isTaskCompleted(row)) {
@@ -207,10 +275,15 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     width: 170,
     sortable: true,
     filter: "agDateColumnFilter",
-    headerTooltip: "Срок задачи. У завершённой — время решения (создана → завершена).",
+    headerTooltip: "Срок задачи. У завершённой — время решения (создана → завершена). Сортировка — по дате создания задачи: сверху самые старые.",
     valueFormatter: (p) => dueCellText(p.data),
     cellStyle: dueCellStyle,
     tooltipValueGetter: (p) => dueCellTooltip(p.data),
+    // Движок сортирует по Created (см. compareDueColumnByCreated), а не по
+    // дедлайну: иначе текст «Осталось/Просрочено/Решено» шёл бы вперемешку.
+    comparator: compareDueColumnByCreated,
+    // Порядок по умолчанию — от самых старых к самым новым (требование 2026-10-10).
+    sort: "asc",
   });
   cols.push({
     headerName: "Изменён",
@@ -219,6 +292,7 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     sortable: true,
     filter: "agDateColumnFilter",
     valueFormatter: (p) => formatDate(p.value),
+    comparator: compareDatesChrono,
   });
   // Таблица #tasks — обзорная: поля результата здесь НЕ показываем.
   // Колонка источника — только в отладочном режиме (?dbg=1 / localStorage.dbg_tasks=1).

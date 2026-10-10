@@ -36,23 +36,44 @@ describe("multiSource.mergeSort", () => {
     { compositeId: "main:3", raw: { Modified: "2026-10-03T10:00:00Z" } },
     { compositeId: "main:1", raw: { Modified: "2026-10-05T10:00:00Z" } },
     { compositeId: "dob:2", raw: { Modified: "2026-10-04T10:00:00Z" } },
-    { compositeId: "main:2", raw: {} }, // нет Modified — должен уехать в конец
+    { compositeId: "main:2", raw: {} }, // нет даты — должен уехать в конец
   ];
 
-  it("Modified desc по умолчанию", () => {
-    const sorted = mergeSort(sample);
-    expect(sorted[0].compositeId).toBe("main:1"); // 10-05
-    expect(sorted[1].compositeId).toBe("dob:2");  // 10-04
-    expect(sorted[2].compositeId).toBe("main:3"); // 10-03
-    expect(sorted[3].compositeId).toBe("main:2"); // без Modified — низ
+  it("по умолчанию — от самых старых к самым новым (Created asc)", () => {
+    const sorted = mergeSort([
+      { compositeId: "main:3", Created: "2026-10-03T10:00:00Z" },
+      { compositeId: "main:1", Created: "2026-10-05T10:00:00Z" },
+      { compositeId: "dob:2", Created: "2026-10-04T10:00:00Z" },
+    ]);
+    expect(sorted.map((t) => t.compositeId)).toEqual(["main:3", "dob:2", "main:1"]);
   });
 
-  it("стабильный tiebreak по compositeId", () => {
+  it("нет Created — фолбэк на Modified (а не в конец списка)", () => {
+    const sorted = mergeSort(sample);
+    expect(sorted.map((t) => t.compositeId)).toEqual(["main:3", "dob:2", "main:1", "main:2"]);
+  });
+
+  it("строки без даты — в конце и при asc, и при desc", () => {
+    const asc = mergeSort(sample, "Created", "asc").map((t) => t.compositeId);
+    const desc = mergeSort(sample, "Created", "desc").map((t) => t.compositeId);
+    expect(asc[asc.length - 1]).toBe("main:2");
+    expect(desc[desc.length - 1]).toBe("main:2");
+    expect(desc.slice(0, 3)).toEqual(["main:1", "dob:2", "main:3"]);
+  });
+
+  it("при равных датах — по числовому Id (в SharePoint он растёт со временем)", () => {
     const eq = [
-      { compositeId: "main:2", raw: { Modified: "2026-10-03T10:00:00Z" } },
-      { compositeId: "main:1", raw: { Modified: "2026-10-03T10:00:00Z" } },
+      { compositeId: "dob:2", Id: 12, Created: "2026-10-03T10:00:00Z" },
+      { compositeId: "main:9", Id: 9, Created: "2026-10-03T10:00:00Z" },
     ];
-    const sorted = mergeSort(eq);
-    expect(sorted.map((s) => s.compositeId)).toEqual(["main:1", "main:2"]);
+    expect(mergeSort(eq).map((t) => t.compositeId)).toEqual(["main:9", "dob:2"]);
+  });
+
+  it("стабильный tiebreak по compositeId, если Id нет или равен", () => {
+    const eq = [
+      { compositeId: "main:2", raw: { Created: "2026-10-03T10:00:00Z" } },
+      { compositeId: "main:1", raw: { Created: "2026-10-03T10:00:00Z" } },
+    ];
+    expect(mergeSort(eq).map((t) => t.compositeId)).toEqual(["main:1", "main:2"]);
   });
 });
