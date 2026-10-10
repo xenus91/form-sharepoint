@@ -42,7 +42,7 @@ const COMPLETED_ROW = {
   Modified: "2026-09-16T10:00:00Z",
 };
 
-const state = vi.hoisted(() => ({ posts: [] }));
+const state = vi.hoisted(() => ({ posts: [], narrow: false }));
 
 vi.mock("../../../api", () => {
   const get = async (url) => {
@@ -97,8 +97,10 @@ globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} 
 window.ResizeObserver = globalThis.ResizeObserver;
 globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } };
 window.IntersectionObserver = globalThis.IntersectionObserver;
-window.matchMedia = window.matchMedia || ((q) => ({
-  matches: false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+// Узкий экран эмулируем через matchMedia: MUI md-down = max-width 899.95px.
+window.matchMedia = ((q) => ({
+  matches: state.narrow && /max-width:\s*899/.test(String(q)),
+  media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
 }));
 globalThis.matchMedia = window.matchMedia;
 
@@ -145,6 +147,7 @@ const tabByText = (host, re) => [...host.querySelectorAll('[role="tab"]')]
 describe("TasksView — вкладка «Завершённые» в табличном режиме", () => {
   beforeEach(() => {
     state.posts.length = 0;
+    state.narrow = false;
     // Табличный режим по умолчанию (как выбрал бы пользователь переключателем).
     try { localStorage.setItem("tasks.viewMode", "table"); } catch { /* ignore */ }
   });
@@ -172,6 +175,15 @@ describe("TasksView — вкладка «Завершённые» в табли�
     expect(text).not.toContain("Активная задача паллет");
     const caption = host.querySelector('[data-testid="table-mode-caption"]')?.textContent || "";
     expect(caption).toContain("завершённые");
+  });
+
+  it("на узком экране таблицы нет даже если выбран табличный режим", async () => {
+    // Переключатель режима на мобильных скрыт — застрять в таблице нельзя.
+    state.narrow = true;
+    const { host } = renderTasksView();
+    await settle(900);
+    expect(host.querySelector(".ag-root")).toBeNull(); // таблица не отрисована
+    expect(host.textContent).toContain("Активная задача паллет"); // карточка на месте
   });
 
   it("обратно на «Активные» — снова активные задачи", async () => {

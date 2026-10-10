@@ -373,7 +373,9 @@ TasksHashContent.completed.test.jsx` (карточка переключаетс�
 * подписи и кнопка стали элементами одной flex-строки
   (`CARD_FOOTER_ROW_SX`: `display: inline-flex`, `align-items: center`) —
   в `TaskCard` (7 мест), `ExternalTaskCard`, `TaskElementDialog`;
-* сама кнопка: `vertical-align: middle`, высота 18 px, `min-height: 0`;
+* сама кнопка: `vertical-align: middle`, `line-height: inherit` и `height: auto`
+  (высота берётся от строки подписи, а не числом), `min-height: 0` — иначе
+  встроенный `min-height` MUI (30 px у `size="small"`) раздвигал строку;
 * пробелы между подписями заданы текстом (`"Исполнитель: "`, `" • Статус: "`) —
   иначе flex их схлопнул бы и `textContent` карточки изменился.
 
@@ -424,7 +426,18 @@ TasksHashContent.completed.test.jsx` (карточка переключаетс�
 на узком экране таблица нечитаема (горизонтальный скролл + popup действий, не
 помещающийся в экран), поэтому там остаются только карточки. Скрытие сделано
 CSS-брейкпоинтом, а не JS-замером ширины, — чтобы не мигало при первой
-отрисовке. Тест: `tasks/__tests__/ViewModeToggle.test.jsx` (4).
+отрисовке.
+
+Выбор режима запоминается (`useViewMode`), поэтому скрытие переключателя
+само по себе ловушка: зайдя с телефона после десктопа, пользователь остался бы
+в таблице без возможности вернуться. В `TasksView` добавлено принудительное
+`const viewMode = narrowScreen ? "cards" : viewModeView` (md-down через
+`useMediaQuery`) — оно же управляет и режимом загрузки данных
+(`useTasksTableData({ mode })`).
+
+Тесты: `tasks/__tests__/ViewModeToggle.test.jsx` (4) и
+`tasks/__tests__/TasksView.completedTable.test.jsx` (4, включая «на узком экране
+таблицы нет»).
 
 ### 12.4 Фильтр «Я исполнитель» в таблице
 

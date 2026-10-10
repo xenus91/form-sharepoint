@@ -149,16 +149,19 @@ export default function AssignedToButtons({
               textTransform: "none",
               fontWeight: 500,
               fontSize: "0.72rem",
-              lineHeight: 1.25,
+              // Высота строки — КАК У СОСЕДНЕГО ТЕКСТА: inherit-ом забираем
+              // line-height подписи, поэтому базовая линия внутри кнопки
+              // совпадает с базовой линией «Исполнитель:» и «• Статус:».
+              lineHeight: "inherit",
               letterSpacing: 0,
-              // Выравнивание ВНУТРИ строки подписей («Исполнитель: … • Статус: …»):
-              // inline-flex по умолчанию садится на baseline своей иконки, из-за
-              // чего подписи вокруг кнопки «ехали лесенкой». Держим кнопку по
-              // центру строки и не даём ей быть выше соседнего текста.
+              // inline-flex по умолчанию садится на baseline своей иконки (у
+              // <svg> baseline = нижний край) — из-за этого подписи вокруг
+              // кнопки и «ехали лесенкой». Держим кнопку по центру строки и не
+              // даём ей быть выше соседнего текста (min-height MUI = 30 px).
               display: "inline-flex",
               verticalAlign: "middle",
               alignItems: "center",
-              height: 18,
+              height: "auto",
               minHeight: 0,
               px: 0.5,
               py: 0,

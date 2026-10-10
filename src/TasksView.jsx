@@ -94,6 +94,7 @@ import {
   Divider,
   Tooltip,
   Autocomplete,
+  useMediaQuery,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -190,6 +191,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   // ===== multi-source табличный режим (см. plan.md, этапы 7, 10) =====
   const [viewModeView, setViewModeView] = useViewMode();
+  // Переключатель «карточки/таблица» виден ТОЛЬКО на десктопе (см. ViewModeToggle),
+  // поэтому на узком экране принудительно показываем карточки: иначе можно было
+  // бы застрять в таблице (выбор запоминается) без возможности вернуться.
+  const narrowScreen = useMediaQuery((theme) => theme.breakpoints.down("md"), { defaultMatches: false });
+  const viewMode = narrowScreen ? "cards" : viewModeView;
   const dept = useDepartment(propUserProfile);
   // Multi-source данные нужны и таблице, и карточкам (чтобы задачи dob были видны
   // в обоих режимах). В карточном режиме запрос включается, только если источников >1.
@@ -200,7 +206,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     recipientField,
     scNumberField,
     resultFieldInternalNames,
-    mode: viewModeView,
+    mode: viewMode,
     enabled: !!currentUserId && !fieldsLoading,
   });
 
@@ -1203,7 +1209,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     <Box sx={{ p: { xs: 1, sm: 2 }, pt: { xs: 0.5, sm: 0.5 }, pb: { xs: 1, sm: 2 },
       // В cards режиме — узкая колонка maxWidth 720 (как раньше),
       // в table режиме — на всю ширину окна, чтобы таблица использовала место.
-      maxWidth: viewModeView === "table" ? "100%" : 720,
+      maxWidth: viewMode === "table" ? "100%" : 720,
       width: "100%",
       minWidth: { xs: 0, sm: 280 },
       mx: "auto",
@@ -1256,7 +1262,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             onClearElementHash={onClearElementHash}
           />
         </Box>
-      ) : viewModeView === "table" ? (
+      ) : viewMode === "table" ? (
         <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1, py: 0.5, borderBottom: "1px solid rgba(23,28,143,0.08)" }}>
             <Typography variant="caption" sx={{ color: "text.secondary", flex: 1 }} data-testid="table-mode-caption">

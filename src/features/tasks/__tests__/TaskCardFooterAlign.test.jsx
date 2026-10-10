@@ -127,8 +127,11 @@ describe("TaskCard — нижняя строка без «лесенки»", () 
     const row = host.querySelector('[data-testid="task-card-footer-row"]');
     const button = row.querySelector('[data-testid="assigned-to-button"]');
     const style = styleOf(button);
-    // height задан явно (18 px) — иначе inline-flex с иконкой растолкает строку
-    expect(["18px", "18"]).toContain(style.height);
+    // Высота берётся ОТ СТРОКИ (line-height подписи), а не задана числом:
+    // иначе inline-flex с иконкой растолкал бы строку.
+    expect(style.lineHeight).toBe("inherit");
+    expect(style.height).toBe("auto");
+    // min-height MUI (30 px у size="small") — выключен
     expect(["0px", "0"]).toContain(style.minHeight);
   });
 });
