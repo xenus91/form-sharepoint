@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 // preview/TableScene.jsx — сцена предпросмотра табличного режима #tasks на мок-данных.
 //
 // Зачем: проверить «на глаз» закреплённую шапку AG Grid (заголовки + строка
@@ -118,8 +119,15 @@ function buildRows() {
   return rows;
 }
 
-export default function TableScene() {
-  const rows = useMemo(buildRows, []);
+// completedMode — режим вкладки «Завершённые»: в строках только закрытые задачи
+// и включена колонка «Результирующий выбор» (у открытых результата нет, поэтому
+// в основной таблице колонки нет вовсе).
+export default function TableScene({ completedMode = false } = {}) {
+  const allRows = useMemo(buildRows, []);
+  const rows = useMemo(
+    () => (completedMode ? allRows.filter((r) => r.Status === "Завершена") : allRows),
+    [allRows, completedMode],
+  );
   const [selected, setSelected] = useState(null);
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState("table"); // переключатель — только для предпросмотра
@@ -162,6 +170,11 @@ export default function TableScene() {
       <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <TasksGrid
           rows={rows}
+          // Пагинация: в превью страница поменьше, чтобы панель была видна
+          // (в приложении по умолчанию 50).
+          pageSize={15}
+          onNeedMoreRows={() => setMessage("Дозагрузка следующей порции с сервера…")}
+          showResultColumn={completedMode}
           currentUserIds={CURRENT_USER_IDS}
           // ФИО нужно фильтру «Я исполнитель»: Editor в строках часто приходит
           // только строкой, без Id.

@@ -158,16 +158,11 @@ check(dues.some((d) => /^Осталось \d+д \d+ч$/.test(d)), "в «Срок
 check(dues.some((d) => /^Просрочено \d+д \d+ч назад$/.test(d)), "в «Сроке» есть «Просрочено … назад»", dues.find((d) => /^Просрочено/.test(d)) || "");
 check(!dues.some((d) => /^\d{2}\.\d{2}\.\d{4}$/.test(d)), "голых дат в «Сроке» не осталось");
 // порядок по умолчанию — от самых старых к самым новым (движок сортирует по Created)
-// «Результирующий выбор» — только у завершённых
+// «Результирующий выбор» — ТОЛЬКО в таблице завершённых: у открытой задачи
+// результата нет, поэтому в активной таблице колонки нет вовсе (замечание
+// пользователя 2026-10-11: пустая колонка незачем).
 const resultHdr = [...host.querySelectorAll(".ag-header-cell")].find((h) => /Результирующий выбор/.test(h.textContent || ""));
-check(!!resultHdr, "в таблице есть колонка «Результирующий выбор»");
-const resultVals = all.map((r) => ({
-  done: /Завершена/.test(cellText(r, "Status")),
-  val: cellText(r, "result"),
-}));
-check(resultVals.some((x) => x.done && x.val) && resultVals.every((x) => x.done || x.val === ""),
-  "«Результирующий выбор» заполнен у завершённых и пуст у открытых",
-  resultVals.filter((x) => x.val).map((x) => x.val).join(" | ") || "пусто");
+check(!resultHdr, "в активной таблице колонки «Результирующий выбор» нет (пустой она не показывается)");
 
 const createdHeader = [...host.querySelectorAll(".ag-header-cell")].find((h) => /Создана/.test(h.textContent || ""));
 check(createdHeader?.getAttribute("aria-sort") === "ascending",
@@ -219,14 +214,19 @@ check(assignedCells.length > 0 && !assignedCells.some((t) => /^Id \d+$/.test(t))
 // «Найдено: X из Y» под поиском.
 const mineBtn = host.querySelector('[data-testid="tasks-grid-only-mine"]');
 check(!!mineBtn && mineBtn.disabled === false, "кнопка «Я исполнитель» доступна");
-const totalRows = Number((host.textContent.match(/Найдено: \d+ из (\d+)/) || [])[1] || 0);
+// ВАЖНО: текст счётчика берём из своего элемента, а не из всего host.textContent —
+// иначе он склеивается с подписью панели пагинации («из 33» + «1 to 15 of 33» → 331).
+const foundText = () => [...host.querySelectorAll("p,span,div")]
+  .map((el) => (el.childElementCount === 0 ? el.textContent || "" : ""))
+  .find((t) => /Найдено:/.test(t)) || "";
+const totalRows = Number((foundText().match(/Найдено: \d+ из (\d+)/) || [])[1] || 0);
 const mineCount = Number((mineBtn?.textContent || "").match(/\((\d+)\)/)?.[1] || 0);
 mineBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
 await settle(400);
 const mineRows = rowsOf();
 const mineTakers = [...new Set(mineRows.map((r) => cellText(r, takerColId)))];
 const mineStatuses = [...new Set(mineRows.map((r) => cellText(r, "Status")))];
-const shownAfter = Number((host.textContent.match(/Найдено: (\d+) из/) || [])[1] || 0);
+const shownAfter = Number((foundText().match(/Найдено: (\d+) из/) || [])[1] || 0);
 console.log("   «Я исполнитель»:", mineCount, "из", totalRows, "| показано", shownAfter, "| исполнители:", mineTakers.join(", "), "| статусы:", mineStatuses.join(", "));
 check(totalRows > 0 && mineCount > 0 && mineCount < totalRows, "фильтр оставляет часть задач", `${mineCount}/${totalRows}`);
 check(shownAfter === mineCount, "таблица показывает ровно столько, сколько на кнопке", String(shownAfter));
@@ -235,7 +235,45 @@ check(!mineStatuses.some((st) => /Не начата/.test(st)), "«Не нача
 // снятие фильтра возвращает всё
 mineBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
 await settle(400);
-check(Number((host.textContent.match(/Найдено: (\d+) из/) || [])[1] || 0) === totalRows, "второй клик возвращает все строки");
+check(Number((foundText().match(/Найдено: (\d+) из/) || [])[1] || 0) === totalRows, "второй клик возвращает все строки");
+
+// ── пагинация табличного представления ─────────────────────────────────────
+const pagerText = () => (host.querySelector(".ag-paging-panel")?.textContent || "").replace(/\s+/g, " ").trim();
+const pageBtn = (label) => [...host.querySelectorAll(".ag-paging-button")].find((b) => b.getAttribute("aria-label") === label);
+const clickPage = async (label) => {
+  pageBtn(label)?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  await settle(400);
+};
+const pager = pagerText();
+const pagerTotal = Number((pager.match(/of (\d+)/) || [])[1] || 0);
+check(pagerTotal === totalRows, "панель пагинации знает общее число строк", `${pagerTotal} (найдено ${totalRows})`);
+check(/Page 1 of \d+/.test(pager), "показана первая страница", pager);
+const pageOf = (n) => Number((pagerText().match(/Page (\d+) of/) || [])[1] || 0);
+check(pageBtn("First Page")?.getAttribute("aria-disabled") === "true" && pageBtn("Next Page")?.getAttribute("aria-disabled") === "false",
+  "на первой странице «назад» недоступна, «вперёд» — доступна");
+await clickPage("Next Page");
+check(pageOf() === 2, "переход на следующую страницу работает", pagerText());
+await clickPage("Last Page");
+check(pageBtn("Next Page")?.getAttribute("aria-disabled") === "true", "на последней странице «вперёд» недоступна", pagerText());
+// дозагрузка с сервера (вкладка «Завершённые» приходит порциями)
+await clickPage("Next Page");
+check(/Дозагрузка следующей порции/.test(host.textContent), "на последней странице запрашивается следующая порция с сервера");
+await clickPage("First Page");
+
+// ── вкладка «Завершённые»: колонка «Результирующий выбор» есть и заполнена ──
+const host2 = document.createElement("div");
+document.body.appendChild(host2);
+createRoot(host2).render(createElement(ThemeProvider, { theme: createTheme() },
+  createElement(TableScene, { completedMode: true })));
+await settle(600);
+const rows2 = [...host2.querySelectorAll(".ag-center-cols-container .ag-row")];
+const cell2 = (r, id) => r.querySelector(`[col-id="${id}"]`)?.textContent?.trim() ?? "";
+const hdr2 = [...host2.querySelectorAll(".ag-header-cell")].map((h) => h.textContent || "");
+check(hdr2.some((t) => /Результирующий выбор/.test(t)), "в таблице завершённых есть колонка «Результирующий выбор»", hdr2.join(" | "));
+const resultVals = rows2.map((r) => cell2(r, "result"));
+check(rows2.length > 0 && resultVals.every((v) => v !== "") && resultVals.some((v) => /Найдена|Не найдена/.test(v)),
+  "колонка заполнена у всех завершённых строк", resultVals.filter(Boolean).join(" | ") || "пусто");
+check([...host2.querySelectorAll(".ag-paging-panel")].length > 0, "в таблице завершённых тоже есть пагинация");
 
 console.log(`\n=== Итог: ${problems === 0 ? "ОК — действия открываются в точке клика" : `проблем: ${problems}`} ===`);
 process.exit(problems === 0 ? 0 : 1);

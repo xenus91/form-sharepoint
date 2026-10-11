@@ -227,7 +227,7 @@ export function dueCellStyle(params) {
  * @param {{showSourceColumn?: boolean}} [opts]
  * @returns {Array<object>} columnDefs для AG Grid
  */
-export function buildTaskColumns({ showSourceColumn = false, resultValueOf = null } = {}) {
+export function buildTaskColumns({ showSourceColumn = false, resultValueOf = null, showResultColumn = false } = {}) {
   const cols = [];
   cols.push({
     headerName: "Id",
@@ -309,9 +309,13 @@ export function buildTaskColumns({ showSourceColumn = false, resultValueOf = nul
     tooltipValueGetter: (p) => dueCellTooltip(p.data),
   });
   // «Результирующий выбор» — значение поля результата ДЛЯ ТИПА КОНТЕНТА задачи
-  // (у каждого типа своё поле: ResultSearchTHU, ResultOOB, …). Показываем только
-  // у завершённых: у открытой задачи результата ещё нет (требование 2026-10-11).
-  cols.push({
+  // (у каждого типа своё поле: ResultSearchTHU, ResultOOB, …).
+  //
+  // Колонка включается ТОЛЬКО в таблице завершённых (showResultColumn): у открытой
+  // задачи результата нет по определению — результат проставляется в момент
+  // закрытия, — поэтому во вкладке «Активные» колонка была бы пустой на всех
+  // строках (замечание пользователя 2026-10-11).
+  if (showResultColumn) cols.push({
     headerName: "Результирующий выбор",
     colId: "result",
     width: 190,

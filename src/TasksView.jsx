@@ -576,6 +576,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   React.useEffect(() => {
     completedRefreshRef.current = completed.refresh;
   }, [completed.refresh]);
+  // Дозагрузка следующей порции завершённых для ТАБЛИЦЫ: пагинация грида зовёт
+  // её, когда пользователь долистал до последней страницы. useCallback — чтобы
+  // идентичность не менялась на каждый рендер (TasksGrid мемоизирован).
+  const loadMoreCompleted = React.useCallback(() => {
+    completed.loadNext();
+  }, [completed.loadNext]);
   const completedTasks = completed.items;
   // Счётчик может быть неизвестен (null) — тогда показываем количество уже загруженных,
   // но НИКОГДА не подставляем 0:completedCount считает завершённые внутри активной выборки,
@@ -1310,8 +1316,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               // ФИО нужно фильтру «Я исполнитель»: Editor (кто взял задачу)
               // в строках часто приходит только строкой, без Id.
               currentUserTitle={currentUserTitle}
-              // «Результирующий выбор» в таблице — по типу контента задачи
+              // «Результирующий выбор» — только в таблице завершённых: у открытой
+              // задачи результата нет, колонка была бы пустой на всех строках.
               resultValueOf={tableResultValueOf}
+              showResultColumn={tab === 1}
+              // Завершённые грузятся порциями по 20: при переходе на последнюю
+              // страницу таблицы догружаем следующую.
+              onNeedMoreRows={tab === 1 && completed.hasMore ? loadMoreCompleted : null}
               onSelectRow={handleSelectTableRow}
               onRowOpen={(compositeId) => openTaskFormResolved(withCtMeta((tableRows || []).find((r) => r.compositeId === compositeId) || null), compositeId)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора

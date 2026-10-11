@@ -23,19 +23,22 @@ function colByHeader(cols, header) {
 }
 
 describe("TasksGrid.buildTaskColumns", () => {
-  it("содержит «Кому назначено», «Исполнитель» и «Результирующий выбор»", () => {
-    const cols = buildTaskColumns();
-    const headers = cols.map((c) => c.headerName);
+  it("содержит «Кому назначено» и «Исполнитель»; «Результирующий выбор» — только по флагу", () => {
+    const headers = buildTaskColumns().map((c) => c.headerName);
     expect(headers).toContain("Кому назначено");
     expect(headers).toContain("Исполнитель");
     expect(headers).toContain("Статус");
     expect(headers).not.toContain("Источник");
-    // С 2026-10-11 результат в таблице ЕСТЬ — но не отдельными колонками на каждое
-    // поле (ResultSearchTHU/ResultOOB/Location1), а одной колонкой по типу контента.
-    expect(headers).toContain("Результирующий выбор");
-    expect(headers).not.toContain("Местоположение");
-    const json = JSON.stringify(cols);
-    expect(json).not.toContain("Location1");
+    // У АКТИВНЫХ задач результата нет по определению — колонка не показывается
+    // (замечание пользователя 2026-10-11: пустая колонка незачем).
+    expect(headers).not.toContain("Результирующий выбор");
+
+    // В таблице завершённых — одна колонка результата (не по колонке на каждое
+    // поле: ResultSearchTHU/ResultOOB/Location1 остаются за бортом).
+    const done = buildTaskColumns({ showResultColumn: true }).map((c) => c.headerName);
+    expect(done).toContain("Результирующий выбор");
+    expect(done).not.toContain("Местоположение");
+    expect(JSON.stringify(buildTaskColumns({ showResultColumn: true }))).not.toContain("Location1");
   });
 
   it("«Кому назначено» — всегда AssignedTo, «Исполнитель» — только тот, кто взял в работу", () => {
@@ -262,7 +265,7 @@ describe("TasksGrid — колонка «Срок» как в карточке",
     expect(resultCellText({ Status: "Завершена", PercentComplete: 1, ResultSearchTHU: "Найдена" }, byCt)).toBe("Найдена");
 
     // колонка пользуется тем же резолвером
-    const col = colByHeader(buildTaskColumns({ resultValueOf: byCt }), "Результирующий выбор");
+    const col = colByHeader(buildTaskColumns({ resultValueOf: byCt, showResultColumn: true }), "Результирующий выбор");
     expect(col.colId).toBe("result");
     expect(col.valueGetter({ data: { Status: "Завершена", PercentComplete: 1, ContentTypeId: "0x0108A" } })).toBe("Не исправлено");
     expect(col.valueGetter({ data: { Status: "Не начата", ContentTypeId: "0x0108A" } })).toBe("");

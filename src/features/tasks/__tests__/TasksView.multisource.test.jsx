@@ -617,9 +617,31 @@ describe("TasksView — multi-source (#tasks)", () => {
         expect(select).not.toContain("Location1");
       }
     }
-    // в таблице одна колонка результата — «Результирующий выбор» (не по полю на тип)
-    expect(host.textContent).toContain("Результирующий выбор");
+    // У АКТИВНЫХ задач результата нет → колонки «Результирующий выбор» в активной
+    // таблице быть не должно (замечание пользователя 2026-10-11). Данные при этом
+    // запрашиваем: они нужны попапу с действиями по строке.
+    const activeHeaders = [...host.querySelectorAll(".ag-header-cell")].map((h) => h.textContent || "");
+    expect(activeHeaders.some((t) => /Результирующий выбор/.test(t))).toBe(false);
     expect(host.textContent).not.toContain("ResultSearchTHU");
+  }, 30000);
+
+  it("колонка «Результирующий выбор» появляется только на вкладке «Завершенные»", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(1500);
+
+    const headers = () => [...host.querySelectorAll(".ag-header-cell")].map((h) => h.textContent || "");
+    expect(headers().some((t) => /Результирующий выбор/.test(t))).toBe(false);
+
+    // вкладка завершённых — та же таблица, но с колонкой результата
+    await clickByText(host, /Завершенные/);
+    await settle(1500);
+    expect(host.textContent).toMatch(/Таблица задач · завершённые · \d+ шт\./);
+    expect(headers().some((t) => /Результирующий выбор/.test(t))).toBe(true);
+
+    // и пагинация есть в обоих режимах
+    expect(host.querySelectorAll(".ag-paging-panel").length).toBeGreaterThan(0);
   }, 30000);
 
   it("«Взять в работу» на карточке dob шлёт MERGE статуса в список источника", async () => {

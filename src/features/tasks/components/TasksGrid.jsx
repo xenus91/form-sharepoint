@@ -335,8 +335,14 @@ export default function TasksGrid({
   updatingId = null,
   showSourceColumn = false,
   // Значение «Результирующего выбора» по типу контента (см. resultCellText).
-
   resultValueOf = null,
+  // Колонка «Результирующий выбор» нужна только в таблице ЗАВЕРШЁННЫХ: у открытой
+  // задачи результата нет, и во вкладке «Активные» колонка была бы пустой.
+  showResultColumn = false,
+  // Пагинация таблицы: размер страницы и дозагрузка с сервера (вкладка
+  // «Завершённые» грузится порциями — см. onNeedMoreRows).
+  pageSize = 50,
+  onNeedMoreRows = null,
   loading = false,
   error = null,
   // Id ТЕКУЩЕГО пользователя на каждом сайте: { [sourceId]: userId }.
@@ -414,7 +420,7 @@ export default function TasksGrid({
   );
 
   const columnDefs = useMemo(
-    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg, resultValueOf })
+    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg, resultValueOf, showResultColumn })
       .map((col) => {
         // кружок-лоадер живёт внутри ячейки Id (не сдвигает строки)
         if (col.field === "Id") return { ...col, cellRenderer: IdCell };
@@ -423,7 +429,7 @@ export default function TasksGrid({
         if (col.colId === "taker") return { ...col, cellRenderer: TakerCell };
         return col;
       }),
-    [showSourceColumn, showDbg, resultValueOf]
+    [showSourceColumn, showDbg, resultValueOf, showResultColumn]
   );
 
   const defaultColDef = useMemo(() => ({ ...TASK_GRID_DEFAULT_COL_DEF }), []);
@@ -439,7 +445,31 @@ export default function TasksGrid({
     // иначе таблица растёт целиком и шапка уезжает вместе со скроллом страницы.
     domLayout: "normal",
     headerHeight: 44,
-  }), []);
+    // Пагинация: таблица не скроллится «бесконечной простынёй», а листается
+    // страницами. Сортировка и поиск работают по ВСЕМ строкам, а не по странице.
+    pagination: true,
+    paginationPageSize: pageSize,
+    paginationPageSizeSelector: [25, 50, 100, 200],
+    // Дозагрузка с сервера: вкладка «Завершённые» приходит порциями по 20,
+    // поэтому при переходе на последнюю страницу просим следующую (иначе дальше
+    // первой порции в таблице было не уйти — кнопка «Показать ещё» живёт в
+    // карточном режиме).
+    onPaginationChanged: (event) => {
+      if (typeof onNeedMoreRows !== "function") return;
+      // Смена размера страницы — не повод тянуть данные с сервера.
+      if (event?.newPageSize) return;
+      const api = event?.api;
+      if (!api || typeof api.paginationGetCurrentPage !== "function") return;
+      // В AG Grid 33 метод называется paginationGetTotalPages; имя …TotalPageCount
+      // оставлено фолбэком — но молча возвращать 0 нельзя, иначе дозагрузка
+      // никогда не сработает (так и было в первой версии).
+      const total = (typeof api.paginationGetTotalPages === "function"
+        ? api.paginationGetTotalPages()
+        : api.paginationGetTotalPageCount?.()) ?? 0;
+      const current = api.paginationGetCurrentPage();
+      if (total > 0 && current >= total - 1) onNeedMoreRows();
+    },
+  }), [pageSize, onNeedMoreRows]);
 
   const closeActions = useMemo(() => () => { setMenuRow(null); setMenuAnchor(null); }, []);
 

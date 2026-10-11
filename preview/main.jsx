@@ -7,7 +7,10 @@ import RelatedScene from "./RelatedScene";
 
 // ?scene=table — табличный режим #tasks (шапка, поиск, кнопки на строке),
 // ?scene=related — диалог «Связанная заявка»; по умолчанию — карточки.
-const scene = new URLSearchParams(window.location.search).get("scene");
+const params = new URLSearchParams(window.location.search);
+const scene = params.get("scene");
+// ?scene=table&tab=completed — таблица завершённых (с колонкой «Результирующий выбор»).
+const completedTab = params.get("tab") === "completed";
 
 const theme = createTheme({
   palette: {
@@ -25,6 +28,8 @@ const theme = createTheme({
 
 createRoot(document.getElementById("root")).render(
   <ThemeProvider theme={theme}>
-    {scene === "table" ? <TableScene /> : scene === "related" ? <RelatedScene /> : <CardsScene />}
+    {scene === "table"
+      ? <TableScene completedMode={completedTab} />
+      : scene === "related" ? <RelatedScene /> : <CardsScene />}
   </ThemeProvider>
 );
