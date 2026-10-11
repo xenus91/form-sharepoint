@@ -65,14 +65,21 @@ describe("TasksGrid — порядок по умолчанию: от стары�
     expect(titles(host)).toEqual(["Самая старая", "Средняя", "Новая", "Без даты создания"]);
   });
 
-  it("колонка «Срок» помечена как отсортированная по возрастанию", async () => {
+  it("ключ сортировки виден: колонка «Создана» со стрелкой и растущими датами", async () => {
     const host = await renderGrid();
     const header = [...host.querySelectorAll(".ag-header-cell")]
-      .find((h) => /Срок/.test(h.textContent || ""));
+      .find((h) => /Создана/.test(h.textContent || ""));
     expect(header?.getAttribute("aria-sort")).toBe("ascending");
     // остальные колонки не отсортированы
     const status = [...host.querySelectorAll(".ag-header-cell")]
       .find((h) => /Статус/.test(h.textContent || ""));
     expect(status?.getAttribute("aria-sort") || "none").toBe("none");
+
+    // даты в колонке «Создана» действительно растут сверху вниз — порядок можно
+    // проверить глазами (ради этого колонка и добавлена)
+    const dates = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+      .sort((a, b) => Number(a.getAttribute("row-index")) - Number(b.getAttribute("row-index")))
+      .map((r) => r.querySelector('[col-id="Created"]')?.textContent?.trim() || "");
+    expect(dates.slice(0, 3)).toEqual(["21.09.2026", "06.10.2026", "10.10.2026"]);
   });
 });

@@ -158,9 +158,16 @@ check(dues.some((d) => /^Осталось \d+д \d+ч$/.test(d)), "в «Срок
 check(dues.some((d) => /^Просрочено \d+д \d+ч назад$/.test(d)), "в «Сроке» есть «Просрочено … назад»", dues.find((d) => /^Просрочено/.test(d)) || "");
 check(!dues.some((d) => /^\d{2}\.\d{2}\.\d{4}$/.test(d)), "голых дат в «Сроке» не осталось");
 // порядок по умолчанию — от самых старых к самым новым (движок сортирует по Created)
-const dueHeader = [...host.querySelectorAll(".ag-header-cell")].find((h) => /Срок/.test(h.textContent || ""));
-check(dueHeader?.getAttribute("aria-sort") === "ascending",
-  "«Срок» по умолчанию отсортирован по возрастанию", dueHeader?.getAttribute("aria-sort") || "нет");
+const createdHeader = [...host.querySelectorAll(".ag-header-cell")].find((h) => /Создана/.test(h.textContent || ""));
+check(createdHeader?.getAttribute("aria-sort") === "ascending",
+  "колонка «Создана» видна и отсортирована по возрастанию", createdHeader?.getAttribute("aria-sort") || "нет колонки");
+const parseCreated = (t) => {
+  const m = String(t).match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime() : NaN;
+};
+const createdTs = all.map((r) => parseCreated(cellText(r, "Created"))).filter((t) => Number.isFinite(t));
+check(createdTs.length > 1 && createdTs.every((t, i) => i === 0 || t >= createdTs[i - 1]),
+  "даты в «Создана» растут сверху вниз", `${createdTs.length} строк`);
 // В сцене Created растёт вместе с порядком сценария (см. preview/TableScene.jsx),
 // поэтому «от старых к новым» = первые сценарии сверху. Берём первые четыре.
 const EXPECTED_FIRST = [

@@ -224,10 +224,18 @@ describe("TasksGrid — колонка «Срок» как в карточке",
     expect(compareDueColumnByCreated(null, null, { data: { raw: { Created: "2026-09-01T00:00:00Z" } } }, { data: { raw: { Created: "2026-09-02T00:00:00Z" } } }, false)).toBeLessThan(0);
   });
 
-  it("«Срок» по умолчанию отсортирован по возрастанию (от старых к новым)", () => {
-    const due = colByHeader(buildTaskColumns(), "Срок");
-    expect(due.sort).toBe("asc");
-    expect(typeof due.comparator).toBe("function");
+  it("порядок по умолчанию задан на видимой колонке «Создана», а не на «Сроке»", () => {
+    const cols = buildTaskColumns();
+    const created = colByHeader(cols, "Создана");
+    // Ключ сортировки должен быть ВИДЕН: сортировать по невидимому полю нельзя —
+    // правильный порядок читается как случайный (замечание пользователя).
+    expect(created).toBeTruthy();
+    expect(created.field).toBe("Created");
+    expect(created.sort).toBe("asc");
+    expect(created.comparator).toBe(compareDatesChrono);
+    expect(created.valueFormatter({ value: "2026-10-03T09:00:00Z" })).toBe("03.10.2026");
+    expect(colByHeader(cols, "Срок").sort).toBeUndefined();
+    expect(typeof colByHeader(cols, "Срок").comparator).toBe("function");
   });
 
   it("«Изменён» сортируется хронологически, а не лексикографически", () => {

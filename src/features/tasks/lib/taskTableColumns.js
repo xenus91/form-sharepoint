@@ -282,7 +282,22 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     // Движок сортирует по Created (см. compareDueColumnByCreated), а не по
     // дедлайну: иначе текст «Осталось/Просрочено/Решено» шёл бы вперемешку.
     comparator: compareDueColumnByCreated,
-    // Порядок по умолчанию — от самых старых к самым новым (требование 2026-10-10).
+  });
+  // «Создана» — видимый ключ сортировки (требование 2026-10-10: порядок по
+  // умолчанию «от самых старых к самым новым»). Без этой колонки сортировка по
+  // Created была невидимой: в «Сроке» — «Осталось/Просрочено/Решено за …», и
+  // правильный порядок читался как случайный.
+  cols.push({
+    headerName: "Создана",
+    field: "Created",
+    width: 110,
+    sortable: true,
+    filter: "agDateColumnFilter",
+    headerTooltip: "Дата создания задачи. По ней список отсортирован по умолчанию: сверху самые старые.",
+    valueFormatter: (p) => formatDate(p.value),
+    tooltipValueGetter: (p) => (p.data?.Created ? formatDueDateFull(p.data.Created) : undefined),
+    comparator: compareDatesChrono,
+    // Порядок по умолчанию — от самых старых к самым новым.
     sort: "asc",
   });
   cols.push({
