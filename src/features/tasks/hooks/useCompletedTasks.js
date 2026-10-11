@@ -17,6 +17,9 @@ export function useCompletedTasks({
   distribution,
   recipientField = null,
   scNumberField = null,
+  // Внутренние имена полей «Результирующий выбор» (по одному на тип контента) —
+  // нужны колонке «Результирующий выбор» в таблице завершённых (2026-10-11).
+  resultFieldInternalNames = [],
   pageSize = COMPLETED_PAGE_SIZE,
   enabled = true,
   autoLoad = false,
@@ -67,6 +70,7 @@ export function useCompletedTasks({
           paging: pagingRef.current || null,
           recipientField,
           scNumberField,
+          resultFieldInternalNames,
         });
         pagingRef.current = page.nextPaging || ""; // "" → больше страниц нет
         setNextPaging(page.nextPaging || null);
@@ -94,7 +98,10 @@ export function useCompletedTasks({
         setLoading(false);
       }
     },
-    [currentUserId, distribution, pageSize, recipientField, scNumberField, countQuery]
+    // Ключ — строкой: массив resultFieldInternalNames пересоздаётся на каждый
+    // рендер TasksView, и loadPage пересобирался бы впустую.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentUserId, distribution, pageSize, recipientField, scNumberField, resultFieldInternalNames.join(","), countQuery]
   );
 
   // Первая страница — когда вкладка реально открыта

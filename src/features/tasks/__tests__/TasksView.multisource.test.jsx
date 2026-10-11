@@ -517,7 +517,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(fullFilter).toBeTruthy();
   }, 30000);
 
-  it("табличный режим: строки обоих источников и никаких полей результата в запросе", async () => {
+  it("табличный режим: строки обоих источников; поля результата — только у основного сайта", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -605,7 +605,11 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.textContent).not.toContain("DOB Logistic");
     expect(host.textContent).not.toMatch(/другого (сайта|источника)/i);
 
-    // ни один мульти-источниковый запрос не просит поля результата
+    // Поля результата: у основного сайта запрашиваем (колонка «Результирующий
+    // выбор», требование 2026-10-11), на dob их нет — и не запрашиваем.
+    const mainSelects = state.requests.filter((r) => r.source === "main" && parseSelect(r.url)).map((r) => parseSelect(r.url));
+    expect(mainSelects.length).toBeGreaterThan(0);
+    expect(mainSelects.some((sel) => sel.includes("ResultSearchTHU"))).toBe(true);
     for (const req of state.requests) {
       const select = parseSelect(req.url);
       if (req.source === "dob") {
@@ -613,7 +617,8 @@ describe("TasksView — multi-source (#tasks)", () => {
         expect(select).not.toContain("Location1");
       }
     }
-    // колонок результата в таблице нет
+    // в таблице одна колонка результата — «Результирующий выбор» (не по полю на тип)
+    expect(host.textContent).toContain("Результирующий выбор");
     expect(host.textContent).not.toContain("ResultSearchTHU");
   }, 30000);
 

@@ -334,6 +334,9 @@ export default function TasksGrid({
   takingId = null,
   updatingId = null,
   showSourceColumn = false,
+  // Значение «Результирующего выбора» по типу контента (см. resultCellText).
+
+  resultValueOf = null,
   loading = false,
   error = null,
   // Id ТЕКУЩЕГО пользователя на каждом сайте: { [sourceId]: userId }.
@@ -411,7 +414,7 @@ export default function TasksGrid({
   );
 
   const columnDefs = useMemo(
-    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg })
+    () => buildTaskColumns({ showSourceColumn: showSourceColumn || showDbg, resultValueOf })
       .map((col) => {
         // кружок-лоадер живёт внутри ячейки Id (не сдвигает строки)
         if (col.field === "Id") return { ...col, cellRenderer: IdCell };
@@ -420,7 +423,7 @@ export default function TasksGrid({
         if (col.colId === "taker") return { ...col, cellRenderer: TakerCell };
         return col;
       }),
-    [showSourceColumn, showDbg]
+    [showSourceColumn, showDbg, resultValueOf]
   );
 
   const defaultColDef = useMemo(() => ({ ...TASK_GRID_DEFAULT_COL_DEF }), []);

@@ -35,8 +35,8 @@ const day = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
 // Порядок в массиве намеренно «перемешан» — проверяем, что грид его переставит.
 const ROWS = [
   { compositeId: "main:3", sourceId: "main", Id: 3, Title: "Средняя", Status: "В процессе выполнения", PercentComplete: 0, Created: day(-5), DueDate: day(9) },
-  { compositeId: "main:1", sourceId: "main", Id: 1, Title: "Самая старая", Status: "Завершена", PercentComplete: 1, Created: day(-20), Modified: day(-1), DueDate: day(-2) },
-  { compositeId: "main:2", sourceId: "main", Id: 2, Title: "Новая", Status: "Не начата", PercentComplete: 0, Created: day(-1), DueDate: day(3) },
+  { compositeId: "main:1", sourceId: "main", Id: 1, Title: "Самая старая", Status: "Завершена", PercentComplete: 1, Created: day(-20), Modified: day(-1), DueDate: day(-2), ResultSearchTHU: "Найдена" },
+  { compositeId: "main:2", sourceId: "main", Id: 2, Title: "Новая", Status: "Не начата", PercentComplete: 0, Created: day(-1), DueDate: day(3), ResultSearchTHU: "Найдена" },
   { compositeId: "main:4", sourceId: "main", Id: 4, Title: "Без даты создания", Status: "Не начата", PercentComplete: 0, Created: "", DueDate: day(2) },
 ];
 
@@ -81,5 +81,13 @@ describe("TasksGrid — порядок по умолчанию: от стары�
       .sort((a, b) => Number(a.getAttribute("row-index")) - Number(b.getAttribute("row-index")))
       .map((r) => r.querySelector('[col-id="Created"]')?.textContent?.trim() || "");
     expect(dates.slice(0, 3)).toEqual(["21.09.2026", "06.10.2026", "10.10.2026"]);
+  });
+  it("«Результирующий выбор» заполнен у завершённой и пуст у открытой", async () => {
+    const host = await renderGrid();
+    const rows = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+      .sort((a, b) => Number(a.getAttribute("row-index")) - Number(b.getAttribute("row-index")));
+    const byTitle = (t) => rows.find((r) => (r.querySelector(".ag-cell")?.textContent || "").trim() === t);
+    expect(byTitle("Самая старая")?.querySelector('[col-id="result"]')?.textContent?.trim()).toBe("Найдена");
+    expect(byTitle("Новая")?.querySelector('[col-id="result"]')?.textContent?.trim()).toBe("");
   });
 });

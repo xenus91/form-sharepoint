@@ -133,9 +133,11 @@ export function useTasksForSources({
       sourceFieldsById,
       sitePrincipalIds,
       nativePrincipalIds,
-      // Таблица не показывает результат-поля (требование пользователя 2026-10-03),
-      // а на сайте ДОБ их нет — запрашивать их в multi-source выборке нельзя.
-      omitResultFields: true,
+      // Поля результата в таблице НУЖНЫ: с 2026-10-11 у завершённых задач
+      // показывается колонка «Результирующий выбор» (своё поле на тип контента).
+      // На сайте ДОБ таких полей нет — их и не запрашиваем: multiSource берёт
+      // список только для main-источника (isMain && !omitResultFields).
+      omitResultFields: false,
     }),
     enabled: fetchEnabled,
     staleTime: staleTimeMs,

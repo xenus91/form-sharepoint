@@ -11,7 +11,7 @@ import { mapRawTask } from "./tasks/mapping";
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTasksQuery } from "./tasks/useTasksQuery";
-import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "./tasks/resultField";
+import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getTaskResultValue, getResultChoicesForTask } from "./tasks/resultField";
 import { getResultUiConfig } from "./tasks/resultConfig";
 import { HASH_LOG, HASH_WARN } from "./tasks/log";
 import { searchTaskByRelatedItem } from "./tasks/hashSearch";
@@ -568,6 +568,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     distribution,
     recipientField,
     scNumberField,
+    // колонка «Результирующий выбор» в таблице завершённых
+    resultFieldInternalNames,
     enabled: !!currentUserId && !fieldsLoading && !isHashMode,
     autoLoad: tab === 1 && !isHashMode,
   });
@@ -727,6 +729,17 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       return null;
     }
   }, [ctResultMap, resultFieldsMeta]);
+
+  // Значение «Результирующего выбора» для строки ТАБЛИЦЫ: поле результата у
+  // каждого типа контента своё (ResultSearchTHU, ResultOOB, …), поэтому берём
+  // его через карту типов контента, а не из ResultSearchTHU напрямую.
+  const tableResultValueOf = useCallback((row) => {
+    try {
+      return getTaskResultValue(row, resultFieldMetaForRow(row));
+    } catch (_e) {
+      return "";
+    }
+  }, [resultFieldMetaForRow]);
 
   const isMainInProgressRow = useCallback((row) => (
     !!row
@@ -1297,6 +1310,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               // ФИО нужно фильтру «Я исполнитель»: Editor (кто взял задачу)
               // в строках часто приходит только строкой, без Id.
               currentUserTitle={currentUserTitle}
+              // «Результирующий выбор» в таблице — по типу контента задачи
+              resultValueOf={tableResultValueOf}
               onSelectRow={handleSelectTableRow}
               onRowOpen={(compositeId) => openTaskFormResolved(withCtMeta((tableRows || []).find((r) => r.compositeId === compositeId) || null), compositeId)}
               // Полный набор действий по задаче (как в карточке) — в popup'е у курсора

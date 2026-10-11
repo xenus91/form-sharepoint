@@ -158,6 +158,17 @@ check(dues.some((d) => /^Осталось \d+д \d+ч$/.test(d)), "в «Срок
 check(dues.some((d) => /^Просрочено \d+д \d+ч назад$/.test(d)), "в «Сроке» есть «Просрочено … назад»", dues.find((d) => /^Просрочено/.test(d)) || "");
 check(!dues.some((d) => /^\d{2}\.\d{2}\.\d{4}$/.test(d)), "голых дат в «Сроке» не осталось");
 // порядок по умолчанию — от самых старых к самым новым (движок сортирует по Created)
+// «Результирующий выбор» — только у завершённых
+const resultHdr = [...host.querySelectorAll(".ag-header-cell")].find((h) => /Результирующий выбор/.test(h.textContent || ""));
+check(!!resultHdr, "в таблице есть колонка «Результирующий выбор»");
+const resultVals = all.map((r) => ({
+  done: /Завершена/.test(cellText(r, "Status")),
+  val: cellText(r, "result"),
+}));
+check(resultVals.some((x) => x.done && x.val) && resultVals.every((x) => x.done || x.val === ""),
+  "«Результирующий выбор» заполнен у завершённых и пуст у открытых",
+  resultVals.filter((x) => x.val).map((x) => x.val).join(" | ") || "пусто");
+
 const createdHeader = [...host.querySelectorAll(".ag-header-cell")].find((h) => /Создана/.test(h.textContent || ""));
 check(createdHeader?.getAttribute("aria-sort") === "ascending",
   "колонка «Создана» видна и отсортирована по возрастанию", createdHeader?.getAttribute("aria-sort") || "нет колонки");

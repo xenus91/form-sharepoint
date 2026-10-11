@@ -98,6 +98,8 @@ function buildRows() {
         Body: DESCRIPTIONS[i % DESCRIPTIONS.length],
         Status: scene.status,
         PercentComplete: completed ? 1 : 0,
+        // «Результирующий выбор» — заполнен только у завершённых (колонка таблицы)
+        ResultSearchTHU: completed ? (i % 2 === 0 ? "Найдена" : "Не найдена") : "",
         AssignedTo: scene.assignee,
         AssignedToId: assigneeId,
         // Кто взял задачу: Editor (до взятия — автор, исполнителем не считается).

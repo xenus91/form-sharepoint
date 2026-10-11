@@ -186,6 +186,30 @@ export function compareDueColumnByCreated(_valueA, _valueB, nodeA, nodeB, isDesc
   return a - b;
 }
 
+/**
+ * Значение «Результирующего выбора» для строки таблицы.
+ *
+ * Только для ЗАВЕРШЁННЫХ задач: у открытой результата нет, и пустая ячейка
+ * честнее, чем прочерк в каждой второй строке.
+ *
+ * Значение берём из поля результата ТИПА КОНТЕНТА задачи: если вызывающая
+ * сторона передала `resultValueOf` (там есть карта типов контента и метаданные
+ * полей), пользуемся им; иначе — универсальное значение из маппинга
+ * (`ResultValue`/`ResultSearchTHU`).
+ *
+ * @param {any} row
+ * @param {((row:any)=>string)|null} [resultValueOf]
+ * @returns {string}
+ */
+export function resultCellText(row, resultValueOf = null) {
+  if (!row || !isTaskCompleted(row)) return "";
+  if (typeof resultValueOf === "function") {
+    const v = String(resultValueOf(row) || "").trim();
+    if (v) return v;
+  }
+  return String(row.ResultValue || row.ResultSearchTHU || row.raw?.ResultSearchTHU || "").trim();
+}
+
 export function dueCellStyle(params) {
   const row = params?.data;
   if (isTaskCompleted(row)) {
@@ -203,7 +227,7 @@ export function dueCellStyle(params) {
  * @param {{showSourceColumn?: boolean}} [opts]
  * @returns {Array<object>} columnDefs для AG Grid
  */
-export function buildTaskColumns({ showSourceColumn = false } = {}) {
+export function buildTaskColumns({ showSourceColumn = false, resultValueOf = null } = {}) {
   const cols = [];
   cols.push({
     headerName: "Id",
@@ -273,15 +297,29 @@ export function buildTaskColumns({ showSourceColumn = false } = {}) {
     // карточка на месте чипа срока рисует именно его.
     field: "DueDate",
     width: 170,
-    sortable: true,
+    // Сортировка по «Сроку» ВЫКЛЮЧЕНА (требование 2026-10-11): в одной ячейке
+    // три разных смысла — «Осталось …», «Просрочено … назад» и «Решено за …»,
+    // поэтому любой порядок в этой колонке читается как случайный. Список
+    // сортируется по «Создана», а срок остаётся справочной колонкой.
+    sortable: false,
     filter: "agDateColumnFilter",
-    headerTooltip: "Срок задачи. У завершённой — время решения (создана → завершена). Сортировка — по дате создания задачи: сверху самые старые.",
+    headerTooltip: "Срок задачи. У завершённой — время решения (создана → завершена). Сортировка списка — по колонке «Создана».",
     valueFormatter: (p) => dueCellText(p.data),
     cellStyle: dueCellStyle,
     tooltipValueGetter: (p) => dueCellTooltip(p.data),
-    // Движок сортирует по Created (см. compareDueColumnByCreated), а не по
-    // дедлайну: иначе текст «Осталось/Просрочено/Решено» шёл бы вперемешку.
-    comparator: compareDueColumnByCreated,
+  });
+  // «Результирующий выбор» — значение поля результата ДЛЯ ТИПА КОНТЕНТА задачи
+  // (у каждого типа своё поле: ResultSearchTHU, ResultOOB, …). Показываем только
+  // у завершённых: у открытой задачи результата ещё нет (требование 2026-10-11).
+  cols.push({
+    headerName: "Результирующий выбор",
+    colId: "result",
+    width: 190,
+    sortable: true,
+    filter: "agTextColumnFilter",
+    headerTooltip: "Значение поля «Результирующий выбор» для типа контента задачи. Заполнено у завершённых задач.",
+    valueGetter: (p) => resultCellText(p.data, resultValueOf),
+    cellStyle: { whiteSpace: "normal" },
   });
   // «Создана» — видимый ключ сортировки (требование 2026-10-10: порядок по
   // умолчанию «от самых старых к самым новым»). Без этой колонки сортировка по

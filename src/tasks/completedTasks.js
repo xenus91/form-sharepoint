@@ -352,6 +352,15 @@ function rowToRawTask(row) {
     OffDepKey: row.OffDepKey ?? null,
     __renderRow: row,
   };
+  // Поля результата (ResultSearchTHU, ResultOOB, …) приходят под своими именами —
+  // пробрасываем их, иначе колонка «Результирующий выбор» останется пустой:
+  // mapRawTask ищет значение именно по ключам raw.
+  for (const key of Object.keys(row || {})) {
+    if (key === "__renderRow") continue;
+    if (!key.toLowerCase().includes("result")) continue;
+    if (raw[key] !== undefined) continue;
+    raw[key] = asText(row[key]);
+  }
   return raw;
 }
 
@@ -389,6 +398,26 @@ function storeFields(key, fields) {
 }
 
 /** Рабочий набор полей: из памяти → из localStorage → полный список. */
+/**
+ * Поля «Результирующий выбор» для выборки завершённых.
+ * У каждого типа контента своё поле (ResultSearchTHU, ResultOOB, …), поэтому
+ * просим все известные; отсутствующее в списке SharePoint уберёт авто-ретрай.
+ * @param {string[]} names
+ * @param {string[]} already — уже запрошенные поля (не дублируем)
+ * @returns {string[]}
+ */
+function extraResultFields(names, already = []) {
+  const seen = new Set((already || []).map((f) => String(f).toLowerCase()));
+  const out = [];
+  for (const n of names || []) {
+    const name = String(n || "").trim();
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push(name);
+  }
+  return out;
+}
+
 function getUsableFields() {
   const key = `completedTasks.usableFields.${listIdFromApi()}`;
   const fromMemory = usableFieldsCache.get(key);
@@ -544,6 +573,7 @@ async function fetchCompletedTasksPageRest({
   recipientField = null,
   scNumberField = null,
   extraStatuses = [],
+  resultFieldInternalNames = [],
 }) {
   const ids = new Set();
   if (currentUserId != null) ids.add(Number(currentUserId));
@@ -551,7 +581,9 @@ async function fetchCompletedTasksPageRest({
   const list = [...ids].filter((n) => !Number.isNaN(n));
   const assignedFilter = list.map((id) => `AssignedToId eq ${id}`).join(" or ");
 
-  let fields = [...REST_PAGE_FIELDS];
+  // Поля «Результирующий выбор» — по одному на тип контента; несуществующее
+  // SharePoint назовёт в ошибке, и цикл ниже его выкинет (extractFieldFromError).
+  let fields = [...REST_PAGE_FIELDS, ...extraResultFields(resultFieldInternalNames, REST_PAGE_FIELDS)];
   let select = `${fields.join(",")},AssignedTo/Title,Editor/Title`;
   let lastError = null;
 
@@ -615,8 +647,9 @@ async function fetchCompletedTasksPageCaml({
   paging = null,
   recipientField = null,
   scNumberField = null,
+  resultFieldInternalNames = [],
 }) {
-  let fields = getUsableFields();
+  let fields = [...getUsableFields(), ...extraResultFields(resultFieldInternalNames, getUsableFields())];
   let attempt = 0;
   let lastError = null;
   let searched = false;

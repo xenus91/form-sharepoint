@@ -14,6 +14,7 @@ import {
   dueCellTooltip,
   compareDueColumnByCreated,
   compareDatesChrono,
+  resultCellText,
   TASK_GRID_DEFAULT_COL_DEF,
 } from "../../lib/taskTableColumns";
 
@@ -22,16 +23,18 @@ function colByHeader(cols, header) {
 }
 
 describe("TasksGrid.buildTaskColumns", () => {
-  it("содержит «Кому назначено» и «Исполнитель» и не содержит полей результата", () => {
+  it("содержит «Кому назначено», «Исполнитель» и «Результирующий выбор»", () => {
     const cols = buildTaskColumns();
     const headers = cols.map((c) => c.headerName);
     expect(headers).toContain("Кому назначено");
     expect(headers).toContain("Исполнитель");
     expect(headers).toContain("Статус");
     expect(headers).not.toContain("Источник");
-    // никаких result-полей в таблице
+    // С 2026-10-11 результат в таблице ЕСТЬ — но не отдельными колонками на каждое
+    // поле (ResultSearchTHU/ResultOOB/Location1), а одной колонкой по типу контента.
+    expect(headers).toContain("Результирующий выбор");
+    expect(headers).not.toContain("Местоположение");
     const json = JSON.stringify(cols);
-    expect(json).not.toContain("ResultSearchTHU");
     expect(json).not.toContain("Location1");
   });
 
@@ -107,7 +110,8 @@ describe("TasksGrid.buildTaskColumns", () => {
 
     const cols = buildTaskColumns();
     for (const c of cols) {
-      expect(c.sortable).toBe(true);
+      // «Срок» — единственная колонка без сортировки (требование 2026-10-11)
+      expect(c.sortable).toBe(c.headerName === "Срок" ? false : true);
       expect(typeof c.filter === "string" || c.filter === true || c.filter === undefined).toBe(true);
     }
     // Id — числовой фильтр, даты — календарь, текстовые — текст
@@ -234,8 +238,34 @@ describe("TasksGrid — колонка «Срок» как в карточке",
     expect(created.sort).toBe("asc");
     expect(created.comparator).toBe(compareDatesChrono);
     expect(created.valueFormatter({ value: "2026-10-03T09:00:00Z" })).toBe("03.10.2026");
-    expect(colByHeader(cols, "Срок").sort).toBeUndefined();
-    expect(typeof colByHeader(cols, "Срок").comparator).toBe("function");
+    // у «Срока» сортировки нет вовсе: в ячейке три разных смысла, любой порядок
+    // читался бы как случайный (требование 2026-10-11)
+    const due = colByHeader(cols, "Срок");
+    expect(due.sortable).toBe(false);
+    expect(due.sort).toBeUndefined();
+    expect(due.comparator).toBeUndefined();
+  });
+
+  it("«Результирующий выбор» — только у завершённых, значение по типу контента", () => {
+    const open = { Status: "В процессе выполнения", PercentComplete: 0, ResultSearchTHU: "Найдена" };
+    const done = { Status: "Завершена", PercentComplete: 1, ResultSearchTHTHU: "", ResultValue: "Исправлено" };
+    // открытая задача — пусто, даже если значение в строке есть
+    expect(resultCellText(open)).toBe("");
+    expect(resultCellText(null)).toBe("");
+    // завершённая — значение из маппинга
+    expect(resultCellText({ Status: "Завершена", PercentComplete: 1, ResultSearchTHU: "Найдена" })).toBe("Найдена");
+    expect(resultCellText(done)).toBe("Исправлено");
+    // если передан резолвер по типу контента — он главнее
+    const byCt = (row) => (row.ContentTypeId === "0x0108A" ? "Не исправлено" : "");
+    expect(resultCellText({ Status: "Завершена", PercentComplete: 1, ContentTypeId: "0x0108A", ResultSearchTHU: "Найдена" }, byCt)).toBe("Не исправлено");
+    // резолвер ничего не вернул — фолбэк на значение из строки
+    expect(resultCellText({ Status: "Завершена", PercentComplete: 1, ResultSearchTHU: "Найдена" }, byCt)).toBe("Найдена");
+
+    // колонка пользуется тем же резолвером
+    const col = colByHeader(buildTaskColumns({ resultValueOf: byCt }), "Результирующий выбор");
+    expect(col.colId).toBe("result");
+    expect(col.valueGetter({ data: { Status: "Завершена", PercentComplete: 1, ContentTypeId: "0x0108A" } })).toBe("Не исправлено");
+    expect(col.valueGetter({ data: { Status: "Не начата", ContentTypeId: "0x0108A" } })).toBe("");
   });
 
   it("«Изменён» сортируется хронологически, а не лексикографически", () => {

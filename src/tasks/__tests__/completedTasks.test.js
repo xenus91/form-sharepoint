@@ -151,5 +151,57 @@ describe("completedTasks", () => {
       const page = await fetchCompletedTasksPage({ currentUserId: 42, distribution: null });
       expect(page.tasks.map((t) => t.Id)).toEqual([1]);
     });
+
+    it("запрашивает поля «Результирующий выбор» и не теряет их значение (CAML)", async () => {
+      // У каждого типа контента своё поле результата — колонка «Результирующий
+      // выбор» в таблице завершённых (требование 2026-10-11).
+      apiState.post.mockResolvedValue({
+        data: {
+          d: {
+            RenderListDataAsStream: {
+              RowCount: 1,
+              NextHref: null,
+              Row: [
+                { ID: 5, Title: "Закрытая ООБ", Status: "Завершена", PercentComplete: 1, ResultOOB: "Исправлено" },
+              ],
+            },
+          },
+        },
+      });
+      const page = await fetchCompletedTasksPage({
+        currentUserId: 42,
+        distribution: null,
+        resultFieldInternalNames: ["ResultOOB", "ResultSearchTHU"],
+      });
+      const viewXml = apiState.post.mock.calls[0][1]?.parameters?.ViewXml || "";
+      expect(viewXml).toContain('Name="ResultOOB"');
+      expect(viewXml).toContain('Name="ResultSearchTHU"');
+      const task = page.tasks[0];
+      // значение доехало до строки: по нему колонка и рисует текст
+      expect(task.ResultValue || task.raw?.ResultOOB).toBe("Исправлено");
+    });
+
+    it("REST-путь тоже просит поля результата", async () => {
+      apiState.post.mockRejectedValue(new Error("CAML down"));
+      apiState.get.mockResolvedValue({
+        data: {
+          d: {
+            results: [
+              { Id: 7, Title: "Закрытая", Status: "Завершена", PercentComplete: 1, ResultOOB: "Не исправлено" },
+            ],
+            __next: null,
+          },
+        },
+      });
+      const page = await fetchCompletedTasksPage({
+        currentUserId: 42,
+        distribution: null,
+        resultFieldInternalNames: ["ResultOOB"],
+      });
+      expect(page.source).toContain("REST");
+      const url = decodeURIComponent(apiState.get.mock.calls[0][0]);
+      expect(url).toContain("ResultOOB");
+      expect(page.tasks[0].ResultValue || page.tasks[0].raw?.ResultOOB).toBe("Не исправлено");
+    });
   });
 });
