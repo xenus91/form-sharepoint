@@ -132,6 +132,46 @@ describe("completedTasks", () => {
   });
 
   describe("fetchCompletedTasksPage", () => {
+    // Без compositeId «Просмотр» в попапе завершённой не мог построить роут
+    // формы: parseCompositeId(undefined) → null → openTaskForm возвращал false,
+    // и клик не делал ничего (замечание пользователя 2026-10-11).
+    it("у каждой завершённой задачи есть compositeId/sourceId основного списка (CAML)", async () => {
+      apiState.post.mockResolvedValue({
+        data: {
+          d: {
+            RenderListDataAsStream: {
+              RowCount: 2,
+              NextHref: null,
+              Row: [
+                { ID: 881, Title: "Закрытая 1", Status: "Завершена", PercentComplete: 1 },
+                { ID: 882, Title: "Закрытая 2", Status: "Завершена", PercentComplete: 1 },
+              ],
+            },
+          },
+        },
+      });
+      const page = await fetchCompletedTasksPage({ currentUserId: 42, distribution: null });
+      expect(page.tasks.map((t) => t.compositeId)).toEqual(["main:881", "main:882"]);
+      expect(page.tasks.every((t) => t.sourceId === "main")).toBe(true);
+    });
+
+    it("у каждой завершённой задачи есть compositeId/sourceId основного списка (REST)", async () => {
+      apiState.post.mockResolvedValue({ data: { d: { RenderListDataAsStream: { RowCount: 0, Row: [] } } } });
+      apiState.get.mockResolvedValue({
+        data: {
+          d: {
+            results: [
+              { Id: 901, Title: "Закрытая REST", Status: "Завершена", PercentComplete: 1, Modified: "2026-10-03T10:30:00Z" },
+            ],
+          },
+        },
+      });
+      const page = await fetchCompletedTasksPage({ currentUserId: 42, distribution: null });
+      expect(page.source).toBe("REST");
+      expect(page.tasks.map((t) => t.compositeId)).toEqual(["main:901"]);
+      expect(page.tasks[0].sourceId).toBe("main");
+    });
+
     it("не пропускает задачу со статусом «В процессе выполнения»", async () => {
       apiState.post.mockResolvedValue({
         data: {

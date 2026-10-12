@@ -57,6 +57,23 @@ const DOB_TASK = {
   Created: "2026-10-03T00:29:41Z",
 };
 
+// Завершённая задача основного списка — для вкладки «Завершенные» (по ней
+// проверяем «Просмотр»: форма должна открываться, а не «ничего не происходить»).
+const MAIN_DONE_TASK = {
+  Id: 881,
+  Title: "Завершённая задача ООБ",
+  Body: "Установить местоположение ЕО&amp;#58; 808003003003003003 для получателя 109",
+  Status: "Завершена",
+  PercentComplete: 1,
+  Created: "2026-10-01T08:00:00Z",
+  Modified: "2026-10-03T10:30:00Z",
+  DueDate: "2026-10-02T10:00:00Z",
+  ContentTypeId: "0x0108003365C4474CAE8C42BCE396314E88E51F0001A4ABEEA9CB93478EEBA71D023E4D0700E86894FD720BCD49A61B7F23B3CFB36E",
+  AssignedTo: { Id: 207, Title: "Поршаков Сергей" },
+  Editor: { Id: 207, Title: "Поршаков Сергей" },
+  ResultSearchTHU: "Найдена",
+};
+
 // Поля результата основного списка: у КАЖДОГО типа контента — своё поле
 // со своими choices (требование: в таблице те же кнопки, что в карточке по CT).
 const RESULT_FIELD_THU = {
@@ -297,6 +314,11 @@ vi.mock("../../../api", () => {
       // у элемента тип контента есть всегда — даже если его не было в select списка
       const ctId = base.ContentTypeId || (n === 14 ? CT_CHECK_FULL : null);
       return { data: { d: { ...base, ContentTypeId: ctId, __metadata: { etag: '"1"', type: "SP.Data.TasksListItem" } } } };
+    }
+    // Завершённые грузятся отдельным запросом (REST: $orderby=Modified desc) —
+    // без этой ветки вкладка «Завершенные» всегда пуста.
+    if (d.includes(`${MAIN_LIST}/items`) && d.includes("$orderby=Modified desc")) {
+      return { data: { d: { results: [MAIN_DONE_TASK] } } };
     }
     if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS, MAIN_CHECK_IN_PROGRESS, MAIN_CHECK_NO_CT] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
@@ -643,6 +665,57 @@ describe("TasksView — multi-source (#tasks)", () => {
     // и пагинация есть в обоих режимах
     expect(host.querySelectorAll(".ag-paging-panel").length).toBeGreaterThan(0);
   }, 30000);
+
+  // 2026-10-11: «Просмотр» — только у завершённых и он ОБЯЗАН открывать форму.
+  // Раньше клик не делал ничего: у строк вкладки «Завершенные» не было
+  // compositeId, buildTaskFormHash(undefined) → null → openTaskForm → false.
+  it("«Просмотр» есть только у завершённых и открывает форму задачи", async () => {
+    const host = renderTasksView();
+    await settle(3000);
+    await clickByText(host, /Таблица/);
+    await settle(1500);
+
+    const openRowMenu = async (re) => {
+      const row = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+        .find((r) => re.test(r.textContent || ""));
+      expect(row).toBeTruthy();
+      const cell = row.querySelector(".ag-cell");
+      await act(async () => {
+        cell.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 240 }));
+        await new Promise((r) => setTimeout(r, 400));
+      });
+      return [...document.body.querySelectorAll('[data-testid="tasks-row-actions"]')].pop();
+    };
+    const menuButtons = (paper) => [...(paper?.querySelectorAll("button") || [])]
+      .filter((b) => !b.closest("[data-principal-button]"))
+      .map((b) => (b.textContent || "").trim());
+
+    // активная задача: «Просмотра» в меню нет
+    const activeMenu = await openRowMenu(/Основная задача ООБ/);
+    expect(menuButtons(activeMenu)).not.toContain("Просмотр");
+    await act(async () => {
+      document.body.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    // вкладка «Завершенные» — строка есть, в меню сводка и «Просмотр»
+    await clickByText(host, /Завершенные/);
+    await settle(2500);
+    expect(host.textContent).toMatch(/Завершённая задача ООБ/);
+    const doneMenu = await openRowMenu(/Завершённая задача ООБ/);
+    expect((doneMenu?.textContent || "")).toContain("Задача завершена");
+    expect(menuButtons(doneMenu)).toEqual(["Просмотр"]);
+
+    // клик по «Просмотр» открывает форму задачи (у завершённой — только чтение)
+    window.location.hash = "#tasks";
+    await act(async () => {
+      [...doneMenu.querySelectorAll("button")]
+        .find((b) => (b.textContent || "").trim() === "Просмотр")
+        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 800));
+    });
+    expect(window.location.hash).toMatch(/^#(tasks\/881|dob_tasks\/881)/);
+  }, 40000);
 
   it("«Взять в работу» на карточке dob шлёт MERGE статуса в список источника", async () => {
     const host = renderTasksView();

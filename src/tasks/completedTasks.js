@@ -14,6 +14,7 @@ import apiClient from "../api";
 import { TASKS_LIST_API } from "./config";
 import { getGroupIdsFromDistribution } from "./distribution";
 import { toDomainTask } from "../domain/tasks/taskModel";
+import { compositeId as makeCompositeId } from "./multiSource";
 import { isCompletedStatus } from "./status";
 import { DBG_ENABLED, dbg, dbgError, dbgWarn } from "../utils/dbg";
 import { apiErrorStatus, describeApiError, extractFieldFromError, apiErrorPayload } from "../utils/apiError";
@@ -326,6 +327,19 @@ function asPerson(value) {
   return { Id: null, Title: str };
 }
 
+// Завершённые задачи приходят ТОЛЬКО из основного списка задач, но идут мимо
+// multiSource (он приклеивает compositeId/sourceId к активным). Без них
+// «Просмотр» в попапе завершённой не мог построить роут формы:
+// parseCompositeId(undefined) → null → openTaskForm() возвращал false, и клик
+// не делал ничего (замечание пользователя 2026-10-11).
+const MAIN_SOURCE_ID = "main";
+function withMainSource(task) {
+  if (!task || task.Id == null) return task;
+  if (!task.compositeId) task.compositeId = makeCompositeId(MAIN_SOURCE_ID, task.Id);
+  if (!task.sourceId) task.sourceId = MAIN_SOURCE_ID;
+  return task;
+}
+
 function rowToRawTask(row) {
   const id = row.ID ?? row.Id ?? row.id;
   const raw = {
@@ -607,7 +621,7 @@ async function fetchCompletedTasksPageRest({
           .filter((r) => r.Id != null)
           // Страховка: при фильтре «только мои» завершённость определяем на клиенте.
           .filter((r) => isCompletedStatus(r.Status, r.PercentComplete))
-          .map((r) => toDomainTask(r, { recipientField, scNumberField }));
+          .map((r) => withMainSource(toDomainTask(r, { recipientField, scNumberField })));
         const nextPaging = skiptokenFromNext(data?.d?.__next);
         dbgWarn("completedTasks:page", `сработал фильтр «${name}»`, { tasks: tasks.length, nextPaging });
         return {
@@ -673,7 +687,7 @@ async function fetchCompletedTasksPageCaml({
         // Страховка: если CAML всё же пропустил «в работе» (например, нестандартный статус),
         // отсекаем такие строки по тому же правилу isCompletedStatus().
         .filter((r) => isCompletedStatus(r.Status, r.PercentComplete))
-        .map((r) => toDomainTask(r, { recipientField, scNumberField }));
+        .map((r) => withMainSource(toDomainTask(r, { recipientField, scNumberField })));
       __dlog("page:result", {
         rows: rows.length,
         tasks: tasks.length,
