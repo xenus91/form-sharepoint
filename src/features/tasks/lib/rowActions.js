@@ -15,14 +15,17 @@
 //     «Изменить» не показываем, иначе форму задачи можно открыть в обход взятия;
 //   • «Изменить» появляется ПОСЛЕ взятия в работу (задача «в работе» и не у
 //     другого пользователя);
-//   • ЗАВЕРШЁННЫЕ задачи (любого источника) — кнопок нет вообще: только
-//     информационная плашка «Задача завершена».
+//   • ЗАВЕРШЁННЫЕ задачи (любого источника) — действий нет, но с 2026-10-11
+//     вместо голой плашки «Действия недоступны» показываем СВОДКУ (чем закрыта,
+//     за сколько решена, когда и кем) и кнопку «Просмотр» — форма задачи
+//     открывается только на чтение.
 //
 // Модуль чистый: все зависимости (можно ли взять, choices, стили, иконки,
 // обработчики) приходят в opts — поэтому паритет с карточкой проверяется
 // юнит-тестами без DOM.
 
 import { isCompletedStatus, isInProgressStatus } from "../../../tasks/status";
+import { formatSolveTime } from "../../../tasks/formatters";
 
 /**
  * sx из Behaviour-стилизации — переносится ЦЕЛИКОМ, как делает карточка
@@ -98,6 +101,21 @@ export function primaryActionSx(styling, fallback = DEFAULT_TAKE_SX) {
  */
 
 /**
+ * «дд.мм.гггг чч:мм» — детерминированный формат, чтобы сводку можно было
+ * проверять тестами без учёта локали окружения.
+ *
+ * @param {any} value
+ * @returns {string} пустая строка, если даты нет/она не разобрана
+ */
+function formatDateTime(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
  * Собирает действия по строке.
  *
  * @param {object} row — строка таблицы (нужны sourceId, Status, PercentComplete, Id)
@@ -120,6 +138,8 @@ export function primaryActionSx(styling, fallback = DEFAULT_TAKE_SX) {
  *   (поля/подтверждение) для поповера: если вернула описание, клик открывает форму В ПОПОВЕРЕ,
  *   как в карточке, а не завершает задачу сразу
  * @param {Function} [opts.onEdit]
+ * @param {string} [opts.resultValue] — значение поля результата (сводка завершённой)
+ * @param {string} [opts.completedBy] — кто закрыл задачу (сводка завершённой)
  * @returns {RowAction[]}
  */
 export function buildRowActions(row, opts = {}) {
@@ -139,6 +159,9 @@ export function buildRowActions(row, opts = {}) {
     onEdit,
     resolveEditor = null,
     externalLike = false,
+    // Сводка завершённой задачи: значение поля результата и кто закрыл.
+    resultValue = "",
+    completedBy = "",
   } = opts;
 
   const takeAction = (disabled) => ({
@@ -167,20 +190,48 @@ export function buildRowActions(row, opts = {}) {
     onClick: () => onEdit?.(),
   });
 
-  // Плашка «Задача завершена»: завершённые задачи не редактируются и не берутся
-  // в работу — кнопок нет ни у main, ни у внешних источников (в карточке то же).
+  // Сводка по завершённой задаче (2026-10-11): чем закрыта, за какое время
+  // решена, когда и кем. Пустые строки не выводим — у задачи из внешнего
+  // источника может не быть, например, поля результата.
+  const completedLines = () => {
+    const lines = [];
+    const result = typeof resultValue === "string" ? resultValue.trim() : "";
+    if (result) lines.push(`Результирующий выбор: ${result}`);
+    const solved = formatSolveTime(row)?.label;
+    if (solved) lines.push(solved);
+    const closedAt = formatDateTime(row?.Modified);
+    const by = completedBy || takerLabel || "";
+    if (closedAt) lines.push(`Завершена: ${closedAt}${by ? ` • ${by}` : ""}`);
+    return lines;
+  };
+
+  // Плашка «Задача завершена» + сводка. Действий по завершённой задаче нет
+  // (она не берётся в работу и не редактируется) — вместо них «Просмотр».
   const completedInfo = () => ({
     key: "completed",
     kind: "info",
     label: "Задача завершена",
-    hint: "Действия по завершённой задаче недоступны.",
+    lines: completedLines(),
+  });
+
+  // «Просмотр» открывает ту же форму, что и «Изменить», но завершённая задача
+  // показывается только на чтение (DobTaskEditView: readOnly = taskCompleted;
+  // у main-задачи — карточка без кнопок действий).
+  const viewAction = () => ({
+    key: "view",
+    label: "Просмотр",
+    icon: "view",
+    variant: "outlined",
+    sx: { ...DEFAULT_EDIT_SX },
+    sticky: true,
+    onClick: () => onEdit?.(),
   });
 
   // Задача ДОБ: внешний источник (dob) либо main-задача типа «Результат проверки
   // ООБ». Форма задачи (как и кнопки результата) — только после взятия в работу.
   const dobLike = (row.sourceId && row.sourceId !== "main") || externalLike;
 
-  if (completed) return [completedInfo()];
+  if (completed) return [completedInfo(), viewAction()];
 
   if (dobLike) {
     // Не взята в работу → только «Взять в работу» («Изменить» — после взятия).

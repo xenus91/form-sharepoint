@@ -13,6 +13,7 @@ import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { ThemeProvider, createTheme } from "@mui/material";
 import TasksGrid from "../components/TasksGrid";
+import { buildRowActions } from "../lib/rowActions";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -312,6 +313,58 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(paper.textContent).toContain("Задача уже взята другим пользователем.");
     // плашка — не кнопка: единственная кнопка в меню — «Изменить»
     expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
+  });
+
+  // 2026-10-11: у завершённой задачи в попапе — сводка и «Просмотр» вместо
+  // заглушки «Действия по завершённой задаче недоступны». Проверяем на реальном
+  // buildRowActions, а не на готовом массиве действий.
+  it("попап завершённой задачи: сводка + «Просмотр», описание с настоящим двоеточием", async () => {
+    const onEdit = vi.fn();
+    const rows = [{
+      compositeId: "main:881",
+      sourceId: "main",
+      Id: 881,
+      Title: "Задача 881",
+      Body: "Установить местоположение ЕО&amp;#58; 808003003003003003 для получателя 109",
+      Status: "Завершена",
+      PercentComplete: 1,
+      Created: "2026-10-01T08:00:00Z",
+      Modified: "2026-10-03T10:30:00Z",
+      AssignedTo: "Поршаков Сергей",
+      EditorTitle: "Поршаков Сергей",
+      ResultSearchTHU: "Найдена",
+    }];
+    const { host } = renderGrid({
+      rows,
+      showResultColumn: true,
+      resultValueOf: (row) => row?.ResultSearchTHU || "",
+      getRowActions: (row) => buildRowActions(row, {
+        resultValue: row?.ResultSearchTHU || "",
+        completedBy: row?.EditorTitle || "",
+        onEdit,
+      }),
+    });
+    await settle(400);
+
+    // описание задачи: «&#58;» (тем более «&amp;#58;») показываем символом «:»
+    expect(host.textContent).toContain("Установить местоположение ЕО: 808003003003003003 для получателя 109");
+
+    await clickCell(rowByText(host, /Задача 881/), 200, 300);
+    const paper = openPopup();
+    expect(paper).toBeTruthy();
+    expect(paper.textContent).toContain("Задача завершена");
+    expect(paper.textContent).toContain("Результирующий выбор: Найдена");
+    expect(paper.textContent).toContain("Решено за 2д 2ч");
+    expect(paper.textContent).toMatch(/Завершена: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} • Поршаков Сергей/);
+    // прежней заглушки больше нет
+    expect(paper.textContent).not.toContain("недоступны");
+    // единственное действие — «Просмотр», и оно открывает форму (только чтение)
+    expect(popupButtons().map((b) => b.textContent)).toEqual(["Просмотр"]);
+    await act(async () => {
+      popupButtons()[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 120));
+    });
+    expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
   it("«Изменить» закреплена внизу меню и видна даже при большом списке результатов", async () => {

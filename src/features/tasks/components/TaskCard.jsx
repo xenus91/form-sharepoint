@@ -6,6 +6,7 @@
 
 import React from "react";
 import apiClient from "../../../api";
+import { decodeHtmlEntities } from "../../../utils/htmlEntities";
 import { getCachedAdditionalActionsDefaultSync } from "../../../tasks/config";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask, getResultChoicesForTask } from "../../../tasks/resultField";
 import { resolveTaskBehaviourByName, findContentTypeMeta, markDobTask } from "../../../services/taskBehaviour";
@@ -62,8 +63,9 @@ const __forceTaskDbg = false;
 function stripHtml(html) {
   if (!html) return "";
   const tmp = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
-  let s = tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
-  s = s.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+  // Сущности — общим декодером (utils/htmlEntities): раскрывает и «&#58;»,
+  // и дважды экранированный «&amp;#58;».
+  let s = decodeHtmlEntities(tmp).trim();
   s = s.replace(/\*\*/g, "");
   s = s.replace(/\s*\)+\s*\}+\s*$/, "").replace(/\s+,/g, ",");
   return s;

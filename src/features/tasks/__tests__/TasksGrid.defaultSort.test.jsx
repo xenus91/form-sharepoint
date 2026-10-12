@@ -32,6 +32,14 @@ globalThis.matchMedia = window.matchMedia;
 
 const day = (n) => new Date(Date.now() + n * 24 * 60 * 60 * 1000).toISOString();
 
+// Ожидаемые даты считаем от тех же смещений, что и строки: хардкод «21.09.2026»
+// жил ровно один день и ломался с переводом календаря.
+const dayLabel = (n) => {
+  const d = new Date(Date.now() + n * 24 * 60 * 60 * 1000);
+  const p = (x) => String(x).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()}`;
+};
+
 // Порядок в массиве намеренно «перемешан» — проверяем, что грид его переставит.
 const ROWS = [
   { compositeId: "main:3", sourceId: "main", Id: 3, Title: "Средняя", Status: "В процессе выполнения", PercentComplete: 0, Created: day(-5), DueDate: day(9) },
@@ -80,7 +88,8 @@ describe("TasksGrid — порядок по умолчанию: от стары�
     const dates = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
       .sort((a, b) => Number(a.getAttribute("row-index")) - Number(b.getAttribute("row-index")))
       .map((r) => r.querySelector('[col-id="Created"]')?.textContent?.trim() || "");
-    expect(dates.slice(0, 3)).toEqual(["21.09.2026", "06.10.2026", "10.10.2026"]);
+    // «Самая старая» (-20), «Средняя» (-5), «Новая» (-1) — от старых к новым.
+    expect(dates.slice(0, 3)).toEqual([dayLabel(-20), dayLabel(-5), dayLabel(-1)]);
   });
   it("«Результирующий выбор» заполнен у завершённой и пуст у открытой", async () => {
     const host = await renderGrid({ showResultColumn: true });

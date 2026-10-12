@@ -76,11 +76,11 @@ const clickPaging = async (host, label) => {
 };
 
 describe("TasksGrid — пагинация", () => {
-  it("по умолчанию страница по 50, панель показывает диапазон и число страниц", async () => {
+  it("по умолчанию страница по 25, панель показывает диапазон и число страниц", async () => {
     const host = await renderGrid();
     const text = pagerText(host);
-    expect(text).toContain("1 to 50 of 60");
-    expect(text).toContain("Page 1 of 2");
+    expect(text).toContain("1 to 25 of 60");
+    expect(text).toContain("Page 1 of 3");
     // первые/предыдущие недоступны на первой странице, следующие — доступны
     expect(pagingButton(host, "First Page").getAttribute("aria-disabled")).toBe("true");
     expect(pagingButton(host, "Next Page").getAttribute("aria-disabled")).toBe("false");
@@ -90,13 +90,18 @@ describe("TasksGrid — пагинация", () => {
   it("переход на следующую страницу показывает остаток, «последняя» — конец списка", async () => {
     const host = await renderGrid();
     await clickPaging(host, "Next Page");
+    expect(pagerText(host)).toContain("26 to 50 of 60");
+    expect(pagerText(host)).toContain("Page 2 of 3");
+    expect(firstRowTitle(host)).toBe("Задача 26");
+    expect(pagingButton(host, "Next Page").getAttribute("aria-disabled")).toBe("false");
+
+    await clickPaging(host, "Last Page");
     expect(pagerText(host)).toContain("51 to 60 of 60");
-    expect(pagerText(host)).toContain("Page 2 of 2");
     expect(firstRowTitle(host)).toBe("Задача 51");
     expect(pagingButton(host, "Next Page").getAttribute("aria-disabled")).toBe("true");
 
     await clickPaging(host, "First Page");
-    expect(pagerText(host)).toContain("1 to 50 of 60");
+    expect(pagerText(host)).toContain("1 to 25 of 60");
     expect(firstRowTitle(host)).toBe("Задача 1");
   });
 

@@ -77,6 +77,12 @@ describe("TasksGrid.buildTaskColumns", () => {
     expect(desc.valueGetter({ data: { Body: "Просмотр видеоархива" } })).toBe("Просмотр видеоархива");
     // HTML из внешних списков — в плоский текст
     expect(desc.valueGetter({ data: { Body: "<p>Строка&nbsp;1</p><br/><b>Строка 2</b>" } })).toBe("Строка 1 Строка 2");
+    // 2026-10-11: сущности в описании раскрываем — «&#58;» (и дважды
+    // экранированный «&amp;#58;») показываем настоящим символом «:».
+    expect(desc.valueGetter({
+      data: { Body: "Установить местоположение ЕО&amp;#58; 808003003003003003 для получателя 109" },
+    })).toBe("Установить местоположение ЕО: 808003003003003003 для получателя 109");
+    expect(desc.valueGetter({ data: { Body: "ЕО&#58; 808003" } })).toBe("ЕО: 808003");
     expect(desc.valueGetter({ data: {} })).toBe("");
     expect(desc.valueGetter({ data: undefined })).toBe("");
   });

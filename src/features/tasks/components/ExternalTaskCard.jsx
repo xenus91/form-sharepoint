@@ -16,6 +16,7 @@
 
 import React from "react";
 import { Box, Paper, Typography, Chip, Button, CircularProgress } from "@mui/material";
+import { decodeHtmlEntities } from "../../../utils/htmlEntities";
 import EditIcon from "@mui/icons-material/Edit";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../../../tasks/status";
@@ -27,12 +28,7 @@ import AssignedToButtons, { TakerButtons } from "./AssignedToButtons";
 function stripHtml(html) {
   if (!html) return "";
   const tmp = String(html).replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
-  return tmp
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .trim();
+  return decodeHtmlEntities(tmp).trim();
 }
 
 /**

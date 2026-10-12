@@ -1,5 +1,6 @@
 /* eslint-disable */
 // src/tasks/mapping.js
+import { decodeHtmlEntities } from "../utils/htmlEntities";
 // eslint-disable-next-line no-unused-vars
 // DBG helper — включи ?dbg=1 или localStorage.setItem('dbg','1') чтобы видеть детальные логи
 const __DBG_ENABLED__ = (()=>{ try{ if(typeof window==='undefined') return false; if(new URLSearchParams(location.search).get('dbg')==='1') return true; if(localStorage.getItem('dbg')==='1') return true; if(localStorage.getItem('dbg_tasks')==='1') return true; return false; }catch(_e){ void _e; return false; } })();
@@ -24,7 +25,7 @@ const __dgroupEnd = ()=>{ if(!__DBG_ENABLED__) return; try{ console.groupEnd();}
 function stripHtml(html) {
   if (!html) return "";
   const tmp = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
-  let s = tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  let s = decodeHtmlEntities(tmp).trim();
   s = s.replace(/\s*\)+\s*\}+\s*$/, "").replace(/\s+,/g, ",");
   return s;
 }

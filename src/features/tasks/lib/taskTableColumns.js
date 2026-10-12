@@ -22,6 +22,7 @@
 import { resolveTaker } from "./resolveTaker";
 import { taskRowStatus, isTaskCompleted, ROW_STATUS } from "./taskRowStatus";
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
+import { decodeHtmlEntities } from "../../../utils/htmlEntities";
 
 // Заливка ячейки «Статус» = заливка строки (тот же смысл, та же палитра).
 const STATUS_KIND_BG = {
@@ -55,13 +56,11 @@ export function statusCellStyle(params) {
 // в таблице показываем плоский текст.
 function stripHtmlText(value) {
   if (value == null) return "";
-  return String(value)
+  // Сущности — общим декодером: в описаниях встречается «&#58;» (в том числе
+  // дважды экранированный «&amp;#58;»), показывать их символами нельзя.
+  return decodeHtmlEntities(String(value)
     .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
+    .replace(/<[^>]*>/g, " "))
     .replace(/\s+/g, " ")
     .trim();
 }

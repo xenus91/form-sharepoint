@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Box, Button, Chip, CircularProgress, LinearProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip, AppBar, Toolbar } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { decodeHtmlEntities } from '../../utils/htmlEntities';
 import MenuIcon from '@mui/icons-material/Menu';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -125,14 +126,11 @@ function taskDescriptionText(raw) {
   if (!raw) return '';
   const html = looksLikeHtml(raw) ? String(raw) : '';
   if (!html) return String(raw).trim();
-  return html
+  // Сущности — общим декодером: «ЕО&#58; 8080…» должно читаться как «ЕО: 8080…».
+  return decodeHtmlEntities(html
     .replace(/<\s*br\s*\/?\s*>/gi, '\n')
     .replace(/<\s*\/\s*(p|div|li|tr|h[1-6])\s*>/gi, '\n')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
+    .replace(/<[^>]*>/g, ' '))
     .replace(/[ \t]+/g, ' ')
     .replace(/\s*\n\s*/g, '\n')
     .trim();

@@ -157,6 +157,13 @@ const dues = all.map((r) => cellText(r, "DueDate")).filter(Boolean);
 check(dues.some((d) => /^Осталось \d+д \d+ч$/.test(d)), "в «Сроке» есть «Осталось …д …ч»", dues.find((d) => /^Осталось/.test(d)) || "");
 check(dues.some((d) => /^Просрочено \d+д \d+ч назад$/.test(d)), "в «Сроке» есть «Просрочено … назад»", dues.find((d) => /^Просрочено/.test(d)) || "");
 check(!dues.some((d) => /^\d{2}\.\d{2}\.\d{4}$/.test(d)), "голых дат в «Сроке» не осталось");
+// описание задачи: HTML-сущности раскрыты («ЕО&amp;#58;» → «ЕО:»)
+const descs = all.map((r) => cellText(r, "description") || cellText(r, "Body"));
+check(descs.some((d) => /Установить местоположение ЕО: 808003003003003003/.test(d)),
+  "в описании «&#58;» показано настоящим двоеточием",
+  descs.find((d) => /808003/.test(d)) || "строка не на этой странице");
+check(!host.textContent.includes("&#58;") && !host.textContent.includes("&amp;#58;"),
+  "экранированных сущностей в таблице не осталось");
 // порядок по умолчанию — от самых старых к самым новым (движок сортирует по Created)
 // «Результирующий выбор» — ТОЛЬКО в таблице завершённых: у открытой задачи
 // результата нет, поэтому в активной таблице колонки нет вовсе (замечание
@@ -237,6 +244,25 @@ mineBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelabl
 await settle(400);
 check(Number((foundText().match(/Найдено: (\d+) из/) || [])[1] || 0) === totalRows, "второй клик возвращает все строки");
 
+// ── попап ЗАВЕРШЁННОЙ задачи: сводка и «Просмотр» вместо заглушки ──────────
+const doneCell = [...host.querySelectorAll(".ag-center-cols-container .ag-row")]
+  .find((r) => /Завершена/.test(r.textContent || ""))?.querySelector(".ag-cell");
+check(!!doneCell, "завершённая строка найдена");
+doneCell?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, clientX: 200, clientY: 300 }));
+await settle(400);
+const donePopup = openPopup();
+const doneText = (donePopup?.textContent || "").replace(/\s+/g, " ");
+check(/Задача завершена/.test(doneText), "в попапе завершённой — «Задача завершена»", doneText.slice(0, 120));
+check(/Результирующий выбор: (Найдена|Не найдена)/.test(doneText), "в сводке есть «Результирующий выбор»");
+check(/Решено( за \d+д \d+ч)?/.test(doneText), "в сводке есть время решения");
+check(/Завершена: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/.test(doneText), "в сводке есть дата и время завершения");
+check(!/недоступны/i.test(doneText), "прежней заглушки «Действия … недоступны» больше нет");
+const doneButtons = [...(donePopup?.querySelectorAll("button") || [])]
+  .filter((b) => !b.closest("[data-principal-button]")).map((b) => (b.textContent || "").trim());
+check(doneButtons.length === 1 && doneButtons[0] === "Просмотр", "единственное действие — «Просмотр»", doneButtons.join(", "));
+document.body.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+await settle(300);
+
 // ── пагинация табличного представления ─────────────────────────────────────
 const pagerText = () => (host.querySelector(".ag-paging-panel")?.textContent || "").replace(/\s+/g, " ").trim();
 const pageBtn = (label) => [...host.querySelectorAll(".ag-paging-button")].find((b) => b.getAttribute("aria-label") === label);
@@ -246,7 +272,11 @@ const clickPage = async (label) => {
 };
 const pager = pagerText();
 const pagerTotal = Number((pager.match(/of (\d+)/) || [])[1] || 0);
+// «25 1 to 25 of 33» → размер страницы — первое число.
+const pageRows = Number((pager.match(/^(\d+) \d+ to/) || [])[1] || 0);
 check(pagerTotal === totalRows, "панель пагинации знает общее число строк", `${pagerTotal} (найдено ${totalRows})`);
+// размер страницы по умолчанию — 25 (требование 2026-10-11)
+check(pageRows === 25, "страница по умолчанию — 25 строк", `${pageRows} (${pager})`);
 check(/Page 1 of \d+/.test(pager), "показана первая страница", pager);
 const pageOf = (n) => Number((pagerText().match(/Page (\d+) of/) || [])[1] || 0);
 check(pageBtn("First Page")?.getAttribute("aria-disabled") === "true" && pageBtn("Next Page")?.getAttribute("aria-disabled") === "false",

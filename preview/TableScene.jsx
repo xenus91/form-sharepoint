@@ -17,6 +17,8 @@ import { isNotStartedStatus, isInProgressStatus } from "../src/tasks/status";
 
 const DESCRIPTIONS = [
   "<p>Просмотр видеоархива за смену</p>",
+  // SharePoint отдаёт текст экранированным: «ЕО:» приходит как «ЕО&amp;#58;».
+  "<p>Установить местоположение ЕО&amp;#58; 808003003003003003 для получателя 109</p>",
   "<p>Найти проблемную ЕО и зафиксировать результат поиска: <b>ТН № 456</b></p>",
   "<p>Проверить комплектность и отсканировать ШК получателя</p>",
   "<p>Сверить остатки по ТКН и передать данные в смену</p>",
@@ -170,9 +172,7 @@ export default function TableScene({ completedMode = false } = {}) {
       <Box sx={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <TasksGrid
           rows={rows}
-          // Пагинация: в превью страница поменьше, чтобы панель была видна
-          // (в приложении по умолчанию 50).
-          pageSize={15}
+          // Пагинация: размер не задаём — в превью тот же, что в приложении (25).
           onNeedMoreRows={() => setMessage("Дозагрузка следующей порции с сервера…")}
           showResultColumn={completedMode}
           currentUserIds={CURRENT_USER_IDS}
@@ -195,7 +195,10 @@ export default function TableScene({ completedMode = false } = {}) {
             resolveIcon: (choice) => renderStylingIcon(ICON_BY_CHOICE[choice] || null, createElement),
             onTake: () => setMessage(`Взять в работу задачу #${row.Id} (в приложении — MERGE статуса: main-список или сайт источника)`),
             onResult: (choice) => setMessage(`Результат «${choice}» по задаче #${row.Id} (в приложении — тот же поток, что в карточке)`),
-            onEdit: () => setMessage(`Изменить задачу #${row.Id} (в приложении — форма задачи: #tasks/<Id> или форма источника)`),
+            onEdit: () => setMessage(`Открыть задачу #${row.Id} (в приложении — форма задачи: #tasks/<Id> или форма источника; завершённая — только на чтение)`),
+            // Сводка в попапе завершённой задачи — как в приложении.
+            resultValue: row.ResultSearchTHU || "",
+            completedBy: row.EditorTitle || "",
           })}
           takingId={null}
         />

@@ -6,6 +6,7 @@ const __dlog = (...a)=>{ if(!__DBG_ENABLED__) return; try{ console.log(...a);}ca
 
 import apiClient, { invalidate } from "./api";
 import { buildTaskIndex, findInIndex } from "./utils/taskIndex";
+import { decodeHtmlEntities } from "./utils/htmlEntities";
 import { createAdaptivePolling } from "./utils/polling";
 import { mapRawTask } from "./tasks/mapping";
 import { useQueryClient } from "@tanstack/react-query";
@@ -116,7 +117,9 @@ import { useNotifications } from "./NotificationsProvider";
 function stripHtml(html) {
   if (!html) return "";
   const tmp = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>/gi, "\n").replace(/<[^>]*>/g, "");
-  let s = tmp.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim();
+  // Сущности — общим декодером: описания приходят экранированными, порой дважды
+  // («&amp;#58;»), а «&#58;» должен показываться как «:».
+  let s = decodeHtmlEntities(tmp).trim();
   // Чистим артефакты JSON (хвост "))}" и пробел перед запятой "28 ,")
   s = s.replace(/\s*\)+\s*\}+\s*$/, "").replace(/\s+,/g, ",");
   return s;
@@ -1130,6 +1133,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       resolveEditor: (choice) => buildResultEditor(rowR, choice),
       externalLike: isDobLikeTask(rowR),
       onEdit: () => openTaskFormResolved(rowR, rowR?.compositeId),
+      // Сводка в попапе завершённой задачи: то же значение «Результирующего
+      // выбора», что и в колонке таблицы (иначе могли бы разойтись).
+      resultValue: tableResultValueOf(rowR),
+      completedBy: rowR?.EditorTitle || (typeof rowR?.Editor === "string" ? rowR.Editor : rowR?.Editor?.Title) || "",
     });
     if (__DBG_ENABLED__) {
       __dlog("[DBG:rowActions]", {

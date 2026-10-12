@@ -3,6 +3,7 @@
 // read-only просмотр связанной заявки (RelatedItemDialog).
 //
 // Здесь только чистые функции — их удобно тестировать без DOM/SharePoint.
+import { decodeHtmlEntities } from '../../../utils/htmlEntities';
 
 // Служебные поля, которые не показываем в форме/просмотре (системные +
 // поля с кодированными русскими именами, дублирующие Modified и т.п.).
@@ -78,12 +79,7 @@ export function toEditorHtml(value) {
 
 /** Текст без тегов (для проверок «поле заполнено»). */
 export function stripTags(value) {
-  return String(value ?? '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
+  return decodeHtmlEntities(String(value ?? '').replace(/<[^>]*>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim();
 }

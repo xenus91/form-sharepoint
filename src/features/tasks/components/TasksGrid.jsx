@@ -32,6 +32,7 @@ import {
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 import EditIcon from "@mui/icons-material/Edit";
+import VisibilityIcon from "@mui/icons-material/Visibility";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import PersonIcon from "@mui/icons-material/Person";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
@@ -52,6 +53,7 @@ const ACTION_ICONS = {
   take: <PlayArrowIcon fontSize="small" />,
   edit: <EditIcon fontSize="small" />,
   result: <TaskAltIcon fontSize="small" />,
+  view: <VisibilityIcon fontSize="small" />,
 };
 
 /**
@@ -117,6 +119,12 @@ const RowActionsPopover = memo(function RowActionsPopover({ open, anchorPosition
       <Typography variant="caption" sx={{ display: "block", fontWeight: 700, color: "#8d6e00" }}>
         {action.label}
       </Typography>
+      {/* Сводка (например, по завершённой задаче) — построчно; hint — одной строкой. */}
+      {(Array.isArray(action.lines) ? action.lines : []).filter(Boolean).map((line) => (
+        <Typography key={line} variant="caption" color="text.secondary" sx={{ display: "block" }}>
+          {line}
+        </Typography>
+      ))}
       {action.hint && (
         <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
           {action.hint}
@@ -339,9 +347,9 @@ export default function TasksGrid({
   // Колонка «Результирующий выбор» нужна только в таблице ЗАВЕРШЁННЫХ: у открытой
   // задачи результата нет, и во вкладке «Активные» колонка была бы пустой.
   showResultColumn = false,
-  // Пагинация таблицы: размер страницы и дозагрузка с сервера (вкладка
-  // «Завершённые» грузится порциями — см. onNeedMoreRows).
-  pageSize = 50,
+  // Пагинация таблицы: размер страницы (2026-10-11 — по 25 строк) и дозагрузка
+  // с сервера (вкладка «Завершённые» грузится порциями — см. onNeedMoreRows).
+  pageSize = 25,
   onNeedMoreRows = null,
   loading = false,
   error = null,

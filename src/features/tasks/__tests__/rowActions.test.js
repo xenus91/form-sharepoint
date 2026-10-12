@@ -147,18 +147,48 @@ describe("buildRowActions — паритет с карточкой", () => {
     expect(labels(buildRowActions(MAIN_CANCELLED, { canTake: false }))).toEqual(["Взять в работу"]);
   });
 
-  it("завершённая задача — кнопок нет вообще (только плашка «Задача завершена»)", () => {
-    const actions = buildRowActions(MAIN_DONE, { canTake: true, choices: ["Найдена"], updating: false });
-    expect(actions).toHaveLength(1);
+  // 2026-10-11: вместо плашки «Действия по завершённой задаче недоступны» —
+  // сводка (чем закрыта / за сколько решена / когда и кем) и кнопка «Просмотр».
+  it("завершённая задача — сводка и «Просмотр», действий по задаче нет", () => {
+    const onEdit = vi.fn();
+    const actions = buildRowActions(
+      { ...MAIN_DONE, Created: "2026-10-01T08:00:00Z", Modified: "2026-10-03T10:30:00Z" },
+      {
+        canTake: true,
+        choices: ["Найдена"],
+        updating: false,
+        resultValue: "Найдена",
+        completedBy: "Поршаков Сергей",
+        onEdit,
+      },
+    );
+    expect(labels(actions)).toEqual(["Задача завершена", "Просмотр"]);
     expect(actions[0]).toMatchObject({ key: "completed", kind: "info", label: "Задача завершена" });
     expect(actions[0].onClick).toBeUndefined();
+    expect(actions[0].lines).toEqual([
+      "Результирующий выбор: Найдена",
+      "Решено за 2д 2ч",
+      expect.stringMatching(/^Завершена: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} • Поршаков Сергей$/),
+    ]);
+    // ни «Взять в работу», ни «Изменить», ни кнопок результата
+    expect(actions.filter((a) => ["take", "edit"].includes(a.key) || String(a.key).startsWith("result")))
+      .toHaveLength(0);
+    // «Просмотр» открывает форму задачи (у завершённой она только на чтение)
+    actions[1].onClick();
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
 
-    // завершённая dob-задача — то же самое: ни «Взять в работу», ни «Изменить»
+  it("в сводке завершённой нет пустых строк: без результата и без дат — только факт завершения", () => {
+    const actions = buildRowActions(MAIN_DONE, { canTake: true });
+    // у MAIN_DONE нет Created/Modified → formatSolveTime даёт просто «Решено»
+    expect(actions[0].lines).toEqual(["Решено"]);
+
+    // завершённая dob-задача — то же: сводка + «Просмотр»
     const dobDone = buildRowActions(
       { sourceId: "dob", Id: 3, Status: "Завершена", PercentComplete: 1 },
       { canTake: true },
     );
-    expect(labels(dobDone)).toEqual(["Задача завершена"]);
+    expect(labels(dobDone)).toEqual(["Задача завершена", "Просмотр"]);
     expect(dobDone[0].kind).toBe("info");
   });
 
