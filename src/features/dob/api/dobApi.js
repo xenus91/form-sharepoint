@@ -58,7 +58,7 @@ const contentTypeCache = new Map();
 export async function getDobContentTypes(listGuid = DOB_LIST_GUID) {
   const guid = normalizeListGuid(listGuid);
   if (contentTypeCache.has(guid)) return contentTypeCache.get(guid);
-  const url = `${listApiOf(guid)}/contenttypes?$select=Id,StringId,Name&$expand=FieldLinks&$top=100`;
+  const url = `${listApiOf(guid)}/contenttypes?$select=Id,StringId,Name,Description&$expand=FieldLinks&$top=100`;
   const { data } = await httpOf(guid).get(url, {
     ...(readConfig(guid) || {}),
     headers: { Accept: 'application/json;odata=verbose' },

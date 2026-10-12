@@ -93,13 +93,33 @@ Payload повторяет соглашение формы заявки: «по�
 `Collection(Edm.Int32)`), `MultiChoice` → `"a;#b"`, плюс `ContentTypeId` выбранного
 типа. Запись — `createDobItem(payload, DOB_LIST_GUID)`.
 
+### 4. Форма открывается уже заполненной (2026-10-12)
+
+* **Тип контента выбран по умолчанию** — берётся первый тип из
+  `getDobContentTypes`; как только список загружен, `useRequestForm` сам вызывает
+  `selectContentType(defaultCtId)`, поэтому поля видны сразу.
+* **Названия типов — из `Description`** (`contentTypeDisplayName` в
+  `lib/requestFields.js`): внутреннее имя (`Name`) показывается только если
+  описания нет. В запрос добавлен `$select=…,Description`.
+* **`DC` ← `Office`, `InitiatingDepartment` ← `Department`** из профиля
+  пользователя (`GetMyProperties` → `App.jsx` → `userProfile` → prop страницы →
+  `useRequestForm`). Логика — в `requestForm/requestDefaults.js`:
+  * «Не указано» (так `App.jsx` помечает отсутствующее свойство) не подставляем;
+  * в `Choice` без свободного ввода пишем только существующий вариант: сначала
+    точное совпадение, затем номер РЦ из `Office` («РЦ-8114» → «8114»);
+    подходящего варианта нет — поле остаётся пустым;
+  * подстановка делается один раз на каждый выбранный тип и не затирает то, что
+    пользователь уже ввёл.
+
 ## Проверка
 
-* `vitest run` — 86 файлов / 711 тестов, зелёные.
-* Новые тесты: `dobRoute` (5), `requestFields` (5), `requestFormFields` (4),
-  `toCreatePayload` (6), `useRequestForm` (5), `RequestCreateView` (2).
-  В `useRequestForm`/`RequestCreateView` проверяется реальный путь: выбор типа →
-  запрос полей этого типа → смена типа меняет состав полей → «Создать» вызывает
+* `vitest run` — 87 файлов / 715+ тестов, зелёные.
+* Новые тесты: `dobRoute` (8), `requestFields` (7), `requestFormFields` (4),
+  `toCreatePayload` (6), `requestDefaults` (7), `useRequestForm` (7),
+  `RequestCreateView` (4), `DobListAppBar.createButton` (1).
+  В `useRequestForm`/`RequestCreateView` проверяется реальный путь: тип выбран по
+  умолчанию → запрос полей этого типа → смена типа меняет состав полей →
+  `DC`/`InitiatingDepartment` подставлены из профиля → «Создать» вызывает
   `createDobItem` с payload'ем и `ContentTypeId`; при незаполненном обязательном
   поле список не трогается.
 * `npm run build` — успешно, в бандле отдельный чанк `RequestCreateView-*.js`.

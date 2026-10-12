@@ -3,14 +3,16 @@
 // Выбор типа контента заявки. От выбранного типа зависит состав полей формы
 // (поля берутся из FieldLinks типа контента — см. requestFields/contentTypeFields).
 import { MenuItem, TextField } from "@mui/material";
+import { contentTypeDisplayName } from "../../lib/requestFields";
 
 export default function RequestContentTypeSelect({ contentTypes = [], value = "", onChange, disabled = false, error = false }) {
+  // Название типа берём из его ОПИСАНИЯ (Description), внутреннее имя — запасной вариант.
   const options = (contentTypes || [])
     .map((ct) => ({
       id: String(ct?.StringId || ct?.Id || ""),
-      name: String(ct?.Name || ct?.StringId || ct?.Id || ""),
+      name: contentTypeDisplayName(ct),
     }))
-    .filter((o) => o.id);
+    .filter((o) => o.id && o.name);
 
   return (
     <TextField

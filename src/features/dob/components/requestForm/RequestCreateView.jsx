@@ -18,18 +18,17 @@ import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import MenuIcon from "@mui/icons-material/Menu";
 import AddIcon from "@mui/icons-material/Add";
 import { useQueryClient } from "@tanstack/react-query";
-import { useDobContentTypes } from "../../hooks/useDobContentTypes";
 import { useNotifications } from "../../../../NotificationsProvider";
 import { DOB_REQUESTS_HASH } from "../../lib/dobRoute";
 import { useRequestForm } from "./useRequestForm";
 import RequestContentTypeSelect from "./RequestContentTypeSelect";
 import RequestFormFields from "./RequestFormFields";
 
-export default function RequestCreateView({ onOpenMenu }) {
+export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
   const qc = useQueryClient();
   const { notify } = useNotifications();
-  const { contentTypes } = useDobContentTypes();
-  const form = useRequestForm();
+  // userProfile → значения по умолчанию: DC ← Office, InitiatingDepartment ← Department.
+  const form = useRequestForm({ userProfile });
 
   const back = useCallback(() => { window.location.hash = DOB_REQUESTS_HASH; }, []);
 
@@ -69,7 +68,7 @@ export default function RequestCreateView({ onOpenMenu }) {
       <Box sx={{ flex: "1 1 0", minHeight: 0, overflowY: "auto", p: { xs: 1.5, sm: 3 } }}>
         <Stack spacing={2} sx={{ maxWidth: 860, mx: "auto" }}>
           <RequestContentTypeSelect
-            contentTypes={contentTypes}
+            contentTypes={form.contentTypes}
             value={form.ctId}
             onChange={form.selectContentType}
             error={form.problems.includes("Выберите тип заявки")}
@@ -77,7 +76,9 @@ export default function RequestCreateView({ onOpenMenu }) {
 
           {!form.ctId && (
             <Typography variant="body2" color="text.secondary" data-testid="request-form-hint">
-              Выберите тип заявки — список полей для заполнения построится по этому типу контента.
+              {form.loadingTypes
+                ? "Загружаем типы заявок…"
+                : (form.typesError || "Не удалось получить типы контента списка — проверьте доступ к списку Requests.")}
             </Typography>
           )}
 
@@ -112,4 +113,9 @@ export default function RequestCreateView({ onOpenMenu }) {
 
 RequestCreateView.propTypes = {
   onOpenMenu: PropTypes.func,
+  // Профиль текущего пользователя (userOffice, userDepartment) — для полей по умолчанию.
+  userProfile: PropTypes.shape({
+    userOffice: PropTypes.string,
+    userDepartment: PropTypes.string,
+  }),
 };

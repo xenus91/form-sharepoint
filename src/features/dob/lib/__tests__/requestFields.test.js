@@ -2,7 +2,7 @@
 // Колонки страницы заявок: поля типов контента + остальные несистемные.
 
 import { describe, it, expect } from "vitest";
-import { collectCtFieldNames, selectRequestFields, isRequestTableField } from "../requestFields";
+import { collectCtFieldNames, selectRequestFields, isRequestTableField, contentTypeDisplayName } from "../requestFields";
 
 const field = (InternalName, extra = {}) => ({ InternalName, Title: InternalName, TypeAsString: "Text", ...extra });
 
@@ -67,5 +67,18 @@ describe("requestFields", () => {
     expect(isRequestTableField(field("FileRef"))).toBe(false);
     expect(isRequestTableField(field("X", { Hidden: true }))).toBe(false);
     expect(isRequestTableField(null)).toBe(false);
+  });
+});
+
+describe("contentTypeDisplayName", () => {
+  it("название типа контента берётся из Description", () => {
+    expect(contentTypeDisplayName({ Name: "Заявка", Description: "Заявка на отгрузку ТМЦ" }))
+      .toBe("Заявка на отгрузку ТМЦ");
+  });
+
+  it("без описания — внутреннее имя", () => {
+    expect(contentTypeDisplayName({ Name: "Заявка", Description: "   " })).toBe("Заявка");
+    expect(contentTypeDisplayName({ StringId: "0x0100AA" })).toBe("0x0100AA");
+    expect(contentTypeDisplayName(null)).toBe("");
   });
 });

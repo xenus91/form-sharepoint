@@ -47,6 +47,19 @@ function isExcludedField(field) {
 }
 
 /**
+ * Как показывать тип контента пользователю: берём его ОПИСАНИЕ (Description),
+ * а внутреннее имя (Name) — только запасной вариант. Требование 2026-10-12:
+ * «сами названия типов контента должны браться из его Описания».
+ * @param {{Description?:string,Name?:string,StringId?:string,Id?:string}} ct
+ * @returns {string}
+ */
+export function contentTypeDisplayName(ct) {
+  const description = String(ct?.Description ?? "").trim();
+  if (description) return description;
+  return String(ct?.Name ?? ct?.StringId ?? ct?.Id ?? "").trim();
+}
+
+/**
  * Внутренние имена полей из FieldLinks всех типов контента списка.
  *
  * @param {Array<{FieldLinks?:Array|{results:Array}}>} contentTypes

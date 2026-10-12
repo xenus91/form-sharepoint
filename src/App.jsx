@@ -1760,7 +1760,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: { xs: 'auto', md: 'calc(100vh - 0px)' }, overflowX: 'hidden' }}>
           <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
             {isDobCreate
-              ? <RequestCreateView onOpenMenu={() => setDrawerOpen(true)} />
+              ? <RequestCreateView onOpenMenu={() => setDrawerOpen(true)} userProfile={userProfile} />
               : isDobEdit
               ? <DobTaskEditView
                   id={String(hashElementId)}
