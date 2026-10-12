@@ -257,9 +257,11 @@ check(/Результирующий выбор: (Найдена|Не найде�
 check(/Решено( за \d+д \d+ч)?/.test(doneText), "в сводке есть время решения");
 check(/Завершена: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/.test(doneText), "в сводке есть дата и время завершения");
 check(!/недоступны/i.test(doneText), "прежней заглушки «Действия … недоступны» больше нет");
+// решение пользователя 2026-10-11: кнопки «Просмотр» у завершённых нет — только сводка
 const doneButtons = [...(donePopup?.querySelectorAll("button") || [])]
   .filter((b) => !b.closest("[data-principal-button]")).map((b) => (b.textContent || "").trim());
-check(doneButtons.length === 1 && doneButtons[0] === "Просмотр", "единственное действие — «Просмотр»", doneButtons.join(", "));
+check(doneButtons.length === 0, "в попапе завершённой кнопок нет («Просмотр» не показываем)", doneButtons.join(", ") || "пусто");
+check(!/Просмотр/.test(doneText), "слова «Просмотр» в попапе завершённой нет");
 document.body.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 await settle(300);
 

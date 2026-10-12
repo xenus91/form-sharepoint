@@ -32,7 +32,6 @@ import {
 import SearchIcon from "@mui/icons-material/Search";
 import ClearIcon from "@mui/icons-material/Clear";
 import EditIcon from "@mui/icons-material/Edit";
-import VisibilityIcon from "@mui/icons-material/Visibility";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import PersonIcon from "@mui/icons-material/Person";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
@@ -53,7 +52,6 @@ const ACTION_ICONS = {
   take: <PlayArrowIcon fontSize="small" />,
   edit: <EditIcon fontSize="small" />,
   result: <TaskAltIcon fontSize="small" />,
-  view: <VisibilityIcon fontSize="small" />,
 };
 
 /**

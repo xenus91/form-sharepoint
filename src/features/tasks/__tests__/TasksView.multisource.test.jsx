@@ -457,6 +457,9 @@ function renderTasksView(props = {}) {
       </QueryClientProvider>
     );
   });
+  // Корень — на хосте: тест, который открывает попап, может размонтировать дерево
+  // и убрать портал MUI из document.body (иначе следующий тест видит чужой попап).
+  host.__root = root;
   return host;
 }
 
@@ -666,10 +669,10 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.querySelectorAll(".ag-paging-panel").length).toBeGreaterThan(0);
   }, 30000);
 
-  // 2026-10-11: «Просмотр» — только у завершённых и он ОБЯЗАН открывать форму.
-  // Раньше клик не делал ничего: у строк вкладки «Завершенные» не было
-  // compositeId, buildTaskFormHash(undefined) → null → openTaskForm → false.
-  it("«Просмотр» есть только у завершённых и открывает форму задачи", async () => {
+  // 2026-10-11 (уточнение пользователя): кнопки «Просмотр» у завершённых задач
+  // НЕТ — в попапе только сводка. Вкладка «Завершенные» при этом обязана
+  // отрисовывать строки (регрессия на compositeId закрыта в completedTasks.test.js).
+  it("у завершённых в попапе только сводка — кнопки «Просмотр» нет", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -690,7 +693,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       .filter((b) => !b.closest("[data-principal-button]"))
       .map((b) => (b.textContent || "").trim());
 
-    // активная задача: «Просмотра» в меню нет
+    // активная задача: «Просмотра» в меню нет (и не появилось)
     const activeMenu = await openRowMenu(/Основная задача ООБ/);
     expect(menuButtons(activeMenu)).not.toContain("Просмотр");
     await act(async () => {
@@ -698,23 +701,27 @@ describe("TasksView — multi-source (#tasks)", () => {
       await new Promise((r) => setTimeout(r, 300));
     });
 
-    // вкладка «Завершенные» — строка есть, в меню сводка и «Просмотр»
+    // вкладка «Завершенные» — строка есть, в меню только сводка, кнопок нет
     await clickByText(host, /Завершенные/);
     await settle(2500);
     expect(host.textContent).toMatch(/Завершённая задача ООБ/);
     const doneMenu = await openRowMenu(/Завершённая задача ООБ/);
-    expect((doneMenu?.textContent || "")).toContain("Задача завершена");
-    expect(menuButtons(doneMenu)).toEqual(["Просмотр"]);
+    const doneText = doneMenu?.textContent || "";
+    expect(doneText).toContain("Задача завершена");
+    expect(doneText).toContain("Результирующий выбор: Найдена");
+    expect(menuButtons(doneMenu)).toEqual([]);
+    expect(doneText).not.toContain("Просмотр");
 
-    // клик по «Просмотр» открывает форму задачи (у завершённой — только чтение)
+    // и hash не меняется — из попапа завершённой задачи никуда не уходим
     window.location.hash = "#tasks";
-    await act(async () => {
-      [...doneMenu.querySelectorAll("button")]
-        .find((b) => (b.textContent || "").trim() === "Просмотр")
-        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 800));
-    });
-    expect(window.location.hash).toMatch(/^#(tasks\/881|dob_tasks\/881)/);
+    await settle(300);
+    expect(window.location.hash).toBe("#tasks");
+
+    // Убираем за собой: попап MUI живёт порталом в document.body, и закрытие
+    // кликом в jsdom не всегда снимает его с opacity!=0 — следующий тест тогда
+    // решает, что меню открылось само. Размонтирование убирает портал наверняка.
+    await act(async () => { host.__root.unmount(); });
+    expect(document.body.querySelector('[data-testid="tasks-row-actions"]')).toBe(null);
   }, 40000);
 
   it("«Взять в работу» на карточке dob шлёт MERGE статуса в список источника", async () => {

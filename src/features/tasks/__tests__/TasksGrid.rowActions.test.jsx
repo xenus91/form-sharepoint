@@ -315,10 +315,11 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(popupButtons().map((b) => b.textContent)).toEqual(["Изменить"]);
   });
 
-  // 2026-10-11: у завершённой задачи в попапе — сводка и «Просмотр» вместо
-  // заглушки «Действия по завершённой задаче недоступны». Проверяем на реальном
-  // buildRowActions, а не на готовом массиве действий.
-  it("попап завершённой задачи: сводка + «Просмотр», описание с настоящим двоеточием", async () => {
+  // 2026-10-11: у завершённой задачи в попапе — сводка вместо заглушки «Действия
+  // по завершённой задаче недоступны», и НИКАКИХ кнопок (решение пользователя:
+  // «не будем отображать кнопку просмотр для завершённых задач»). Проверяем на
+  // реальном buildRowActions, а не на готовом массиве действий.
+  it("попап завершённой задачи: сводка без кнопок, описание с настоящим двоеточием", async () => {
     const onEdit = vi.fn();
     const rows = [{
       compositeId: "main:881",
@@ -358,13 +359,10 @@ describe("TasksGrid — действия в точке клика", () => {
     expect(paper.textContent).toMatch(/Завершена: \d{2}\.\d{2}\.\d{4} \d{2}:\d{2} • Поршаков Сергей/);
     // прежней заглушки больше нет
     expect(paper.textContent).not.toContain("недоступны");
-    // единственное действие — «Просмотр», и оно открывает форму (только чтение)
-    expect(popupButtons().map((b) => b.textContent)).toEqual(["Просмотр"]);
-    await act(async () => {
-      popupButtons()[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 120));
-    });
-    expect(onEdit).toHaveBeenCalledTimes(1);
+    // действий нет вообще: ни «Просмотра», ни «Изменить», ни «Взять в работу»
+    expect(popupButtons()).toHaveLength(0);
+    expect(paper.textContent).not.toContain("Просмотр");
+    expect(onEdit).not.toHaveBeenCalled();
   });
 
   it("«Изменить» закреплена внизу меню и видна даже при большом списке результатов", async () => {
