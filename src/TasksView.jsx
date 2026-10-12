@@ -1194,7 +1194,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // PR2: polling вынесен в useHashPolling (adaptivePolling 60s, focus throttle 30s)
   useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMatch, setIsHashTaskRefreshing, recipientField, scNumberField, currentUserId, distribution, taskFieldNames, resultFieldInternalNames, queryClient, lastHashFocusRef });
   // ⭐ Задача «Результат проверки ООБ» открывается ФОРМОЙ ДОБ (как задачи сайта dob),
-  // а не стандартной карточкой: deep-link #tasks/<Id> уводим на #dob_requests/<Id>?list=<основной список>.
+  // а не стандартной карточкой: deep-link #tasks/<Id> уводим на #dob_tasks/<Id>?list=<основной список>.
   React.useEffect(() => {
     const t = elementTaskMatch;
     // sourceId может быть не проставлен (в hash-режиме задачи приходят из useTasksQuery

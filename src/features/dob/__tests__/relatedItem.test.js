@@ -54,7 +54,11 @@ describe("dob/lib/relatedItem", () => {
   });
 
   it("relatedItemRoute ведёт в форму заявки с её списком", () => {
-    expect(relatedItemRoute({ listId: DOB_LIST, itemId: 2 })).toBe(`#dob_requests/2?list=${DOB_LIST}`);
+    // Связанный элемент лежит в списке заявок → адрес заявки, без ?list
+    expect(relatedItemRoute({ listId: DOB_LIST, itemId: 2 })).toBe("#dob_requests/2");
+    // Элемент другого списка — это задача → #dob_tasks/<id>?list=<guid>
+    expect(relatedItemRoute({ listId: "03FC1B92-BAFF-44DC-B8A3-D04ACBE329D3", itemId: 7 }))
+      .toBe("#dob_tasks/7?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3");
     expect(relatedItemRoute(null)).toBe("");
   });
 });

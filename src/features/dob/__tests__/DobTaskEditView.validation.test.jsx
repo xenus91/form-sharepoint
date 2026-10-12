@@ -112,7 +112,7 @@ async function renderForm() {
 
 describe("DobTaskEditView — валидация обязательных полей формы заявки", () => {
   beforeEach(() => {
-    window.location.hash = `#dob_requests/77?list=${LIST_GUID}`;
+    window.location.hash = `#dob_tasks/77?list=${LIST_GUID}`;
     document.body.innerHTML = "";
     updateDobItem.mockClear();
   });

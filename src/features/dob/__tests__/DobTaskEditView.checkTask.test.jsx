@@ -2,7 +2,7 @@
 // src/features/dob/__tests__/DobTaskEditView.checkTask.test.jsx
 //
 // Задача типа контента «Результат проверки ООБ» живёт в ОСНОВНОМ списке, но ведёт
-// себя как задача сайта ДОБ: открывается формой DobTaskEditView (#dob_requests/<id>?list=<основной>)
+// себя как задача сайта ДОБ: открывается формой DobTaskEditView (#dob_tasks/<id>?list=<основной>)
 // и закрывается ТОЛЬКО через форму по колонкам типа контента — кнопки результата
 // DobSearchResult + рич-текст/число/«Пользователь или группа», обязательные поля из SP.
 // Проверяем, что отправка собирает MERGE (Status/PercentComplete + поля CT).
@@ -144,7 +144,7 @@ describe("DobTaskEditView — задача «Результат проверки
     updateDobItem.mockClear();
     uploadDobAttachment.mockClear();
     uploadedAttachments.length = 0;
-    window.location.hash = `#dob_requests/13?list=${MAIN_GUID}`;
+    window.location.hash = `#dob_tasks/13?list=${MAIN_GUID}`;
     document.body.innerHTML = "";
   });
 

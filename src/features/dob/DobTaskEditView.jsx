@@ -156,7 +156,8 @@ function isEditableField(f) {
 // (раздел «Заявки ДОБ»). #tasks передаёт сюда GUID списка задач источника
 // (например, RequestsTask ООБ), чтобы форма работала как dob_requests/[id],
 // но с полями и сохранением именно в список задачи.
-// onBackHash — куда возвращает кнопка «Назад» (по умолчанию #dob_requests).
+// onBackHash — куда возвращает кнопка «Назад» (по умолчанию: #dob_requests для
+// заявки из списка Requests и #tasks для задачи чужого списка).
 // ── Поля формы по ТИПАМ колонок SharePoint ────────────────────────────────────
 const CHOICE_TYPES = new Set(['choice', 'multichoice', 'gridchoice', 'combobox', 'outcomechoice']);
 const USER_TYPES = new Set(['user', 'usermulti']);
@@ -705,9 +706,11 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
 
   const isDefaultList = listGuid === DOB_LIST_GUID;
+  // Куда ведёт «Назад»: заявка (список Requests) → #dob_requests,
+  // задача чужого списка (#dob_tasks/<id>?list=…) → обратно в #tasks.
   const handleBack = useCallback(() => {
-    window.location.hash = onBackHash || DOB_REQUESTS_HASH;
-  }, [onBackHash]);
+    window.location.hash = onBackHash || (isDefaultList ? DOB_REQUESTS_HASH : '#tasks');
+  }, [onBackHash, isDefaultList]);
 
   // Статус задачи и choices поля Status — чтобы подобрать статус «в работе»
   // именно из вокабуляра этого списка (у списков он разный).
@@ -721,7 +724,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   }, [fields]);
   const taskCompleted = isCompletedStatus(taskStatus, item?.PercentComplete);
   // Завершённую задачу править нельзя — НИ в таблице, НИ по прямой ссылке
-  // (#dob_requests/<id>?list=<GUID>): форма открывается только на просмотр.
+  // (#dob_tasks/<id>?list=<GUID>): форма открывается только на просмотр.
   const readOnly = taskCompleted;
   const taskInProgress = isInProgressStatus(taskStatus);
   // Требовать взятие, только когда статус ЯВНО «не начата»: у заявок без поля
@@ -840,7 +843,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   ) : null;
 
   // «Шлюз»: задача ещё не взята в работу — данных вносить нельзя, пока не взяли.
-  // Прямая ссылка (#dob_requests/<id>?list=<GUID>) открывает форму в обход списка,
+  // Прямая ссылка (#dob_tasks/<id>?list=<GUID>) открывает форму в обход списка,
   // где кнопка «Взять в работу» обязательна.
   const takeGate = (
     <Box sx={{ p: { xs: 1.5, md: 2 }, display: 'grid', placeItems: 'center', minHeight: 220 }} data-testid="dob-take-gate">

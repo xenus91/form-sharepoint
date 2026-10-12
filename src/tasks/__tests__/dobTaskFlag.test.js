@@ -122,7 +122,7 @@ describe("isDobTaskForTask / markDobTask — признак на задаче", 
     const stored = { Id: 26, contentTypeId: CT_ID };
     const task = markDobTask({ ...stored, sourceId: "main" }, CONFIG);
     expect(buildTaskFormHash("main:26", [MAIN, DOB], task)).toBe(
-      "#dob_requests/26?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+      "#dob_tasks/26?list=463b634e-a71a-4fef-9a1f-b803431d8639",
     );
     // без признака — обычный роут
     expect(buildTaskFormHash("main:26", [MAIN, DOB], { ...stored, sourceId: "main" })).toBe("#tasks/26");

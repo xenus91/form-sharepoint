@@ -70,7 +70,7 @@ import {
   DOB_REQUESTS_HASH,
   buildDobCreateHash,
   buildDobItemHash,
-  isLegacyDobHash,
+  isLegacyDobRequestHash,
   toRequestsHash,
 } from "./features/dob/lib/dobRoute";
 const DobTaskEditView = React.lazy(() => import("./features/dob/DobTaskEditView"));
@@ -1552,9 +1552,10 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setHashElementListGuid(p.elementListGuid);
       setHashElementKind(p.elementKind || "auto");
       setHashDobCreate(!!p.dobCreate);
-      // Роут переименован: #dob_tasks → #dob_requests. Старые ссылки (из писем,
-      // закладок и старых ссылок в таблице задач) перезаписываем на новый адрес.
-      if (isLegacyDobHash(window.location.hash)) {
+      // Заявки живут на #dob_requests, задачи чужого списка — на
+      // #dob_tasks/<id>?list=<guid>. Перезаписываем только СТАРЫЕ ссылки на
+      // заявки (#dob_tasks/12 без ?list=), задачные адреса не трогаем.
+      if (isLegacyDobRequestHash(window.location.hash)) {
         window.location.hash = toRequestsHash(window.location.hash);
       }
     };
@@ -1575,7 +1576,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       return;
     }
     if (currentView === "dob" && parsed.elementId) {
-      const want = `${desired}/${parsed.elementId}` + (parsed.elementListGuid ? `?list=${parsed.elementListGuid}` : "");
+      // Заявка (список Requests) → #dob_requests/<id>; задача другого списка
+      // (основной Tasks, RequestsTask ООБ) → #dob_tasks/<id>?list=<guid>.
+      const want = buildDobItemHash(parsed.elementId, parsed.elementListGuid);
       if (!window.location.hash.toLowerCase().startsWith(want.toLowerCase())) {
         window.location.hash = want;
       }

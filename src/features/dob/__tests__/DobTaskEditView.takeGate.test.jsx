@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // src/features/dob/__tests__/DobTaskEditView.takeGate.test.jsx
 //
-// Прямой переход по ссылке #dob_requests/<id>?list=<GUID> открывает форму в обход
+// Прямой переход по ссылке #dob_tasks/<id>?list=<GUID> открывает форму в обход
 // списка/таблицы, где кнопка «Взять в работу» обязательна. Если задача ещё
 // «Не начата», форма НЕ должна давать вносить данные: сначала — «Взять в работу»,
 // и только после взятия — поля результата и «Сохранить».
@@ -120,7 +120,7 @@ describe("DobTaskEditView — шлюз «Взять в работу» для п�
     state.takeCalls.length = 0;
     takeDobTaskInWork.mockClear();
     document.body.innerHTML = "";
-    window.location.hash = `#dob_requests/906?list=${MAIN_GUID}`;
+    window.location.hash = `#dob_tasks/906?list=${MAIN_GUID}`;
   });
 
   it("задача «Не начата»: вместо формы — шлюз, полей результата и «Сохранить» нет", async () => {

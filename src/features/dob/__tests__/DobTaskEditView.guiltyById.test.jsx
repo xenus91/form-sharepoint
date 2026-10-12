@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // src/features/dob/__tests__/DobTaskEditView.guiltyById.test.jsx
 //
-// «Виновные» в ВЫПОЛНЕННОЙ заявке ООБ (#dob_requests/906?list=…).
+// «Виновные» в ВЫПОЛНЕННОЙ заявке ООБ (#dob_tasks/906?list=…).
 //
 // Причина поломки: SharePoint не всегда раскрывает многозначное поле
 // «Пользователь или группа» в $expand (колонка скрыта, слишком много expands,
@@ -152,7 +152,7 @@ const guiltyValue = (host) => [...host.querySelectorAll('[data-testid="person-fi
 
 describe("DobTaskEditView — виновные в выполненной заявке", () => {
   beforeEach(() => {
-    window.location.hash = `#dob_requests/906?list=${LIST_GUID}`;
+    window.location.hash = `#dob_tasks/906?list=${LIST_GUID}`;
     document.body.innerHTML = "";
     state.calls.length = 0;
     state.fields = LIST_FIELDS;

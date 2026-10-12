@@ -71,7 +71,7 @@ export function resolveRelatedRef(item, fields = [], { fallbackListId = DOB_LIST
   return null;
 }
 
-/** Маршрут формы связанной заявки (та же форма #dob_requests/<id>, но с ?list=). */
+/** Маршрут связанного элемента: заявка → #dob_requests/<id>, элемент чужого списка → #dob_tasks/<id>?list=<guid>. */
 export function relatedItemRoute(ref) {
   if (!ref?.itemId) return "";
   return buildDobItemHash(ref.itemId, ref.listId || null);

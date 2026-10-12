@@ -21,21 +21,30 @@
 
 ## Решение
 
-### 1. Роут переименован: `#dob_tasks` → `#dob_requests`
+### 1. Адреса разделены по смыслу: заявки — `#dob_requests`, задачи — `#dob_tasks`
 
-| Адрес | Что открывает |
-|---|---|
-| `#dob_requests` | список заявок |
-| `#dob_requests/new` | форма создания заявки |
-| `#dob_requests/<id>` | форма заявки (правка) |
-| `#dob_requests/<id>?list=<guid>` | та же форма, но в списке источника |
+Это **два разных списка**, поэтому и адреса разные:
 
-Старые ссылки продолжают работать: `parseHash` понимает `#dob_tasks/…` и `#dob/…`,
-а обработчик `hashchange` в `App.jsx` перезаписывает старый адрес на новый
-(`isLegacyDobHash` / `toRequestsHash` в `lib/dobRoute.js`). Все **производители**
-ссылок в приложении переведены на новый роут: `DobListStateContext.openEdit`,
-`openTaskForm.js`, `DobTaskEditView` (кнопка «Назад»), `relatedItem.js`, пункт
-бокового меню.
+| Адрес | Что открывает | Список |
+|---|---|---|
+| `#dob_requests` | список заявок | `Requests` (`21B5B544-…`) |
+| `#dob_requests/new` | форма создания заявки | `Requests` |
+| `#dob_requests/<id>` | форма заявки (правка) | `Requests` |
+| `#dob_tasks/<id>?list=<guid>` | форма **задачи** из другого списка | основной `Tasks`, `RequestsTask` ООБ |
+
+Экран один (`DobTaskEditView`), но заявка и задача — разные сущности: задача
+приходит из `#tasks` с `?list=<список источника>` и сохраняются в свой список.
+Переименовывать задачный адрес в «заявки» нельзя — заявки там нет.
+
+Выбор адреса делает `buildDobItemHash(id, listGuid)`: без `list` (или с GUID
+списка `Requests`) → `#dob_requests/<id>`, иначе → `#dob_tasks/<id>?list=<guid>`.
+Кнопка «Назад» возвращает в `#dob_requests` для заявки и в `#tasks` для задачи.
+
+Старые ссылки на **заявки** (`#dob_tasks/<id>` без `?list=`, `#dob/<id>`)
+продолжают работать: `parseDobHash` понимает все варианты, а `hashchange` в
+`App.jsx` перезаписывает такие адреса на `#dob_requests`
+(`isLegacyDobRequestHash` / `toRequestsHash`); задачные ссылки с `?list=` не
+трогает.
 
 ### 2. Колонки таблицы — только нужные поля
 
