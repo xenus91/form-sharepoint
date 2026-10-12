@@ -1,7 +1,7 @@
 // src/features/dob/__tests__/dobRowStatus.test.js
 //
 // Завершённую задачу нельзя править НИГДЕ — в том числе ячейкой прямо в
-// таблице ДОБ (#dob_tasks). Здесь проверяется определение «строка завершена».
+// таблице ДОБ (#dob_requests). Здесь проверяется определение «строка завершена».
 
 import { describe, it, expect } from "vitest";
 import { isRowCompleted, statusInternalOf } from "../lib/dobRowStatus";

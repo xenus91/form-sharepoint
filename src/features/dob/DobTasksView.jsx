@@ -1,5 +1,5 @@
 // src/features/dob/DobTasksView.jsx
-// Page for hash #dob_tasks — owns the AppBar, the DobListStateProvider and
+// Page for hash #dob_requests — owns the AppBar, the DobListStateProvider and
 // the AG Grid. The action toolbar (Изменить / Обновить / Сбросить / Сохранить)
 // used to live above the grid; it now lives in the AppBar and exchanges
 // state with the grid via the DobListStateContext. The whole page is a
@@ -9,6 +9,7 @@ import { useMemo, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
 import { Box, Typography, CircularProgress, Alert, Button } from '@mui/material';
 import { useDobFields } from './hooks/useDobFields';
+import { useDobContentTypes } from './hooks/useDobContentTypes';
 import { useDobItemsPaged } from './hooks/useDobItems';
 import DobGrid from './components/DobGrid';
 import DobListAppBar from './components/DobListAppBar';
@@ -17,6 +18,8 @@ import { useQueryClient } from '@tanstack/react-query';
 
 export default function DobTasksView({ onOpenDrawer }) {
   const fieldsQ = useDobFields(true);
+  // Типы контента: их поля идут первыми колонками таблицы заявок (2026-10-12).
+  const { ctFieldNames } = useDobContentTypes();
   const fieldsData = useMemo(() => fieldsQ.data || null, [fieldsQ.data]);
   const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: '' });
   const qc = useQueryClient();
@@ -26,7 +29,7 @@ export default function DobTasksView({ onOpenDrawer }) {
       const shell = document.querySelector('[data-dob-shell]');
       const page = document.querySelector('[data-dob-page]');
       const grid = document.querySelector('.ag-root-wrapper');
-      console.groupCollapsed('[DOB layout] #dob_tasks');
+      console.groupCollapsed('[DOB layout] #dob_requests');
       console.log({
         viewport: window.innerWidth,
         document: document.documentElement.clientWidth,
@@ -165,7 +168,7 @@ export default function DobTasksView({ onOpenDrawer }) {
             flexDirection: 'column',
           }}
         >
-          <DobGrid fields={fields} rows={rows} />
+          <DobGrid fields={fields} rows={rows} ctFieldNames={ctFieldNames} />
         </Box>
       </Box>
     </DobListStateProvider>

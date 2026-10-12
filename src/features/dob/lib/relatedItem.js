@@ -8,6 +8,7 @@
 // которое ссылается на список заявок.
 
 import { DOB_LIST_GUID } from "../api/dobClient";
+import { buildDobItemHash } from "./dobRoute";
 
 /** GUID в любом регистре/с фигурными скобками → нижний регистр без скобок. */
 export function normalizeGuid(value) {
@@ -70,9 +71,8 @@ export function resolveRelatedRef(item, fields = [], { fallbackListId = DOB_LIST
   return null;
 }
 
-/** Маршрут формы связанной заявки (та же форма dob_tasks, но с ?list=). */
+/** Маршрут формы связанной заявки (та же форма #dob_requests/<id>, но с ?list=). */
 export function relatedItemRoute(ref) {
   if (!ref?.itemId) return "";
-  const list = ref.listId ? `?list=${ref.listId}` : "";
-  return `#dob_tasks/${ref.itemId}${list}`;
+  return buildDobItemHash(ref.itemId, ref.listId || null);
 }

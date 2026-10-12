@@ -1,5 +1,5 @@
 // src/features/dob/components/DobListAppBar.jsx
-// Sticky header for #dob_tasks — holds the title and the four action
+// Sticky header for #dob_requests — holds the title and the four action
 // buttons (Изменить / Обновить / Сбросить / Сохранить) that used to live
 // above the grid. Reads its state from the DobListStateContext.
 import PropTypes from 'prop-types';
@@ -8,6 +8,8 @@ import MenuIcon from '@mui/icons-material/Menu';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EditIcon from '@mui/icons-material/Edit';
+import AddIcon from '@mui/icons-material/Add';
+import { buildDobCreateHash } from '../lib/dobRoute';
 import { useDobListState } from '../state/DobListStateContext';
 
 export default function DobListAppBar({ onOpenDrawer }) {
@@ -98,6 +100,19 @@ export default function DobListAppBar({ onOpenDrawer }) {
         </Box>
 
         <Box sx={{ flex: 1 }} />
+
+        <Tooltip title="Создать заявку: выбор типа контента, затем поля этого типа">
+          <Button
+            size="small"
+            variant="outlined"
+            onClick={() => { window.location.hash = buildDobCreateHash(); }}
+            startIcon={<AddIcon />}
+            data-testid="request-create-open"
+            sx={{ borderRadius: '10px', textTransform: 'none', fontWeight: 700 }}
+          >
+            Создать заявку
+          </Button>
+        </Tooltip>
 
         <Tooltip title="Открыть форму редактирования выбранной строки">
           <span>

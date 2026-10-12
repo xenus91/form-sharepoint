@@ -2,7 +2,7 @@
 // src/features/dob/__tests__/DobTaskEditView.readOnly.test.jsx
 //
 // Завершённую задачу править нельзя — НИ в таблице, НИ по прямой ссылке
-// #dob_tasks/<id>?list=<GUID>. Форма открывается, но только на просмотр:
+// #dob_requests/<id>?list=<GUID>. Форма открывается, но только на просмотр:
 // полей не редактировать, «Сохранить» нет, вложения не удалить.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -125,7 +125,7 @@ describe("DobTaskEditView — завершённая задача только �
     state.percent = 1;
     state.saves.length = 0;
     document.body.innerHTML = "";
-    window.location.hash = `#dob_tasks/906?list=${MAIN_GUID}`;
+    window.location.hash = `#dob_requests/906?list=${MAIN_GUID}`;
   });
 
   it("прямая ссылка на завершённую задачу: форма на просмотр, «Сохранить» нет", async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // src/features/dob/__tests__/dobApi.takeInWork.test.js
 //
-// Взятие задачи в работу ИЗ ФОРМЫ: #dob_tasks/<id>?list=<GUID> открывается прямой
+// Взятие задачи в работу ИЗ ФОРМЫ: #dob_requests/<id>?list=<GUID> открывается прямой
 // ссылкой, поэтому «Взять в работу» обязано работать в самом списке задачи
 // (MERGE статуса), а не только из таблицы/карточки.
 

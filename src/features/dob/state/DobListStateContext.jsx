@@ -4,6 +4,7 @@
 
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
+import { buildDobItemHash } from '../lib/dobRoute';
 import { useNotifications } from '../../../NotificationsProvider';
 import { updateDobItem } from '../api/dobApi';
 
@@ -27,7 +28,7 @@ export function useDobListState() {
  *  - handleSave()    -> save all dirty rows
  *  - handleRevert()  -> discard local edits + reload from server
  *  - handleRefresh() -> reload from server
- *  - openEdit(id)    -> navigate to #dob_tasks/<id>
+ *  - openEdit(id)    -> navigate to #dob_requests/<id>
  */
 export function DobListStateProvider({ fields, rows, onRefresh, loading, isFetching, children }) {
   const { notify } = useNotifications();
@@ -86,7 +87,7 @@ export function DobListStateProvider({ fields, rows, onRefresh, loading, isFetch
 
   const openEdit = useCallback((id) => {
     if (!id) return;
-    window.location.hash = `#dob_tasks/${id}`;
+    window.location.hash = buildDobItemHash(id);
   }, []);
 
   const clearSaveError = useCallback(() => setSaveError(''), []);

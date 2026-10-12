@@ -66,7 +66,15 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import TableChartIcon from "@mui/icons-material/TableChart";
 const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
+import {
+  DOB_REQUESTS_HASH,
+  buildDobCreateHash,
+  buildDobItemHash,
+  isLegacyDobHash,
+  toRequestsHash,
+} from "./features/dob/lib/dobRoute";
 const DobTaskEditView = React.lazy(() => import("./features/dob/DobTaskEditView"));
+const RequestCreateView = React.lazy(() => import("./features/dob/components/requestForm/RequestCreateView"));
 import TasksView from "./TasksView";
 import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
 import { useNotifications } from './NotificationsProvider';
@@ -1479,8 +1487,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const mId = low.match(/(?:elementid|\bid)\s*=\s*(\d{1,19})/);
     if (mId) { elementId = mId[1]; elementKind = "element"; }
     else {
-      // Dob: #dob_tasks/9723 or #dob/10
-      const mDob = raw.match(/#\/?(?:dob_tasks|dob)\/(\d{1,19})/i);
+      // Dob: #dob_requests/9723, #dob_tasks/9723 (старый роут) или #dob/10
+      const mDob = raw.match(/#\/?(?:dob_requests|dob_tasks|dob)\/(\d{1,19})/i);
       if (mDob) elementId = mDob[1];
       else {
         // 2) путь /tasks/10
@@ -1519,7 +1527,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       else elementAction = v;
     } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
     else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
-    return { view, elementId, elementAction, elementListGuid, elementKind };
+    // #dob_requests/new — форма создания заявки (роут раздела, 2026-10-12).
+    const dobCreate = view === "dob" && /#\/?(?:dob_requests|dob_tasks|dob)\/new(\b|[?&#/])/i.test(raw);
+    return { view, elementId, elementAction, elementListGuid, elementKind, dobCreate };
   };
   const getViewFromHash = () => parseHash().view;
   const [currentView, setCurrentView] = useState(() => getViewFromHash());
@@ -1527,6 +1537,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
   const [hashElementListGuid, setHashElementListGuid] = useState(() => parseHash().elementListGuid);
   const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
+  const [hashDobCreate, setHashDobCreate] = useState(() => !!parseHash().dobCreate);
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
 
@@ -1540,16 +1551,27 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setHashElementAction(p.elementAction);
       setHashElementListGuid(p.elementListGuid);
       setHashElementKind(p.elementKind || "auto");
+      setHashDobCreate(!!p.dobCreate);
+      // Роут переименован: #dob_tasks → #dob_requests. Старые ссылки (из писем,
+      // закладок и старых ссылок в таблице задач) перезаписываем на новый адрес.
+      if (isLegacyDobHash(window.location.hash)) {
+        window.location.hash = toRequestsHash(window.location.hash);
+      }
     };
     window.addEventListener("hashchange", onHash);
     onHash();
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useEffect(() => {
-    const desired = currentView === "dob" ? "#dob_tasks" : currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
+    const desired = currentView === "dob" ? DOB_REQUESTS_HASH : currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
     const parsed = parseHash();
     if (currentView === "form") {
       if (window.location.hash && window.location.hash.toLowerCase() !== "#form") window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return;
+    }
+    // Форма создания: адрес не переписываем (#dob_requests/new).
+    if (currentView === "dob" && parsed.dobCreate) {
+      if (!/^#\/?dob_requests\/new/i.test(window.location.hash)) window.location.hash = buildDobCreateHash();
       return;
     }
     if (currentView === "dob" && parsed.elementId) {
@@ -1711,6 +1733,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   }
 
   if (currentView === "dob") {
+    const isDobCreate = !!hashDobCreate && !hashElementId;
     const isDobEdit = !!hashElementId && /^\d+$/.test(String(hashElementId));
     return (
       <ThemeProvider theme={figmaTheme}>
@@ -1726,18 +1749,20 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           <List>
             <ListItem disablePadding><ListItemButton onClick={handleOpenForm}><ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
             <ListItem disablePadding><ListItemButton onClick={handleOpenTasks}><ListItemIcon><AssignmentIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
-            <ListItem disablePadding><ListItemButton onClick={()=> { window.location.hash = '#dob_tasks'; setHashElementId(null); }} selected={!isDobEdit}><ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
+            <ListItem disablePadding><ListItemButton onClick={()=> { window.location.hash = DOB_REQUESTS_HASH; setHashElementId(null); }} selected={!isDobEdit && !hashDobCreate}><ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
             {canOpenManagerPreview && (<ListItem disablePadding><ListItemButton onClick={handleOpenManagerPreview}><ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>)}
           </List>
           <Box sx={{ flex: 1 }} /><Divider /><Box sx={{ p: 2 }}><Typography variant="caption" color="text.secondary">{userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}</Typography></Box>
         </Drawer>
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: { xs: 'auto', md: 'calc(100vh - 0px)' }, overflowX: 'hidden' }}>
           <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
-            {isDobEdit
+            {isDobCreate
+              ? <RequestCreateView onOpenMenu={() => setDrawerOpen(true)} />
+              : isDobEdit
               ? <DobTaskEditView
                   id={String(hashElementId)}
                   listGuid={hashElementListGuid || undefined}
-                  onBackHash={hashElementListGuid ? "#tasks" : "#dob_tasks"}
+                  onBackHash={hashElementListGuid ? "#tasks" : DOB_REQUESTS_HASH}
                   onOpenMenu={() => setDrawerOpen(true)}
                 />
               : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} />}

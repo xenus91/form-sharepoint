@@ -131,7 +131,7 @@ function behaviourRecord({ title, isDobTask }) {
 
 describe("DobTaskEditView — задача ДОБ по записи TaskBehaviour", () => {
   beforeEach(() => {
-    window.location.hash = `#dob_tasks/41?list=${MAIN_GUID}`;
+    window.location.hash = `#dob_requests/41?list=${MAIN_GUID}`;
     document.body.innerHTML = "";
     behaviourMap = new Map();
   });

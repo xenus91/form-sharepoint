@@ -101,7 +101,7 @@ async function renderForm() {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider theme={createTheme()}>
           <NotificationsProvider>
-            <DobTaskEditView id={77} listGuid={LIST_GUID} onBackHash="#dob_tasks" />
+            <DobTaskEditView id={77} listGuid={LIST_GUID} onBackHash="#dob_requests" />
           </NotificationsProvider>
         </ThemeProvider>
       </QueryClientProvider>,
@@ -114,7 +114,7 @@ async function renderForm() {
 
 describe("DobTaskEditView — поля формы по типам колонок", () => {
   beforeEach(() => {
-    window.location.hash = `#dob_tasks/77?list=${LIST_GUID}`;
+    window.location.hash = `#dob_requests/77?list=${LIST_GUID}`;
     document.body.innerHTML = "";
   });
 

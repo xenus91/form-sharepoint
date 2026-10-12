@@ -54,7 +54,7 @@ describe("dob/lib/relatedItem", () => {
   });
 
   it("relatedItemRoute ведёт в форму заявки с её списком", () => {
-    expect(relatedItemRoute({ listId: DOB_LIST, itemId: 2 })).toBe(`#dob_tasks/2?list=${DOB_LIST}`);
+    expect(relatedItemRoute({ listId: DOB_LIST, itemId: 2 })).toBe(`#dob_requests/2?list=${DOB_LIST}`);
     expect(relatedItemRoute(null)).toBe("");
   });
 });

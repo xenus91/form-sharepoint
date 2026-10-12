@@ -3,13 +3,15 @@
 //
 // • main-задача (compositeId "main:<Id>") → #tasks/<Id> — существующая форма
 //   основного сайта.
-// • задача внешнего источника (например "dob:1") → #dob_tasks/<Id>?list=<guid>
+// • задача внешнего источника (например "dob:1") → #dob_requests/<Id>?list=<guid>
+//   (роут переименован 2026-10-12, старый #dob_tasks понимается приложением)
 //   — та же форма, что в разделе «Заявки ДОБ» (DobTaskEditView), но с полями и
 //   сохранением в список источника (GUID берём из конфига источника).
 //
 // Вынесено отдельно от TasksView, чтобы поведение было тестируемым.
 
 import { parseCompositeId } from "../../../tasks/multiSource";
+import { buildDobItemHash } from "../../dob/lib/dobRoute";
 import { isResultCheckTask } from "../../../tasks/contentTypeFields";
 import { TASKS_LIST_GUID } from "../../../tasks/config";
 
@@ -37,14 +39,14 @@ export function buildTaskFormHash(compositeId, sources = [], task = null) {
     // формой ДОБ (тот же экран DobTaskEditView), но список — основной.
     // Задача стандартного типа остаётся в карточке #tasks/<Id>.
     if (isDialogResultTask(task)) {
-      return `#dob_tasks/${parsed.id}?list=${String(TASKS_LIST_GUID || "").toLowerCase()}`;
+      return buildDobItemHash(parsed.id, TASKS_LIST_GUID);
     }
     return `#tasks/${parsed.id}`;
   }
   const source = (sources || []).find((s) => s && s.id === parsed.sourceId);
   const listGuid = source?.listGuid ? String(source.listGuid).toLowerCase() : null;
   if (!listGuid) return null;
-  return `#dob_tasks/${parsed.id}?list=${listGuid}`;
+  return buildDobItemHash(parsed.id, listGuid);
 }
 
 /**

@@ -25,6 +25,7 @@ import {
 import { Box, CircularProgress, Typography, Alert } from '@mui/material';
 import { useDobListState } from '../state/DobListStateContext';
 import { isRowCompleted, statusInternalOf } from '../lib/dobRowStatus';
+import { selectRequestFields } from '../lib/requestFields';
 
 ModuleRegistry.registerModules([
   AllCommunityModule,
@@ -84,36 +85,14 @@ function htmlToCellText(value) {
 
 // ---------- column definitions ----------
 
-function buildColumnDefs(fields) {
+function buildColumnDefs(fields, ctFieldNames) {
   if (!fields || fields.length === 0) return [];
   // Завершённые задачи — только просмотр (правило общее для всех интерфейсов).
   const statusInternalGlobal = statusInternalOf(fields);
-  const systemSkip = new Set([
-    'File_x0020_Type', 'ComplianceAssetId', 'LinkTitle', 'LinkTitleNoMenu', 'PermMask',
-    'MetaInfo', 'FileRef', 'FileDirRef', 'FileLeafRef', 'ContentType', 'ContentTypeId',
-    '_UIVersionString', 'DocIcon', 'ItemChildCount', 'FolderChildCount',
-    'OData__ContentTypeId',
-  ]);
-  const ordered = [];
-  const priority = ['ID', 'Title'];
-  const fieldMap = new Map(fields.map((f) => [f.InternalName, f]));
-  for (const name of priority) {
-    const f = fieldMap.get(name);
-    if (f) ordered.push(f);
-  }
-  for (const f of fields) {
-    if (ordered.includes(f)) continue;
-    if (f.Hidden) continue;
-    if (f.InternalName === 'ChekResult' || /chekresult/i.test(f.InternalName || '') || /результат.*провер/i.test(f.Title || '')) continue;
-    if (systemSkip.has(f.InternalName)) continue;
-    if (f.InternalName === 'ContentType' || f.Title === 'Тип контента' || (f.Title || '').toLowerCase().includes('тип контента')) continue;
-    const t = (f.TypeAsString || '').toLowerCase();
-    if (['calculated', 'computed', 'text', 'choice', 'number', 'currency', 'datetime', 'note', 'boolean', 'url', 'user', 'integer', 'counter'].includes(t) || f.InternalName === 'Attachments' || f.InternalName === 'UserFail' || f.InternalName === 'ChekResult') {
-      ordered.push(f);
-    } else if (!f.Hidden && !systemSkip.has(f.InternalName)) {
-      ordered.push(f);
-    }
-  }
+  // Состав колонок — lib/requestFields: поля типов контента списка + остальные
+  // несистемные (требование 2026-10-12). Локальный список исключений удалён —
+  // он жил только здесь и расходился с формой.
+  const ordered = selectRequestFields(fields, { ctFieldNames });
 
   const cols = [];
   for (const f of ordered) {
@@ -395,7 +374,7 @@ const HEADER_TEMPLATE = `
 
 // ---------- component ----------
 
-export default function DobGrid({ fields, rows }) {
+export default function DobGrid({ fields, rows, ctFieldNames = null }) {
   const gridRef = useRef(null);
   const {
     selectedId,
@@ -407,7 +386,10 @@ export default function DobGrid({ fields, rows }) {
     loading,
   } = useDobListState();
 
-  const baseColumnDefs = useMemo(() => buildColumnDefs(fields || ctxFields || []), [fields, ctxFields]);
+  const baseColumnDefs = useMemo(
+    () => buildColumnDefs(fields || ctxFields || [], ctFieldNames),
+    [fields, ctxFields, ctFieldNames],
+  );
   const statusInternal = useMemo(() => statusInternalOf(fields || ctxFields || []), [fields, ctxFields]);
   // Завершённую задачу нельзя править и пакетной записью (кнопка «Сохранить»).
   const rowCompletedClassRules = useMemo(
@@ -574,4 +556,7 @@ export default function DobGrid({ fields, rows }) {
 DobGrid.propTypes = {
   fields: PropTypes.array,
   rows: PropTypes.array,
+  // Внутренние имена полей из FieldLinks типов контента списка — по ним решаем,
+  // какие поля показывать в таблице заявок (см. selectRequestFields).
+  ctFieldNames: PropTypes.oneOfType([PropTypes.instanceOf(Set), PropTypes.array]),
 };

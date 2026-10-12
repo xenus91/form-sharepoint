@@ -12,7 +12,7 @@
 // на другой элемент — писать по ним в main-список нельзя. Поэтому здесь тот же
 // визуальный язык TaskCard (Paper 28px, полоса статуса, заголовок/описание,
 // кнопка действия, футер «Исполнитель • Статус» и «#Id»), но действия ведут в
-// форму редактирования этого источника (как dob_tasks/[id]).
+// форму редактирования этого источника (как dob_requests/[id]).
 
 import React from "react";
 import { Box, Paper, Typography, Chip, Button, CircularProgress } from "@mui/material";

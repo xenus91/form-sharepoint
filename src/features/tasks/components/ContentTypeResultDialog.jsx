@@ -131,10 +131,10 @@ export default function ContentTypeResultDialog({
   onSubmit,
   onClose,
   // inline: та же форма, но не в модальном окне — её показывает форма ДОБ
-  // (страница #dob_tasks/<id>), чтобы задача «Результат проверки ООБ» закрывалась
+  // (страница #dob_requests/<id>), чтобы задача «Результат проверки ООБ» закрывалась
   // кнопками результата прямо на экране задачи.
   inline = false,
-  // submitRef: страница (#dob_tasks/<id>) кладёт в него submit формы — кнопка
+  // submitRef: страница (#dob_requests/<id>) кладёт в него submit формы — кнопка
   // «Сохранить» в шапке страницы работает так же, как в форме заявки ДОБ.
   submitRef = null,
   // listGuid — список ЗАДАЧИ: поля типа контента читаем у него (а не у основного
@@ -150,7 +150,7 @@ export default function ContentTypeResultDialog({
   // Значения формы «наружу» — страница следит за картинками в rich-тексте
   // (удалили картинку из текста → вложение тоже удаляем).
   onValuesChange = null,
-  // «Пульт» для страницы-владельца формы (#dob_tasks/<id>): попросить убрать
+  // «Пульт» для страницы-владельца формы (#dob_requests/<id>): попросить убрать
   // картинку удалённого вложения из rich-текста. Значения формы живут ВНУТРИ
   // диалога, поэтому снаружи их можно изменить только так — иначе каскад
   // «удалили вложение из блока вложений» не доходил бы до текста.
@@ -221,7 +221,7 @@ export default function ContentTypeResultDialog({
     setValues(next);
     setProblems([]);
     setTouched(false);
-    // Владелец формы (страница #dob_tasks/<id>) следит за картинками в тексте:
+    // Владелец формы (страница #dob_requests/<id>) следит за картинками в тексте:
     // сообщаем ему стартовые значения, чтобы он видел ПОСЛЕДУЮЩИЕ удаления.
     onChangeRef.current?.(next);
   }, [open, inline, task, form.controls]);
@@ -303,7 +303,7 @@ export default function ContentTypeResultDialog({
     if (resultProblem) found.unshift(resultProblem);
     if (found.length > 0) {
       setProblems(found);
-      // Страница (#dob_tasks/<id>) показывает snackbar с предупреждением — форма
+      // Страница (#dob_requests/<id>) показывает snackbar с предупреждением — форма
       // сама про ошибку молчит только списком под полями.
       onValidationError?.(found);
       return;
@@ -785,7 +785,7 @@ export default function ContentTypeResultDialog({
     </>
   );
 
-  // ⭐ Страница формы (#dob_tasks/<id>) — тот же формат, что у заявки ДОБ:
+  // ⭐ Страница формы (#dob_requests/<id>) — тот же формат, что у заявки ДОБ:
   // секции с заголовками, компактные поля и кнопки внизу, без «диалоговой» рамки.
   if (inline) {
     return (

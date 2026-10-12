@@ -10,7 +10,7 @@ import { pickInProgressChoice } from '../../../tasks/mutations/takeTaskInWork';
 import { isCompletedStatus, isInProgressStatus } from '../../../tasks/status';
 
 // ⭐ Списки основного сайта (ProblemsPallet/Tasks) редактируются ТОЙ ЖЕ формой, что
-// заявки ДОБ: #dob_tasks/<id>?list=<GUID основного списка>. Для таких списков ходим
+// заявки ДОБ: #dob_requests/<id>?list=<GUID основного списка>. Для таких списков ходим
 // через основной клиент (свой digest и прокси /api), для остальных — через DOB-клиент
 // (/dob-api/sites/dob/doblogistic). Так задача «Результат проверки ООБ» открывается
 // в форме ДОБ, а пишется в свой список.
@@ -51,6 +51,27 @@ function readConfig(listGuid) {
   return isMainSiteList(listGuid) ? { __noCache: true } : undefined;
 }
 
+
+// Типы контента списка вместе с FieldLinks — нужны и для состава колонок
+// страницы заявок (#dob_requests), и для выбора типа в форме создания.
+const contentTypeCache = new Map();
+export async function getDobContentTypes(listGuid = DOB_LIST_GUID) {
+  const guid = normalizeListGuid(listGuid);
+  if (contentTypeCache.has(guid)) return contentTypeCache.get(guid);
+  const url = `${listApiOf(guid)}/contenttypes?$select=Id,StringId,Name&$expand=FieldLinks&$top=100`;
+  const { data } = await httpOf(guid).get(url, {
+    ...(readConfig(guid) || {}),
+    headers: { Accept: 'application/json;odata=verbose' },
+  });
+  const list = Array.isArray(data?.d?.results) ? data.d.results : (Array.isArray(data?.d) ? data.d : []);
+  contentTypeCache.set(guid, list);
+  return list;
+}
+
+/** Сброс кэша типов контента (тесты / смена списка). */
+export function clearDobContentTypeCache() {
+  contentTypeCache.clear();
+}
 
 // Fetch ListItemEntityTypeFullName for MERGE payloads (кэш по списку)
 const entityTypeCache = new Map();
@@ -439,7 +460,7 @@ export async function createDobItem(payload, listGuid = DOB_LIST_GUID) {
 /**
  * Взятие задачи/заявки в работу ПРЯМО в её списке (MERGE статуса «в работе»).
  *
- * Зачем: форма #dob_tasks/<id>?list=<GUID> открывается прямой ссылкой (из письма,
+ * Зачем: форма #dob_requests/<id>?list=<GUID> открывается прямой ссылкой (из письма,
  * из таблицы, из закладки) — кнопку «Взять в работу» в списке/таблице можно
  * пропустить, и тогда результат сохранится без исполнителя и статуса. Форма
  * поэтому ТРЕБУЕТ взятия в работу до ввода данных и зовёт этот метод.

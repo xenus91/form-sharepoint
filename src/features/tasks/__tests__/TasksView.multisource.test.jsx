@@ -766,7 +766,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     window.location.hash = "#tasks/13";
     renderTasksView({ initialElementId: "13" });
     await settle(3500);
-    expect(window.location.hash).toBe(`#dob_tasks/13?list=${MAIN_GUID}`);
+    expect(window.location.hash).toBe(`#dob_requests/13?list=${MAIN_GUID}`);
   }, 40000);
 
   it("«Изменить» в таблице: строка без ContentTypeId — тип дочитывается, открывается форма ДОБ", async () => {
@@ -798,7 +798,7 @@ describe("TasksView — multi-source (#tasks)", () => {
 
     // тип контента дочитан у элемента (items(14)) и увёл на форму ДОБ
     expect(state.requests.some((r) => /items\(14\)/.test(r.url))).toBe(true);
-    expect(window.location.hash).toBe(`#dob_tasks/14?list=${MAIN_GUID}`);
+    expect(window.location.hash).toBe(`#dob_requests/14?list=${MAIN_GUID}`);
   }, 40000);
 
   it("действия по задаче открываются В ТОЧКЕ КЛИКА по строке (popup, а не колонка)", async () => {
@@ -876,7 +876,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(window.location.hash).not.toBe(hashBeforeEdit);
-    expect(window.location.hash.toLowerCase()).toBe("#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3");
+    expect(window.location.hash.toLowerCase()).toBe("#dob_requests/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3");
   }, 30000);
 
   it("в попапе на main-строке есть «Взять в работу», и она шлёт MERGE в основной список", async () => {
@@ -1163,7 +1163,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     await settle(300);
 
     // ⭐ как задачи сайта dob: открывается форма ДОБ, но с основным списком
-    expect(window.location.hash).toBe(`#dob_tasks/13?list=${MAIN_GUID}`);
+    expect(window.location.hash).toBe(`#dob_requests/13?list=${MAIN_GUID}`);
     // «молча» ничего не пишем — результат соберёт форма закрытия
     expect(state.requests.some((r) => r.source === "main" && r.merge)).toBe(false);
   }, 40000);
@@ -1195,7 +1195,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     const edit = [...popup.querySelectorAll("button")].find((b) => b.textContent.trim() === "Изменить");
     await act(async () => { mouseClick(edit); await wait200(); });
     await settle(300);
-    expect(window.location.hash).toBe(`#dob_tasks/13?list=${MAIN_GUID}`);
+    expect(window.location.hash).toBe(`#dob_requests/13?list=${MAIN_GUID}`);
     expect(state.requests.some((r) => r.source === "main" && r.merge)).toBe(false);
   }, 40000);
 

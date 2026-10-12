@@ -137,6 +137,7 @@ function taskDescriptionText(raw) {
 }
 import { resolveRelatedRef } from './lib/relatedItem';
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from '../../tasks/status';
+import { DOB_REQUESTS_HASH } from './lib/dobRoute';
 
 
 function isEditableField(f) {
@@ -153,9 +154,9 @@ function isEditableField(f) {
 
 // listGuid — какой список редактируем. По умолчанию — список заявок ДОБ
 // (раздел «Заявки ДОБ»). #tasks передаёт сюда GUID списка задач источника
-// (например, RequestsTask ООБ), чтобы форма работала как dob_tasks/[id],
+// (например, RequestsTask ООБ), чтобы форма работала как dob_requests/[id],
 // но с полями и сохранением именно в список задачи.
-// onBackHash — куда возвращает кнопка «Назад» (по умолчанию #dob_tasks).
+// onBackHash — куда возвращает кнопка «Назад» (по умолчанию #dob_requests).
 // ── Поля формы по ТИПАМ колонок SharePoint ────────────────────────────────────
 const CHOICE_TYPES = new Set(['choice', 'multichoice', 'gridchoice', 'combobox', 'outcomechoice']);
 const USER_TYPES = new Set(['user', 'usermulti']);
@@ -276,7 +277,7 @@ async function resolveDobPrincipal(id) {
   return person;
 }
 
-export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = '#dob_tasks' }) {
+export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = DOB_REQUESTS_HASH }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
   const [form, setForm] = useState({});
@@ -705,7 +706,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
 
   const isDefaultList = listGuid === DOB_LIST_GUID;
   const handleBack = useCallback(() => {
-    window.location.hash = onBackHash || '#dob_tasks';
+    window.location.hash = onBackHash || DOB_REQUESTS_HASH;
   }, [onBackHash]);
 
   // Статус задачи и choices поля Status — чтобы подобрать статус «в работе»
@@ -720,7 +721,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   }, [fields]);
   const taskCompleted = isCompletedStatus(taskStatus, item?.PercentComplete);
   // Завершённую задачу править нельзя — НИ в таблице, НИ по прямой ссылке
-  // (#dob_tasks/<id>?list=<GUID>): форма открывается только на просмотр.
+  // (#dob_requests/<id>?list=<GUID>): форма открывается только на просмотр.
   const readOnly = taskCompleted;
   const taskInProgress = isInProgressStatus(taskStatus);
   // Требовать взятие, только когда статус ЯВНО «не начата»: у заявок без поля
@@ -839,7 +840,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   ) : null;
 
   // «Шлюз»: задача ещё не взята в работу — данных вносить нельзя, пока не взяли.
-  // Прямая ссылка (#dob_tasks/<id>?list=<GUID>) открывает форму в обход списка,
+  // Прямая ссылка (#dob_requests/<id>?list=<GUID>) открывает форму в обход списка,
   // где кнопка «Взять в работу» обязательна.
   const takeGate = (
     <Box sx={{ p: { xs: 1.5, md: 2 }, display: 'grid', placeItems: 'center', minHeight: 220 }} data-testid="dob-take-gate">

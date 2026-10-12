@@ -1,8 +1,8 @@
 // src/features/tasks/__tests__/openTaskForm.test.js
 // Переход из таблицы #tasks в форму редактирования:
 //   • main → существующий роут #tasks/<Id>;
-//   • dob (внешний источник) → #dob_tasks/<Id>?list=<GUID списка источника>,
-//     то есть та же форма, что dob_tasks/[id], но по списку задачи.
+//   • dob (внешний источник) → #dob_requests/<Id>?list=<GUID списка источника>,
+//     то есть та же форма, что dob_requests/[id], но по списку задачи.
 
 import { describe, it, expect } from "vitest";
 import { buildTaskFormHash, isDialogResultTask } from "../lib/openTaskForm";
@@ -16,9 +16,9 @@ describe("buildTaskFormHash", () => {
     expect(buildTaskFormHash("main:10", [MAIN, DOB])).toBe("#tasks/10");
   });
 
-  it("задача dob → #dob_tasks/<id>?list=<guid источника> (нижний регистр)", () => {
+  it("задача dob → #dob_requests/<id>?list=<guid источника> (нижний регистр)", () => {
     expect(buildTaskFormHash("dob:1", [MAIN, DOB])).toBe(
-      "#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3",
+      "#dob_requests/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3",
     );
   });
 
@@ -34,7 +34,7 @@ describe("buildTaskFormHash", () => {
     const check = { sourceId: "main", Id: 13, contentTypeId: RESULT_CHECK_OOO_CT_ID };
     expect(isDialogResultTask(check)).toBe(true);
     expect(buildTaskFormHash("main:13", [MAIN, DOB], check)).toBe(
-      "#dob_tasks/13?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+      "#dob_requests/13?list=463b634e-a71a-4fef-9a1f-b803431d8639",
     );
     // задача обычного типа не меняется
     expect(isDialogResultTask({ sourceId: "main", Id: 10, contentTypeId: "0x0108AAAA" })).toBe(false);
@@ -51,7 +51,7 @@ describe("buildTaskFormHash", () => {
   it("реальный id из списка (тип + дочерний сегмент) уводит на форму ДОБ", () => {
     const task = { Id: 13, ContentTypeId: RESULT_CHECK_OOO_CT_FULL_ID };
     expect(buildTaskFormHash("main:13", [MAIN, DOB], task)).toBe(
-      "#dob_tasks/13?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+      "#dob_requests/13?list=463b634e-a71a-4fef-9a1f-b803431d8639",
     );
     expect(isDialogResultTask(task)).toBe(true);
   });
@@ -59,11 +59,11 @@ describe("buildTaskFormHash", () => {
   it("тип контента в объектной/raw-форме тоже уводит на форму ДОБ", () => {
     const task = { Id: 7, raw: { ContentTypeId: { StringValue: RESULT_CHECK_OOO_CT_ID } } };
     expect(buildTaskFormHash("main:7", [MAIN, DOB], task)).toBe(
-      "#dob_tasks/7?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+      "#dob_requests/7?list=463b634e-a71a-4fef-9a1f-b803431d8639",
     );
     const byName = { Id: 8, raw: { ContentType: { Name: "Результат проверки ООБ" } } };
     expect(buildTaskFormHash("main:8", [MAIN, DOB], byName)).toBe(
-      "#dob_tasks/8?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+      "#dob_requests/8?list=463b634e-a71a-4fef-9a1f-b803431d8639",
     );
   });
 
