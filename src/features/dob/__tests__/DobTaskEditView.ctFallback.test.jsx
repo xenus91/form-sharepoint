@@ -23,7 +23,7 @@ const LIST_FIELDS = [
   { InternalName: "Title", Title: "Имя задачи", TypeAsString: "Text", Required: true },
   { InternalName: "Predecessors", Title: "Предшественники", TypeAsString: "Text" },
   { InternalName: "PercentComplete", Title: "% завершения", TypeAsString: "Number" },
-  { InternalName: "DobSearchResult", Title: "Результат проверки", TypeAsString: "Choice", Choices: { results: ["Годен", "Брак"] } },
+  { InternalName: "TaskOutcome", Title: "Результат задачи", TypeAsString: "Choice", Choices: { results: ["Годен", "Брак"] } },
 ];
 
 // «В работе» — чтобы форма показывала поля, а не гейт «взять в работу»
@@ -110,6 +110,11 @@ describe("DobTaskEditView — состав полей по типу контен
     expect(warning.textContent).toContain("Состав типа контента");
     expect(warning.textContent).toContain("показаны все поля списка");
     expect(warning.textContent).toContain("404");
+
+    // главного ради чего тест: секции «Результат проверки» быть не должно —
+    // такой колонки нет ни в типе контента, ни в списке
+    expect(document.body.textContent).not.toContain("Результат проверки");
+    expect(document.querySelector('[data-testid="rich-editor"]')).toBeFalsy();
     act(() => root.unmount());
   });
 

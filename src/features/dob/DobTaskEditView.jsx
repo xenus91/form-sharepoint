@@ -646,6 +646,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         const lower = String(rawMsg).toLowerCase();
         if (lower.includes('без имени типа') || lower.includes('without type') || lower.includes('expected type') || lower.includes('primitivevalue') || lower.includes('startobject') || lower.includes('непредвиденный узел')) {
           console.warn('[DobEdit][save] fallback to minimal payload (ChekResult only) due to type error', rawMsg.slice(0,300));
+          if (!chekField) throw e; // колонки результата нет — минимальный payload бессмыслен
           const chekKey = toODataKey(chekInternal);
           const minimal = { [chekKey]: payload[chekKey] ?? prepared[chekInternal] ?? '' };
           // Title тоже попробуем если есть
@@ -961,7 +962,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       const title = String(x.Title || '').trim().toLowerCase();
       return title === 'результат проверки' || /^результат проверки\s*\(.*\)$/.test(title);
     });
-    return exactTitle || { InternalName: 'ChekResult', Title: 'Результат проверки (ChekResult)', TypeAsString: 'Note', Required: false };
+    // Раньше здесь был запасной вариант — выдуманное поле ChekResult. Из-за него
+    // в форме списка БЕЗ такой колонки (например, RequestsTask) появлялась секция
+    // «Результат проверки», которой нет ни в типе контента, ни в списке, а при
+    // сохранении в payload уходил несуществующий столбец. Теперь: нет колонки —
+    // нет секции.
+    return exactTitle || null;
   }, [fields]);
 
   const chekInternal = chekField?.InternalName || 'ChekResult';
@@ -1256,6 +1262,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       )}
       {needsTake ? takeGate : (
       <>
+      {chekField && (
       <Box
         className="dob-rich-section"
         data-dob-invalid={richInvalid ? 'true' : undefined}
@@ -1285,6 +1292,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           footer={attachmentsBlock}
         />
       </Box>
+      )}
 
       {ctSource && ctSource !== 'list-fields' && itemCtLabel && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }} data-testid="ct-source-caption">
