@@ -38,6 +38,10 @@ const ITEM = {
 vi.mock("../api/dobApi", () => ({
   getDobFields: vi.fn(async () => FIELDS),
   getDobContentTypeFields: vi.fn(async () => FIELDS),
+  // форма читает подробный вариант: поля + признак источника
+  getDobContentTypeFieldsDetailed: vi.fn(async () => ({
+    fields: FIELDS, source: 'fieldlinks', ctId: '0x0100TEST', error: '',
+  })),
   getDobItem: vi.fn(async () => ITEM),
   updateDobItem: vi.fn(async () => ({ ok: true })),
   uploadDobAttachment: vi.fn(async (id, file) => {
@@ -92,7 +96,14 @@ vi.mock("../../tasks/components/PersonFieldAutocomplete", () => ({
 
 vi.mock("../../../tasks/contentTypeFields", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, fetchContentTypeFields: vi.fn(async () => FIELDS) };
+  return {
+    ...actual,
+    fetchContentTypeFields: vi.fn(async () => FIELDS),
+    // форма задачи теперь читает подробный вариант (с признаком источника полей)
+    fetchContentTypeFieldsDetailed: vi.fn(async () => ({
+      fields: FIELDS, source: "fieldlinks", ctId: "0x0100TEST", error: "",
+    })),
+  };
 });
 
 const { default: DobTaskEditView } = await import("../DobTaskEditView");

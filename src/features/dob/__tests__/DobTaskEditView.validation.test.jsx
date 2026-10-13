@@ -37,6 +37,10 @@ const ITEM = {
 vi.mock("../api/dobApi", () => ({
   getDobFields: vi.fn(async () => LIST_FIELDS),
   getDobContentTypeFields: vi.fn(async () => LIST_FIELDS),
+  // форма читает подробный вариант: поля + признак источника
+  getDobContentTypeFieldsDetailed: vi.fn(async () => ({
+    fields: LIST_FIELDS, source: 'fieldlinks', ctId: '0x0100TEST', error: '',
+  })),
   getDobItem: vi.fn(async () => ITEM),
   updateDobItem: vi.fn(async () => ({ ok: true })),
   uploadDobAttachment: vi.fn(async () => ({})),

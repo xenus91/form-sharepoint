@@ -177,7 +177,7 @@ export async function fetchContentTypeFieldLinks(ctId, opts = {}) {
   // 1) Коллекция типов контента списка (тот же вызов, что в resultField.js).
   try {
     const resp = await get(
-      `${listApi}/contenttypes?$select=Id,StringId,Name&$expand=FieldLinks&$top=50`,
+      `${listApi}/contenttypes?$select=Id,StringId,Name,Description&$expand=FieldLinks&$top=100`,
       ACCEPT,
     );
     const types = verboseList(resp?.data);
@@ -236,8 +236,25 @@ function fieldFromLink(link) {
  * @returns {Promise<Array<object>>}
  */
 export async function fetchContentTypeFields(ctId, opts = {}) {
+  const detailed = await fetchContentTypeFieldsDetailed(ctId, opts);
+  return detailed.fields;
+}
+
+/**
+ * То же, что fetchContentTypeFields, но с признаком источника полей.
+ *
+ * Зачем: когда состав типа получить не удалось, функция уходит в фолбэк «все
+ * поля списка» — и форма молча показывала чужой набор колонок (например,
+ * стандартные поля «Задачи рабочего процесса» вместо полей типа контента).
+ * Теперь вызывающий код видит source и может предупредить пользователя.
+ *
+ * @param {string} ctId
+ * @param {{ get?: Function, listApi?: string, forceRefresh?: boolean }} [opts]
+ * @returns {Promise<{fields: Array<object>, source: "fieldlinks"|"ct-fields"|"list-fields"|"none", ctId: string, error: string}>}
+ */
+export async function fetchContentTypeFieldsDetailed(ctId, opts = {}) {
   const id = String(ctId || "").trim();
-  if (!id) return [];
+  if (!id) return { fields: [], source: "none", ctId: "", error: "" };
   const listApi = opts.listApi || TASKS_LIST_API;
   const cacheKey = `${listApi}::${id}`;
   if (!opts.forceRefresh) {
@@ -245,6 +262,7 @@ export async function fetchContentTypeFields(ctId, opts = {}) {
     if (cached) return cached;
   }
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
+  let lastError = "";
 
   // 0) Основной путь: состав — ровно FieldLinks типа контента.
   try {
@@ -284,11 +302,13 @@ export async function fetchContentTypeFields(ctId, opts = {}) {
         fields.push(field);
       }
       if (fields.length > 0) {
-        cacheSet(cacheKey, fields);
-        return fields;
+        const detailed = { fields, source: "fieldlinks", ctId: id, error: "" };
+        cacheSet(cacheKey, detailed);
+        return detailed;
       }
     }
   } catch (e) {
+    lastError = String(e?.response?.status || e?.message || e || "");
     console.warn("[contentTypeFields] FieldLinks path failed", e?.response?.status || e?.message);
   }
 
@@ -299,26 +319,31 @@ export async function fetchContentTypeFields(ctId, opts = {}) {
     const resp = await get(url, { headers: { Accept: "application/json;odata=verbose" } });
     const fields = fieldResults(resp.data);
     if (fields.length > 0) {
-      cacheSet(cacheKey, fields);
-      return fields;
+      const detailed = { fields, source: "ct-fields", ctId: id, error: lastError };
+      cacheSet(cacheKey, detailed);
+      return detailed;
     }
   } catch (e) {
+    lastError = String(e?.response?.status || e?.message || e || "") || lastError;
     if (e?.response?.status && ![400, 404].includes(e.response.status)) {
       console.warn("[contentTypeFields] CT fields failed", e.response.status);
     }
   }
 
   // 2) Последний фолбэк: все поля списка (тип контента недоступен).
+  //    source = "list-fields" — вызывающий код обязан это показать пользователю.
   try {
     const all = await fetchListFields(listApi, get);
     if (all.length > 0) {
-      cacheSet(cacheKey, all);
-      return all;
+      const detailed = { fields: all, source: "list-fields", ctId: id, error: lastError };
+      cacheSet(cacheKey, detailed);
+      return detailed;
     }
   } catch (e) {
+    lastError = String(e?.response?.status || e?.message || e || "") || lastError;
     console.warn("[contentTypeFields] fallback failed", e?.response?.status || e?.message);
   }
-  return [];
+  return { fields: [], source: "none", ctId: id, error: lastError };
 }
 
 /**

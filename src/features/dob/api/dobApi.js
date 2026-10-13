@@ -5,7 +5,7 @@ import { attachmentDisplayUrl } from '../lib/attachmentUrl';
 import { isUserFieldType } from '../lib/dobFormFields';
 import apiClient from '../../../api';
 import { TASKS_LIST_API, TASKS_LIST_GUID } from '../../../tasks/config';
-import { fetchContentTypeFields } from '../../../tasks/contentTypeFields';
+import { fetchContentTypeFields, fetchContentTypeFieldsDetailed } from '../../../tasks/contentTypeFields';
 import { pickInProgressChoice } from '../../../tasks/mutations/takeTaskInWork';
 import { isCompletedStatus, isInProgressStatus } from '../../../tasks/status';
 
@@ -36,6 +36,23 @@ export async function getDobContentTypeFields(ctId, listGuid = DOB_LIST_GUID) {
   if (!ctId) return [];
   const guid = normalizeListGuid(listGuid);
   return fetchContentTypeFields(ctId, {
+    listApi: listApiOf(guid),
+    get: (url, cfg) => httpOf(guid).get(url, cfg ?? readConfig(guid)),
+  });
+}
+
+/**
+ * То же, но с признаком ОТКУДА пришли поля:
+ *   "fieldlinks"  — состав типа контента (нормальный случай);
+ *   "ct-fields"   — поля прямо у типа (FieldLinks не отдались);
+ *   "list-fields" — ФОЛБЭК: все колонки списка, тип не найден. Форму в этом
+ *                   случае нужно показывать с предупреждением.
+ * @returns {Promise<{fields:Array<object>, source:string, ctId:string, error:string}>}
+ */
+export async function getDobContentTypeFieldsDetailed(ctId, listGuid = DOB_LIST_GUID) {
+  if (!ctId) return { fields: [], source: 'none', ctId: '', error: '' };
+  const guid = normalizeListGuid(listGuid);
+  return fetchContentTypeFieldsDetailed(ctId, {
     listApi: listApiOf(guid),
     get: (url, cfg) => httpOf(guid).get(url, cfg ?? readConfig(guid)),
   });

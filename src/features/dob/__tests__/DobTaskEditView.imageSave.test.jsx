@@ -30,6 +30,10 @@ let attachmentsValue = [];
 vi.mock("../api/dobApi", () => ({
   getDobFields: vi.fn(async () => LIST_FIELDS),
   getDobContentTypeFields: vi.fn(async () => LIST_FIELDS),
+  // форма читает подробный вариант: поля + признак источника
+  getDobContentTypeFieldsDetailed: vi.fn(async () => ({
+    fields: LIST_FIELDS, source: 'fieldlinks', ctId: '0x0100TEST', error: '',
+  })),
   getDobItem: vi.fn(async () => ({
     Id: 77,
     Title: "Заявка ДОБ",

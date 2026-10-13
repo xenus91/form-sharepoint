@@ -12,7 +12,7 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment, getDobContentTypeFields, takeDobTaskInWork } from './api/dobApi';
+import { getDobFields, getDobItem, updateDobItem, uploadDobAttachment, getDobAttachments, deleteDobAttachment, getDobContentTypeFieldsDetailed, takeDobTaskInWork } from './api/dobApi';
 import { DOB_LIST_GUID } from './api/dobClient';
 import { useNotifications } from '../../NotificationsProvider';
 import RichEditor from './components/RichEditor';
@@ -22,7 +22,9 @@ import { fileNameFromSrc, removeImgByFileName, removedImgSrcs, removedImgSrcsByV
 import { attachmentDisplayUrl, toDisplayImages, toStorageImages } from './lib/attachmentUrl';
 import { fieldsWithBase64, materializeRichValues } from './lib/materializeRichImages';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
-import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
+import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, contentTypeIdMatches, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
+import { useDobContentTypes } from './hooks/useDobContentTypes';
+import { contentTypeDisplayName } from './lib/requestFields';
 import { useTaskConfiguration } from '../tasks/hooks/useTaskConfiguration';
 import { markDobTask } from '../../services/taskBehaviour';
 import {
@@ -329,12 +331,24 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // колонкам типа контента, а не форму заявки. Конфигурация кешируется react-query.
   const taskConfiguration = useTaskConfiguration({ enabled: !!item });
 
-  const { data: ctFields } = useQuery({
+  // Состав полей типа контента + ОТКУДА он получен. source === 'list-fields'
+  // означает фолбэк «все колонки списка» (тип не найден) — это нужно показать
+  // пользователю, иначе форма молча отображает чужой набор полей.
+  const { data: ctDetailed } = useQuery({
     queryKey: ['dob-ct-fields', listGuid, itemCtId],
-    queryFn: () => getDobContentTypeFields(itemCtId, listGuid),
+    queryFn: () => getDobContentTypeFieldsDetailed(itemCtId, listGuid),
     enabled: !!itemCtId,
     staleTime: 30 * 60 * 1000,
   });
+  const ctFields = ctDetailed?.fields;
+  const ctSource = ctDetailed?.source || '';
+  const ctError = ctDetailed?.error || '';
+
+  // Типы контента списка — чтобы назвать тип, по которому построена форма.
+  const { contentTypes: listContentTypes } = useDobContentTypes(listGuid);
+  const itemCt = (listContentTypes || [])
+    .find((ct) => contentTypeIdMatches(itemCtId, ct?.StringId || ct?.Id)) || null;
+  const itemCtLabel = itemCt ? contentTypeDisplayName(itemCt) : '';
 
   // Load attachments separately for display
   useEffect(() => {
@@ -1234,6 +1248,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       {readOnlyBanner}
 
       {taskHead}
+      {ctSource === 'list-fields' && (
+        <Alert severity="warning" data-testid="ct-fallback-warning" sx={{ mb: 1 }}>
+          Состав типа контента{itemCtLabel ? ` «${itemCtLabel}»` : (itemCtId ? ` ${itemCtId.slice(0, 24)}…` : '')} получить не удалось
+          {ctError ? ` (${ctError})` : ''} — показаны все поля списка. Набор может не совпадать с полями типа.
+        </Alert>
+      )}
       {needsTake ? takeGate : (
       <>
       <Box
@@ -1265,6 +1285,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
           footer={attachmentsBlock}
         />
       </Box>
+
+      {ctSource && ctSource !== 'list-fields' && itemCtLabel && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }} data-testid="ct-source-caption">
+          Поля типа контента: {itemCtLabel}
+        </Typography>
+      )}
 
       <Box
         className="dob-fields-section"

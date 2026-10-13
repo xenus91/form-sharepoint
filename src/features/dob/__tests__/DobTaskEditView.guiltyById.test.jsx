@@ -51,6 +51,10 @@ const state = vi.hoisted(() => ({ item: null, calls: [], fields: null }));
 vi.mock("../api/dobApi", () => ({
   getDobFields: vi.fn(async () => state.fields),
   getDobContentTypeFields: vi.fn(async () => state.fields),
+  // форма читает подробный вариант: поля + признак источника
+  getDobContentTypeFieldsDetailed: vi.fn(async () => ({
+    fields: state.fields, source: 'fieldlinks', ctId: '0x0100TEST', error: '',
+  })),
   getDobItem: vi.fn(async () => state.item),
   updateDobItem: vi.fn(async () => ({ ok: true })),
   uploadDobAttachment: vi.fn(async () => ({})),

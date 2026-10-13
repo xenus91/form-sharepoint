@@ -39,6 +39,10 @@ const state = { status: "Завершена", percent: 1, saves: [] };
 vi.mock("../api/dobApi", () => ({
   getDobFields: vi.fn(async () => FIELDS),
   getDobContentTypeFields: vi.fn(async () => FIELDS),
+  // форма читает подробный вариант: поля + признак источника
+  getDobContentTypeFieldsDetailed: vi.fn(async () => ({
+    fields: FIELDS, source: 'fieldlinks', ctId: '0x0100TEST', error: '',
+  })),
   getDobItem: vi.fn(async () => ({ ...ITEM, Status: state.status, PercentComplete: state.percent })),
   updateDobItem: vi.fn(async (_id, body) => { state.saves.push(body); return { ok: true }; }),
   uploadDobAttachment: vi.fn(async (id, file) => ({ FileName: file?.name || "image.png", ServerRelativeUrl: `/sites/dob/Attachments/${id}/image.png` })),
@@ -73,7 +77,14 @@ vi.mock("../../tasks/components/PersonFieldAutocomplete", () => ({
 
 vi.mock("../../../tasks/contentTypeFields", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, fetchContentTypeFields: vi.fn(async () => FIELDS) };
+  return {
+    ...actual,
+    fetchContentTypeFields: vi.fn(async () => FIELDS),
+    // форма задачи теперь читает подробный вариант (с признаком источника полей)
+    fetchContentTypeFieldsDetailed: vi.fn(async () => ({
+      fields: FIELDS, source: "fieldlinks", ctId: "0x0100TEST", error: "",
+    })),
+  };
 });
 
 const { default: DobTaskEditView } = await import("../DobTaskEditView");
