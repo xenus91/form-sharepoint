@@ -39,13 +39,27 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
 
   if (kind === "richtext") {
     return (
-      <RichEditor
-        value={typeof value === "string" ? value : ""}
-        onChange={(next) => onChange?.(next)}
-        readOnly={readOnly}
-        invalid={!!invalid}
-        isUploading={isUploading}
-      />
+      <Box>
+        <Typography
+          variant="caption"
+          sx={{ display: "block", fontWeight: 700, mb: 0.5, color: invalid ? "#d32f2f" : "text.secondary" }}
+        >
+          {`${title}${required ? " *" : ""}`}
+        </Typography>
+        <RichEditor
+          value={typeof value === "string" ? value : ""}
+          onChange={(next) => onChange?.(next)}
+          readOnly={readOnly}
+          invalid={!!invalid}
+          isUploading={isUploading}
+          placeholder="Введите текст…"
+        />
+        {invalid && (
+          <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "#d32f2f", fontWeight: 600 }}>
+            Обязательное поле
+          </Typography>
+        )}
+      </Box>
     );
   }
 

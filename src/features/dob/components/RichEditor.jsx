@@ -7,7 +7,7 @@
 // `lib/attachmentUrl.js`. Если загрузка не удалась — текст всё равно не теряется
 // (остаётся base64).
 /* eslint-disable react/prop-types */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CKEditor } from '@ckeditor/ckeditor5-react';
 import ClassicEditor from '@ckeditor/ckeditor5-build-classic';
 import { Box, Button, MenuItem, Select, Stack, TextField, Tooltip, Typography } from '@mui/material';
@@ -44,6 +44,10 @@ export default function RichEditor({
   onDeleteImage,
   readOnly = false,
   isUploading = false,
+  // Подсказка внутри пустого редактора. Раньше была жёстко «результат проверки» —
+  // это верно только для задачи, поэтому теперь задаётся вызывающим: форма задачи
+  // и диалог результата оставляют прежний текст, форма заявки — нейтральный.
+  placeholder = 'Введите результат проверки…',
   // Блок вложений показывается ВНУТРИ редактора (внутри его рамки): это часть
   // rich-поля — картинки из текста лежат вложениями, и удалять их удобно рядом.
   footer = null,
@@ -60,7 +64,7 @@ export default function RichEditor({
 
   const config = useMemo(() => ({
     licenseKey: 'GPL',
-    placeholder: 'Введите результат проверки…',
+    placeholder,
     extraPlugins: [UploadAdapterPlugin(onUploadImage)],
     toolbar: {
       items: [
@@ -73,7 +77,7 @@ export default function RichEditor({
     table: { contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'] },
     link: { addTargetToExternalLinks: true },
     language: 'ru',
-  }), [onUploadImage]);
+  }), [onUploadImage, placeholder]);
 
   useEffect(() => {
     if (editorRef.current && value !== undefined && value !== editorRef.current.getData()) {
