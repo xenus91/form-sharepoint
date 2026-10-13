@@ -42,6 +42,9 @@ export default function PersonFieldAutocomplete({
   disabled = false,
   error = false,
   helperText = "",
+  // Подсказка в пустом поле. По умолчанию — прежний текст для задач; форма
+  // заявки передаёт описание поля (Description).
+  placeholder = "Учётная запись, ФИО или e-mail",
 }) {
   const selected = React.useMemo(
     () => (Array.isArray(value) ? value.filter(Boolean) : (value ? [value] : [])),
@@ -236,7 +239,7 @@ export default function PersonFieldAutocomplete({
           <TextField
             {...params}
             label={`${label}${required ? " *" : ""}`}
-            placeholder={selected.length === 0 ? "Учётная запись, ФИО или e-mail" : ""}
+            placeholder={selected.length === 0 ? placeholder : ""}
             error={error}
             helperText={helperText}
             size="small"

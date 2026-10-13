@@ -12,14 +12,17 @@ import RichEditor from "../RichEditor";
 import PersonFieldAutocomplete from "../../../tasks/components/PersonFieldAutocomplete";
 
 export default function RequestFieldControl({ control, value, onChange, invalid = false, readOnly = false, isUploading = false }) {
-  const { internalName, title, kind, required, choices = [], multiple = false, description = "" } = control;
+  const { internalName, title, kind, required, choices = [], multiple = false } = control;
+  // Подпись поля = Description (см. requestFieldLabel). Тот же текст идёт
+  // подсказкой в пустом поле — «Placeholder такой же, как название».
   const common = {
     fullWidth: true,
     size: "small",
     label: title,
+    placeholder: title,
     required: !!required,
     error: !!invalid,
-    helperText: invalid ? "Обязательное поле" : (description ? description.slice(0, 120) : ""),
+    helperText: invalid ? "Обязательное поле" : "",
     inputProps: { "data-testid": `request-field-${internalName}` },
     disabled: readOnly,
   };
@@ -28,6 +31,7 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
     return (
       <PersonFieldAutocomplete
         label={title}
+        placeholder={title}
         value={value ?? (multiple ? [] : null)}
         onChange={(next) => onChange?.(next)}
         multiple={multiple !== false}
@@ -38,9 +42,6 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
   }
 
   if (kind === "richtext") {
-    // Подсказка редактора — описание поля из типа контента (в SP его заполняют
-    // «что писать в это поле»); если описания нет — нейтральный текст.
-    const richPlaceholder = description ? description.replace(/<[^>]*>/g, "").trim() : "";
     return (
       <Box>
         <Typography
@@ -55,7 +56,7 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
           readOnly={readOnly}
           invalid={!!invalid}
           isUploading={isUploading}
-          placeholder={richPlaceholder || "Введите текст…"}
+          placeholder={title}
         />
         {invalid && (
           <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "#d32f2f", fontWeight: 600 }}>

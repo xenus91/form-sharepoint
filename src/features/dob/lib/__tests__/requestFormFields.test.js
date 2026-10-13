@@ -37,6 +37,23 @@ describe("buildRequestFormControls", () => {
     expect(by.Site).toMatchObject({ kind: "url" });
   });
 
+  it("подпись поля — всегда Description; InternalName не показываем", () => {
+    const controls = buildRequestFormControls([
+      f("DueDate", "DateTime", { Title: "Срок", Description: "Укажите срок отгрузки" }),
+      f("Note", "Note", { Title: "Описание", Description: "Что и куда везём" }),
+      f("Volume", "Number", { Title: "Объём" }), // без описания — подпись из Title
+      f("DC", "Text", { Title: "РЦ" }),
+    ]);
+    const by = Object.fromEntries(controls.map((c) => [c.internalName, c]));
+    expect(by.DueDate.title).toBe("Укажите срок отгрузки");
+    expect(by.Note.title).toBe("Что и куда везём");
+    // Нет Description — берём Title (тоже человекочитаемое), не InternalName
+    expect(by.Volume.title).toBe("Объём");
+    expect(by.DC.title).toBe("РЦ");
+    // InternalName в подписях не мелькает
+    for (const c of controls) expect(c.title).not.toBe(c.internalName);
+  });
+
   it("Title, Status и «Результирующий выбор» в форму не попадают", () => {
     const controls = buildRequestFormControls([
       f("Title", "Text", { Title: "Наименование", Required: true }),

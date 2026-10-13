@@ -45,6 +45,16 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
 перекрытием по `FieldLinks` типа контента (`fetchContentTypeFieldsDetailed`).
 Порядок полей — как в типе.
 
+### 2a. Подписи и подсказки — из `Description`
+
+Подпись поля в форме — **всегда `Description`** поля типа контента (в SharePoint
+в нём формулируют «что указать в поле»); `InternalName` не показываем никогда.
+Функция `requestFieldLabel(field)` — единая точка: `Description` → `Title` (тоже
+человекочитаемое) → известный русский оверрайд. Тот же текст идёт и **placeholder**
+пустого поля (у текстовых/даты/числа/выбора, у рич-редактора и у поля человека —
+для этого в `PersonFieldAutocomplete` добавлен параметр `placeholder`). У rich-поля
+название выводится подписью над редактором.
+
 ### 3. `Title`, `Status` и «Результирующий выбор» в форму не попадают
 
 Добавлены в `REQUEST_FORM_SKIP_FIELDS` (`requestFormFields.js`): `Title`,

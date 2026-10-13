@@ -33,6 +33,20 @@ export const REQUEST_FORM_SKIP_FIELDS = new Set([
 const isContentTypeMarker = (f) => String(f?.Title || "").toLowerCase() === "тип контента";
 
 /**
+ * Подпись поля в форме — ВСЕГДА описание из SharePoint (Description): в нём
+ * формулируют «что указать в поле». Внутреннее имя (InternalName) не показываем
+ * никогда. Если описания нет — берём отображаемое имя поля (Title, оно тоже
+ * человекочитаемое), затем — известный русский оверрайд.
+ */
+export function requestFieldLabel(field) {
+  const description = field?.Description ? String(field.Description).trim() : "";
+  if (description) return description;
+  const title = field?.Title ? String(field.Title).trim() : "";
+  if (title && title !== field?.InternalName) return title;
+  return FIELD_LABEL_OVERRIDES[field?.InternalName] || "";
+}
+
+/**
  * «Результирующий выбор» (OutcomeChoice): в заявке таких полей нет — заявка это
  * стартовая форма оформления, результат проверки живёт в задачах. На всякий
  * случай не показываем: даже обязательное OutcomeChoice-поле не должно рисовать
@@ -89,9 +103,7 @@ export function buildRequestFormControls(fields = []) {
     seen.add(field.InternalName);
     controls.push({
       internalName: field.InternalName,
-      title: field.Title && field.Title !== field.InternalName
-        ? String(field.Title)
-        : (FIELD_LABEL_OVERRIDES[field.InternalName] || String(field.InternalName)),
+      title: requestFieldLabel(field),
       kind,
       typeAsString: String(field.TypeAsString || ""),
       required: field.Required === true,
