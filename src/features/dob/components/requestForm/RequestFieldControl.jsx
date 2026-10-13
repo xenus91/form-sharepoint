@@ -38,6 +38,9 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
   }
 
   if (kind === "richtext") {
+    // Подсказка редактора — описание поля из типа контента (в SP его заполняют
+    // «что писать в это поле»); если описания нет — нейтральный текст.
+    const richPlaceholder = description ? description.replace(/<[^>]*>/g, "").trim() : "";
     return (
       <Box>
         <Typography
@@ -52,7 +55,7 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
           readOnly={readOnly}
           invalid={!!invalid}
           isUploading={isUploading}
-          placeholder="Введите текст…"
+          placeholder={richPlaceholder || "Введите текст…"}
         />
         {invalid && (
           <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "#d32f2f", fontWeight: 600 }}>

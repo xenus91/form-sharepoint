@@ -47,7 +47,14 @@ describe("RequestFieldControl — rich-поле", () => {
     expect(host.querySelector('[data-testid="rich-editor"]')).toBeTruthy();
   });
 
-  it("подсказка нейтральная, а не «результат проверки»", () => {
+  it("подсказка = описание поля, а не «результат проверки»", () => {
+    const host = mount({ control: { ...noteControl, description: "Что именно нужно указать в описании" } });
+    const placeholder = host.querySelector('[data-testid="rich-editor"]').getAttribute("data-placeholder");
+    expect(placeholder).toBe("Что именно нужно указать в описании");
+    expect(placeholder).not.toContain("результат проверки");
+  });
+
+  it("без описания — нейтральная подсказка «Введите текст…»", () => {
     const host = mount();
     const placeholder = host.querySelector('[data-testid="rich-editor"]').getAttribute("data-placeholder");
     expect(placeholder).toBe("Введите текст…");
