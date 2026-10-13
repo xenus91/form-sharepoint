@@ -4,8 +4,10 @@
 // (controlKindOf в tasks/contentTypeFields.js), поэтому форма строится по типу
 // контента, а не хардкодом полей.
 import {
-  Autocomplete, Checkbox, FormControlLabel, MenuItem, TextField,
+  Autocomplete, Box, Checkbox, FormControlLabel, MenuItem, TextField, ToggleButton, ToggleButtonGroup,
+  Typography,
 } from "@mui/material";
+import { RESULT_TOGGLE_GROUP_SX } from "../../lib/formStyles";
 import RichEditor from "../RichEditor";
 import PersonFieldAutocomplete from "../../../tasks/components/PersonFieldAutocomplete";
 
@@ -82,6 +84,34 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
         )}
         disabled={readOnly}
       />
+    );
+  }
+
+  // «Результирующий выбор» (OutcomeChoice) — группа кнопок, как в форме задачи.
+  if (String(control.typeAsString || "").toLowerCase() === "outcomechoice" && !multiple) {
+    return (
+      <Box>
+        <Typography
+          variant="caption"
+          sx={{ display: "block", fontWeight: 700, mb: 0.5, color: invalid ? "#d32f2f" : "text.secondary" }}
+        >
+          {`${title}${required ? " *" : ""}`}
+        </Typography>
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={value == null || value === "" ? null : String(value)}
+          disabled={readOnly}
+          onChange={(_e, next) => { if (next !== null) onChange?.(next); }}
+          sx={RESULT_TOGGLE_GROUP_SX}
+        >
+          {choices.map((c) => (
+            <ToggleButton key={String(c)} value={String(c)} data-testid={`outcome-choice-${internalName}-${c}`}>
+              {String(c)}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+      </Box>
     );
   }
 

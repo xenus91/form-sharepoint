@@ -51,7 +51,10 @@ const FIELDS_A = [
   f("Title", "Text", { Title: "Наименование", Required: true }),
   f("DueDate", "DateTime", { Title: "Срок" }),
   f("AssignedTo", "User", { Title: "Исполнитель" }),
-  f("DobSearchResult", "Choice", { Title: "Результат проверки", Choices: { results: ["Найдена", "Не найдена"] } }),
+  f("DobSearchResult", "OutcomeChoice", {
+    Title: "Результат проверки", TypeDisplayName: "Результирующий выбор",
+    Choices: { results: ["Найдена", "Не найдена"] },
+  }),
 ];
 const FIELDS_B = [
   f("Title", "Text", { Title: "Наименование", Required: true }),
@@ -150,6 +153,9 @@ describe("форма создания заявки", () => {
       .toBe("Title,DueDate,AssignedTo,DobSearchResult");
     expect(window.__form.ctId).toBe(CT_A);
     expect(field("Title")).toBeTruthy();
+    // «Результирующий выбор» — группа кнопок, а не список
+    expect(document.querySelector('[data-testid="outcome-choice-DobSearchResult-Найдена"]')).toBeTruthy();
+    expect(document.querySelector('[data-testid="outcome-choice-DobSearchResult-Не найдена"]')).toBeTruthy();
     expect(dobApi.getDobContentTypeFields).toHaveBeenCalledWith(CT_A, expect.anything());
   });
 

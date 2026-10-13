@@ -1,7 +1,7 @@
 // src/features/dob/DobTaskEditView.jsx
 // Full-screen edit form for single DOB item — with rich ChekResult editor
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { Box, Button, Chip, CircularProgress, LinearProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip, AppBar, Toolbar } from '@mui/material';
+import { Box, Button, Chip, CircularProgress, LinearProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip, AppBar, Toolbar, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { decodeHtmlEntities } from '../../utils/htmlEntities';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -42,9 +42,21 @@ import {
   FORM_FIELD_WIDE_SX,
   FORM_INVALID_SECTION_SX,
   FORM_NUMBER_FIELD_SX,
+  RESULT_TOGGLE_GROUP_SX,
 } from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
 import { resolvePrincipal, principalGetForTask } from '../tasks/lib/assignees';
+
+/**
+ * Поле типа «Результирующий выбор» (OutcomeChoice). В SharePoint это
+ * TypeAsString = "OutcomeChoice" / TypeDisplayName = «Результирующий выбор».
+ * Такое поле показываем группой кнопок, а не списком.
+ */
+function isOutcomeChoiceField(field) {
+  const type = String(field?.TypeAsString || '').trim().toLowerCase();
+  const display = String(field?.TypeDisplayName || '').trim().toLowerCase();
+  return type === 'outcomechoice' || display.includes('результирующий выбор');
+}
 
 /** Ссылка на вложение для браузера (в dev — через прокси /dob-api, в prod — origin). */
 function attachmentHref(serverRelativeUrl) {
@@ -1351,6 +1363,37 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
                   />
                 </Box>
               );
+            }
+            // «Результирующий выбор» — группа кнопок (как в диалоге результата):
+            // выбирать из нескольких вариантов через список неудобно.
+            if (isOutcomeChoiceField(f) && !isMultiChoiceField(f)) {
+              const outcomeVals = choicesOfField(f);
+              if (outcomeVals.length > 0) {
+                const outcomeSelected = normalizeChoiceValue(value);
+                return (
+                  <Box key={internal} data-dob-field={internal} sx={FORM_FIELD_WIDE_SX}>
+                    <Typography
+                      variant="caption"
+                      sx={{ display: 'block', fontWeight: 700, mb: 0.5, color: isInvalid ? '#d32f2f' : 'text.secondary' }}
+                    >
+                      {`${title}${f.Required ? ' *' : ''}`}
+                    </Typography>
+                    <ToggleButtonGroup
+                      exclusive
+                      size="small"
+                      value={outcomeSelected || null}
+                      disabled={!editable}
+                      onChange={(_e, next) => { if (next !== null) handleChange(internal, next); }}
+                      sx={RESULT_TOGGLE_GROUP_SX}
+                    >
+                      {outcomeVals.map(v => (
+                        <ToggleButton key={v} value={v} data-testid={`outcome-choice-${internal}-${v}`}>{v}</ToggleButton>
+                      ))}
+                    </ToggleButtonGroup>
+                    {isInvalid && <Typography variant="caption" sx={{ color: '#d32f2f' }}>Обязательное поле</Typography>}
+                  </Box>
+                );
+              }
             }
             // Любое поле выбора — настоящий select (одиночный или многократный).
             if (isChoiceField(f)) {

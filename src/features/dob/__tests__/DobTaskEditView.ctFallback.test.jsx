@@ -23,7 +23,11 @@ const LIST_FIELDS = [
   { InternalName: "Title", Title: "Имя задачи", TypeAsString: "Text", Required: true },
   { InternalName: "Predecessors", Title: "Предшественники", TypeAsString: "Text" },
   { InternalName: "PercentComplete", Title: "% завершения", TypeAsString: "Number" },
-  { InternalName: "TaskOutcome", Title: "Результат задачи", TypeAsString: "Choice", Choices: { results: ["Годен", "Брак"] } },
+  {
+    InternalName: "TaskOutcome", Title: "Результат задачи",
+    TypeAsString: "OutcomeChoice", TypeDisplayName: "Результирующий выбор",
+    Choices: { results: ["Годен", "Брак"] },
+  },
 ];
 
 // «В работе» — чтобы форма показывала поля, а не гейт «взять в работу»
@@ -133,6 +137,27 @@ describe("DobTaskEditView — состав полей по типу контен
     expect(caption).toBeTruthy();
     // название типа — из его Описания
     expect(caption.textContent).toContain("Проверка ЕО (ООБ)");
+    act(() => root.unmount());
+  });
+});
+
+describe("DobTaskEditView — «Результирующий выбор»", () => {
+  it("поле типа OutcomeChoice рисуется группой кнопок, а не списком", async () => {
+    await renderForm();
+
+    const good = document.querySelector('[data-testid="outcome-choice-TaskOutcome-Годен"]');
+    const bad = document.querySelector('[data-testid="outcome-choice-TaskOutcome-Брак"]');
+    expect(good).toBeTruthy();
+    expect(bad).toBeTruthy();
+    // это кнопки (MuiToggleButton → <button aria-pressed>), а не выпадающий список
+    expect(good.tagName).toBe("BUTTON");
+    expect(good.getAttribute("aria-pressed")).toBe("false");
+    expect(document.querySelector('[data-dob-field="TaskOutcome"] .MuiSelect-select')).toBeFalsy();
+
+    // клик выбирает значение
+    await act(async () => { good.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(good.getAttribute("aria-pressed")).toBe("true");
+
     act(() => root.unmount());
   });
 });
