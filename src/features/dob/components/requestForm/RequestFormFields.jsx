@@ -4,12 +4,15 @@
 import { Box, Typography } from "@mui/material";
 import RequestFieldControl from "./RequestFieldControl";
 
-export default function RequestFormFields({ controls = [], values = {}, invalidNames = [], onChange, readOnly = false }) {
+export default function RequestFormFields({
+  controls = [], values = {}, invalidNames = [], onChange,
+  readOnly = false, isUploading = false,
+}) {
   const bad = new Set(invalidNames.map(String));
   if (!controls.length) {
     return (
       <Typography variant="body2" color="text.secondary" data-testid="request-form-empty">
-        У выбранного типа контента нет полей для заполнения.
+        У выбранного типа контента нет обязательных полей для заполнения.
       </Typography>
     );
   }
@@ -23,6 +26,7 @@ export default function RequestFormFields({ controls = [], values = {}, invalidN
           onChange={(next) => onChange?.(control.internalName, next)}
           invalid={bad.has(control.internalName)}
           readOnly={readOnly}
+          isUploading={isUploading}
         />
       ))}
     </Box>

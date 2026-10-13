@@ -3,11 +3,14 @@
 // src/features/dob/components/requestForm/__tests__/useRequestForm.test.jsx
 //
 // Форма создания заявки:
+//   • показываем ТОЛЬКО обязательные поля типа контента;
+//   • Title в форме нет — генерируется общим правилом; Status не отправляем;
 //   • тип контента выбран ПО УМОЛЧАНИЮ (первый в списке) — форма открывается с полями;
 //   • сменил тип → состав полей меняется;
 //   • DC ← Office, InitiatingDepartment ← Department (из профиля пользователя);
 //   • обязательные пустые → список не трогаем;
-//   • «Создать» → createDobItem(поля + ContentTypeId).
+//   • «Создать» → createDobItem(обязательные поля + Title + ContentTypeId);
+//   • rich-поле с картинкой → двухфазно: create → вложение → MERGE.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
@@ -18,6 +21,8 @@ vi.mock("../../../api/dobApi", () => ({
   getDobContentTypes: vi.fn(),
   getDobContentTypeFields: vi.fn(),
   createDobItem: vi.fn(),
+  updateDobItem: vi.fn(),
+  uploadDobAttachment: vi.fn(),
 }));
 vi.mock("../../RichEditor", () => ({
   default: ({ value, onChange }) => (
@@ -41,38 +46,37 @@ import RequestFormFields from "../RequestFormFields";
 
 const CT_A = "0x0100AAAA";
 const CT_B = "0x0100BBBB";
+const CT_C = "0x0100CCCC";
 
 const f = (InternalName, TypeAsString, extra = {}) => ({
   InternalName, Title: `Поле ${InternalName}`, Required: false, Hidden: false, ReadOnlyField: false,
   FieldTypeKind: 2, TypeAsString, Choices: { results: [] }, ...extra,
 });
 
+// Тип A: обязательные DueDate и Note (rich); Title и AssignedTo — не в форме.
 const FIELDS_A = [
   f("Title", "Text", { Title: "Наименование", Required: true }),
-  f("DueDate", "DateTime", { Title: "Срок" }),
+  f("DueDate", "DateTime", { Title: "Срок", Required: true }),
+  f("Note", "Note", { Title: "Описание", Required: true }),
   f("AssignedTo", "User", { Title: "Исполнитель" }),
-  f("DobSearchResult", "OutcomeChoice", {
-    Title: "Результат проверки", TypeDisplayName: "Результирующий выбор",
-    Choices: { results: ["Найдена", "Не найдена"] },
-  }),
 ];
 const FIELDS_B = [
-  f("Title", "Text", { Title: "Наименование", Required: true }),
+  f("DueDate", "DateTime", { Title: "Срок", Required: true }),
   f("Note", "Note", { Title: "Примечание" }),
 ];
-// Тип, в котором есть поля для автозаполнения из профиля
+// Тип, в котором обязательные поля заполняются из профиля
 const FIELDS_C = [
-  f("Title", "Text", { Title: "Наименование", Required: true }),
-  f("DC", "Text", { Title: "РЦ" }),
-  f("InitiatingDepartment", "Text", { Title: "Подразделение-инициатор" }),
+  f("DC", "Text", { Title: "РЦ", Required: true }),
+  f("InitiatingDepartment", "Text", { Title: "Подразделение-инициатор", Required: true }),
 ];
-const CT_C = "0x0100CCCC";
 
 const PROFILE = { userOffice: "РЦ-8114", userDepartment: "Группа отгрузки РЦ" };
 
 const names = () => (document.querySelector('[data-testid="names"]')?.textContent || "");
 const problems = () => (document.querySelector('[data-testid="problems"]')?.textContent || "");
 const field = (name) => document.querySelector(`[data-testid="request-field-${name}"]`);
+// rich-контрол в тесте — мок RichEditor (свой data-testid, не request-field-*)
+const richEditor = () => document.querySelector('[data-testid="rich-editor"]');
 
 // controlled-инпут MUI: значение пишем нативным сеттером и диспатчим input —
 // так событие проходит через событийную систему React, как от пользователя.
@@ -130,6 +134,10 @@ beforeEach(() => {
     ctId === CT_A ? FIELDS_A : ctId === CT_B ? FIELDS_B : FIELDS_C,
   ));
   dobApi.createDobItem.mockResolvedValue({ Id: 9001 });
+  dobApi.updateDobItem.mockResolvedValue({});
+  dobApi.uploadDobAttachment.mockResolvedValue({
+    ServerRelativeUrl: "/sites/dob/doblogistic/Lists/DobLogistic/Attachments/9001/pic.png",
+  });
   window.__form = null;
 });
 
@@ -147,88 +155,98 @@ const waitForNames = async (expected) => {
 };
 
 describe("форма создания заявки", () => {
-  it("тип контента выбран по умолчанию — поля видны сразу", async () => {
+  it("показывает только обязательные поля типа; Title в форму не попадает", async () => {
     mount();
-    expect(await waitForNames("Title,DueDate,AssignedTo,DobSearchResult"))
-      .toBe("Title,DueDate,AssignedTo,DobSearchResult");
+    expect(await waitForNames("DueDate,Note")).toBe("DueDate,Note");
     expect(window.__form.ctId).toBe(CT_A);
-    expect(field("Title")).toBeTruthy();
-    // «Результирующий выбор» — группа кнопок, а не список
-    expect(document.querySelector('[data-testid="outcome-choice-DobSearchResult-Найдена"]')).toBeTruthy();
-    expect(document.querySelector('[data-testid="outcome-choice-DobSearchResult-Не найдена"]')).toBeTruthy();
-    expect(dobApi.getDobContentTypeFields).toHaveBeenCalledWith(CT_A, expect.anything());
+    expect(field("Title")).toBeFalsy();
+    expect(field("AssignedTo")).toBeFalsy();
+    expect(field("DueDate")).toBeTruthy();
+    expect(richEditor()).toBeTruthy();
   });
 
   it("смена типа контента меняет состав полей", async () => {
     mount();
-    await waitForNames("Title,DueDate,AssignedTo,DobSearchResult");
+    await waitForNames("DueDate,Note");
 
     click("pick-b");
-    expect(await waitForNames("Title,Note")).toBe("Title,Note");
-    expect(field("DueDate")).toBeFalsy();
-    // Note — рич-текст: контрол рисует RichEditor (в тесте — мок)
-    expect(document.querySelector('[data-testid="rich-editor"]')).toBeTruthy();
-    // значения предыдущего типа не перетекают
+    // В типе B обязателен только DueDate; Note — необязательный rich, не показываем.
+    expect(await waitForNames("DueDate")).toBe("DueDate");
+    expect(richEditor()).toBeFalsy();
     expect(window.__form.values).toEqual({});
   });
 
   it("DC и InitiatingDepartment подставляются из Office и Department профиля", async () => {
     mount(PROFILE);
-    await waitForNames("Title,DueDate,AssignedTo,DobSearchResult");
+    await waitForNames("DueDate,Note");
 
     click("pick-c");
-    await waitForNames("Title,DC,InitiatingDepartment");
+    await waitForNames("DC,InitiatingDepartment");
 
     expect(window.__form.values.DC).toBe("РЦ-8114");
     expect(window.__form.values.InitiatingDepartment).toBe("Группа отгрузки РЦ");
-    // значение действительно стоит в поле формы
     expect(field("DC").value).toBe("РЦ-8114");
-  });
-
-  it("без профиля поля DC/InitiatingDepartment остаются пустыми", async () => {
-    mount(null);
-    await waitForNames("Title,DueDate,AssignedTo,DobSearchResult");
-    click("pick-c");
-    await waitForNames("Title,DC,InitiatingDepartment");
-    expect(window.__form.values).toEqual({});
   });
 
   it("обязательное поле пустое → заявку не создаём, показываем ошибку", async () => {
     mount();
-    await waitForNames("Title,DueDate,AssignedTo,DobSearchResult");
+    await waitForNames("DueDate,Note");
 
     await act(async () => { await window.__form.submit(); });
-    expect(problems()).toContain("Заполните «Наименование»");
-    expect(window.__form.invalidNames).toContain("Title");
+    expect(problems()).toContain("Заполните «Срок»");
+    expect(window.__form.invalidNames).toContain("DueDate");
     expect(dobApi.createDobItem).not.toHaveBeenCalled();
   });
 
-  it("«Создать» пишет заявку: поля + ContentTypeId выбранного типа", async () => {
+  it("«Создать»: Title сгенерирован, Status не отправляем, только обязательные поля", async () => {
     mount(PROFILE);
-    await waitForNames("Title,DueDate,AssignedTo,DobSearchResult");
+    await waitForNames("DueDate,Note");
     click("pick-c");
-    await waitForNames("Title,DC,InitiatingDepartment");
-
-    act(() => { setInputValue(field("Title"), "Заявка №123 на отгрузку"); });
+    await waitForNames("DC,InitiatingDepartment");
 
     await act(async () => { await window.__form.submit(); });
 
     expect(dobApi.createDobItem).toHaveBeenCalledTimes(1);
-    const [payload, listGuid] = dobApi.createDobItem.mock.calls[0];
-    expect(payload.Title).toBe("Заявка №123 на отгрузку");
-    // автозаполненные поля уходят в payload вместе с остальными
+    const [payload] = dobApi.createDobItem.mock.calls[0];
+    // Title сгенерирован из названия типа (Description), а не введён в форме
+    expect(String(payload.Title).startsWith("Внутренняя заявка от ")).toBe(true);
+    expect(payload.Status).toBeUndefined();
+    expect(payload.ContentTypeId).toBe(CT_C);
     expect(payload.DC).toBe("РЦ-8114");
     expect(payload.InitiatingDepartment).toBe("Группа отгрузки РЦ");
-    expect(payload.ContentTypeId).toBe(CT_C);
-    expect(listGuid).toBeTruthy();
     expect(window.__form.created).toBe(9001);
+    // без картинок второй фазы нет
+    expect(dobApi.updateDobItem).not.toHaveBeenCalled();
+  });
+
+  it("rich-поле с картинкой: создаём → грузим вложение → MERGE со ссылкой", async () => {
+    mount();
+    await waitForNames("DueDate,Note");
+
+    act(() => { setInputValue(field("DueDate"), "2026-10-20"); });
+    act(() => { setInputValue(richEditor(), '<p>см.</p><img src="data:image/png;base64,AAAA" />'); });
+
+    await act(async () => { await window.__form.submit(); });
+
+    // фаза 1 — создание без base64
+    const [created] = dobApi.createDobItem.mock.calls[0];
+    expect(created.Note).not.toContain("data:image");
+    expect(created.DueDate).toBe("2026-10-20");
+    // фаза 2 — вложение и MERGE со ссылкой
+    expect(dobApi.uploadDobAttachment).toHaveBeenCalledTimes(1);
+    expect(dobApi.updateDobItem).toHaveBeenCalledTimes(1);
+    const [id, richPayload] = dobApi.updateDobItem.mock.calls[0];
+    expect(id).toBe(9001);
+    expect(richPayload.Note).toContain("Attachments/9001");
+    expect(richPayload.Note).not.toContain("data:image");
   });
 
   it("ошибка SharePoint показывается в форме, а не молча глотается", async () => {
     mount();
-    await waitForNames("Title,DueDate,AssignedTo,DobSearchResult");
+    await waitForNames("DueDate,Note");
     dobApi.createDobItem.mockRejectedValueOnce({ response: { data: { error: { message: { value: "Поле обязательно" } } } } });
-    act(() => { setInputValue(field("Title"), "x"); });
+    act(() => { setInputValue(field("DueDate"), "2026-10-20"); });
+    act(() => { setInputValue(richEditor(), "<p>x</p>"); });
 
     await act(async () => { await window.__form.submit(); });
 

@@ -6,7 +6,7 @@
 //   2) список полей формы меняется под выбранный тип (поля — из FieldLinks типа);
 //   3) «Создать» пишет элемент в список (createDobItem) и возвращает в список заявок.
 //
-// Форма вынесена в отдельные компоненты (RequestContentTypeSelect /
+// Форма вынесена в отдельные компоненты (RequestTypePicker /
 // RequestFormFields / RequestFieldControl / useRequestForm) — страница здесь
 // только раскладывает их и показывает состояние.
 import { useCallback } from "react";
@@ -20,8 +20,9 @@ import AddIcon from "@mui/icons-material/Add";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNotifications } from "../../../../NotificationsProvider";
 import { DOB_REQUESTS_HASH } from "../../lib/dobRoute";
+import { contentTypeDisplayName } from "../../lib/requestFields";
 import { useRequestForm } from "./useRequestForm";
-import RequestContentTypeSelect from "./RequestContentTypeSelect";
+import RequestTypePicker from "./RequestTypePicker";
 import RequestFormFields from "./RequestFormFields";
 
 export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
@@ -60,17 +61,18 @@ export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
             onClick={handleCreate}
             data-testid="request-create-submit"
           >
-            Создать
+            {form.isUploading ? "Загрузка изображений…" : "Создать"}
           </Button>
         </Toolbar>
       </AppBar>
 
       <Box sx={{ flex: "1 1 0", minHeight: 0, overflowY: "auto", p: { xs: 1.5, sm: 3 } }}>
         <Stack spacing={2} sx={{ maxWidth: 860, mx: "auto" }}>
-          <RequestContentTypeSelect
+          <RequestTypePicker
             contentTypes={form.contentTypes}
             value={form.ctId}
             onChange={form.selectContentType}
+            ctLabelOf={contentTypeDisplayName}
             error={form.problems.includes("Выберите тип заявки")}
           />
 
@@ -96,6 +98,7 @@ export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
               values={form.values}
               invalidNames={form.invalidNames}
               onChange={form.setValue}
+              isUploading={form.isUploading}
             />
           )}
 

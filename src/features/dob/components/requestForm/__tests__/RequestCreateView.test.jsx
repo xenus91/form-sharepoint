@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // src/features/dob/components/requestForm/__tests__/RequestCreateView.test.jsx
 // Страница #dob_requests/new:
-//   • тип контента выбран по умолчанию, поля видны сразу;
-//   • в списке типов — их ОПИСАНИЯ (Description), а не внутренние имена;
+//   • тип контента выбран по умолчанию, обязательные поля видны сразу;
+//   • тип выбирается кнопками/чипами на одной странице (не выпадающим списком);
+//   • в подписях типов — их ОПИСАНИЯ (Description), а не внутренние имена;
 //   • если типов нет — создавать нечего (кнопка недоступна) и это видно.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -14,6 +15,8 @@ vi.mock("../../../api/dobApi", () => ({
   getDobContentTypes: vi.fn(),
   getDobContentTypeFields: vi.fn(),
   createDobItem: vi.fn(),
+  updateDobItem: vi.fn(),
+  uploadDobAttachment: vi.fn(),
 }));
 vi.mock("../../RichEditor", () => ({ default: () => <textarea data-testid="rich-editor" /> }));
 vi.mock("../../../../tasks/components/PersonFieldAutocomplete", () => ({ default: () => <input data-testid="person-field" /> }));
@@ -23,6 +26,7 @@ import NotificationsProvider from "../../../../../NotificationsProvider";
 import RequestCreateView from "../RequestCreateView";
 
 const CT_A = "0x0100AAAA";
+const CT_B = "0x0100BBBB";
 const PROFILE = { userOffice: "РЦ-8114", userDepartment: "Группа отгрузки РЦ" };
 const text = () => document.body.textContent || "";
 const byTestid = (id) => document.querySelector(`[data-testid="${id}"]`);
@@ -48,11 +52,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   dobApi.getDobContentTypes.mockResolvedValue([
     { Id: CT_A, StringId: CT_A, Name: "Request", Description: "Заявка на отгрузку ТМЦ" },
-    { Id: "0x0100BBBB", StringId: "0x0100BBBB", Name: "Return", Description: "Заявка на возврат" },
+    { Id: CT_B, StringId: CT_B, Name: "Return", Description: "Заявка на возврат" },
   ]);
   dobApi.getDobContentTypeFields.mockResolvedValue([
     { InternalName: "Title", Title: "Наименование", Required: true, Hidden: false, FieldTypeKind: 2, TypeAsString: "Text", Choices: { results: [] } },
-    { InternalName: "DC", Title: "РЦ", Required: false, Hidden: false, FieldTypeKind: 2, TypeAsString: "Text", Choices: { results: [] } },
+    { InternalName: "DC", Title: "РЦ", Required: true, Hidden: false, FieldTypeKind: 2, TypeAsString: "Text", Choices: { results: [] } },
   ]);
 });
 
@@ -69,43 +73,43 @@ const tick = async (n = 15) => {
 };
 
 describe("RequestCreateView", () => {
-  it("открывается уже с выбранным типом: поля видны, «Создать» доступна", async () => {
+  it("открывается уже с выбранным типом: обязательные поля видны, «Создать» доступна", async () => {
     mount();
     expect(text()).toContain("Новая заявка");
     await tick();
 
-    expect(byTestid("request-field-Title")).toBeTruthy();
+    // Title не показываем (генерируется), DC — обязательное поле
+    expect(byTestid("request-field-Title")).toBeFalsy();
+    expect(byTestid("request-field-DC")).toBeTruthy();
     expect(byTestid("request-create-submit").disabled).toBe(false);
     expect(dobApi.getDobContentTypeFields).toHaveBeenCalledWith(CT_A, expect.anything());
   });
 
-  it("в выборе типа — описания типов контента, значение — id типа", async () => {
+  it("тип выбирается чипами на одной странице; подписи — описания типов", async () => {
     mount();
     await tick();
 
-    const input = byTestid("request-ct-select");
-    // MUI Select: inputProps уходят в скрытый input, кликабельный элемент —
-    // соседний div[role="combobox"].
-    const combo = input.parentElement.querySelector('[role="combobox"]');
-    act(() => { combo.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 })); });
-    await tick(4);
+    const picker = byTestid("request-type-picker");
+    expect(picker).toBeTruthy();
+    // выпадающего списка больше нет
+    expect(byTestid("request-ct-select")).toBeFalsy();
 
-    const options = Array.from(document.querySelectorAll('[role="option"]'));
-    const labels = options.map((o) => o.textContent);
-    expect(labels).toContain("Заявка на отгрузку ТМЦ");
-    expect(labels).toContain("Заявка на возврат");
-    // внутреннее имя типа (Name) пользователю не показываем
-    expect(labels).not.toContain("Request");
+    const chipA = byTestid(`request-type-${CT_A}`);
+    const chipB = byTestid(`request-type-${CT_B}`);
+    expect(chipA.textContent).toContain("Заявка на отгрузку ТМЦ");
+    expect(chipB.textContent).toContain("Заявка на возврат");
+    // внутреннее имя типа (Name) в подписях чипов не показываем
+    expect(picker.textContent).not.toContain("Request");
+    // первый тип выбран по умолчанию
+    expect(chipA.getAttribute("data-selected")).toBe("true");
 
-    act(() => {
-      options.find((o) => o.textContent === "Заявка на возврат")
-        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    act(() => { chipB.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     await tick();
-    expect(input.value).toBe("0x0100BBBB");
+    expect(byTestid(`request-type-${CT_B}`).getAttribute("data-selected")).toBe("true");
+    expect(dobApi.getDobContentTypeFields).toHaveBeenCalledWith(CT_B, expect.anything());
   });
 
-  it("поля формы получают значения из профиля (DC ← Office)", async () => {
+  it("обязательное поле получает значение из профиля (DC ← Office)", async () => {
     mount();
     await tick();
     expect(byTestid("request-field-DC").value).toBe("РЦ-8114");

@@ -22,9 +22,27 @@ export const REQUEST_FORM_SKIP_FIELDS = new Set([
   "Id",
   "Attachments",
   "Body",
+  // Заголовок не показываем: его генерирует приложение общим правилом
+  // (см. requestForm/requestTitle.js), иначе пришлось бы заставлять
+  // пользователя придумывать имя каждой заявки.
+  "Title",
+  // Статус не показываем и не отправляем: значение проставит дефолт колонки.
+  "Status", "TaskStatus",
 ]);
 
 const isContentTypeMarker = (f) => String(f?.Title || "").toLowerCase() === "тип контента";
+
+/**
+ * «Результирующий выбор» (OutcomeChoice): в заявке таких полей нет — заявка это
+ * стартовая форма оформления, результат проверки живёт в задачах. На всякий
+ * случай не показываем: даже обязательное OutcomeChoice-поле не должно рисовать
+ * группу кнопок результата в форме создания.
+ */
+function isOutcomeChoiceField(field) {
+  if (String(field?.TypeAsString || "").toLowerCase() === "outcomechoice") return true;
+  const display = String(field?.TypeDisplayName || "").toLowerCase();
+  return display.includes("результирующий выбор");
+}
 
 /** Поле типа контента показываем в форме создания заявки? */
 export function isRequestFormField(field) {
@@ -34,6 +52,7 @@ export function isRequestFormField(field) {
   if (/^(?:OData__|_)/i.test(String(field.InternalName))) return false;
   if (isEncodedJunkName(field.InternalName)) return false;
   if (isContentTypeMarker(field)) return false;
+  if (isOutcomeChoiceField(field)) return false;
   return true;
 }
 

@@ -11,7 +11,7 @@ import { RESULT_TOGGLE_GROUP_SX } from "../../lib/formStyles";
 import RichEditor from "../RichEditor";
 import PersonFieldAutocomplete from "../../../tasks/components/PersonFieldAutocomplete";
 
-export default function RequestFieldControl({ control, value, onChange, invalid = false, readOnly = false }) {
+export default function RequestFieldControl({ control, value, onChange, invalid = false, readOnly = false, isUploading = false }) {
   const { internalName, title, kind, required, choices = [], multiple = false, description = "" } = control;
   const common = {
     fullWidth: true,
@@ -44,6 +44,7 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
         onChange={(next) => onChange?.(next)}
         readOnly={readOnly}
         invalid={!!invalid}
+        isUploading={isUploading}
       />
     );
   }
