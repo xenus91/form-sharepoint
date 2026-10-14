@@ -121,13 +121,14 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
   списку `sitegroups`, с **обязательным фильтром `PrincipalType ne 1`** (SP.PrincipalType:
   1 — пользователь, 2/4/8 — группы). Id берутся с того же сайта, что резолвит
   `ensureuser`, поэтому валидны для поля `Email`;
-* выбранные группы резолвятся через **`/web/siteusers/ensureuser`** (имя параметра
-  пробуем как `loginName`, так и `logonName` — зависит от сборки SharePoint).
-  `ensureuser` не всегда может создать принципал: для security-групп из AD
-  (`c:0+.w|s-1-5-21-…`) сайт отвечает **404**. Поэтому порядок резолва такой:
-  1) `ensureuser`; 2) если 404 — ищем группу по названию (`sitegroups/getbyname`
-  → фильтр `Title eq`); 3) если и её нет — берём Id из результата поиска, но
-  только подтвердив его группой (`sitegroups/getbyid`). В `Email` пользователь не
+* выбранные группы резолвятся в Id принципала. Порядок:
+  0) Id из автокомплита (поиск идёт по `/web/siteusers` — те же принципалы, что
+  вернул бы `ensureuser`) — если он подтверждается группой (`sitegroups/getbyid`),
+  берём сразу, без лишнего вызова (на AD/security-группах `ensureuser` даёт 404);
+  1) иначе `ensureuser` — метод ВЕБА: **`POST /web/ensureuser`** (не
+  `/web/siteusers/ensureuser` — это другой ресурс и даёт 404), имя параметра
+  пробуем как `logonName`, так и `loginName`; 2) иначе группа по названию
+  (`sitegroups/getbyname` → фильтр `Title eq`). В `Email` пользователь не
   попадёт: результат всегда проверяется на группу;
 * `ensureDcEmailLink`: если элемент уже появился — используем его; иначе
   **сначала создаём элемент в `DcEmail`** (`OffDepKey` + `Email` =

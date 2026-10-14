@@ -114,45 +114,52 @@ export function clearDcEmailGroupCache() {
 }
 
 /**
- * Резолв ГРУППЫ на сайте ДОБ. Порядок:
- *   1) ensureuser по учётной записи (loginName/logonName) — как требует форма;
- *   2) если ensureuser вернул 404 (security-группа из AD) — ищем группу по
- *      названию (sitegroups/getbyname → фильтр Title);
- *   3) если и это не помогло — берём Id из результата поиска, но ТОЛЬКО если он
- *      подтверждается как группа (sitegroups/getbyid).
- * Возвращает Id принципала, только если это действительно группа.
+ * Резолв ГРУППЫ на сайте ДОБ в Id принципала для поля Email.
+ * Порядок:
+ *   0) Id из автокомплита (поиск идёт по /web/siteusers — те же принципалы, что
+ *      вернул бы ensureuser) — если он подтверждается как группа, берём сразу.
+ *      Так избегаем лишнего вызова и видимого 404 на AD/security-группах;
+ *   1) иначе ensureuser по учётной записи (loginName/logonName);
+ *   2) иначе группа по названию (sitegroups/getbyname → фильтр Title eq).
+ * Возвращает Id, только если это действительно группа (пользователь не попадёт).
  * @param {{Id?:number, LoginName?:string, Title?:string}} group
  * @returns {Promise<number|null>}
  */
 export async function ensureGroupPrincipal(group) {
   const loginName = String(group?.LoginName || "").trim();
   const title = String(group?.Title || "").trim();
-  const candidate = loginName || title;
-  if (!candidate) return null;
-  const cacheKey = `${loginName.toLowerCase()}|${title.toLowerCase()}`;
+  const searchId = Number(group?.Id);
+  if (!loginName && !title && !(Number.isFinite(searchId) && searchId > 0)) return null;
+  const cacheKey = `${searchId}|${loginName.toLowerCase()}|${title.toLowerCase()}`;
   if (_groupCache.has(cacheKey)) return _groupCache.get(cacheKey);
 
   const done = (id) => { _groupCache.set(cacheKey, id); return id; };
 
-  // 1) ensureuser: имя параметра в разных сборках — loginName и logonName.
-  for (const key of ["loginName", "logonName"]) {
-    try {
-      const resp = await dobAxios.post(
-        `${dobApiBase()}/web/siteusers/ensureuser`,
-        { [key]: candidate },
-        { headers: VERBOSE },
-      );
-      const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
-      if (Number.isFinite(id) && id > 0) {
-        if (await isGroupPrincipal(id)) return done(id);
-        // ensureuser вернул ПОЛЬЗОВАТЕЛЯ — не подходит, ищем группу дальше.
-        break;
-      }
-    } catch (e) {
-      const st = e?.response?.status;
-      // 404/400 — принципал не создаётся (AD/security-группа) — это не сбой, идём к фолбэкам.
-      if (st && ![400, 404].includes(st)) {
-        console.warn(`[dcEmail] ensureuser(${candidate}) failed`, st, e?.message);
+  // 0) Id уже есть из поиска (siteusers) — подтверждаем, что это группа.
+  if (Number.isFinite(searchId) && searchId > 0 && await isGroupPrincipal(searchId)) {
+    return done(searchId);
+  }
+
+  // 1) ensureuser: метод ВЕБА (_api/web/ensureuser), а не коллекции siteusers.
+  //    Имя параметра в разных сборках — logonName и loginName.
+  const candidate = loginName || title;
+  const endpoints = [`${dobApiBase()}/web/ensureuser`, `${dobApiBase()}/web/siteusers/ensureuser`];
+  for (const endpoint of endpoints) {
+    for (const key of ["logonName", "loginName"]) {
+      try {
+        const resp = await dobAxios.post(endpoint, { [key]: candidate }, { headers: VERBOSE });
+        const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
+        if (Number.isFinite(id) && id > 0) {
+          if (await isGroupPrincipal(id)) return done(id);
+          // ensureuser вернул ПОЛЬЗОВАТЕЛЯ — не подходит, ищем группу дальше.
+          break;
+        }
+      } catch (e) {
+        const st = e?.response?.status;
+        // 404/400 — принципал не создаётся (AD/security-группа) — это не сбой, идём к фолбэку.
+        if (st && ![400, 404].includes(st)) {
+          console.warn(`[dcEmail] ensureuser(${candidate}) failed`, st, e?.message);
+        }
       }
     }
   }
@@ -160,12 +167,6 @@ export async function ensureGroupPrincipal(group) {
   // 2) По названию — группа уже существует на сайте.
   const byTitle = await siteGroupByTitle(title);
   if (byTitle) return done(byTitle.id);
-
-  // 3) Id из результата поиска, если он подтверждается как группа.
-  const searchId = Number(group?.Id);
-  if (Number.isFinite(searchId) && searchId > 0 && await isGroupPrincipal(searchId)) {
-    return done(searchId);
-  }
 
   console.warn(`[dcEmail] не удалось определить группу «${title || candidate}»`);
   return done(null);
