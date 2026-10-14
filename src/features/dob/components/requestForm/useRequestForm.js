@@ -21,6 +21,22 @@ import { useDobContentTypes } from "../../hooks/useDobContentTypes";
 import { toCreatePayload } from "./toCreatePayload";
 import { buildPrefillValues } from "./requestDefaults";
 import { buildRequestTitle } from "./requestTitle";
+import { buildOffDepKey, ensureDcEmailLink, findDcEmailItem } from "../../lib/dcEmailApi";
+
+/** Значения профиля, которые считаем «не задано» (см. App.jsx/requestDefaults). */
+const PROFILE_NOT_SET = new Set(["", "не указано", "not specified", "null", "undefined"]);
+
+/** Офис/департамент профиля для ключа DcEmail: «Не указано» → пусто. */
+function profileOfficeDepartment(profile) {
+  const clean = (value) => {
+    const text = String(value ?? "").trim();
+    return PROFILE_NOT_SET.has(text.toLowerCase()) ? "" : text;
+  };
+  return {
+    office: clean(profile?.userOffice ?? profile?.Office),
+    department: clean(profile?.userDepartment ?? profile?.Department),
+  };
+}
 
 /** Системный тип контента «Папка» (Id начинается с 0x0120). */
 export function isFolderContentType(ct) {
@@ -53,6 +69,15 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
   const [problems, setProblems] = useState([]);
   const [invalidNames, setInvalidNames] = useState([]);
   const [created, setCreated] = useState(null);
+  // Гейт DcEmail: если для Office+Department нет элемента в списке DcEmail —
+  // перед созданием заявки просим пользователя указать рассылку.
+  const [needsDcEmail, setNeedsDcEmail] = useState(false);
+  const [dcEmailSaving, setDcEmailSaving] = useState(false);
+  const [dcEmailError, setDcEmailError] = useState("");
+  const { office: profileOffice, department: profileDepartment } = useMemo(
+    () => profileOfficeDepartment(userProfile),
+    [userProfile],
+  );
 
   // Типы контента списка заявок: из них строится выбор и выбирается тип по умолчанию.
   const { contentTypes, isLoading: loadingTypes, error: typesError } = useDobContentTypes(listGuid);
@@ -119,28 +144,8 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
     setValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
-  const submit = useCallback(async () => {
-    if (!ctId) {
-      setProblems(["Выберите тип заявки"]);
-      return null;
-    }
-    // Картинка в rich-поле — тоже содержимое. Общий валидатор снимает теги, и
-    // поле с одной картинкой (без текста) он счёл бы пустым, поэтому для проверки
-    // подставляем текстовый маркер — иначе обязательное rich-поле с картинкой
-    // нельзя было бы отправить.
-    const forValidation = { ...values };
-    for (const c of controls) {
-      if (c.kind === "richtext" && hasInlineImage(forValidation[c.internalName])) {
-        forValidation[c.internalName] = `${forValidation[c.internalName]} изображение`;
-      }
-    }
-    const found = validateRequiredFields(controls, forValidation);
-    setProblems(found);
-    setInvalidNames(controls
-      .filter((c) => c.required && found.some((p) => p.includes(c.title)))
-      .map((c) => c.internalName));
-    if (found.length) return null;
-
+  // Непосредственное создание заявки в Requests (второй шаг после DcEmail).
+  const createRequest = useCallback(async () => {
     const richControls = controls.filter((c) => c.kind === "richtext");
     const withImages = richControls.filter((c) => hasInlineImage(values[c.internalName]));
     // Фаза 2 нужна, когда есть картинки ИЛИ обязательное rich-поле осталось бы
@@ -203,6 +208,73 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
     }
   }, [ctId, controls, values, listGuid, contentTypes]);
 
+  /**
+   * «Создать»: сначала проверяем связку DcEmail (Office+Department). Если её
+   * нет — открываем диалог выбора рассылки и НЕ создаём заявку; пользователь
+   * подтвердит — см. saveDcEmailAndCreate. Если связка есть (или профиль не
+   * задан) — создаём заявку сразу.
+   */
+  const submit = useCallback(async () => {
+    if (!ctId) {
+      setProblems(["Выберите тип заявки"]);
+      return null;
+    }
+    // Картинка в rich-поле — тоже содержимое. Общий валидатор снимает теги, и
+    // поле с одной картинкой (без текста) он счёл бы пустым, поэтому для проверки
+    // подставляем текстовый маркер — иначе обязательное rich-поле с картинкой
+    // нельзя было бы отправить.
+    const forValidation = { ...values };
+    for (const c of controls) {
+      if (c.kind === "richtext" && hasInlineImage(forValidation[c.internalName])) {
+        forValidation[c.internalName] = `${forValidation[c.internalName]} изображение`;
+      }
+    }
+    const found = validateRequiredFields(controls, forValidation);
+    setProblems(found);
+    setInvalidNames(controls
+      .filter((c) => c.required && found.some((p) => p.includes(c.title)))
+      .map((c) => c.internalName));
+    if (found.length) return null;
+
+    // Гейт DcEmail (только если известны Office и Department профиля).
+    if (profileOffice && profileDepartment) {
+      try {
+        const existing = await findDcEmailItem(profileOffice, profileDepartment);
+        if (!existing) {
+          setDcEmailError("");
+          setNeedsDcEmail(true);
+          return null;
+        }
+      } catch (e) {
+        // Не смогли проверить (нет доступа и т.п.) — не блокируем создание.
+        console.warn("[useRequestForm] проверка DcEmail не удалась", e?.message);
+      }
+    }
+    return createRequest();
+  }, [ctId, controls, values, profileOffice, profileDepartment, createRequest]);
+
+  /** Диалог DcEmail: создаём элемент DcEmail, затем — заявку (именно в этом порядке). */
+  const saveDcEmailAndCreate = useCallback(async (groups) => {
+    setDcEmailSaving(true);
+    setDcEmailError("");
+    try {
+      await ensureDcEmailLink({ office: profileOffice, department: profileDepartment, groups });
+    } catch (e) {
+      const msg = e?.response?.data?.error?.message?.value || e?.message || String(e);
+      setDcEmailError(String(msg).slice(0, 400));
+      setDcEmailSaving(false);
+      return null;
+    }
+    setDcEmailSaving(false);
+    setNeedsDcEmail(false);
+    return createRequest();
+  }, [profileOffice, profileDepartment, createRequest]);
+
+  const cancelDcEmail = useCallback(() => {
+    setNeedsDcEmail(false);
+    setDcEmailError("");
+  }, []);
+
   return {
     contentTypes,
     loadingTypes: !!loadingTypes,
@@ -222,5 +294,14 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
     error,
     created,
     submit,
+    // Гейт DcEmail
+    needsDcEmail,
+    dcEmailSaving,
+    dcEmailError,
+    dcEmailOffice: profileOffice,
+    dcEmailDepartment: profileDepartment,
+    dcEmailKey: buildOffDepKey(profileOffice, profileDepartment),
+    saveDcEmailAndCreate,
+    cancelDcEmail,
   };
 }

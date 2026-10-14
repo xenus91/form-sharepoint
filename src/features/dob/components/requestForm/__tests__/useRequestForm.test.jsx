@@ -24,6 +24,11 @@ vi.mock("../../../api/dobApi", () => ({
   updateDobItem: vi.fn(),
   uploadDobAttachment: vi.fn(),
 }));
+vi.mock("../../../lib/dcEmailApi", () => ({
+  findDcEmailItem: vi.fn(),
+  ensureDcEmailLink: vi.fn(),
+  buildOffDepKey: (office, department) => `${office || ""}${department || ""}`,
+}));
 vi.mock("../../RichEditor", () => ({
   default: ({ value, onChange }) => (
     <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
@@ -41,6 +46,7 @@ vi.mock("../../../../tasks/components/PersonFieldAutocomplete", () => ({
 }));
 
 import * as dobApi from "../../../api/dobApi";
+import * as dcEmailApi from "../../../lib/dcEmailApi";
 import { useRequestForm } from "../useRequestForm";
 import RequestFormFields from "../RequestFormFields";
 
@@ -138,6 +144,8 @@ beforeEach(() => {
   dobApi.uploadDobAttachment.mockResolvedValue({
     ServerRelativeUrl: "/sites/dob/doblogistic/Lists/DobLogistic/Attachments/9001/pic.png",
   });
+  dcEmailApi.findDcEmailItem.mockResolvedValue({ Id: 7, OffDepKey: "РЦ-8114Группа отгрузки РЦ" });
+  dcEmailApi.ensureDcEmailLink.mockResolvedValue({ created: true, item: { Id: 501 }, offDepKey: "РЦ-8114Группа отгрузки РЦ" });
   window.__form = null;
 });
 
@@ -251,6 +259,87 @@ describe("форма создания заявки", () => {
     await act(async () => { await window.__form.submit(); });
 
     expect(document.querySelector('[data-testid="error"]').textContent).toContain("Поле обязательно");
+  });
+});
+
+describe("гейт DcEmail (связка офиса и департамента с рассылкой)", () => {
+  it("нет элемента DcEmail → заявку не создаём, просим указать рассылку", async () => {
+    dcEmailApi.findDcEmailItem.mockResolvedValue(null);
+    mount(PROFILE);
+    await waitForNames("DueDate,Note");
+    click("pick-c");
+    await waitForNames("DC,InitiatingDepartment");
+
+    await act(async () => { await window.__form.submit(); });
+
+    expect(dcEmailApi.findDcEmailItem).toHaveBeenCalledWith("РЦ-8114", "Группа отгрузки РЦ");
+    expect(window.__form.needsDcEmail).toBe(true);
+    expect(dobApi.createDobItem).not.toHaveBeenCalled();
+  });
+
+  it("элемент DcEmail есть → создаём заявку сразу, диалог не открываем", async () => {
+    mount(PROFILE);
+    await waitForNames("DueDate,Note");
+    click("pick-c");
+    await waitForNames("DC,InitiatingDepartment");
+
+    await act(async () => { await window.__form.submit(); });
+
+    expect(window.__form.needsDcEmail).toBe(false);
+    expect(dobApi.createDobItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("профиль без офиса/департамента → гейт не мешает созданию", async () => {
+    mount();
+    await waitForNames("DueDate,Note");
+    act(() => { setInputValue(field("DueDate"), "2026-10-20"); });
+    act(() => { setInputValue(richEditor(), "<p>x</p>"); });
+
+    await act(async () => { await window.__form.submit(); });
+
+    expect(dcEmailApi.findDcEmailItem).not.toHaveBeenCalled();
+    expect(dobApi.createDobItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("saveDcEmailAndCreate: СНАЧАЛА элемент DcEmail, затем заявка", async () => {
+    dcEmailApi.findDcEmailItem.mockResolvedValue(null);
+    mount(PROFILE);
+    await waitForNames("DueDate,Note");
+    click("pick-c");
+    await waitForNames("DC,InitiatingDepartment");
+    await act(async () => { await window.__form.submit(); });
+    expect(window.__form.needsDcEmail).toBe(true);
+
+    const groups = [{ Id: 33, Title: "ООБ", LoginName: "c:0-.f|rolemanager|oob" }];
+    await act(async () => { await window.__form.saveDcEmailAndCreate(groups); });
+
+    expect(dcEmailApi.ensureDcEmailLink).toHaveBeenCalledWith({
+      office: "РЦ-8114", department: "Группа отгрузки РЦ", groups,
+    });
+    expect(dobApi.createDobItem).toHaveBeenCalledTimes(1);
+    expect(window.__form.needsDcEmail).toBe(false);
+    // порядок: DcEmail-элемент создаётся до заявки — проверяем по порядку вызовов
+    const ensureOrder = dcEmailApi.ensureDcEmailLink.mock.invocationCallOrder[0];
+    const createOrder = dobApi.createDobItem.mock.invocationCallOrder[0];
+    expect(ensureOrder).toBeLessThan(createOrder);
+  });
+
+  it("ошибка создания DcEmail → заявку не создаём, показываем ошибку диалога", async () => {
+    dcEmailApi.findDcEmailItem.mockResolvedValue(null);
+    dcEmailApi.ensureDcEmailLink.mockRejectedValue(new Error("нет доступа к DcEmail"));
+    mount(PROFILE);
+    await waitForNames("DueDate,Note");
+    click("pick-c");
+    await waitForNames("DC,InitiatingDepartment");
+    await act(async () => { await window.__form.submit(); });
+
+    await act(async () => {
+      await window.__form.saveDcEmailAndCreate([{ Id: 33, Title: "ООБ" }]);
+    });
+
+    expect(dobApi.createDobItem).not.toHaveBeenCalled();
+    expect(window.__form.dcEmailError).toContain("нет доступа к DcEmail");
+    expect(window.__form.needsDcEmail).toBe(true);
   });
 });
 

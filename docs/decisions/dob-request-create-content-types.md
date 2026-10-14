@@ -103,13 +103,35 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
 «Заявка #N создана, но изображения не загрузились» — заявку можно открыть и
 дозаполнить (компенсирующее удаление не делаем).
 
+### 7. Гейт рассылки DcEmail (Office + Department)
+
+При создании заявки форма проверяет, есть ли в списке `DcEmail` (основной сайт)
+элемент с `OffDepKey = Office + Department` (оба — из профиля пользователя,
+слитно, как в `tasks/distribution`). Если элемента **нет** — до создания заявки
+пользователь указывает рассылку:
+
+* диалог `DcEmailLinkDialog` + `GroupFieldAutocomplete` — выбор **только групп**
+  (источник `/web/sitegroups`, многократный выбор);
+* выбранные группы резолвятся через **`/web/siteusers/ensureuser`** (имя параметра
+  пробуем как `loginName`, так и `logonName` — зависит от сборки SharePoint);
+* `ensureDcEmailLink`: если элемент уже появился — используем его; иначе
+  **сначала создаём элемент в `DcEmail`** (`OffDepKey` + `Email` =
+  `Collection(Edm.Int32)` выбранных групп), и **только затем** создаём заявку в
+  `Requests` (порядок обеспечивает `useRequestForm.saveDcEmailAndCreate`).
+
+Если `Office`/`Department` профиля не заданы («Не указано»/пусто) — гейт не
+применяем, заявка создаётся как раньше. Ошибку создания элемента `DcEmail`
+показываем в диалоге; заявку при этом **не** создаём.
+
 ## Проверка
 
-* `vitest run` — 90 файлов / 737 тестов, зелёные. Обновлены/добавлены:
+* `vitest run` — 94 файла / 762 теста, зелёные. Обновлены/добавлены:
   `useRequestForm` (только обязательные; `Title` сгенерирован; `Status` не в
-  payload; двухфазная запись с картинкой), `RequestCreateView` (чипы; описания
-  типов; тип по умолчанию), `requestFormFields` (`Title`/`Status`/OutcomeChoice
-  отсеиваются), `requestTitle`.
+  payload; двухфазная запись с картинкой; гейт DcEmail — нет элемента → диалог,
+  `saveDcEmailAndCreate` пишет DcEmail до Requests), `RequestCreateView` (чипы;
+  описания типов; тип по умолчанию), `requestFormFields` (`Title`/`Status`/
+  OutcomeChoice отсеиваются), `requestTitle`, `groupSearch`, `dcEmailApi`,
+  `DcEmailLinkDialog`.
 * `eslint` по изменённым файлам — чисто.
 * `npm run build` — успешно, отдельный чанк `RequestCreateView-*.js`.
 

@@ -24,6 +24,7 @@ import { contentTypeDisplayName } from "../../lib/requestFields";
 import { useRequestForm } from "./useRequestForm";
 import RequestTypePicker from "./RequestTypePicker";
 import RequestFormFields from "./RequestFormFields";
+import DcEmailLinkDialog from "./DcEmailLinkDialog";
 
 export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
   const qc = useQueryClient();
@@ -35,6 +36,16 @@ export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
 
   const handleCreate = useCallback(async () => {
     const item = await form.submit();
+    if (!item) return;
+    notify(`Заявка #${item?.Id ?? item?.ID ?? ""} создана`, { severity: "success" });
+    try { qc.invalidateQueries({ queryKey: ["dob"] }); } catch (_e) { void _e; }
+    back();
+  }, [form, notify, qc, back]);
+
+  // Диалог DcEmail: сначала сохраняем рассылку, затем создаём заявку (порядок
+  // обеспечивает useRequestForm.saveDcEmailAndCreate).
+  const handleDcEmailSave = useCallback(async (groups) => {
+    const item = await form.saveDcEmailAndCreate(groups);
     if (!item) return;
     notify(`Заявка #${item?.Id ?? item?.ID ?? ""} создана`, { severity: "success" });
     try { qc.invalidateQueries({ queryKey: ["dob"] }); } catch (_e) { void _e; }
@@ -110,6 +121,17 @@ export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
           {form.error && <Alert severity="error">{form.error}</Alert>}
         </Stack>
       </Box>
+
+      <DcEmailLinkDialog
+        open={form.needsDcEmail}
+        office={form.dcEmailOffice}
+        department={form.dcEmailDepartment}
+        offDepKey={form.dcEmailKey}
+        saving={form.dcEmailSaving}
+        error={form.dcEmailError}
+        onCancel={form.cancelDcEmail}
+        onSubmit={handleDcEmailSave}
+      />
     </Box>
   );
 }
