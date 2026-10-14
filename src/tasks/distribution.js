@@ -71,12 +71,19 @@ export function getGroupIdsFromDistribution(dist) {
  * (full "РЦ-8117Группа…", suffix "8117Группа…", без дефиса и т.д.),
  * чтобы задачи перепоискались при смене РЦ в модалке.
  * Возвращает item из DcEmail или null.
+ *
+ * По умолчанию ходит на ОСНОВНОЙ сайт (задачи). Форма заявок ДОБ передаёт
+ * opts: свой клиент сайта ДОБ (`get`) и префикс базы (`listBase`), потому что
+ * список DcEmail лежит на сайте ДОБ рядом с Requests.
  * @param {string} office
  * @param {string} department
+ * @param {{get?:Function, listBase?:string}} [opts]
  * @returns {Promise<object|null>}
  */
-export async function resolveDistributionViaDcEmail(office, department) {
+export async function resolveDistributionViaDcEmail(office, department, opts = {}) {
   if (!office || !department) return null;
+  const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
+  const listBase = opts.listBase ?? "";
   const officeStr = String(office).trim();
   const deptStr = String(department).trim();
   const full = `${officeStr}${deptStr}`;
@@ -95,8 +102,8 @@ export async function resolveDistributionViaDcEmail(office, department) {
   for (const offDepKey of candidates) {
     const offDepKeyEsc = offDepKey.replace(/'/g, "''");
     try {
-      const { data } = await apiClient.get(
-        `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+      const { data } = await get(
+        `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       const items = data?.d?.results || [];
@@ -104,12 +111,14 @@ export async function resolveDistributionViaDcEmail(office, department) {
         if (offDepKey !== full) console.log(`[DcEmail] resolved via variant "${offDepKey}" (full "${full}")`);
         return items[0];
       }
-    } catch {}
+    } catch {
+      /* вариант ключа не подошёл — пробуем следующий */
+    }
   }
   // Фолбэк: ни один точный фильтр не нашёл — тянем 100 и ищем case-insensitive по всем кандидатам
   try {
-    const { data: data2 } = await apiClient.get(
-      `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$top=100`,
+    const { data: data2 } = await get(
+      `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$top=100`,
       { headers: { Accept: "application/json;odata=verbose" } }
     );
     const items2 = data2?.d?.results || [];
@@ -121,13 +130,15 @@ export async function resolveDistributionViaDcEmail(office, department) {
         return found;
       }
     }
-  } catch {}
+  } catch {
+    /* точный фильтр по вариантам не сработал — идём в фолбэк ниже */
+  }
   // Fallback без expand если Email expand не поддерживается — тоже по кандидатам
   for (const offDepKey of candidates) {
     const offDepKeyEsc = offDepKey.replace(/'/g, "''");
     try {
-      const { data } = await apiClient.get(
-        `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,EmailId&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+      const { data } = await get(
+        `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,EmailId&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       const items = data?.d?.results || [];

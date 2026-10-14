@@ -13,6 +13,7 @@ import {
   Alert, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography,
 } from "@mui/material";
 import GroupFieldAutocomplete from "../../../tasks/components/GroupFieldAutocomplete";
+import { searchDobGroups } from "../../lib/dcEmailApi";
 
 export default function DcEmailLinkDialog({
   open = false,
@@ -51,6 +52,7 @@ export default function DcEmailLinkDialog({
             onChange={(next) => { setGroups(next); if (next.length) setTouched(false); }}
             multiple
             required
+            search={searchDobGroups}
             error={touched && nothingSelected}
             helperText={touched && nothingSelected ? "Выберите хотя бы одну группу" : ""}
             placeholder="Название группы"

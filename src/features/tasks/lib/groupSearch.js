@@ -12,14 +12,13 @@ import apiClient from "../../../api";
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const GROUPS_PAGE_LIMIT = 500;
 
-const _allGroups = { loaded: false, list: [] };
-let _allGroupsPromise = null;
+const _allGroups = new Map(); // base → { loaded, list }
+let _allGroupsPromise = new Map(); // base → Promise
 
 /** Сброс кэша групп (тесты/отладка). */
 export function clearGroupSearchCache() {
-  _allGroups.loaded = false;
-  _allGroups.list = [];
-  _allGroupsPromise = null;
+  _allGroups.clear();
+  _allGroupsPromise = new Map();
 }
 
 function lower(value) {
@@ -69,36 +68,38 @@ export function matchesGroup(group, query) {
   return [group?.Title, group?.LoginName].map(lower).some((h) => h && h.includes(needle));
 }
 
-async function fetchGroupsPage(get, limit = GROUPS_PAGE_LIMIT) {
-  if (_allGroups.loaded) return _allGroups.list;
-  if (!_allGroupsPromise) {
-    _allGroupsPromise = (async () => {
-      const url = `/web/sitegroups?$select=Id,Title,LoginName,Description&$top=${limit}`;
+async function fetchGroupsPage(get, base, limit = GROUPS_PAGE_LIMIT) {
+  const cached = _allGroups.get(base);
+  if (cached?.loaded) return cached.list;
+  if (!_allGroupsPromise.has(base)) {
+    _allGroupsPromise.set(base, (async () => {
+      const url = `${base}/web/sitegroups?$select=Id,Title,LoginName,Description&$top=${limit}`;
       try {
         const resp = await get(url, ACCEPT);
         const list = resultsOf(resp).map(mapGroup).filter(Boolean);
-        _allGroups.loaded = true;
-        _allGroups.list = list;
+        _allGroups.set(base, { loaded: true, list });
         return list;
       } catch (e) {
         console.warn("[groupSearch] sitegroups page failed", e?.response?.status || e?.message);
         return [];
       } finally {
-        _allGroupsPromise = null;
+        _allGroupsPromise.delete(base);
       }
-    })();
+    })());
   }
-  return _allGroupsPromise;
+  return _allGroupsPromise.get(base);
 }
 
 /**
  * Поиск групп SharePoint по запросу (название/учётная запись).
  * @param {string} query
- * @param {{ limit?: number, get?: Function }} [opts]
+ * @param {{ limit?: number, get?: Function, base?: string }} [opts]
+ *   get  — HTTP-клиент (по умолчанию основной сайт);
+ *   base — префикс базы для сайта ДОБ (например, dobApiBase()).
  * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Description:string}>>}
  */
 export async function searchSiteGroups(query, opts = {}) {
-  const { limit = 20 } = opts;
+  const { limit = 20, base = "" } = opts;
   const q = String(query ?? "").trim();
   if (!q) return [];
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
@@ -106,7 +107,7 @@ export async function searchSiteGroups(query, opts = {}) {
 
   let groups = [];
   try {
-    const url = `/web/sitegroups?$filter=substringof('${escaped}',Title) or substringof('${escaped}',LoginName)`
+    const url = `${base}/web/sitegroups?$filter=substringof('${escaped}',Title) or substringof('${escaped}',LoginName)`
       + `&$select=Id,Title,LoginName,Description&$top=${limit}`;
     const resp = await get(url, ACCEPT);
     groups = resultsOf(resp).map(mapGroup).filter(Boolean);
@@ -118,7 +119,7 @@ export async function searchSiteGroups(query, opts = {}) {
   }
 
   if (groups.length === 0) {
-    const all = await fetchGroupsPage(get);
+    const all = await fetchGroupsPage(get, base);
     groups = all.filter((g) => matchesGroup(g, q));
   }
   return dedupeGroups(groups).slice(0, limit);

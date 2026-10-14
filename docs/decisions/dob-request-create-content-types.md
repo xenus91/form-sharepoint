@@ -105,13 +105,19 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
 
 ### 7. Гейт рассылки DcEmail (Office + Department)
 
-При создании заявки форма проверяет, есть ли в списке `DcEmail` (основной сайт)
-элемент с `OffDepKey = Office + Department` (оба — из профиля пользователя,
-слитно, как в `tasks/distribution`). Если элемента **нет** — до создания заявки
-пользователь указывает рассылку:
+При создании заявки форма проверяет, есть ли в списке `DcEmail` элемент с
+`OffDepKey = Office + Department` (оба — из профиля пользователя, слитно, как в
+`tasks/distribution`). **Список `DcEmail` для заявок ДОБ лежит на САЙТЕ ДОБ
+(`sites/dob/doblogistic`), рядом со списком `Requests`**, поэтому все запросы идут
+через `dobAxios`/`dobApiBase` (свой digest сайта ДОБ), а не через клиент основного
+сайта. `resolveDistributionViaDcEmail` получил параметры `get`/`listBase`, чтобы
+тот же резолвер можно было направить на нужный сайт (для задач — основной сайт по
+умолчанию, для формы заявок — сайт ДОБ). Если элемента **нет** — до создания
+заявки пользователь указывает рассылку:
 
 * диалог `DcEmailLinkDialog` + `GroupFieldAutocomplete` — выбор **только групп**
-  (источник `/web/sitegroups`, многократный выбор);
+  (источник `/web/sitegroups` на сайте ДОБ, многократный выбор); Id групп берутся
+  с того же сайта, что резолвит `ensureuser`, поэтому валидны для поля `Email`;
 * выбранные группы резолвятся через **`/web/siteusers/ensureuser`** (имя параметра
   пробуем как `loginName`, так и `logonName` — зависит от сборки SharePoint);
 * `ensureDcEmailLink`: если элемент уже появился — используем его; иначе

@@ -1,19 +1,38 @@
 // src/features/dob/lib/dcEmailApi.js
-// Связка «офис + департамент → рассылка» (список DcEmail на ОСНОВНОМ сайте).
+// Связка «офис + департамент → рассылка» (список DcEmail).
 //
 // Требование: при создании заявки ДОБ форма проверяет, есть ли в DcEmail
 // элемент, у которого OffDepKey = Office + Department. Если нет — пользователь
 // указывает рассылку (ТОЛЬКО группы), группы резолвятся через ensureuser, и
 // сначала создаётся элемент в DcEmail, а затем — заявка в Requests.
 //
-// Все запросы идут через apiClient основного сайта (там живёт DcEmail); digest
-// для POST добавляет интерцептор apiClient.
+// ВАЖНО: список DcEmail для заявок ДОБ лежит на САЙТЕ ДОБ (sites/dob/doblogistic),
+// рядом со списком Requests. Поэтому все запросы идут через dobAxios/dobApiBase
+// (свой digest сайта ДОБ), а не через клиент основного сайта.
 
-import apiClient from "../../../api";
+import { dobApiBase, dobAxios } from "../api/dobClient";
 import { DCEMAIL_LIST_TITLE, resolveDistributionViaDcEmail } from "../../../tasks/distribution";
+import { searchSiteGroups } from "../../tasks/lib/groupSearch";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const VERBOSE = { Accept: "application/json;odata=verbose", "Content-Type": "application/json;odata=verbose" };
+
+/** Абсолютный URL списка DcEmail на сайте ДОБ (dobAxios — без baseURL). */
+export function dcEmailListApi() {
+  return `${dobApiBase()}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')`;
+}
+
+/**
+ * Поиск ГРУПП на сайте ДОБ — те же принципалы, что резолвит ensureuser,
+ * поэтому Id из поиска валидны для поля Email списка DcEmail этого сайта.
+ */
+export function searchDobGroups(query, opts = {}) {
+  return searchSiteGroups(query, {
+    ...opts,
+    base: dobApiBase(),
+    get: (url, cfg) => dobAxios.get(url, cfg),
+  });
+}
 
 /** OffDepKey = Office + Department (слитно) — как в tasks/distribution. */
 export function buildOffDepKey(office, department) {
@@ -24,29 +43,32 @@ export function buildOffDepKey(office, department) {
 }
 
 /**
- * Элемент DcEmail для Office+Department, если он уже есть.
+ * Элемент DcEmail для Office+Department, если он уже есть (на сайте ДОБ).
  * @returns {Promise<object|null>}
  */
 export async function findDcEmailItem(office, department) {
   if (!buildOffDepKey(office, department)) return null;
-  return resolveDistributionViaDcEmail(office, department);
+  return resolveDistributionViaDcEmail(office, department, {
+    get: (url, cfg) => dobAxios.get(url, cfg),
+    listBase: dobApiBase(),
+  });
 }
 
 /**
- * Резолв группы на сайте через ensureuser: по учётной записи (LoginName) или,
- * если её нет, по названию (Title). Возвращает Id принципала.
+ * Резолв группы на сайте ДОБ через ensureuser: по учётной записи (LoginName)
+ * или, если её нет, по названию (Title). Возвращает Id принципала.
  * @param {{LoginName?:string, Title?:string}} group
  * @returns {Promise<number|null>}
  */
 export async function ensureGroupPrincipal(group) {
   const loginName = String(group?.LoginName || group?.Title || "").trim();
   if (!loginName) return null;
-  const url = "/web/siteusers/ensureuser";
+  const url = `${dobApiBase()}/web/siteusers/ensureuser`;
   // Имя параметра в разных сборках SharePoint встречается как loginName и
   // logonName — пробуем оба, чтобы не зависеть от версии.
   for (const key of ["loginName", "logonName"]) {
     try {
-      const resp = await apiClient.post(url, { [key]: loginName }, { headers: VERBOSE });
+      const resp = await dobAxios.post(url, { [key]: loginName }, { headers: VERBOSE });
       const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
       if (Number.isFinite(id) && id > 0) return id;
     } catch (e) {
@@ -73,8 +95,8 @@ export async function ensureGroupPrincipals(groups = []) {
 
 async function getDcEmailEntityType() {
   try {
-    const { data } = await apiClient.get(
-      `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')?$select=ListItemEntityTypeFullName`,
+    const { data } = await dobAxios.get(
+      `${dcEmailListApi()}?$select=ListItemEntityTypeFullName`,
       ACCEPT,
     );
     const type = data?.d?.ListItemEntityTypeFullName;
@@ -86,7 +108,7 @@ async function getDcEmailEntityType() {
 }
 
 /**
- * Создать элемент в DcEmail: OffDepKey + рассылка (группы) в поле Email.
+ * Создать элемент в DcEmail (на сайте ДОБ): OffDepKey + рассылка (группы) в Email.
  * @param {{offDepKey:string, groupIds:number[], title?:string}} args
  * @returns {Promise<object>}
  */
@@ -102,11 +124,7 @@ export async function createDcEmailItem({ offDepKey, groupIds = [], title = "" }
     OffDepKey: key,
     EmailId: { __metadata: { type: "Collection(Edm.Int32)" }, results: ids },
   };
-  const { data } = await apiClient.post(
-    `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items`,
-    body,
-    { headers: VERBOSE },
-  );
+  const { data } = await dobAxios.post(`${dcEmailListApi()}/items`, body, { headers: VERBOSE });
   return data?.d || data;
 }
 
