@@ -11,7 +11,7 @@ import { dobAxios } from "../../api/dobClient";
 import { clearUserSearchCache } from "../../../../tasks/userSearch";
 import {
   buildOffDepKey, ensureGroupPrincipal, ensureGroupPrincipals, createDcEmailItem,
-  ensureDcEmailLink, dcEmailListApi, searchDobGroups,
+  ensureDcEmailLink, dcEmailListApi, searchDobGroups, clearDcEmailGroupCache,
 } from "../dcEmailApi";
 
 const verbose = (d) => ({ data: { d } });
@@ -19,6 +19,7 @@ const verbose = (d) => ({ data: { d } });
 beforeEach(() => {
   vi.clearAllMocks();
   clearUserSearchCache();
+  clearDcEmailGroupCache();
 });
 
 describe("buildOffDepKey", () => {
@@ -45,21 +46,34 @@ describe("ensureGroupPrincipal", () => {
     expect(url).toBe("/dob-api/sites/dob/doblogistic/_api/web/siteusers/ensureuser");
     expect(body).toEqual({ loginName: "c:0-.f|rolemanager|oob" });
     // обязательная проверка: принципал есть в sitegroups (значит это группа)
-    expect(dobAxios.get.mock.calls[0][0]).toBe("/dob-api/sites/dob/doblogistic/_api/web/sitegroups/getbyid(33)");
+    expect(dobAxios.get.mock.calls[0][0]).toContain("/web/sitegroups/getbyid(33)");
   });
 
-  it("ensureuser вернул ПОЛЬЗОВАТЕЛЯ (нет в sitegroups) → null (не группу не берём)", async () => {
+  it("ensureuser вернул ПОЛЬЗОВАТЕЛЯ (нет в sitegroups) и группы по Title нет → null", async () => {
     dobAxios.post.mockResolvedValue(verbose({ Id: 5 }));
     dobAxios.get.mockRejectedValue({ response: { status: 404 } });
-    expect(await ensureGroupPrincipal({ LoginName: "i:0#.f|membership|ivanov@lenta.com" })).toBeNull();
+    expect(await ensureGroupPrincipal({ LoginName: "i:0#.f|membership|ivanov@lenta.com", Title: "Иванов" })).toBeNull();
   });
 
-  it("если у группы нет LoginName — резолвит по Title", async () => {
-    dobAxios.post.mockResolvedValue(verbose({ Id: 44 }));
-    dobAxios.get.mockResolvedValue(verbose({ Id: 44, Title: "Группа отгрузки" }));
-    const id = await ensureGroupPrincipal({ Title: "Группа отгрузки" });
-    expect(id).toBe(44);
-    expect(dobAxios.post.mock.calls[0][1]).toEqual({ loginName: "Группа отгрузки" });
+  it("ensureuser 404 (AD/security-группа) → резолв по названию через sitegroups/getbyname", async () => {
+    dobAxios.post.mockRejectedValue({ response: { status: 404 } });
+    dobAxios.get.mockImplementation((url) => {
+      if (url.includes("/sitegroups/getbyname(")) return Promise.resolve(verbose({ Id: 77, Title: "Группа отгрузки", LoginName: "c:0+.w|s-1-5-21-1" }));
+      return Promise.reject({ response: { status: 404 } });
+    });
+    const id = await ensureGroupPrincipal({ Title: "Группа отгрузки", LoginName: "c:0+.w|s-1-5-21-3594104448-116792928-3034854717-188109" });
+    expect(id).toBe(77);
+    expect(dobAxios.get.mock.calls.some(([u]) => u.includes("sitegroups/getbyname"))).toBe(true);
+  });
+
+  it("ensureuser 404 и группы по Title нет → берём Id из поиска, если он подтверждён группой", async () => {
+    dobAxios.post.mockRejectedValue({ response: { status: 404 } });
+    dobAxios.get.mockImplementation((url) => {
+      if (url.includes("/sitegroups/getbyid(91)")) return Promise.resolve(verbose({ Id: 91, Title: "Гр" }));
+      return Promise.reject({ response: { status: 404 } });
+    });
+    const id = await ensureGroupPrincipal({ Id: 91, Title: "Гр" });
+    expect(id).toBe(91);
   });
 
   it("пустая группа — null, без запроса", async () => {

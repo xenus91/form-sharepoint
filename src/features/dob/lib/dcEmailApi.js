@@ -60,7 +60,7 @@ export async function findDcEmailItem(office, department) {
 /** Принципал с таким Id — группа (а не пользователь)? */
 async function isGroupPrincipal(id) {
   try {
-    const resp = await dobAxios.get(`${dobApiBase()}/web/sitegroups/getbyid(${id})`, ACCEPT);
+    const resp = await dobAxios.get(`${dobApiBase()}/web/sitegroups/getbyid(${id})?$select=Id,Title,LoginName`, ACCEPT);
     const g = resp?.data?.d || resp?.data;
     return Boolean(g && (g.Title || g.LoginName));
   } catch {
@@ -69,36 +69,106 @@ async function isGroupPrincipal(id) {
 }
 
 /**
- * Резолв ГРУППЫ на сайте ДОБ через ensureuser: по учётной записи (LoginName) или,
- * если её нет, по названию (Title). Возвращает Id принципала, ТОЛЬКО если это
- * действительно группа (обязательная проверка — не пользователь).
- * @param {{LoginName?:string, Title?:string}} group
+ * Группа сайта по названию: getbyname, затем фильтр по Title.
+ * Нужно как фолбэк, когда ensureuser не может создать принципал (например,
+ * security-группа из AD `c:0+.w|s-1-5-21-…` → 404), хотя группа уже есть на сайте.
+ */
+async function siteGroupByTitle(title) {
+  const name = String(title || "").trim();
+  if (!name) return null;
+  const esc = name.replace(/'/g, "''");
+  try {
+    const resp = await dobAxios.get(
+      `${dobApiBase()}/web/sitegroups/getbyname('${encodeURIComponent(name).replace(/'/g, "''")}')?$select=Id,Title,LoginName`,
+      ACCEPT,
+    );
+    const g = resp?.data?.d || resp?.data;
+    const id = Number(g?.Id);
+    if (Number.isFinite(id) && id > 0) return { id, title: g?.Title || name, loginName: g?.LoginName || "" };
+  } catch (e) {
+    if (e?.response?.status && e.response.status !== 404) {
+      console.warn("[dcEmail] sitegroups/getbyname failed", e.response.status);
+    }
+  }
+  try {
+    const resp = await dobAxios.get(
+      `${dobApiBase()}/web/sitegroups?$filter=Title eq '${esc}'&$select=Id,Title,LoginName&$top=1`,
+      ACCEPT,
+    );
+    const items = resp?.data?.d?.results || [];
+    const id = Number(items?.[0]?.Id);
+    if (Number.isFinite(id) && id > 0) return { id, title: items[0].Title || name, loginName: items[0].LoginName || "" };
+  } catch (e) {
+    if (e?.response?.status && e.response.status !== 404) {
+      console.warn("[dcEmail] sitegroups filter failed", e.response.status);
+    }
+  }
+  return null;
+}
+
+const _groupCache = new Map(); // login|title → id|null
+
+/** Сброс кэша резолва групп (тесты/отладка). */
+export function clearDcEmailGroupCache() {
+  _groupCache.clear();
+}
+
+/**
+ * Резолв ГРУППЫ на сайте ДОБ. Порядок:
+ *   1) ensureuser по учётной записи (loginName/logonName) — как требует форма;
+ *   2) если ensureuser вернул 404 (security-группа из AD) — ищем группу по
+ *      названию (sitegroups/getbyname → фильтр Title);
+ *   3) если и это не помогло — берём Id из результата поиска, но ТОЛЬКО если он
+ *      подтверждается как группа (sitegroups/getbyid).
+ * Возвращает Id принципала, только если это действительно группа.
+ * @param {{Id?:number, LoginName?:string, Title?:string}} group
  * @returns {Promise<number|null>}
  */
 export async function ensureGroupPrincipal(group) {
-  const loginName = String(group?.LoginName || group?.Title || "").trim();
-  if (!loginName) return null;
-  const url = `${dobApiBase()}/web/siteusers/ensureuser`;
-  // Имя параметра в разных сборках SharePoint встречается как loginName и
-  // logonName — пробуем оба, чтобы не зависеть от версии.
+  const loginName = String(group?.LoginName || "").trim();
+  const title = String(group?.Title || "").trim();
+  const candidate = loginName || title;
+  if (!candidate) return null;
+  const cacheKey = `${loginName.toLowerCase()}|${title.toLowerCase()}`;
+  if (_groupCache.has(cacheKey)) return _groupCache.get(cacheKey);
+
+  const done = (id) => { _groupCache.set(cacheKey, id); return id; };
+
+  // 1) ensureuser: имя параметра в разных сборках — loginName и logonName.
   for (const key of ["loginName", "logonName"]) {
     try {
-      const resp = await dobAxios.post(url, { [key]: loginName }, { headers: VERBOSE });
+      const resp = await dobAxios.post(
+        `${dobApiBase()}/web/siteusers/ensureuser`,
+        { [key]: candidate },
+        { headers: VERBOSE },
+      );
       const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
       if (Number.isFinite(id) && id > 0) {
-        // Обязательно убеждаемся, что это группа, а не пользователь.
-        if (await isGroupPrincipal(id)) return id;
-        console.warn(`[dcEmail] ensureuser(${loginName}) → ${id} не группа — пропускаем`);
-        return null;
+        if (await isGroupPrincipal(id)) return done(id);
+        // ensureuser вернул ПОЛЬЗОВАТЕЛЯ — не подходит, ищем группу дальше.
+        break;
       }
     } catch (e) {
-      if (e?.response?.status && ![400, 404].includes(e.response.status)) {
-        console.warn(`[dcEmail] ensureuser(${loginName}) failed`, e.response.status, e?.message);
+      const st = e?.response?.status;
+      // 404/400 — принципал не создаётся (AD/security-группа) — это не сбой, идём к фолбэкам.
+      if (st && ![400, 404].includes(st)) {
+        console.warn(`[dcEmail] ensureuser(${candidate}) failed`, st, e?.message);
       }
     }
   }
-  console.warn(`[dcEmail] ensureuser не разрешил группу «${loginName}»`);
-  return null;
+
+  // 2) По названию — группа уже существует на сайте.
+  const byTitle = await siteGroupByTitle(title);
+  if (byTitle) return done(byTitle.id);
+
+  // 3) Id из результата поиска, если он подтверждается как группа.
+  const searchId = Number(group?.Id);
+  if (Number.isFinite(searchId) && searchId > 0 && await isGroupPrincipal(searchId)) {
+    return done(searchId);
+  }
+
+  console.warn(`[dcEmail] не удалось определить группу «${title || candidate}»`);
+  return done(null);
 }
 
 /** Резолв набора групп → массив { Id, Title, LoginName }. */
