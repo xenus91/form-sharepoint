@@ -12,7 +12,7 @@ import { useState } from "react";
 import {
   Alert, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography,
 } from "@mui/material";
-import GroupFieldAutocomplete from "../../../tasks/components/GroupFieldAutocomplete";
+import PersonFieldAutocomplete from "../../../tasks/components/PersonFieldAutocomplete";
 import { searchDobGroups } from "../../lib/dcEmailApi";
 
 export default function DcEmailLinkDialog({
@@ -46,7 +46,7 @@ export default function DcEmailLinkDialog({
             DcEmail{offDepKey ? ` (ключ: ${offDepKey})` : ""}. Выберите группы, которые нужно связать
             с этим сочетанием офиса и департамента.
           </Typography>
-          <GroupFieldAutocomplete
+          <PersonFieldAutocomplete
             label="Рассылка (группы)"
             value={groups}
             onChange={(next) => { setGroups(next); if (next.length) setTouched(false); }}
@@ -55,7 +55,7 @@ export default function DcEmailLinkDialog({
             search={searchDobGroups}
             error={touched && nothingSelected}
             helperText={touched && nothingSelected ? "Выберите хотя бы одну группу" : ""}
-            placeholder="Название группы"
+            placeholder="Учётная запись или название группы"
           />
           {error ? <Alert severity="error">{error}</Alert> : null}
         </Stack>

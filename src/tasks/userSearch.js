@@ -23,16 +23,15 @@ const _positions = new Map();      // loginKey -> «должность · деп
 // Если пакетный запрос к списку сведений о пользователях недоступен (нет полей
 // JobTitle/Department или нет прав) — не долбим его на каждый поиск.
 let _userInfoBatchBroken = false;
-const _allUsers = { loaded: false, list: [] }; // фолбэк-страница siteusers
-let _allUsersPromise = null;
+const _allUsers = new Map(); // base → { loaded, list } — фолбэк-страница siteusers
+let _allUsersPromise = new Map(); // base → Promise
 
 /** Сброс кэшей (тесты/отладка). */
 export function clearUserSearchCache() {
   _positions.clear();
   _userInfoBatchBroken = false;
-  _allUsers.loaded = false;
-  _allUsers.list = [];
-  _allUsersPromise = null;
+  _allUsers.clear();
+  _allUsersPromise = new Map();
   try {
     if (typeof sessionStorage !== "undefined") {
       for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
@@ -133,11 +132,13 @@ function mapUser(raw) {
   const id = Number(raw.Id);
   const loginName = String(raw.LoginName || "").trim();
   if (!Number.isFinite(id) || id <= 0 || !loginName) return null;
+  const principalType = Number(raw.PrincipalType);
   return {
     Id: id,
     Title: String(raw.Title || "").trim() || accountLocalPart(loginName),
     LoginName: loginName,
     Email: String(raw.Email || raw.EMail || "").trim(),
+    ...(Number.isFinite(principalType) ? { PrincipalType: principalType } : {}),
   };
 }
 
@@ -154,46 +155,53 @@ function dedupeUsers(users) {
   return out;
 }
 
-async function fetchUsersPage(get, limit = USERS_PAGE_LIMIT) {
-  if (_allUsers.loaded) return _allUsers.list;
-  if (!_allUsersPromise) {
-    _allUsersPromise = (async () => {
-      const url = `/web/siteusers?$select=Id,Title,LoginName,Email,IsHiddenInUI&$top=${limit}`;
+async function fetchUsersPage(get, base = "", limit = USERS_PAGE_LIMIT) {
+  const cached = _allUsers.get(base);
+  if (cached?.loaded) return cached.list;
+  if (!_allUsersPromise.has(base)) {
+    _allUsersPromise.set(base, (async () => {
+      const url = `${base}/web/siteusers?$select=Id,Title,LoginName,Email,IsHiddenInUI,PrincipalType&$top=${limit}`;
       try {
         const resp = await get(url, ACCEPT);
         const list = resultsOf(resp).map(mapUser).filter(Boolean)
           .filter((u) => !/^sharepoint\|/i.test(u.LoginName) && !/\bsystem\b/i.test(u.Title));
-        _allUsers.loaded = true;
-        _allUsers.list = list;
+        _allUsers.set(base, { loaded: true, list });
         return list;
       } catch (e) {
         console.warn("[userSearch] siteusers page failed", e?.response?.status || e?.message);
         return [];
       } finally {
-        _allUsersPromise = null;
+        _allUsersPromise.delete(base);
       }
-    })();
+    })());
   }
-  return _allUsersPromise;
+  return _allUsersPromise.get(base);
 }
 
 /**
  * Поиск пользователей по запросу.
  * @param {string} query — учётная запись (можно с `_`), ФИО или e-mail
- * @param {{ limit?: number, get?: Function }} [opts]
- * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string}>>}
+ * @param {{ limit?: number, get?: Function, groupsOnly?: boolean, base?: string }} [opts]
+ *   groupsOnly — вернуть ТОЛЬКО группы: добавляем обязательный фильтр
+ *   `PrincipalType ne 1` (SP.PrincipalType: 1 — пользователь, 2/4/8 — группы);
+ *   base — префикс базы другого сайта (например, сайта ДОБ).
+ * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string,PrincipalType?:number}>>}
  */
 export async function searchSiteUsers(query, opts = {}) {
-  const { limit = 20 } = opts;
+  const { limit = 20, groupsOnly = false, base = "" } = opts;
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
   const variants = accountQueryVariants(query);
   if (variants.length === 0) return [];
 
+  // Обязательный фильтр «не пользователь»: только принципалы-группы.
+  const groupFilter = groupsOnly ? " and PrincipalType ne 1" : "";
+  const select = `Id,Title,LoginName,Email,IsHiddenInUI${groupsOnly ? ",PrincipalType" : ""}`;
+
   const collected = [];
   for (const variant of variants) {
     const q = escapeODataString(variant);
-    const url = `/web/siteusers?$filter=substringof('${q}',LoginName) or substringof('${q}',Title) or substringof('${q}',Email)`
-      + `&$select=Id,Title,LoginName,Email,IsHiddenInUI&$top=${limit}`;
+    const url = `${base}/web/siteusers?$filter=(substringof('${q}',LoginName) or substringof('${q}',Title) or substringof('${q}',Email))${groupFilter}`
+      + `&$select=${select}&$top=${limit}`;
     try {
       const resp = await get(url, ACCEPT);
       collected.push(...resultsOf(resp).map(mapUser).filter(Boolean));
@@ -208,14 +216,18 @@ export async function searchSiteUsers(query, opts = {}) {
   }
 
   let users = dedupeUsers(collected);
+  if (groupsOnly) users = users.filter((u) => Number(u.PrincipalType) !== 1);
   if (users.length === 0) {
     // Фолбэк: страница siteusers + локальная фильтрация (учитывает `_` → `.`)
-    const all = await fetchUsersPage(get);
+    const all = await fetchUsersPage(get, base);
     users = all.filter((u) => matchesUser(u, query));
+    if (groupsOnly) users = users.filter((u) => Number(u.PrincipalType) !== 1);
   } else if (variants.length > 1) {
     // сервер вернул только точное совпадение — добавим совпадения с точками из фолбэка, если он уже загружен
-    if (_allUsers.loaded) {
-      users = dedupeUsers([...users, ..._allUsers.list.filter((u) => matchesUser(u, query))]);
+    const all = _allUsers.get(base);
+    if (all?.loaded) {
+      users = dedupeUsers([...users, ...all.list.filter((u) => matchesUser(u, query))]);
+      if (groupsOnly) users = users.filter((u) => Number(u.PrincipalType) !== 1);
     }
   }
   return users.slice(0, limit);

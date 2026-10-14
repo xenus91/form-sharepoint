@@ -115,11 +115,16 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
 умолчанию, для формы заявок — сайт ДОБ). Если элемента **нет** — до создания
 заявки пользователь указывает рассылку:
 
-* диалог `DcEmailLinkDialog` + `GroupFieldAutocomplete` — выбор **только групп**
-  (источник `/web/sitegroups` на сайте ДОБ, многократный выбор); Id групп берутся
-  с того же сайта, что резолвит `ensureuser`, поэтому валидны для поля `Email`;
+* диалог `DcEmailLinkDialog` + автокомплит **`PersonFieldAutocomplete`** (тот же
+  компонент, что и поле «Виновный» в форме задач) — выбор **только групп**;
+  поиск идёт по принципалам сайта ДОБ (`/web/siteusers`, как «Виновный»), а НЕ по
+  списку `sitegroups`, с **обязательным фильтром `PrincipalType ne 1`** (SP.PrincipalType:
+  1 — пользователь, 2/4/8 — группы). Id берутся с того же сайта, что резолвит
+  `ensureuser`, поэтому валидны для поля `Email`;
 * выбранные группы резолвятся через **`/web/siteusers/ensureuser`** (имя параметра
   пробуем как `loginName`, так и `logonName` — зависит от сборки SharePoint);
+  результат дополнительно подтверждаем `/web/sitegroups/getbyid(<Id>)`, чтобы в
+  `Email` не попал пользователь;
 * `ensureDcEmailLink`: если элемент уже появился — используем его; иначе
   **сначала создаём элемент в `DcEmail`** (`OffDepKey` + `Email` =
   `Collection(Edm.Int32)` выбранных групп), и **только затем** создаём заявку в
@@ -136,8 +141,8 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
   payload; двухфазная запись с картинкой; гейт DcEmail — нет элемента → диалог,
   `saveDcEmailAndCreate` пишет DcEmail до Requests), `RequestCreateView` (чипы;
   описания типов; тип по умолчанию), `requestFormFields` (`Title`/`Status`/
-  OutcomeChoice отсеиваются), `requestTitle`, `groupSearch`, `dcEmailApi`,
-  `DcEmailLinkDialog`.
+  OutcomeChoice отсеиваются), `requestTitle`, `userSearch` (поиск групп по
+  принципалам с фильтром `PrincipalType ne 1`), `dcEmailApi`, `DcEmailLinkDialog`.
 * `eslint` по изменённым файлам — чисто.
 * `npm run build` — успешно, отдельный чанк `RequestCreateView-*.js`.
 

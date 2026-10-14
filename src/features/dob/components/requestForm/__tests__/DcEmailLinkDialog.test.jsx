@@ -6,10 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 
-// Подменяем автокомплит групп, чтобы проверить логику диалога без MUI-ввода.
-vi.mock("../../../../tasks/components/GroupFieldAutocomplete", () => ({
-  default: ({ value = [], onChange, helperText = "" }) => (
-    <div data-testid="group-field">
+// Подменяем автокомплит (как поле «Виновный»), чтобы проверить логику диалога без MUI-ввода.
+vi.mock("../../../../tasks/components/PersonFieldAutocomplete", () => ({
+  default: ({ value = [], onChange, helperText = "", search }) => (
+    <div data-testid="group-field" data-has-search={search ? "1" : "0"}>
       <button
         data-testid="pick-group"
         onClick={() => onChange([...value, { Id: 33, Title: "ООБ", LoginName: "c:0-.f|rolemanager|oob" }])}
@@ -63,6 +63,8 @@ describe("DcEmailLinkDialog", () => {
 
     click("pick-group");
     expect(byTestid("group-count").textContent).toBe("1");
+    // автокомплит работает по принципу «Виновного» — ему передан свой поиск
+    expect(byTestid("group-field").getAttribute("data-has-search")).toBe("1");
 
     click("dcemail-save");
     expect(onSubmit).toHaveBeenCalledTimes(1);

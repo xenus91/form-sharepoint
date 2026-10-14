@@ -45,6 +45,9 @@ export default function PersonFieldAutocomplete({
   // Подсказка в пустом поле. По умолчанию — прежний текст для задач; форма
   // заявки передаёт описание поля (Description).
   placeholder = "Учётная запись, ФИО или e-mail",
+  // Поиск принципалов. По умолчанию — пользователи/группы основного сайта;
+  // диалог рассылки передаёт поиск по сайту ДОБ с фильтром «только группы».
+  search = searchSiteUsers,
 }) {
   const selected = React.useMemo(
     () => (Array.isArray(value) ? value.filter(Boolean) : (value ? [value] : [])),
@@ -71,7 +74,7 @@ export default function PersonFieldAutocomplete({
     setLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const found = await searchSiteUsers(query, { limit: 20 });
+        const found = await search(query, { limit: 20 });
         if (!cancelled) setOptions(found);
       } catch (_e) {
         void _e;
@@ -81,7 +84,7 @@ export default function PersonFieldAutocomplete({
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [inputValue]);
+  }, [inputValue, search]);
 
   // Сведения (должность/департамент/офис) для подсказок и для уже выбранных.
   React.useEffect(() => {

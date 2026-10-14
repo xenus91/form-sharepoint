@@ -12,7 +12,7 @@
 
 import { dobApiBase, dobAxios } from "../api/dobClient";
 import { DCEMAIL_LIST_TITLE, resolveDistributionViaDcEmail } from "../../../tasks/distribution";
-import { searchSiteGroups } from "../../tasks/lib/groupSearch";
+import { searchSiteUsers } from "../../../tasks/userSearch";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const VERBOSE = { Accept: "application/json;odata=verbose", "Content-Type": "application/json;odata=verbose" };
@@ -23,12 +23,15 @@ export function dcEmailListApi() {
 }
 
 /**
- * Поиск ГРУПП на сайте ДОБ — те же принципалы, что резолвит ensureuser,
- * поэтому Id из поиска валидны для поля Email списка DcEmail этого сайта.
+ * Поиск ГРУПП на сайте ДОБ для автокомплита рассылки — тем же принципом, что и
+ * поле «Виновный» (через /web/siteusers, а не список sitegroups), НО с
+ * ОБЯЗАТЕЛЬНЫМ фильтром `PrincipalType ne 1` — только группы, без пользователей.
+ * Id берутся с того же сайта, что резолвит ensureuser, поэтому валидны для Email.
  */
 export function searchDobGroups(query, opts = {}) {
-  return searchSiteGroups(query, {
+  return searchSiteUsers(query, {
     ...opts,
+    groupsOnly: true,
     base: dobApiBase(),
     get: (url, cfg) => dobAxios.get(url, cfg),
   });
@@ -54,9 +57,21 @@ export async function findDcEmailItem(office, department) {
   });
 }
 
+/** Принципал с таким Id — группа (а не пользователь)? */
+async function isGroupPrincipal(id) {
+  try {
+    const resp = await dobAxios.get(`${dobApiBase()}/web/sitegroups/getbyid(${id})`, ACCEPT);
+    const g = resp?.data?.d || resp?.data;
+    return Boolean(g && (g.Title || g.LoginName));
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Резолв группы на сайте ДОБ через ensureuser: по учётной записи (LoginName)
- * или, если её нет, по названию (Title). Возвращает Id принципала.
+ * Резолв ГРУППЫ на сайте ДОБ через ensureuser: по учётной записи (LoginName) или,
+ * если её нет, по названию (Title). Возвращает Id принципала, ТОЛЬКО если это
+ * действительно группа (обязательная проверка — не пользователь).
  * @param {{LoginName?:string, Title?:string}} group
  * @returns {Promise<number|null>}
  */
@@ -70,7 +85,12 @@ export async function ensureGroupPrincipal(group) {
     try {
       const resp = await dobAxios.post(url, { [key]: loginName }, { headers: VERBOSE });
       const id = Number(resp?.data?.d?.Id ?? resp?.data?.Id);
-      if (Number.isFinite(id) && id > 0) return id;
+      if (Number.isFinite(id) && id > 0) {
+        // Обязательно убеждаемся, что это группа, а не пользователь.
+        if (await isGroupPrincipal(id)) return id;
+        console.warn(`[dcEmail] ensureuser(${loginName}) → ${id} не группа — пропускаем`);
+        return null;
+      }
     } catch (e) {
       if (e?.response?.status && ![400, 404].includes(e.response.status)) {
         console.warn(`[dcEmail] ensureuser(${loginName}) failed`, e.response.status, e?.message);
