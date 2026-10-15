@@ -128,3 +128,45 @@ html, body { overflow-x: hidden; }
 .ag-row.dob-row-completed .ag-cell {
   background-color: transparent;
 }
+/* Строка группы в #dob_requests (DobGrid, groupDisplayType="singleColumn").
+   Внутри ячейки группы AG Grid кладёт подпись в .ag-group-value (обычный inline
+   с обрезкой по ширине), а счётчик — в .ag-group-child-count, который попадает
+   под правило «.ag-cell-wrapper > *:not(.ag-cell-value):not(.ag-group-value)» и
+   становится флекс-боксом со своей высотой min(--ag-line-height, row-height -
+   2px). Из-за этого «(2)» уезжало относительно подписи и выглядело подстрочным.
+
+   Решение: ячейка группы — флекс-строка с выравниванием по базовой линии, а все
+   её дети (иконка, подпись, счётчик) — строковые элементы общей высоты.
+   Префикс .ag-root-wrapper.ag-theme-quartz поднимает специфичность выше, чем у
+   правил темы AG Grid, которые вставляются в head позже нашей таблицы стилей. */
+.ag-root-wrapper.ag-theme-quartz .ag-cell-wrapper.ag-row-group {
+  display: flex;
+  align-items: baseline;
+}
+.ag-root-wrapper.ag-theme-quartz .ag-cell-wrapper.ag-row-group > * {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+/* Подпись группы обрезается многоточием, как и раньше. */
+.ag-root-wrapper.ag-theme-quartz .ag-cell-wrapper.ag-row-group > .ag-group-value {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Счётчик «(N)» — на базовой линии подписи, мельче и светлее её. */
+.ag-root-wrapper.ag-theme-quartz .ag-cell-wrapper.ag-row-group > .ag-group-child-count {
+  /* отступ задаём здесь, а не column-gap у ячейки: внутри есть невидимый
+     .ag-group-checkbox.ag-invisible нулевой ширины, и промежутки flex
+     добавились бы и вокруг него */
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ag-secondary-foreground-color);
+}
+.ag-root-wrapper.ag-theme-quartz .ag-group-child-count::before {
+  content: none;
+}

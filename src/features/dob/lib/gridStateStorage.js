@@ -23,9 +23,14 @@ export const GRID_STATE_STORAGE_PREFIX = 'dob:grid-state';
  * Версия формата настроек. Поднимаем её, когда меняем раскладку таблицы
  * (состав колонок, режим группировки): сохранённое состояние от прошлой версии
  * способно «заморозить» таблицу в старом виде — например, без групп строк, и
- * тогда «Свернуть все группы» и агрегаты по группам просто не сработают.
+ * тогда «Свернуть все группы» просто не сработает.
+ *
+ * v3 (2026-10-15): агрегации из таблицы убраны, а старое сохранённое состояние
+ * тащит aggregationModel с функцией агрегата — AG Grid применяет её даже без
+ * aggFunc в colDef, и в строке группы снова появляются числа. Поэтому версию
+ * подняли, а aggregation/pivot вырезаем и при чтении, и при записи.
  */
-export const GRID_STATE_VERSION = 'v2';
+export const GRID_STATE_VERSION = 'v3';
 
 /**
  * Ключ localStorage для настроек конкретной таблицы.
@@ -39,7 +44,15 @@ export function gridStateKey(scope = 'requests') {
 
 // Восстанавливать прокрутку и фокус ячейки смысла нет: строки между визитами
 // меняются, а «уехавший» скролл выглядит как баг.
-const DROP_ON_SAVE = new Set(['scroll', 'focusedCell', 'rowSelection', 'cellSelection']);
+// aggregation/pivot — агрегации убраны, в настройках им делать нечего.
+const DROP_ON_SAVE = new Set([
+  'scroll',
+  'focusedCell',
+  'rowSelection',
+  'cellSelection',
+  'aggregation',
+  'pivot',
+]);
 
 /**
  * Что из состояния сохраняем.
@@ -71,6 +84,9 @@ export function loadGridState(key) {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    // Состояние от прошлой сборки могло содержать агрегаты — вырезаем, иначе
+    // AG Grid посчитает их и в строке группы снова появятся числа.
+    for (const key of DROP_ON_SAVE) delete parsed[key];
     return Object.keys(parsed).length > 0 ? parsed : null;
   } catch (_e) {
     void _e;

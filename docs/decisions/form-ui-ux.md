@@ -1556,3 +1556,64 @@ eslint по изменённым файлам — 0/0. Новый `DobGrid.noObj
 → 2; вернуть `String(v).slice` в датном → 1; убрать `suppressAggFuncInHeader`
 → 2. `vitest run` — 904 теста, `npm run build` — 10.53 с, eslint по изменённым
 файлам — 0.
+
+## 29. Агрегации убраны, счётчик группы выровнен (2026-10-15)
+
+Требования пользователя: «убери агрегации!» и «наведи порядок в cell render
+группы — число в скобках смещается, как будто подстрочным».
+
+### Агрегации
+
+Убрано всё, что их даёт, — иначе они возвращаются из сохранённого состояния:
+
+- `AggregationModule` не регистрируется;
+- у колонок нет `aggFunc` (ни `sum` у числовых, ни `count` у остальных);
+- `enableValue: false` в `defaultColDef` и `suppressValues: true` в панели
+  «Колонки» — раздела «Значения» больше нет;
+- из строки состояния убрана панель `agAggregationComponent` (остались счётчики
+  строк и выделенного);
+- `GRID_STATE_VERSION` поднят до `v3`, а `aggregation`/`pivot` вырезаются и при
+  записи, и при чтении настроек.
+
+Последний пункт не косметика: проверка показала, что `initialState` с
+`aggregation: {aggregationModel:[{colId:'ID', aggFunc:'sum'}]}` показывает суммы
+в строке группы **даже без `aggFunc` в colDef** — функцию агрегата AG Grid берёт
+из самого состояния. Поэтому без вырезания «агрегации убраны» не работает.
+
+### Счётчик в строке группы
+
+Разметка ячейки группы (jsdom-дамп):
+
+```html
+<span class="ag-cell-wrapper ag-cell-expandable ag-row-group …">
+  <span class="ag-group-expanded "><span class="ag-icon ag-icon-tree-open"></span></span>
+  <span class="ag-group-value">Открыт</span>
+  <span class="ag-group-child-count">(2)</span>
+</span>
+```
+
+Подпись — это `.ag-group-value`, а тема грида применяет к остальным детям
+ячейки правило `.ag-cell-wrapper > *:not(.ag-cell-value):not(.ag-group-value)`,
+которое даёт `display: flex; height: min(--ag-line-height, row-height - 2px)`.
+Счётчик поэтому становился флекс-боксом высотой со строку таблицы, а подпись
+оставалась обычным inline — «(2)» уезжало вниз и выглядело подстрочным.
+
+Исправлено в `src/index.css`: ячейка группы — флекс-строка с
+`align-items: baseline`, все её дети — строковые элементы общей высоты
+(`height: auto; line-height: inherit`), счётчик — 12 px,
+`--ag-secondary-foreground-color`. Селекторы начинаются с
+`.ag-root-wrapper.ag-theme-quartz` — это поднимает специфичность выше правил
+темы, которые AG Grid вставляет в `head` позже нашей таблицы стилей.
+
+### Проверка
+
+`vitest run` — 122 файла, 905 тестов, все зелёные; `npm run build` — 11.87 с;
+eslint по изменённым файлам — 0. Откаты падают: вернуть `enableValue: true` +
+`suppressValues: false` → 4 падения; вернуть панель агрегатов → 4; перестать
+вырезать `aggregation` из настроек → 6; убрать CSS-правило счётчика → 2;
+совместный откат (`aggFunc: 'sum'` + `enableValue: true` + не вырезать
+состояние) → суммы 30/5 снова в строке группы.
+
+Не проверялось: сама вёрстка в браузере — jsdom не считает layout, поэтому
+тесты проверяют разметку ячейки группы и наличие правила в `src/index.css`, а
+визуальный результат нужно смотреть в приложении.

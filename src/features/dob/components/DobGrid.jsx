@@ -58,7 +58,6 @@ import {
   RangeSelectionModule,
   ExcelExportModule,
   StatusBarModule,
-  AggregationModule,
   RowNumbersModule,
   FindModule,
   LicenseManager,
@@ -96,7 +95,6 @@ ModuleRegistry.registerModules([
   RangeSelectionModule,
   ExcelExportModule,
   StatusBarModule,
-  AggregationModule,
   RowNumbersModule,
   FindModule,
 ]);
@@ -382,10 +380,7 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
         return isNaN(n) ? null : n;
       };
       col.cellStyle = { textAlign: 'right' };
-      // Агрегат по умолчанию для чисел — сумма (шапку колонки сохраняет
-      // headerValueGetter ниже). Без aggFunc перенос колонки в «Значения» не
-      // показывал в строке группы НИЧЕГО — «агрегация по группам не работает».
-      col.aggFunc = 'sum';
+      // aggFunc НЕ задаём: агрегации в таблице убраны (см. ниже).
     } else if (t === 'text' || t === 'note' || t === 'url') {
       col.filter = 'agSetColumnFilter';
       col.cellEditor = t === 'note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
@@ -451,18 +446,6 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
     // У наследника ContentTypeId длиннее, чем у родительского типа, — сначала
     // проверяем более длинные Id.
     .sort((a, b) => b.id.length - a.id.length);
-  // Агрегат по умолчанию у КАЖДОЙ колонки: у чисел — сумма (выше), у остальных
-  // — количество. Без этого перенос колонки в «Значения» не давал в строке
-  // группы ничего («Без агрегации»). Функцию можно сменить в чипе «Значения».
-  //
-  // Важно: у колонки с aggFunc AG Grid подменяет шапку на «Количество(<имя>)»,
-  // поэтому шапку возвращаем через headerValueGetter — названия из Description
-  // остаются на месте.
-  for (const col of cols) {
-    if (!col.aggFunc) col.aggFunc = 'count';
-    if (!col.headerValueGetter) col.headerValueGetter = () => col.headerName || col.field;
-  }
-
 
   if (ctList.length > 0) {
     const ctCol = {
@@ -611,10 +594,11 @@ export default function DobGrid({
       minWidth: 120,
       enableCellChangeFlash: true,
       headerComponentParams: { template: HEADER_TEMPLATE },
-      // Любую колонку можно закрепить, сгруппировать и использовать в
-      // агрегатах — через меню колонки и панель «Колонки».
+      // Колонку можно закрепить и сгруппировать по ней — через меню колонки и
+      // панель «Колонки». enableValue выключен: агрегации убраны (2026-10-15),
+      // поэтому раздела «Значения» в панели нет и в строке группы нет сумм.
       enableRowGroup: true,
-      enableValue: true,
+      enableValue: false,
       menuTabs: ['generalMenuTab', 'filterMenuTab', 'columnsMenuTab'],
       cellStyle: { fontSize: 13, lineHeight: '1.35', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
     }),
@@ -760,10 +744,8 @@ export default function DobGrid({
             toolPanelParams: {
               suppressPivots: true,
               suppressPivotMode: true,
-              // «Значения» НЕ прячем: перетащив сюда колонку, пользователь
-              // получает агрегат (сумма/среднее/мин/макс/количество) по
-              // группам строк — это и есть управление агрегациями.
-              suppressValues: false,
+              // Агрегации убраны — раздела «Значения» в панели нет.
+              suppressValues: true,
               suppressRowGroups: false,
             },
           },
@@ -779,17 +761,12 @@ export default function DobGrid({
         defaultToolPanel: '',
       },
 
-      // Строка состояния: сколько всего строк, сколько отфильтровано, сколько
-      // выделено, и агрегаты по выделению (сумма/среднее/мин/макс).
+      // Строка состояния: сколько всего строк, сколько отфильтровано и сколько
+      // выделено. Панели агрегатов (сумма/среднее/мин/макс) убраны.
       statusBar: {
         statusPanels: [
           { statusPanel: 'agTotalAndFilteredRowCountComponent', align: 'left' },
           { statusPanel: 'agSelectedRowCountComponent', align: 'left' },
-          {
-            statusPanel: 'agAggregationComponent',
-            align: 'right',
-            statusPanelParams: { aggFuncs: ['count', 'sum', 'avg', 'min', 'max'] },
-          },
         ],
       },
 
@@ -915,7 +892,7 @@ export default function DobGrid({
             </Button>
           </span>
         </Tooltip>
-        <Tooltip title="Вернуть таблицу к виду по умолчанию: колонки, фильтры, группировка, агрегаты">
+        <Tooltip title="Вернуть таблицу к виду по умолчанию: колонки, фильтры, группировка">
           <span>
             <Button
               size="small"
@@ -974,9 +951,6 @@ export default function DobGrid({
             paginationPageSizeSelector={[20, 50, 100, 200]}
             enableCellTextSelection
             onSelectionChanged={onSelectionChanged}
-            // Шапка колонки-«значения» остаётся именем из Description вместо
-            // «Количество(<имя>)» / «Сумма(<имя>)».
-            suppressAggFuncInHeader
             onStateUpdated={onStateUpdated}
             onGridReady={onGridReady}
             onRowDoubleClicked={onRowDoubleClicked}
@@ -990,13 +964,13 @@ export default function DobGrid({
       <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#5b6273' }}>
         Заявки доступны только для просмотра — изменение заявок в этом разделе отключено. Двойной клик по строке
         открывает заявку. Всё управление — средствами AG Grid: кнопка <b>«Колонки»</b> справа — показ/скрытие,
-        порядок, закрепление слева/справа, группировка строк и <b>агрегаты</b> (перетащите колонку в «Значения» —
-        сумма, среднее, минимум, максимум, количество: результат виден в строке группы); кнопка <b>«Фильтры»</b> —
-        все фильтры списком. Фильтр каждой колонки — список значений с галочками (иконка воронки в шапке). Правый
-        клик — копирование, экспорт в Excel и CSV, группировка, «Развернуть/Свернуть все группы», «Сбросить
-        настройки таблицы». Кнопками над таблицей группы сворачиваются и разворачиваются целиком. Внизу — счётчики
-        строк и агрегаты по выделению. Настройки таблицы (колонки, фильтры, группы, агрегаты, сортировка)
-        сохраняются автоматически и восстанавливаются при следующем открытии.
+        порядок, закрепление слева/справа и группировка строк; кнопка <b>«Фильтры»</b> — все фильтры списком.
+        Фильтр каждой колонки — список значений с галочками (иконка воронки в шапке). Правый клик — копирование,
+        экспорт в Excel и CSV, группировка, «Развернуть/Свернуть все группы», «Сбросить настройки таблицы».
+        Кнопками над таблицей группы сворачиваются и разворачиваются целиком; в строке группы видно её название и
+        число заявок в ней. Агрегатов (сумм, средних и т. п.) в таблице нет. Внизу — счётчики строк. Настройки
+        таблицы (колонки, фильтры, группы, сортировка) сохраняются автоматически и восстанавливаются при
+        следующем открытии.
 </Typography>
     </Box>
   );

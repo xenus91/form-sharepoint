@@ -3,7 +3,7 @@
 //
 // Требования 2026-10-15:
 //   • «добавь возможность сохранения пользовательских настроек ag-grid»;
-//   • «добавь возможность агрегаций» (панель «Значения» + агрегат по группам).
+//   • агрегации убраны (2026-10-15): ни раздела «Значения», ни сумм в строке группы.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { act } from "react-dom/test-utils";
@@ -77,28 +77,28 @@ describe("DobGrid — сохранение настроек", () => {
     expect(textOf(host)).toContain("Третья");
   });
 });
-
-describe("DobGrid — агрегации", () => {
+describe("DobGrid — агрегации убраны", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
   });
 
-  it("в панели «Колонки» есть раздел «Значения» для агрегатов", async () => {
-    const { host } = await renderDobGrid({ stateScope: "agg_panel" });
+  it("в панели «Колонки» нет раздела «Значения»", async () => {
+    const { host } = await renderDobGrid({ stateScope: "no_agg_panel" });
     await click(sideButton(host, "Колонки"));
     const panel = (host.querySelector(".ag-tool-panel-wrapper")?.textContent || "").replace(/\s+/g, " ");
-    expect(panel).toContain("Значения");
+    expect(panel).toContain("Группы строк");
+    expect(panel).not.toContain("Значения");
   });
 
-  it("агрегат по группам считается: в строке группы — сумма значений", async () => {
-    const scope = "agg_sum";
-    // 10 + 20 = 30 по «Открыт», 5 по «Завершена»
+  it("сохранённое состояние с агрегатом не показывает чисел в строке группы", async () => {
+    const scope = "no_agg_state";
     const rows = [
       { ID: 10, Title: "Первая", Status: "Открыт", ContentTypeId: "0x0100AA" },
       { ID: 20, Title: "Вторая", Status: "Открыт", ContentTypeId: "0x0100AA" },
       { ID: 5, Title: "Третья", Status: "Завершена", ContentTypeId: "0x0100BB" },
     ];
+    // Состояние могло остаться от старой сборки — агрегат должен игнорироваться.
     localStorage.setItem(gridStateKey(scope), JSON.stringify({
       rowGroup: { groupColIds: ["Status"] },
       aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
@@ -106,45 +106,22 @@ describe("DobGrid — агрегации", () => {
     }));
     const { host } = await renderDobGrid({ stateScope: scope, rows });
 
-    // строки групп: «Открыт» → 30, «Завершена» → 5
-    const groupCells = [...host.querySelectorAll(".ag-row-group [col-id=\"ID\"]")]
-      .map((c) => (c.textContent || "").trim());
-    expect(groupCells).toContain("30");
-    expect(groupCells).toContain("5");
-
-    // агрегат виден и в панели «Колонки» («Значения» → «Сумма(ID)»)
-    await click(sideButton(host, "Колонки"));
-    const panel = (host.querySelector(".ag-tool-panel-wrapper")?.textContent || "").replace(/\s+/g, " ");
-    expect(panel).toContain("Сумма(ID)");
-  });
-
-  it("агрегат виден и в РАСКРЫТОЙ группе (groupSuppressBlankHeader)", async () => {
-    const scope = "agg_expanded";
-    const rows = [
-      { ID: 10, Title: "Первая", Status: "Открыт", ContentTypeId: "0x0100AA" },
-      { ID: 20, Title: "Вторая", Status: "Открыт", ContentTypeId: "0x0100AA" },
-    ];
-    localStorage.setItem(gridStateKey(scope), JSON.stringify({
-      rowGroup: { groupColIds: ["Status"] },
-      aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
-      rowGroupExpansion: { expandedRowGroupIds: ["row-group-Status-Открыт"] },
-      partialColumnState: true,
-    }));
-    const { host } = await renderDobGrid({ stateScope: scope, rows });
-
-    // группа раскрыта: строки видны…
-    expect(textOf(host)).toContain("Первая");
-    // …и сумма по группе тоже видна, а не пропадает при раскрытии
     const groupCells = [...host.querySelectorAll('.ag-row-group [col-id="ID"]')]
       .map((c) => (c.textContent || "").trim());
-    expect(groupCells).toContain("30");
+    expect(groupCells).not.toContain("30");
+    expect(groupCells).not.toContain("5");
+
+    // группировка при этом работает: подписи и счётчики строк на месте
+    expect(textOf(host)).toContain("Открыт");
+    expect(textOf(host)).toContain("Завершена");
   });
 
-  it("в строке состояния есть агрегаты по выделению", async () => {
-    const { host } = await renderDobGrid({ stateScope: "agg_bar" });
+  it("в статус-панели нет агрегатов по выделению", async () => {
+    const { host } = await renderDobGrid({ stateScope: "no_agg_bar" });
     const bar = (host.querySelector(".ag-status-bar")?.textContent || "").replace(/\s+/g, " ");
+    expect(bar).toContain("Строки");
     for (const label of ["Сумма", "Среднее", "Количество", "Минимум", "Максимум"]) {
-      expect(bar).toContain(label);
+      expect(bar).not.toContain(label);
     }
   });
 });
