@@ -19,7 +19,11 @@ export function cellText(value) {
   if (Array.isArray(value)) return value.map(cellText).filter(Boolean).join('; ');
   if (Array.isArray(value.results)) return value.results.map(cellText).filter(Boolean).join('; ');
   if (value.__deferred) return '';
-  for (const key of ['Value', 'Label', 'Title', 'Name', 'LookupValue']) {
+  // 'value' со строчной — это результат агрегата AG Grid: count/avg отдают
+  // обёртку {value: N}, из-за неё в строке группы было пусто, а там, где
+  // значение приводилось к строке, — «[object Object]».
+  // 'Description'/'Url' — значение поля «Гиперссылка» SharePoint.
+  for (const key of ['Value', 'Label', 'Title', 'Name', 'LookupValue', 'Description', 'Url', 'value', 'text', 'label']) {
     if (value[key] !== null && value[key] !== undefined) return cellText(value[key]);
   }
   return '';

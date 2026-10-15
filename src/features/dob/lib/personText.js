@@ -107,8 +107,12 @@ export default personCellText;
  * @returns {string}
  */
 export function safeText(formatted, raw) {
+  // Форматтер мог вернуть СТРОКУ «[object Object]» (так делали числовые и
+  // датные форматтеры на значении-объекте) — это не текст, а мусор.
+  const isJunk = (value) => typeof value === 'string' && value.includes('[object');
   const pick = (value) => {
     if (value === null || value === undefined) return '';
+    if (isJunk(value)) return '';
     const kind = typeof value;
     if (kind === 'string') return value;
     if (kind === 'number' || kind === 'boolean') return String(value);

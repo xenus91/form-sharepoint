@@ -328,7 +328,11 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
       };
     } else if (t === 'datetime') {
       col.valueFormatter = (p) => {
-        const v = p.value;
+        // Дату SharePoint тоже может отдать обёрткой {Value: '/Date(…)/'} —
+        // иначе String(объект).slice(0, 10) печатал «[object Ob».
+        const rawValue = p.value;
+        if (!rawValue) return '';
+        const v = typeof rawValue === 'object' ? cellText(rawValue) : rawValue;
         if (!v) return '';
         try {
           let d;
@@ -360,10 +364,15 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
       col.filter = 'agNumberColumnFilter';
       col.cellEditor = 'agNumberCellEditor';
       col.valueFormatter = (p) => {
-        const v = p.value;
-        if (v == null || v === '') return '';
+        // Значение числа может прийти объектом ({Value: 1500} — «выбор»,
+        // вычисляемое поле, lookup). String(объект) и давал в ячейке
+        // «[object Object]» — сначала достаём текст, потом считаем.
+        const rawValue = p.value;
+        if (rawValue == null || rawValue === '') return '';
+        const v = typeof rawValue === 'object' ? cellText(rawValue) : rawValue;
+        if (v === '') return '';
         const n = Number(v);
-        if (isNaN(n)) return String(v);
+        if (isNaN(n)) return cellText(rawValue) || '';
         if (t === 'currency') return n.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         return String(n);
       };
@@ -373,9 +382,10 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
         return isNaN(n) ? null : n;
       };
       col.cellStyle = { textAlign: 'right' };
-      // aggFunc здесь НЕ задаём: у колонки с aggFunc AG Grid подменяет шапку на
-      // «Сумма(<имя>)» — названия колонок из Description пропали бы. Функцию
-      // агрегата пользователь выбирает в чипе «Значения» (панель «Колонки»).
+      // Агрегат по умолчанию для чисел — сумма (шапку колонки сохраняет
+      // headerValueGetter ниже). Без aggFunc перенос колонки в «Значения» не
+      // показывал в строке группы НИЧЕГО — «агрегация по группам не работает».
+      col.aggFunc = 'sum';
     } else if (t === 'text' || t === 'note' || t === 'url') {
       col.filter = 'agSetColumnFilter';
       col.cellEditor = t === 'note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
@@ -441,10 +451,18 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
     // У наследника ContentTypeId длиннее, чем у родительского типа, — сначала
     // проверяем более длинные Id.
     .sort((a, b) => b.id.length - a.id.length);
-  // Агрегаты: колонки можно переносить в «Значения» (enableValue в
-  // defaultColDef), функцию (сумма/среднее/мин/макс/количество) пользователь
-  // выбирает в чипе «Значения». aggFunc в colDef НЕ проставляем — иначе AG Grid
-  // подменяет шапку колонки на «Количество(<имя>)».
+  // Агрегат по умолчанию у КАЖДОЙ колонки: у чисел — сумма (выше), у остальных
+  // — количество. Без этого перенос колонки в «Значения» не давал в строке
+  // группы ничего («Без агрегации»). Функцию можно сменить в чипе «Значения».
+  //
+  // Важно: у колонки с aggFunc AG Grid подменяет шапку на «Количество(<имя>)»,
+  // поэтому шапку возвращаем через headerValueGetter — названия из Description
+  // остаются на месте.
+  for (const col of cols) {
+    if (!col.aggFunc) col.aggFunc = 'count';
+    if (!col.headerValueGetter) col.headerValueGetter = () => col.headerName || col.field;
+  }
+
 
   if (ctList.length > 0) {
     const ctCol = {
@@ -554,6 +572,8 @@ export default function DobGrid({
   initialStatusFilter = null,
   // Идентификатор таблицы для сохранения настроек в localStorage.
   stateScope = 'dob_requests',
+  // Проброс события готовности грида (api понадобится вне компонента).
+  onGridReady = null,
 }) {
   const gridRef = useRef(null);
   const {
@@ -954,7 +974,11 @@ export default function DobGrid({
             paginationPageSizeSelector={[20, 50, 100, 200]}
             enableCellTextSelection
             onSelectionChanged={onSelectionChanged}
+            // Шапка колонки-«значения» остаётся именем из Description вместо
+            // «Количество(<имя>)» / «Сумма(<имя>)».
+            suppressAggFuncInHeader
             onStateUpdated={onStateUpdated}
+            onGridReady={onGridReady}
             onRowDoubleClicked={onRowDoubleClicked}
             rowClassRules={rowCompletedClassRules}
             getRowId={getRowId}
@@ -993,4 +1017,6 @@ DobGrid.propTypes = {
   contentTypes: PropTypes.array,
   // Ключ сохранения настроек таблицы в localStorage.
   stateScope: PropTypes.string,
+  // Колбэк готовности грида: (event) => void, event.api — GridApi.
+  onGridReady: PropTypes.func,
 };
