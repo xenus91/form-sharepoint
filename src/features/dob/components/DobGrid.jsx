@@ -21,7 +21,7 @@ import PropTypes from 'prop-types';
 import { useMemo, useRef, useCallback, useEffect, useState } from 'react';
 import { isUserField } from "../lib/dobFormFields";
 import { cellText } from "../lib/cellText";
-import { personCellText } from "../lib/personText";
+import { personCellText, safeText } from "../lib/personText";
 import { contentTypeDisplayName, contentTypeNameOfRow, DOB_CT_COLUMN_FIELD } from "../lib/requestFields";
 import { ctIdOf } from "../lib/requestListFilters";
 import { AG_GRID_LOCALE_RU } from "../lib/agGridLocaleRu";
@@ -63,7 +63,7 @@ import {
   FindModule,
   LicenseManager,
 } from 'ag-grid-enterprise';
-import { Box, CircularProgress, IconButton, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, Button, CircularProgress, Stack, Tooltip, Typography } from '@mui/material';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
@@ -373,9 +373,9 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
         return isNaN(n) ? null : n;
       };
       col.cellStyle = { textAlign: 'right' };
-      // Агрегат по умолчанию для чисел: когда колонку перетаскивают в
-      // «Значения» (панель «Колонки»), считается сумма, а не «без агрегации».
-      col.aggFunc = 'sum';
+      // aggFunc здесь НЕ задаём: у колонки с aggFunc AG Grid подменяет шапку на
+      // «Сумма(<имя>)» — названия колонок из Description пропали бы. Функцию
+      // агрегата пользователь выбирает в чипе «Значения» (панель «Колонки»).
     } else if (t === 'text' || t === 'note' || t === 'url') {
       col.filter = 'agSetColumnFilter';
       col.cellEditor = t === 'note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
@@ -386,6 +386,21 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
     // Страховка от «[object Object]»: если для типа не задан свой форматтер,
     // значение всё равно приводим к тексту (объекты {Value}, коллекции, массивы).
     if (!col.valueFormatter) col.valueFormatter = (p) => cellText(p.value);
+
+    // ОБЩАЯ защита: что бы ни вернул форматтер колонки, в ячейку, фильтр,
+    // буфер обмена и экспорт не может попасть объект (String({…}) =
+    // «[object Object]» — так выглядели пустые/нераскрытые значения).
+    const ownFormatter = col.valueFormatter;
+    col.valueFormatter = (params) => safeText(ownFormatter ? ownFormatter(params) : params?.value, params?.value);
+    if (!col.filterValueGetter) {
+      col.filterValueGetter = (params) => safeText(getODataValue(params?.data, internal), params?.value);
+    } else {
+      const ownFilterGetter = col.filterValueGetter;
+      col.filterValueGetter = (params) => safeText(ownFilterGetter(params), params?.value);
+    }
+    // Ключ группы: при группировке по полю-объекту (lookup, «выбор» объектом,
+    // люди) подпись группы бралась из самого значения — тоже «[object Object]».
+    col.keyCreator = (params) => safeText(params?.value);
 
     if (isCalculated) {
       col.editable = false;
@@ -426,6 +441,11 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
     // У наследника ContentTypeId длиннее, чем у родительского типа, — сначала
     // проверяем более длинные Id.
     .sort((a, b) => b.id.length - a.id.length);
+  // Агрегаты: колонки можно переносить в «Значения» (enableValue в
+  // defaultColDef), функцию (сумма/среднее/мин/макс/количество) пользователь
+  // выбирает в чипе «Значения». aggFunc в colDef НЕ проставляем — иначе AG Grid
+  // подменяет шапку колонки на «Количество(<имя>)».
+
   if (ctList.length > 0) {
     const ctCol = {
       field: DOB_CT_COLUMN_FIELD,
@@ -507,6 +527,18 @@ const HEADER_TEMPLATE = `
     <span data-ref="eFilter" class="ag-header-icon ag-filter-icon" aria-hidden="true"></span>
   </div>
 </div>`;
+
+// Компактные кнопки панели над таблицей (30 px — вровень с соседними контролами).
+const TOOLBAR_BUTTON_SX = {
+  height: 30,
+  minHeight: 30,
+  px: 1,
+  fontSize: '0.75rem',
+  textTransform: 'none',
+  color: '#171c8f',
+  borderColor: '#cdd2e3',
+  '&:hover': { borderColor: '#171c8f', bgcolor: 'rgba(23,28,143,0.04)' },
+};
 
 // ---------- component ----------
 
@@ -835,40 +867,46 @@ export default function DobGrid({
         justifyContent="flex-end"
         sx={{ mb: 0.5, flex: '0 0 auto' }}
       >
-        <Tooltip title="Развернуть все группы">
+        <Tooltip title="Развернуть все группы строк">
           <span>
-            <IconButton
+            <Button
               size="small"
+              variant="outlined"
               onClick={handleExpandAll}
               data-testid="dob-grid-expand-all"
-              aria-label="Развернуть все группы"
+              startIcon={<UnfoldMoreIcon sx={{ fontSize: 16 }} />}
+              sx={TOOLBAR_BUTTON_SX}
             >
-              <UnfoldMoreIcon fontSize="small" />
-            </IconButton>
+              Развернуть все
+            </Button>
           </span>
         </Tooltip>
-        <Tooltip title="Свернуть все группы">
+        <Tooltip title="Свернуть все группы строк">
           <span>
-            <IconButton
+            <Button
               size="small"
+              variant="outlined"
               onClick={handleCollapseAll}
               data-testid="dob-grid-collapse-all"
-              aria-label="Свернуть все группы"
+              startIcon={<UnfoldLessIcon sx={{ fontSize: 16 }} />}
+              sx={TOOLBAR_BUTTON_SX}
             >
-              <UnfoldLessIcon fontSize="small" />
-            </IconButton>
+              Свернуть все
+            </Button>
           </span>
         </Tooltip>
-        <Tooltip title="Сбросить настройки таблицы (колонки, фильтры, группировка)">
+        <Tooltip title="Вернуть таблицу к виду по умолчанию: колонки, фильтры, группировка, агрегаты">
           <span>
-            <IconButton
+            <Button
               size="small"
+              variant="outlined"
               onClick={handleResetState}
               data-testid="dob-grid-reset-state"
-              aria-label="Сбросить настройки таблицы"
+              startIcon={<RestartAltIcon sx={{ fontSize: 16 }} />}
+              sx={TOOLBAR_BUTTON_SX}
             >
-              <RestartAltIcon fontSize="small" />
-            </IconButton>
+              Сбросить вид
+            </Button>
           </span>
         </Tooltip>
       </Stack>

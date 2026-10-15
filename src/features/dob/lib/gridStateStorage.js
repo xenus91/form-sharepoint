@@ -20,13 +20,21 @@
 export const GRID_STATE_STORAGE_PREFIX = 'dob:grid-state';
 
 /**
+ * Версия формата настроек. Поднимаем её, когда меняем раскладку таблицы
+ * (состав колонок, режим группировки): сохранённое состояние от прошлой версии
+ * способно «заморозить» таблицу в старом виде — например, без групп строк, и
+ * тогда «Свернуть все группы» и агрегаты по группам просто не сработают.
+ */
+export const GRID_STATE_VERSION = 'v2';
+
+/**
  * Ключ localStorage для настроек конкретной таблицы.
  * @param {string} [scope] — идентификатор таблицы (по умолчанию «requests»)
  * @returns {string}
  */
 export function gridStateKey(scope = 'requests') {
   const clean = String(scope || '').trim().toLowerCase() || 'requests';
-  return `${GRID_STATE_STORAGE_PREFIX}:${clean}`;
+  return `${GRID_STATE_STORAGE_PREFIX}:${GRID_STATE_VERSION}:${clean}`;
 }
 
 // Восстанавливать прокрутку и фокус ячейки смысла нет: строки между визитами

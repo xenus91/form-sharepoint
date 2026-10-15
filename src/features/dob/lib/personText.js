@@ -96,3 +96,26 @@ export function personCellText(row, internal) {
 }
 
 export default personCellText;
+
+
+/**
+ * Гарантированно строка для ячейки/фильтра/подписи группы.
+ * Форматтер колонки может вернуть объект (или ничего) — тогда берём текст из
+ * самого значения, чтобы в таблицу не попал «[object Object]».
+ * @param {any} formatted — результат valueFormatter
+ * @param {any} [raw] — исходное значение ячейки
+ * @returns {string}
+ */
+export function safeText(formatted, raw) {
+  const pick = (value) => {
+    if (value === null || value === undefined) return '';
+    const kind = typeof value;
+    if (kind === 'string') return value;
+    if (kind === 'number' || kind === 'boolean') return String(value);
+    if (kind !== 'object') return '';
+    return personNames(value);
+  };
+  const text = pick(formatted);
+  if (text) return text;
+  return pick(raw);
+}

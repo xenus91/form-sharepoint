@@ -16,9 +16,11 @@ describe("gridStateStorage", () => {
   beforeEach(() => { localStorage.clear(); });
 
   it("ключ — по разделу таблицы", () => {
-    expect(gridStateKey()).toBe("dob:grid-state:requests");
-    expect(gridStateKey("dob_requests")).toBe("dob:grid-state:dob_requests");
-    expect(gridStateKey("  DOB_Requests ")).toBe("dob:grid-state:dob_requests");
+    expect(gridStateKey()).toBe("dob:grid-state:v2:requests");
+    expect(gridStateKey("dob_requests")).toBe("dob:grid-state:v2:dob_requests");
+    expect(gridStateKey("  DOB_Requests ")).toBe("dob:grid-state:v2:dob_requests");
+    // состояние от прошлой версии формата не подхватывается
+    expect(gridStateKey("t1")).not.toContain("dob:grid-state:t1");
   });
 
   it("сохраняет настройки и читает их обратно", () => {

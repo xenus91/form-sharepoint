@@ -42,7 +42,12 @@ export function isHiddenFormField(internal = '') {
  */
 export function isUserFieldType(typeAsString) {
   const t = String(typeAsString || '').trim().toLowerCase();
-  return t === 'user' || t === 'usermulti';
+  if (t === 'user' || t === 'usermulti') return true;
+  // SharePoint отдаёт TypeAsString на языке интерфейса сайта: по-русски это
+  // «Пользователь» / «Пользователь или группа» — без этой проверки поле
+  // людей попадало в общую ветку колонок.
+  if (t === 'пользователь' || t === 'пользователь или группа') return true;
+  return t.includes('user');
 }
 
 /** То же самое по объекту колонки (метаданные /fields). */
