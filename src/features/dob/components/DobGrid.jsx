@@ -8,6 +8,7 @@
 import PropTypes from 'prop-types';
 import { useMemo, useRef, useCallback, useEffect } from 'react';
 import { isUserField } from "../lib/dobFormFields";
+import { cellText } from "../lib/cellText";
 import { AgGridReact } from 'ag-grid-react';
 import {
   ModuleRegistry,
@@ -70,7 +71,7 @@ function isEditableField(f) {
 
 function htmlToCellText(value) {
   if (value === null || value === undefined) return '';
-  const raw = String(value);
+  const raw = cellText(value);
   try {
     const doc = new DOMParser().parseFromString(raw, 'text/html');
     let text = doc.body.textContent || '';
@@ -204,7 +205,7 @@ function buildColumnDefs(fields, ctFieldNames) {
       // editable как ФУНКЦИЯ: ячейка недоступна, если строка — завершённая задача.
       editable: (p) => editable && !isCalculated && !isRowCompleted(p?.data, statusInternalGlobal),
       headerTooltip: `${internal} — ${f.TypeAsString}${f.Description ? ' | ' + String(f.Description).slice(0, 80) : ''}`,
-      tooltipValueGetter: (p) => (p.value ? String(p.value).slice(0, 120) : ''),
+      tooltipValueGetter: (p) => cellText(p.value).slice(0, 120),
       ...(isODataField
         ? {
             valueGetter: (p) => getODataValue(p.data, internal),
@@ -228,7 +229,10 @@ function buildColumnDefs(fields, ctFieldNames) {
 
     if (t === 'choice') {
       const rawChoices = Array.isArray(f.Choices) ? f.Choices : (f.Choices?.results || f.Choices?.Results || []);
-      const vals = (rawChoices || []).filter(Boolean);
+      const vals = (rawChoices || []).filter(Boolean).map((c) => cellText(c));
+      // Значение может прийти объектом ({Value: 'Годен'}) — показываем текст.
+      col.valueFormatter = (p) => cellText(p.value);
+      col.filterValueGetter = (p) => cellText(getODataValue(p?.data, internal));
       col.cellEditor = 'agSelectCellEditor';
       col.cellEditorParams = { values: vals.length ? vals : [''], valueListGap: 0 };
       col.filter = 'agTextColumnFilter';
@@ -239,6 +243,13 @@ function buildColumnDefs(fields, ctFieldNames) {
           borderLeft: p.value ? undefined : '3px solid #e53935',
         });
       }
+    } else if (t === 'multichoice') {
+      // MultiChoice приходит коллекцией, элементы бывают объектами {Value} —
+      // без нормализации в ячейке был «[object Object]».
+      col.valueFormatter = (p) => cellText(p.value);
+      col.filterValueGetter = (p) => cellText(getODataValue(p?.data, internal));
+      col.filter = 'agTextColumnFilter';
+      col.width = 200;
     } else if (t === 'boolean') {
       col.cellRenderer = (p) => (p.value ? '☑ Да' : '☐ Нет');
       col.cellEditor = 'agCheckboxCellEditor';
@@ -305,6 +316,10 @@ function buildColumnDefs(fields, ctFieldNames) {
     } else {
       col.filter = 'agTextColumnFilter';
     }
+
+    // Страховка от «[object Object]»: если для типа не задан свой форматтер,
+    // значение всё равно приводим к тексту (объекты {Value}, коллекции, массивы).
+    if (!col.valueFormatter) col.valueFormatter = (p) => cellText(p.value);
 
     if (isCalculated) {
       col.editable = false;

@@ -1010,3 +1010,32 @@ AG Grid сортирует по ЗНАЧЕНИЮ колонки, а не по `v
 На старом `DobListAppBar` (без бейджа) тест падает. `vitest run` — 98 файлов /
 792 теста, зелёные; `npm run build` — успешно; eslint по изменённым файлам —
 0 новых замечаний (`DobTaskEditView`: 9 → 5).
+
+## 20. Таблица #dob_requests: «выбор» без «[object Object]» (2026-10-15)
+
+**Проблема.** В колонках типа «выбор» встречалось `[object Object]`. SharePoint
+отдаёт значение не всегда строкой: MultiChoice приходит коллекцией
+(`{__metadata:{type:"Collection(Edm.String)"}, results:[…]}`), а элементы
+коллекции бывают объектами `{Value}`; одиночный выбор тоже может прийти
+объектом. Форматтер значения был задан только для `text/note/url`
+(`htmlToCellText`) — у `choice` его не было, а ветки `multichoice` не было
+вовсе, поэтому AG Grid просто вызывал `String(value)`.
+
+**Решение.**
+
+* `src/features/dob/lib/cellText.js` — `cellText(value)`: примитивы как есть;
+  массив/`results` → через `; `; объект → `Value`/`Label`/`Title`/`Name`/
+  `LookupValue`; `__deferred` и пустой объект → пустая строка.
+* `DobGrid`: `valueFormatter` у `choice` и у новой ветки `multichoice`,
+  `filterValueGetter` для текстового фильтра, `tooltipValueGetter` — через
+  `cellText`, и страховка в конце: если у колонки так и не появилось своего
+  форматтера — ставим `cellText` (ни одна колонка не может показать
+  `[object Object]`).
+* `htmlToCellText` тоже нормализует значение перед снятием тегов.
+* Формы этого не касаются: там значения и так приводит `normalizeChoiceValue(s)`.
+
+**Проверено:** `cellText.test.js` — 7 тестов; `DobGrid.choiceObject.test.jsx` —
+4 теста (одиночный выбор объектом; MultiChoice коллекцией объектов; обычные
+строки не сломались; во всей таблице нет `[object Object]`). При отключении
+форматтеров 3 теста падают ровно на `[object Object]`. `vitest run` — 100 файлов
+/ 803 теста, зелёные; `npm run build` — успешно; eslint — чисто.
