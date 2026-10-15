@@ -25,10 +25,10 @@ export const GRID_STATE_STORAGE_PREFIX = 'dob:grid-state';
  * способно «заморозить» таблицу в старом виде — например, без групп строк, и
  * тогда «Свернуть все группы» просто не сработает.
  *
- * v3 (2026-10-15): агрегации из таблицы убраны, а старое сохранённое состояние
- * тащит aggregationModel с функцией агрегата — AG Grid применяет её даже без
- * aggFunc в colDef, и в строке группы снова появляются числа. Поэтому версию
- * подняли, а aggregation/pivot вырезаем и при чтении, и при записи.
+ * v3 (2026-10-15): таблица вернулась к поведению коммита 14bed60 (полноширинная
+ * строка группы + агрегаты в разделе «Значения» и в строке состояния). Версию
+ * оставили v3, чтобы настройки, записанные промежуточными сборками, не
+ * восстанавливали устаревшую раскладку.
  */
 export const GRID_STATE_VERSION = 'v3';
 
@@ -43,16 +43,9 @@ export function gridStateKey(scope = 'requests') {
 }
 
 // Восстанавливать прокрутку и фокус ячейки смысла нет: строки между визитами
-// меняются, а «уехавший» скролл выглядит как баг.
-// aggregation/pivot — агрегации убраны, в настройках им делать нечего.
-const DROP_ON_SAVE = new Set([
-  'scroll',
-  'focusedCell',
-  'rowSelection',
-  'cellSelection',
-  'aggregation',
-  'pivot',
-]);
+// меняются, а «уехавший» скролл выглядит как баг. Агрегаты (aggregation) —
+// часть настроек пользователя, их сохраняем.
+const DROP_ON_SAVE = new Set(['scroll', 'focusedCell', 'rowSelection', 'cellSelection']);
 
 /**
  * Что из состояния сохраняем.
@@ -84,8 +77,8 @@ export function loadGridState(key) {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    // Состояние от прошлой сборки могло содержать агрегаты — вырезаем, иначе
-    // AG Grid посчитает их и в строке группы снова появятся числа.
+    // Из состояния, записанного другой сборкой, могло прийти то, что мы
+    // намеренно не храним (прокрутка, фокус) — такие ключи не применяем.
     for (const key of DROP_ON_SAVE) delete parsed[key];
     return Object.keys(parsed).length > 0 ? parsed : null;
   } catch (_e) {

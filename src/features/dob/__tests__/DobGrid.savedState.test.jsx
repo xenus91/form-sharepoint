@@ -77,51 +77,74 @@ describe("DobGrid — сохранение настроек", () => {
     expect(textOf(host)).toContain("Третья");
   });
 });
-describe("DobGrid — агрегации убраны", () => {
+describe("DobGrid — агрегации (поведение 14bed60)", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
   });
 
-  it("в панели «Колонки» нет раздела «Значения»", async () => {
-    const { host } = await renderDobGrid({ stateScope: "no_agg_panel" });
+  it("в панели «Колонки» есть раздел «Значения»", async () => {
+    const { host } = await renderDobGrid({ stateScope: "agg_panel" });
     await click(sideButton(host, "Колонки"));
     const panel = (host.querySelector(".ag-tool-panel-wrapper")?.textContent || "").replace(/\s+/g, " ");
     expect(panel).toContain("Группы строк");
-    expect(panel).not.toContain("Значения");
+    expect(panel).toContain("Значения");
   });
 
-  it("сохранённое состояние с агрегатом не показывает чисел в строке группы", async () => {
-    const scope = "no_agg_state";
-    const rows = [
-      { ID: 10, Title: "Первая", Status: "Открыт", ContentTypeId: "0x0100AA" },
-      { ID: 20, Title: "Вторая", Status: "Открыт", ContentTypeId: "0x0100AA" },
-      { ID: 5, Title: "Третья", Status: "Завершена", ContentTypeId: "0x0100BB" },
-    ];
-    // Состояние могло остаться от старой сборки — агрегат должен игнорироваться.
+  it("колонка из сохранённого состояния попадает в «Значения» с функцией агрегата", async () => {
+    const scope = "agg_values";
     localStorage.setItem(gridStateKey(scope), JSON.stringify({
       rowGroup: { groupColIds: ["Status"] },
       aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
       partialColumnState: true,
     }));
-    const { host } = await renderDobGrid({ stateScope: scope, rows });
-
-    const groupCells = [...host.querySelectorAll('.ag-row-group [col-id="ID"]')]
-      .map((c) => (c.textContent || "").trim());
-    expect(groupCells).not.toContain("30");
-    expect(groupCells).not.toContain("5");
-
-    // группировка при этом работает: подписи и счётчики строк на месте
-    expect(textOf(host)).toContain("Открыт");
-    expect(textOf(host)).toContain("Завершена");
+    const { host } = await renderDobGrid({ stateScope: scope });
+    await click(sideButton(host, "Колонки"));
+    const panel = (host.querySelector(".ag-tool-panel-wrapper")?.textContent || "").replace(/\s+/g, " ");
+    // чип в разделе «Значения» показывает выбранную функцию
+    expect(panel).toContain("Сумма(ID)");
   });
 
-  it("в статус-панели нет агрегатов по выделению", async () => {
-    const { host } = await renderDobGrid({ stateScope: "no_agg_bar" });
+  it("в статус-панели есть агрегаты по выделению", async () => {
+    const { host } = await renderDobGrid({ stateScope: "agg_bar" });
     const bar = (host.querySelector(".ag-status-bar")?.textContent || "").replace(/\s+/g, " ");
-    expect(bar).toContain("Строки");
     for (const label of ["Сумма", "Среднее", "Количество", "Минимум", "Максимум"]) {
-      expect(bar).not.toContain(label);
+      expect(bar).toContain(label);
     }
+  });
+
+  it("строка группы — отдельная строка с названием и числом заявок", async () => {
+    const scope = "agg_grouprow";
+    const rows = [
+      { ID: 10, Title: "Первая", Status: "Открыт", ContentTypeId: "0x0100AA" },
+      { ID: 20, Title: "Вторая", Status: "Открыт", ContentTypeId: "0x0100AA" },
+      { ID: 5, Title: "Третья", Status: "Завершена", ContentTypeId: "0x0100BB" },
+    ];
+    localStorage.setItem(gridStateKey(scope), JSON.stringify({
+      rowGroup: { groupColIds: ["Status"] },
+      aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
+      partialColumnState: true,
+    }));
+    let api = null;
+    const { host } = await renderDobGrid({
+      stateScope: scope,
+      rows,
+      onGridReady: (e) => { api = e?.api || null; },
+    });
+
+    // режим строки группы — как в 14bed60
+    expect(api.getGridOption("groupDisplayType")).toBe("groupRows");
+    expect(api.getGridOption("groupSuppressBlankHeader")).toBeFalsy();
+    // полноширинная строка группы (groupDisplayType="groupRows")
+    expect(host.querySelector(".ag-full-width-row.ag-row-group")).toBeTruthy();
+    const labels = [...host.querySelectorAll(".ag-full-width-row.ag-row-group .ag-group-value")]
+      .map((e) => (e.textContent || "").trim());
+    expect(labels).toContain("Открыт");
+    expect(labels).toContain("Завершена");
+    const counts = [...host.querySelectorAll(".ag-full-width-row.ag-row-group .ag-group-child-count")]
+      .map((e) => (e.textContent || "").trim()).filter(Boolean);
+    expect([...new Set(counts)]).toEqual(["(2)", "(1)"]);
+    // в самой строке группы сумм нет — агрегат живёт в «Значениях» и внизу
+    expect(textOf(host.querySelector(".ag-full-width-row.ag-row-group"))).not.toContain("30");
   });
 });

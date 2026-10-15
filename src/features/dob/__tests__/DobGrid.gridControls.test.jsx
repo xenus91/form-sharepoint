@@ -57,9 +57,9 @@ describe("DobGrid — чекбоксы, группы, локаль", () => {
     const status = (host.querySelector(".ag-status-bar")?.textContent || "").replace(/\s+/g, " ");
     expect(status).toContain("Строки");
     expect(status).toContain("Выделено");
-    // агрегации убраны (2026-10-15) — агрегатов в статус-панели нет
+    // агрегаты по выделению (поведение 14bed60)
     for (const label of ["Сумма", "Среднее", "Количество", "Минимум", "Максимум"]) {
-      expect(status).not.toContain(label);
+      expect(status).toContain(label);
     }
 
     const paging = (host.querySelector(".ag-paging-panel")?.textContent || "").replace(/\s+/g, " ");
@@ -69,6 +69,6 @@ describe("DobGrid — чекбоксы, группы, локаль", () => {
     await click(sideButton(host, "Колонки"));
     const panel = (host.querySelector(".ag-tool-panel-wrapper")?.textContent || "").replace(/\s+/g, " ");
     expect(panel).toContain("Группы строк");
-    expect(panel).not.toContain("Значения");
+    expect(panel).toContain("Значения");
   });
 });

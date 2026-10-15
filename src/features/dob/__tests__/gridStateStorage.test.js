@@ -60,30 +60,28 @@ describe("gridStateStorage", () => {
     expect(clearGridState(gridStateKey("t2"))).toBe(false);
   });
 
-  it("агрегаты не сохраняет и из сохранённого состояния вырезает", () => {
-    // Агрегации из таблицы убраны: старое состояние с aggregationModel не должно
-    // вернуть суммы в строку группы.
+  it("агрегаты сохраняет и восстанавливает", () => {
+    // Раздел «Значения» вернулся (поведение 14bed60) — выбранная пользователем
+    // функция агрегата обязана переживать перезагрузку страницы.
     const picked = pickPersistedState({
       rowGroup: { groupColIds: ["Status"] },
       aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
-      pivot: { pivot: true },
     });
-    expect(picked).toEqual({ rowGroup: { groupColIds: ["Status"] } });
+    expect(picked).toEqual({
+      rowGroup: { groupColIds: ["Status"] },
+      aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
+    });
 
-    const key = gridStateKey("agg_drop");
+    const key = gridStateKey("agg_keep");
     localStorage.setItem(key, JSON.stringify({
       rowGroup: { groupColIds: ["Status"] },
       aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
+      scroll: { rowIndex: 10 },
     }));
-    expect(loadGridState(key)).toEqual({ rowGroup: { groupColIds: ["Status"] } });
-  });
-
-  it("состояние только из агрегатов — это «настроек нет»", () => {
-    const key = gridStateKey("agg_only");
-    localStorage.setItem(key, JSON.stringify({
+    expect(loadGridState(key)).toEqual({
+      rowGroup: { groupColIds: ["Status"] },
       aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
-    }));
-    expect(loadGridState(key)).toBe(null);
+    });
   });
 
 });

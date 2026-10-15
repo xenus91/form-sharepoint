@@ -4,10 +4,11 @@
 // накопления dirty-строк больше нет (требование 2026-10-15).
 //
 // Группировка по статусу — ШТАТНАЯ функция AG Grid (colDef.rowGroup +
-// groupDisplayType="singleColumn"): разворачиваемые группы со счётчиком и
-// шевроном. Режим 'singleColumn' выбран не случайно: при 'groupRows' строка
-// группы рисуется ПОЛНОШИРИННОЙ (в .ag-full-width-container, без ячеек по
-// колонкам) — и агрегатам по группам просто негде показаться. Row Grouping
+// groupDisplayType="groupRows"): отдельная полноширинная строка группы с
+// названием и числом заявок — «Открыт (2)». Именно такое поведение строки
+// группы пользователь назвал нормальным (коммит 14bed60) и попросил вернуть
+// 2026-10-15. Агрегаты при этом живут в разделе «Значения» панели «Колонки»
+// (чипы с функцией) и в строке состояния. Row Grouping
 // входит в AG Grid Enterprise, поэтому подключён пакет
 // ag-grid-enterprise (RowGroupingModule). Ключ лицензии берётся из
 // VITE_AG_GRID_LICENSE_KEY (.env): без ключа грид работает, но показывает
@@ -58,6 +59,7 @@ import {
   RangeSelectionModule,
   ExcelExportModule,
   StatusBarModule,
+  AggregationModule,
   RowNumbersModule,
   FindModule,
   LicenseManager,
@@ -95,6 +97,7 @@ ModuleRegistry.registerModules([
   RangeSelectionModule,
   ExcelExportModule,
   StatusBarModule,
+  AggregationModule,
   RowNumbersModule,
   FindModule,
 ]);
@@ -380,7 +383,9 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes 
         return isNaN(n) ? null : n;
       };
       col.cellStyle = { textAlign: 'right' };
-      // aggFunc НЕ задаём: агрегации в таблице убраны (см. ниже).
+      // Агрегат по умолчанию для чисел — сумма (как в 14bed60): перенёс
+      // колонку в «Значения» — сразу получил сумму по группам и по выделению.
+      col.aggFunc = 'sum';
     } else if (t === 'text' || t === 'note' || t === 'url') {
       col.filter = 'agSetColumnFilter';
       col.cellEditor = t === 'note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
@@ -594,11 +599,10 @@ export default function DobGrid({
       minWidth: 120,
       enableCellChangeFlash: true,
       headerComponentParams: { template: HEADER_TEMPLATE },
-      // Колонку можно закрепить и сгруппировать по ней — через меню колонки и
-      // панель «Колонки». enableValue выключен: агрегации убраны (2026-10-15),
-      // поэтому раздела «Значения» в панели нет и в строке группы нет сумм.
+      // Любую колонку можно закрепить, сгруппировать и использовать в
+      // агрегатах — через меню колонки и панель «Колонки».
       enableRowGroup: true,
-      enableValue: false,
+      enableValue: true,
       menuTabs: ['generalMenuTab', 'filterMenuTab', 'columnsMenuTab'],
       cellStyle: { fontSize: 13, lineHeight: '1.35', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
     }),
@@ -707,12 +711,32 @@ export default function DobGrid({
     resetStateRef.current = handleResetState;
   }, [handleResetState]);
 
+  // Все ли группы сейчас раскрыты — от этого зависит единственная кнопка
+  // «Развернуть все» / «Свернуть все» (требование 2026-10-15: показывать ту,
+  // которая нужна сейчас).
+  const [allGroupsExpanded, setAllGroupsExpanded] = useState(false);
+
+  const syncGroupExpansion = useCallback(() => {
+    const api = gridRef.current?.api;
+    if (!api?.forEachNode) return;
+    let groups = 0;
+    let open = 0;
+    api.forEachNode((node) => {
+      if (!node?.group) return;
+      groups += 1;
+      if (node.expanded) open += 1;
+    });
+    setAllGroupsExpanded(groups > 0 && open === groups);
+  }, []);
+
   const handleExpandAll = useCallback(() => {
     gridRef.current?.api?.expandAll?.();
-  }, []);
+    syncGroupExpansion();
+  }, [syncGroupExpansion]);
   const handleCollapseAll = useCallback(() => {
     gridRef.current?.api?.collapseAll?.();
-  }, []);
+    syncGroupExpansion();
+  }, [syncGroupExpansion]);
 
   const gridOptions = useMemo(
     () => ({
@@ -744,8 +768,9 @@ export default function DobGrid({
             toolPanelParams: {
               suppressPivots: true,
               suppressPivotMode: true,
-              // Агрегации убраны — раздела «Значения» в панели нет.
-              suppressValues: true,
+              // Раздел «Значения» открыт: колонка, перенесённая сюда,
+              // становится чипом с функцией агрегата (сумма/среднее/…).
+              suppressValues: false,
               suppressRowGroups: false,
             },
           },
@@ -761,12 +786,17 @@ export default function DobGrid({
         defaultToolPanel: '',
       },
 
-      // Строка состояния: сколько всего строк, сколько отфильтровано и сколько
-      // выделено. Панели агрегатов (сумма/среднее/мин/макс) убраны.
+      // Строка состояния: сколько всего строк, сколько отфильтровано, сколько
+      // выделено, и агрегаты по выделению (сумма/среднее/мин/макс).
       statusBar: {
         statusPanels: [
           { statusPanel: 'agTotalAndFilteredRowCountComponent', align: 'left' },
           { statusPanel: 'agSelectedRowCountComponent', align: 'left' },
+          {
+            statusPanel: 'agAggregationComponent',
+            align: 'right',
+            statusPanelParams: { aggFuncs: ['count', 'sum', 'avg', 'min', 'max'] },
+          },
         ],
       },
 
@@ -864,31 +894,24 @@ export default function DobGrid({
         justifyContent="flex-end"
         sx={{ mb: 0.5, flex: '0 0 auto' }}
       >
-        <Tooltip title="Развернуть все группы строк">
+        {/* Одна кнопка: если все группы раскрыты — она сворачивает, иначе
+            разворачивает. testid тоже переключается, чтобы было видно, какое
+            действие выполнится. */}
+        <Tooltip title={allGroupsExpanded ? 'Свернуть все группы строк' : 'Развернуть все группы строк'}>
           <span>
             <Button
               size="small"
               variant="outlined"
-              onClick={handleExpandAll}
-              data-testid="dob-grid-expand-all"
-              startIcon={<UnfoldMoreIcon sx={{ fontSize: 16 }} />}
+              onClick={allGroupsExpanded ? handleCollapseAll : handleExpandAll}
+              data-testid={allGroupsExpanded ? 'dob-grid-collapse-all' : 'dob-grid-expand-all'}
+              startIcon={
+                allGroupsExpanded
+                  ? <UnfoldLessIcon sx={{ fontSize: 16 }} />
+                  : <UnfoldMoreIcon sx={{ fontSize: 16 }} />
+              }
               sx={TOOLBAR_BUTTON_SX}
             >
-              Развернуть все
-            </Button>
-          </span>
-        </Tooltip>
-        <Tooltip title="Свернуть все группы строк">
-          <span>
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={handleCollapseAll}
-              data-testid="dob-grid-collapse-all"
-              startIcon={<UnfoldLessIcon sx={{ fontSize: 16 }} />}
-              sx={TOOLBAR_BUTTON_SX}
-            >
-              Свернуть все
+              {allGroupsExpanded ? 'Свернуть все' : 'Развернуть все'}
             </Button>
           </span>
         </Tooltip>
@@ -938,12 +961,11 @@ export default function DobGrid({
             rowData={rowData}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
-            groupDisplayType="singleColumn"
+            groupDisplayType="groupRows"
             // Без сохранённых настроек группы раскрыты; с сохранёнными —
             // решает сам сохранённый state (rowGroupExpansion), иначе
             // groupDefaultExpanded=-1 перекрывал бы настройку пользователя.
             groupDefaultExpanded={savedState ? 0 : -1}
-            groupSuppressBlankHeader
             autoGroupColumnDef={autoGroupColumnDef}
             initialState={initialState}
             pagination
@@ -953,6 +975,9 @@ export default function DobGrid({
             onSelectionChanged={onSelectionChanged}
             onStateUpdated={onStateUpdated}
             onGridReady={onGridReady}
+            // Группы раскрыли/свернули (клик по шеврону, «Развернуть все»,
+            // восстановление настроек) — пересчитываем подпись кнопки.
+            onModelUpdated={syncGroupExpansion}
             onRowDoubleClicked={onRowDoubleClicked}
             rowClassRules={rowCompletedClassRules}
             getRowId={getRowId}
@@ -967,10 +992,11 @@ export default function DobGrid({
         порядок, закрепление слева/справа и группировка строк; кнопка <b>«Фильтры»</b> — все фильтры списком.
         Фильтр каждой колонки — список значений с галочками (иконка воронки в шапке). Правый клик — копирование,
         экспорт в Excel и CSV, группировка, «Развернуть/Свернуть все группы», «Сбросить настройки таблицы».
-        Кнопками над таблицей группы сворачиваются и разворачиваются целиком; в строке группы видно её название и
-        число заявок в ней. Агрегатов (сумм, средних и т. п.) в таблице нет. Внизу — счётчики строк. Настройки
-        таблицы (колонки, фильтры, группы, сортировка) сохраняются автоматически и восстанавливаются при
-        следующем открытии.
+        Строка группы — отдельная строка с названием группы и числом заявок в ней («Открыт (2)»). Кнопка над
+        таблицей одна: если все группы раскрыты, она сворачивает их, иначе разворачивает. Агрегаты: перенесите
+        колонку в раздел «Значения» панели «Колонки» — чип покажет функцию (сумма/среднее/мин/макс/количество),
+        результат виден в строке состояния внизу. Настройки таблицы (колонки, фильтры, группы, агрегаты,
+        сортировка) сохраняются автоматически и восстанавливаются при следующем открытии.
 </Typography>
     </Box>
   );
