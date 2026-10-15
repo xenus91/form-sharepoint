@@ -154,3 +154,49 @@ describe("dob/lib/dobFormFields — тип контента", () => {
     expect(contentTypeNameOf({})).toBe("");
   });
 });
+
+describe("dob/lib/dobFormFields — пустые поля людей без «[object Object]»", () => {
+  // Баг 2026-10-15: у незаполненного поля «Пользователь или группа» значение
+  // приходит объектом ({__deferred:…} или {}), а titleOf() в конце делал
+  // String(fallback) — в форме появлялось «[object Object]».
+  const USER = { InternalName: "Initiator", Title: "Инициатор", TypeAsString: "User" };
+  const USER_MULTI = { InternalName: "Members", Title: "Участники", TypeAsString: "UserMulti" };
+
+  it("нераскрытое значение (__deferred) — пусто", () => {
+    const view = formatFieldValue(USER, { Initiator: { __deferred: { uri: "http://sp/x" } } });
+    expect(view.text).toBe("");
+    expect(view.text).not.toContain("[object Object]");
+  });
+
+  it("пустой объект, пустая коллекция и null-значения — пусто", () => {
+    expect(formatFieldValue(USER, { Initiator: {} }).text).toBe("");
+    expect(formatFieldValue(USER_MULTI, { Members: { results: [] } }).text).toBe("");
+    expect(formatFieldValue(USER, { Initiator: { Id: null, Title: null } }).text).toBe("");
+    expect(formatFieldValue(USER, {}).text).toBe("");
+  });
+
+  it("заполненное поле — ФИО (в том числе несколько через запятую)", () => {
+    expect(formatFieldValue(USER, { Initiator: { Id: 7, Title: "Иванов Иван" } }).text).toBe("Иванов Иван");
+    expect(
+      formatFieldValue(USER_MULTI, { Members: { results: [{ Title: "Иванов Иван" }, { Title: "Петрова Анна" }] } }).text,
+    ).toBe("Иванов Иван, Петрова Анна");
+  });
+
+  it("объект в текстовом поле — тоже не «[object Object]»", () => {
+    const note = { InternalName: "Comment", Title: "Комментарий", TypeAsString: "Note" };
+    expect(formatFieldValue(note, { Comment: { __deferred: { uri: "x" } } }).text).toBe("");
+  });
+
+  it("ни один вариант значения не даёт «[object Object]»", () => {
+    const shapes = [
+      undefined, null, {}, { __deferred: { uri: "x" } }, { results: [] }, { results: [{}] },
+      { Id: null, Title: null }, { Title: null, Value: null }, [{}, {}],
+    ];
+    for (const value of shapes) {
+      for (const field of [USER, USER_MULTI]) {
+        const text = formatFieldValue(field, { [field.InternalName]: value }).text;
+        expect(String(text)).not.toContain("[object Object]");
+      }
+    }
+  });
+});

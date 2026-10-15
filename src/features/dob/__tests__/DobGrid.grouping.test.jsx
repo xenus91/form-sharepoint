@@ -58,11 +58,21 @@ async function renderGrid(props = {}) {
   return { host, root };
 }
 
+// Подпись группы есть и в закреплённой, и в центральной части таблицы —
+// копия в центральной части пустая, поэтому пустые значения отбрасываем.
 const groupLabels = (host) => [
-  ...new Set([...host.querySelectorAll(".ag-group-value")].map((el) => (el.textContent || "").trim())),
+  ...new Set(
+    [...host.querySelectorAll(".ag-group-value")]
+      .map((el) => (el.textContent || "").trim())
+      .filter(Boolean),
+  ),
 ];
 const groupCounts = (host) => [
-  ...new Set([...host.querySelectorAll(".ag-group-child-count")].map((el) => (el.textContent || "").trim())),
+  ...new Set(
+    [...host.querySelectorAll(".ag-group-child-count")]
+      .map((el) => (el.textContent || "").trim())
+      .filter(Boolean),
+  ),
 ];
 const text = (host) => (host.textContent || "").replace(/\s+/g, " ");
 
@@ -98,7 +108,36 @@ describe("DobGrid — штатная группировка AG Grid по ста�
     expect(text(host)).toContain("Завершена");
   });
 
-  it("по умолчанию показаны только заявки «Открыт» (стартовый Set-фильтр)", async () => {
+  it("по умолчанию показаны ВСЕ заявки — стартового фильтра по статусу нет", async () => {
+    // Требование 2026-10-15: «убрать фильтр по Открыт».
+    const { host } = await renderGrid();
+    expect(text(host)).toContain("Первая");
+    expect(text(host)).toContain("Вторая");
+    expect(text(host)).toContain("Третья");
+    expect(groupLabels(host)).toEqual(["Открыт", "Завершена"]);
+  });
+
+  it("без пропа initialStatusFilter (как в приложении) фильтра по статусу нет", async () => {
+    // DobTasksView проп не передаёт — проверяем именно значение по умолчанию.
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(
+        <DobListStateProvider fields={FIELDS} rows={ROWS}>
+          <DobGrid fields={FIELDS} rows={ROWS} stateScope="no_default_filter" />
+        </DobListStateProvider>,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    await act(async () => { await new Promise((r) => setTimeout(r, 200)); });
+
+    expect(text(host)).toContain("Первая");
+    expect(text(host)).toContain("Третья");
+    expect(groupLabels(host)).toEqual(["Открыт", "Завершена"]);
+  });
+
+  it("фильтр по статусу можно поставить самому (Set-фильтр значениями)", async () => {
     const { host } = await renderGrid({ initialStatusFilter: ["Открыт"] });
     expect(text(host)).toContain("Первая");
     expect(text(host)).not.toContain("Третья");

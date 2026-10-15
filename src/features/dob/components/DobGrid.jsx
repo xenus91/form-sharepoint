@@ -3,9 +3,12 @@
 // Заявки в этой таблице ТОЛЬКО просматриваются (readOnly): правки в ячейках и
 // накопления dirty-строк больше нет (требование 2026-10-15).
 //
-// Группировка по статусу — ШТАТНАЯ функция AG Grid (rowGroupCols +
-// groupDisplayType="groupRows"): разворачиваемые группы со счётчиком и
-// шевроном. Row Grouping входит в AG Grid Enterprise, поэтому подключён пакет
+// Группировка по статусу — ШТАТНАЯ функция AG Grid (colDef.rowGroup +
+// groupDisplayType="singleColumn"): разворачиваемые группы со счётчиком и
+// шевроном. Режим 'singleColumn' выбран не случайно: при 'groupRows' строка
+// группы рисуется ПОЛНОШИРИННОЙ (в .ag-full-width-container, без ячеек по
+// колонкам) — и агрегатам по группам просто негде показаться. Row Grouping
+// входит в AG Grid Enterprise, поэтому подключён пакет
 // ag-grid-enterprise (RowGroupingModule). Ключ лицензии берётся из
 // VITE_AG_GRID_LICENSE_KEY (.env): без ключа грид работает, но показывает
 // водяной знак и предупреждение в консоли.
@@ -23,6 +26,7 @@ import { contentTypeDisplayName, contentTypeNameOfRow, DOB_CT_COLUMN_FIELD } fro
 import { ctIdOf } from "../lib/requestListFilters";
 import { AG_GRID_LOCALE_RU } from "../lib/agGridLocaleRu";
 import { gridStateKey, loadGridState, saveGridState, clearGridState } from "../lib/gridStateStorage";
+import { buildContextMenuItems } from "../lib/gridContextMenu";
 import { AgGridReact } from 'ag-grid-react';
 import {
   ModuleRegistry,
@@ -506,9 +510,6 @@ const HEADER_TEMPLATE = `
 
 // ---------- component ----------
 
-// Стартовое значение фильтра по статусу (снимается в интерфейсе AG Grid).
-const DEFAULT_STATUS_FILTER = ['Открыт'];
-
 export default function DobGrid({
   fields,
   rows,
@@ -516,7 +517,9 @@ export default function DobGrid({
   // Типы контента списка — для колонки «Тип контента» (имя берём из Description).
   contentTypes = null,
   readOnly = true,
-  initialStatusFilter = DEFAULT_STATUS_FILTER,
+  // Стартового фильтра по статусу НЕТ (требование 2026-10-15: «убрать фильтр
+  // по Открыт») — показываем все заявки, фильтр пользователь ставит сам.
+  initialStatusFilter = null,
   // Идентификатор таблицы для сохранения настроек в localStorage.
   stateScope = 'dob_requests',
 }) {
@@ -744,36 +747,10 @@ export default function DobGrid({
       rowNumbers: true,
       suppressClipboardPaste: false,
       allowContextMenuWithControlKey: false,
-      getContextMenuItems: (params) => [
-        'copy',
-        'copyWithHeaders',
-        'paste',
-        'separator',
-        'export',
-        'separator',
-        'rowGrouping',
-        'separator',
-        {
-          name: 'Развернуть все группы',
-          icon: '<span class="ag-icon ag-icon-tree-open" role="presentation"></span>',
-          action: () => params?.api?.expandAll?.(),
-          disabled: () => (params?.api?.getRowGroupColumns?.() || []).length === 0,
-        },
-        {
-          name: 'Свернуть все группы',
-          icon: '<span class="ag-icon ag-icon-tree-closed" role="presentation"></span>',
-          action: () => params?.api?.collapseAll?.(),
-          disabled: () => (params?.api?.getRowGroupColumns?.() || []).length === 0,
-        },
-        'separator',
-        {
-          name: 'Сбросить настройки таблицы',
-          icon: '<span class="ag-icon ag-icon-cancel" role="presentation"></span>',
-          action: () => resetStateRef.current?.(),
-        },
-        'separator',
-        ...(params?.defaultItems || []),
-      ],
+      getContextMenuItems: (params) => buildContextMenuItems({
+        defaultItems: params?.defaultItems,
+        onResetState: () => resetStateRef.current?.(),
+      }),
       defaultExcelExportParams: { skipColumnHeaders: false },
     }),
     [],
@@ -926,11 +903,12 @@ export default function DobGrid({
             rowData={rowData}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
-            groupDisplayType="groupRows"
+            groupDisplayType="singleColumn"
             // Без сохранённых настроек группы раскрыты; с сохранёнными —
             // решает сам сохранённый state (rowGroupExpansion), иначе
             // groupDefaultExpanded=-1 перекрывал бы настройку пользователя.
             groupDefaultExpanded={savedState ? 0 : -1}
+            groupSuppressBlankHeader
             autoGroupColumnDef={autoGroupColumnDef}
             initialState={initialState}
             pagination
@@ -951,12 +929,12 @@ export default function DobGrid({
         Заявки доступны только для просмотра — изменение заявок в этом разделе отключено. Двойной клик по строке
         открывает заявку. Всё управление — средствами AG Grid: кнопка <b>«Колонки»</b> справа — показ/скрытие,
         порядок, закрепление слева/справа, группировка строк и <b>агрегаты</b> (перетащите колонку в «Значения» —
-        сумма, среднее, минимум, максимум, количество по группам); кнопка <b>«Фильтры»</b> — все фильтры списком.
-        Фильтр каждой колонки — список значений с галочками (иконка воронки в шапке). Правый клик — копирование,
-        экспорт в Excel и CSV, группировка, «Развернуть/Свернуть все группы», «Сбросить настройки таблицы».
-        Кнопками над таблицей группы сворачиваются и разворачиваются целиком. Внизу — счётчики строк и агрегаты по
-        выделению. Настройки таблицы (колонки, фильтры, группы, агрегаты, сортировка) сохраняются автоматически и
-        восстанавливаются при следующем открытии.
+        сумма, среднее, минимум, максимум, количество: результат виден в строке группы); кнопка <b>«Фильтры»</b> —
+        все фильтры списком. Фильтр каждой колонки — список значений с галочками (иконка воронки в шапке). Правый
+        клик — копирование, экспорт в Excel и CSV, группировка, «Развернуть/Свернуть все группы», «Сбросить
+        настройки таблицы». Кнопками над таблицей группы сворачиваются и разворачиваются целиком. Внизу — счётчики
+        строк и агрегаты по выделению. Настройки таблицы (колонки, фильтры, группы, агрегаты, сортировка)
+        сохраняются автоматически и восстанавливаются при следующем открытии.
 </Typography>
     </Box>
   );

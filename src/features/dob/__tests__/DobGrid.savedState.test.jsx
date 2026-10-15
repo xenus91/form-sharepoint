@@ -91,22 +91,53 @@ describe("DobGrid — агрегации", () => {
     expect(panel).toContain("Значения");
   });
 
-  it("агрегат применяется: в группе видно «Сумма(ID)»", async () => {
+  it("агрегат по группам считается: в строке группы — сумма значений", async () => {
     const scope = "agg_sum";
+    // 10 + 20 = 30 по «Открыт», 5 по «Завершена»
+    const rows = [
+      { ID: 10, Title: "Первая", Status: "Открыт", ContentTypeId: "0x0100AA" },
+      { ID: 20, Title: "Вторая", Status: "Открыт", ContentTypeId: "0x0100AA" },
+      { ID: 5, Title: "Третья", Status: "Завершена", ContentTypeId: "0x0100BB" },
+    ];
     localStorage.setItem(gridStateKey(scope), JSON.stringify({
       rowGroup: { groupColIds: ["Status"] },
       aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
       partialColumnState: true,
     }));
-    const { host } = await renderDobGrid({ stateScope: scope });
+    const { host } = await renderDobGrid({ stateScope: scope, rows });
 
-    const texts = [...host.querySelectorAll('[col-id="ID"]')].map((c) => (c.textContent || "").trim());
-    expect(texts).toContain("Сумма(ID)");
+    // строки групп: «Открыт» → 30, «Завершена» → 5
+    const groupCells = [...host.querySelectorAll(".ag-row-group [col-id=\"ID\"]")]
+      .map((c) => (c.textContent || "").trim());
+    expect(groupCells).toContain("30");
+    expect(groupCells).toContain("5");
 
-    // агрегат виден и в панели «Колонки»
+    // агрегат виден и в панели «Колонки» («Значения» → «Сумма(ID)»)
     await click(sideButton(host, "Колонки"));
     const panel = (host.querySelector(".ag-tool-panel-wrapper")?.textContent || "").replace(/\s+/g, " ");
     expect(panel).toContain("Сумма(ID)");
+  });
+
+  it("агрегат виден и в РАСКРЫТОЙ группе (groupSuppressBlankHeader)", async () => {
+    const scope = "agg_expanded";
+    const rows = [
+      { ID: 10, Title: "Первая", Status: "Открыт", ContentTypeId: "0x0100AA" },
+      { ID: 20, Title: "Вторая", Status: "Открыт", ContentTypeId: "0x0100AA" },
+    ];
+    localStorage.setItem(gridStateKey(scope), JSON.stringify({
+      rowGroup: { groupColIds: ["Status"] },
+      aggregation: { aggregationModel: [{ colId: "ID", aggFunc: "sum" }] },
+      rowGroupExpansion: { expandedRowGroupIds: ["row-group-Status-Открыт"] },
+      partialColumnState: true,
+    }));
+    const { host } = await renderDobGrid({ stateScope: scope, rows });
+
+    // группа раскрыта: строки видны…
+    expect(textOf(host)).toContain("Первая");
+    // …и сумма по группе тоже видна, а не пропадает при раскрытии
+    const groupCells = [...host.querySelectorAll('.ag-row-group [col-id="ID"]')]
+      .map((c) => (c.textContent || "").trim());
+    expect(groupCells).toContain("30");
   });
 
   it("в строке состояния есть агрегаты по выделению", async () => {

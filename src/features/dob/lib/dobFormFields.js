@@ -3,6 +3,7 @@
 // read-only просмотр связанной заявки (RelatedItemDialog).
 //
 // Здесь только чистые функции — их удобно тестировать без DOM/SharePoint.
+import { personNames } from './personText';
 import { decodeHtmlEntities } from '../../../utils/htmlEntities';
 
 // Служебные поля, которые не показываем в форме/просмотре (системные +
@@ -171,11 +172,17 @@ function titleOf(item, internal, fallback) {
     if (Array.isArray(node.results) && node.results.length) {
       return node.results.map((r) => r?.Title ?? r?.Value ?? r?.Id ?? '').filter(Boolean).join(', ');
     }
-    if (node.Title !== undefined) return String(node.Title ?? '');
-    if (node.Value !== undefined) return String(node.Value ?? '');
+    // Title/Value бывают равны null (поле не заполнено) — String(null) дал бы
+    // «null» в форме, поэтому проверяем и на null.
+    if (node.Title !== undefined && node.Title !== null) return String(node.Title);
+    if (node.Value !== undefined && node.Value !== null) return String(node.Value);
   }
   const idValue = item?.[`${internal}Id`] ?? item?.[`OData__${internal}Id`];
   if (idValue !== undefined && idValue !== null && idValue !== '') return String(idValue);
+  // Пользователь не указан: значение приходит объектом ({__deferred:…} или {}) —
+  // String(объект) и давал в форме «[object Object]» (баг 2026-10-15). Для
+  // объектов берём ФИО тем же правилом, что и в таблице, иначе — пусто.
+  if (fallback && typeof fallback === 'object') return personNames(fallback);
   return fallback === undefined || fallback === null ? '' : String(fallback);
 }
 
@@ -220,6 +227,8 @@ export function formatFieldValue(field, item) {
     return { kind: 'link', text: String(desc || url || ''), href: withDobProxy(String(url || '')) };
   }
   if (type === 'note' || type === 'text') {
+    // Объект в текстовом поле (например, нераскрытое значение) — не «[object Object]».
+    if (raw && typeof raw === 'object') return { kind: 'text', text: personNames(raw) };
     if (looksLikeHtml(raw)) return { kind: 'html', html: sanitizeHtmlForView(normalizeHtmlValue(raw)), text: stripTags(raw) };
     return { kind: 'text', text: String(raw ?? '') };
   }
