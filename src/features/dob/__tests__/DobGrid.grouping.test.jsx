@@ -67,7 +67,12 @@ const groupCounts = (host) => [
 const text = (host) => (host.textContent || "").replace(/\s+/g, " ");
 
 describe("DobGrid — штатная группировка AG Grid по статусу", () => {
-  beforeEach(() => { document.body.innerHTML = ""; });
+  // Настройки таблицы сохраняются в localStorage — между тестами их стираем,
+  // иначе состояние из предыдущего теста переопределяет стартовый фильтр.
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+  });
 
   it("грид строит группы со счётчиком", async () => {
     const { host } = await renderGrid();

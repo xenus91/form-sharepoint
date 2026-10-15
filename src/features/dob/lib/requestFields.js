@@ -11,6 +11,8 @@
 //   2) поля типов контента (в том порядке, в каком они идут в списке полей);
 //   3) остальные несистемные поля списка.
 
+import { ctIdOf, matchesContentType } from "./requestListFilters";
+
 // Служебные колонки SharePoint: они есть у каждого элемента и смысла в таблице
 // заявок не несут. Набор перенесён из DobGrid (systemSkip) — теперь он один.
 export const SYSTEM_LIST_FIELDS = new Set([
@@ -123,4 +125,26 @@ export function selectRequestFields(fields, opts = {}) {
   // 3) остальные несистемные
   for (const f of list) push(f.InternalName);
   return out;
+}
+
+
+/** Поле синтетической колонки «Тип контента» (в списке такой колонки нет). */
+export const DOB_CT_COLUMN_FIELD = "dobContentType";
+
+/**
+ * Имя типа контента строки списка. ContentTypeId элемента длиннее Id
+ * родительского типа контента, поэтому сравниваем и как префикс
+ * (matchesContentType). Список типов должен быть отсортирован «от длинного Id к
+ * короткому», чтобы наследник не перекрыл родителя.
+ * @param {object|null|undefined} row — строка списка
+ * @param {Array<{id:string,name:string}>} cts — Id и имена типов контента
+ * @returns {string}
+ */
+export function contentTypeNameOfRow(row, cts) {
+  const rowCt = ctIdOf(row);
+  if (!rowCt) return "";
+  for (const ct of cts || []) {
+    if (matchesContentType(rowCt, ct.id)) return ct.name;
+  }
+  return "";
 }

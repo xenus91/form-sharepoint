@@ -15,9 +15,14 @@
 // example does; sort still works on click but no sort icons are rendered.
 // The grid fills the remaining viewport height after the sticky AppBar.
 import PropTypes from 'prop-types';
-import { useMemo, useRef, useCallback, useEffect } from 'react';
+import { useMemo, useRef, useCallback, useEffect, useState } from 'react';
 import { isUserField } from "../lib/dobFormFields";
 import { cellText } from "../lib/cellText";
+import { personCellText } from "../lib/personText";
+import { contentTypeDisplayName, contentTypeNameOfRow, DOB_CT_COLUMN_FIELD } from "../lib/requestFields";
+import { ctIdOf } from "../lib/requestListFilters";
+import { AG_GRID_LOCALE_RU } from "../lib/agGridLocaleRu";
+import { gridStateKey, loadGridState, saveGridState, clearGridState } from "../lib/gridStateStorage";
 import { AgGridReact } from 'ag-grid-react';
 import {
   ModuleRegistry,
@@ -54,7 +59,11 @@ import {
   FindModule,
   LicenseManager,
 } from 'ag-grid-enterprise';
-import { Box, CircularProgress, Typography } from '@mui/material';
+import { Box, CircularProgress, IconButton, Stack, Tooltip, Typography } from '@mui/material';
+import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
+import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import PersonCell from './PersonCell';
 import { useDobListState } from '../state/DobListStateContext';
 import { isRowCompleted, statusInternalOf } from '../lib/dobRowStatus';
 import { selectRequestFields } from '../lib/requestFields';
@@ -152,7 +161,7 @@ function columnLabel(f) {
   return String(f?.Title || f?.InternalName || '').trim();
 }
 
-function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
+function buildColumnDefs(fields, ctFieldNames, { readOnly = false, contentTypes = null } = {}) {
   if (!fields || fields.length === 0) return [];
   // Завершённые задачи — только просмотр (правило общее для всех интерфейсов).
   const statusInternalGlobal = statusInternalOf(fields);
@@ -181,12 +190,11 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
         headerName: label,
         width: 140,
         editable: false,
-        valueGetter: (p) => {
-          const v = p.data?.[internal];
-          if (v && typeof v === 'object' && v.Title) return v.Title;
-          if (p.data?.[internal]?.Title) return p.data[internal].Title;
-          return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
-        },
+        // Поля людей показываем ФИО (User/UserMulti раскрываются в список) —
+        // так же, как в таблице задач (см. lib/personText.js).
+        valueGetter: (p) => personCellText(p.data, internal),
+        filterValueGetter: (p) => personCellText(p.data, internal),
+        cellRenderer: PersonCell,
         cellStyle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
         filter: 'agSetColumnFilter',
       });
@@ -198,11 +206,9 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
         headerName: f.Description ? label : 'UserFail (виновный)',
         width: 150,
         editable: false,
-        valueGetter: (p) => {
-          const v = p.data?.[internal];
-          if (v && typeof v === 'object') return v.Title || v.Name || '';
-          return p.data?.['UserFail/Title'] || p.data?.UserFailTitle || p.data?.['UserFailId'] || '';
-        },
+        valueGetter: (p) => personCellText(p.data, internal),
+        filterValueGetter: (p) => personCellText(p.data, internal),
+        cellRenderer: PersonCell,
         filter: 'agSetColumnFilter',
       });
       continue;
@@ -223,11 +229,12 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
         headerName: label + (f.Required ? ' *' : ''),
         width: 140,
         editable: false,
-        valueGetter: (p) => {
-          const v = p.data?.[internal];
-          if (v && typeof v === 'object') return v.Title || v.Name || '';
-          return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
-        },
+        // User: {Title}; UserMulti: {results:[{Title},…]} — оба дают список ФИО
+        // через запятую (раньше многозначное поле показывало ПУСТО: у
+        // коллекции нет свойства Title).
+        valueGetter: (p) => personCellText(p.data, internal),
+        filterValueGetter: (p) => personCellText(p.data, internal),
+        cellRenderer: PersonCell,
         cellStyle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
         filter: 'agSetColumnFilter',
       });
@@ -362,6 +369,9 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
         return isNaN(n) ? null : n;
       };
       col.cellStyle = { textAlign: 'right' };
+      // Агрегат по умолчанию для чисел: когда колонку перетаскивают в
+      // «Значения» (панель «Колонки»), считается сумма, а не «без агрегации».
+      col.aggFunc = 'sum';
     } else if (t === 'text' || t === 'note' || t === 'url') {
       col.filter = 'agSetColumnFilter';
       col.cellEditor = t === 'note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
@@ -403,6 +413,31 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
     }
     cols.push(col);
   }
+  // ── Колонка «Тип контента» (требование 2026-10-15) ────────────────────────
+  // В самом списке такой колонки нет: тип заявки — это ContentTypeId элемента.
+  // Показываем имя типа контента (его Description), ставим рядом с «Названием».
+  const ctList = (Array.isArray(contentTypes) ? contentTypes : [])
+    .map((ct) => ({ id: ctIdOf(ct?.StringId || ct?.Id), name: contentTypeDisplayName(ct) }))
+    .filter((ct) => ct.id && ct.name)
+    // У наследника ContentTypeId длиннее, чем у родительского типа, — сначала
+    // проверяем более длинные Id.
+    .sort((a, b) => b.id.length - a.id.length);
+  if (ctList.length > 0) {
+    const ctCol = {
+      field: DOB_CT_COLUMN_FIELD,
+      headerName: 'Тип контента',
+      width: 190,
+      flex: 0,
+      editable: false,
+      valueGetter: (p) => contentTypeNameOfRow(p?.data, ctList),
+      filterValueGetter: (p) => contentTypeNameOfRow(p?.data, ctList),
+      filter: 'agSetColumnFilter',
+      cellStyle: { color: '#5b6273' },
+    };
+    const titleIndex = cols.findIndex((c) => c.field === 'Title');
+    cols.splice(titleIndex >= 0 ? titleIndex + 1 : 0, 0, ctCol);
+  }
+
   // Заявки не редактируются нигде: снимаем editable со всех колонок разом,
   // чтобы ни одна ветка выше не могла оставить ячейку редактируемой.
   if (readOnly) {
@@ -478,8 +513,12 @@ export default function DobGrid({
   fields,
   rows,
   ctFieldNames = null,
+  // Типы контента списка — для колонки «Тип контента» (имя берём из Description).
+  contentTypes = null,
   readOnly = true,
   initialStatusFilter = DEFAULT_STATUS_FILTER,
+  // Идентификатор таблицы для сохранения настроек в localStorage.
+  stateScope = 'dob_requests',
 }) {
   const gridRef = useRef(null);
   const {
@@ -491,8 +530,8 @@ export default function DobGrid({
   } = useDobListState();
 
   const baseColumnDefs = useMemo(
-    () => buildColumnDefs(fields || ctxFields || [], ctFieldNames, { readOnly }),
-    [fields, ctxFields, ctFieldNames, readOnly],
+    () => buildColumnDefs(fields || ctxFields || [], ctFieldNames, { readOnly, contentTypes }),
+    [fields, ctxFields, ctFieldNames, readOnly, contentTypes],
   );
   const statusInternal = useMemo(() => statusInternalOf(fields || ctxFields || []), [fields, ctxFields]);
   // Завершённую задачу нельзя править и пакетной записью (кнопка «Сохранить»).
@@ -578,10 +617,76 @@ export default function DobGrid({
     }
   }, [selectedId]);
 
+  // ── Сохранение пользовательских настроек таблицы ──────────────────────────
+  // AG Grid v33: api.getState() отдаёт единый объект настроек, а читает грид их
+  // из опции initialState (один раз при инициализации), поэтому после сброса
+  // настроек грид пересоздаётся (key = stateVersion).
+  const stateKey = useMemo(() => gridStateKey(stateScope), [stateScope]);
+  const [savedState, setSavedState] = useState(() => loadGridState(stateKey));
+  const [stateVersion, setStateVersion] = useState(0);
+  useEffect(() => {
+    setSavedState(loadGridState(stateKey));
+  }, [stateKey]);
+
+  const saveTimerRef = useRef(null);
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
+
+  const onStateUpdated = useCallback(
+    (evt) => {
+      const api = evt?.api || gridRef.current?.api;
+      if (!api || typeof api.getState !== 'function') return;
+      // Любое изменение настроек (порядок, ширина, закрепление, фильтры,
+      // группы, агрегаты) сохраняем с небольшой задержкой — не на каждый кадр.
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
+        saveGridState(stateKey, api.getState());
+      }, 400);
+    },
+    [stateKey],
+  );
+
+  const handleResetState = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    clearGridState(stateKey);
+    setSavedState(null);
+    setStateVersion((v) => v + 1);
+  }, [stateKey]);
+
+  // Контекстное меню грида собирается один раз (gridOptions мемоизирован) —
+  // актуальный обработчик сброса держим в ref.
+  const resetStateRef = useRef(null);
+  useEffect(() => {
+    resetStateRef.current = handleResetState;
+  }, [handleResetState]);
+
+  const handleExpandAll = useCallback(() => {
+    gridRef.current?.api?.expandAll?.();
+  }, []);
+  const handleCollapseAll = useCallback(() => {
+    gridRef.current?.api?.collapseAll?.();
+  }, []);
+
   const gridOptions = useMemo(
     () => ({
       animateRows: true,
-      rowSelection: { mode: 'singleRow', enableClickSelection: true },
+      // Выделение строки кликом — БЕЗ чекбоксов (требование 2026-10-15:
+      // «удали чекбокс из таблицы»): колонка с галочками не отображается, а
+      // «Открыть» в шапке по-прежнему работает от выделенной строки.
+      rowSelection: {
+        mode: 'singleRow',
+        enableClickSelection: true,
+        checkboxes: false,
+        headerCheckbox: false,
+      },
       suppressRowHoverHighlight: false,
       ensureDomOrder: true,
       suppressMenuHide: true,
@@ -600,7 +705,10 @@ export default function DobGrid({
             toolPanelParams: {
               suppressPivots: true,
               suppressPivotMode: true,
-              suppressValues: true,
+              // «Значения» НЕ прячем: перетащив сюда колонку, пользователь
+              // получает агрегат (сумма/среднее/мин/макс/количество) по
+              // группам строк — это и есть управление агрегациями.
+              suppressValues: false,
               suppressRowGroups: false,
             },
           },
@@ -645,6 +753,25 @@ export default function DobGrid({
         'separator',
         'rowGrouping',
         'separator',
+        {
+          name: 'Развернуть все группы',
+          icon: '<span class="ag-icon ag-icon-tree-open" role="presentation"></span>',
+          action: () => params?.api?.expandAll?.(),
+          disabled: () => (params?.api?.getRowGroupColumns?.() || []).length === 0,
+        },
+        {
+          name: 'Свернуть все группы',
+          icon: '<span class="ag-icon ag-icon-tree-closed" role="presentation"></span>',
+          action: () => params?.api?.collapseAll?.(),
+          disabled: () => (params?.api?.getRowGroupColumns?.() || []).length === 0,
+        },
+        'separator',
+        {
+          name: 'Сбросить настройки таблицы',
+          icon: '<span class="ag-icon ag-icon-cancel" role="presentation"></span>',
+          action: () => resetStateRef.current?.(),
+        },
+        'separator',
         ...(params?.defaultItems || []),
       ],
       defaultExcelExportParams: { skipColumnHeaders: false },
@@ -680,7 +807,7 @@ export default function DobGrid({
   // В AG Grid v33 стартовое состояние задаётся единой опцией initialState
   // (отдельной initialFilterModel нет — грид пишет «invalid gridOptions
   // property 'initialFilterModel' … did you mean … initialState»).
-  const initialState = useMemo(() => {
+  const defaultInitialState = useMemo(() => {
     const values = Array.isArray(initialStatusFilter) ? initialStatusFilter.filter(Boolean) : [];
     if (!statusInternal || values.length === 0) return undefined;
     return {
@@ -689,6 +816,13 @@ export default function DobGrid({
       },
     };
   }, [statusInternal, initialStatusFilter]);
+
+  // Сохранённые настройки пользователя важнее состояния по умолчанию: если он
+  // снял фильтр «Открыт» или перегруппировал таблицу — это его выбор.
+  const initialState = useMemo(
+    () => (savedState && typeof savedState === 'object' ? savedState : defaultInitialState),
+    [savedState, defaultInitialState],
+  );
 
   const autoGroupColumnDef = useMemo(
     () => ({
@@ -717,6 +851,51 @@ export default function DobGrid({
         '& .ag-row-group .ag-cell': { fontWeight: 700, color: '#171c8f' },
       }}
     >
+      <Stack
+        direction="row"
+        spacing={0.5}
+        alignItems="center"
+        justifyContent="flex-end"
+        sx={{ mb: 0.5, flex: '0 0 auto' }}
+      >
+        <Tooltip title="Развернуть все группы">
+          <span>
+            <IconButton
+              size="small"
+              onClick={handleExpandAll}
+              data-testid="dob-grid-expand-all"
+              aria-label="Развернуть все группы"
+            >
+              <UnfoldMoreIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Свернуть все группы">
+          <span>
+            <IconButton
+              size="small"
+              onClick={handleCollapseAll}
+              data-testid="dob-grid-collapse-all"
+              aria-label="Свернуть все группы"
+            >
+              <UnfoldLessIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        <Tooltip title="Сбросить настройки таблицы (колонки, фильтры, группировка)">
+          <span>
+            <IconButton
+              size="small"
+              onClick={handleResetState}
+              data-testid="dob-grid-reset-state"
+              aria-label="Сбросить настройки таблицы"
+            >
+              <RestartAltIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Stack>
+
       <Box
         className="dob-ag-grid"
         sx={{
@@ -737,14 +916,21 @@ export default function DobGrid({
           </Box>
         ) : (
           <AgGridReact
+            // key меняем при сбросе настроек: initialState грид читает один раз
+            // при инициализации, поэтому «сбросить вид» = пересоздать грид.
+            key={`dob-grid-${stateVersion}`}
             ref={gridRef}
             theme={dobTheme}
+            localeText={AG_GRID_LOCALE_RU}
             columnDefs={columnDefs}
             rowData={rowData}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
             groupDisplayType="groupRows"
-            groupDefaultExpanded={-1}
+            // Без сохранённых настроек группы раскрыты; с сохранёнными —
+            // решает сам сохранённый state (rowGroupExpansion), иначе
+            // groupDefaultExpanded=-1 перекрывал бы настройку пользователя.
+            groupDefaultExpanded={savedState ? 0 : -1}
             autoGroupColumnDef={autoGroupColumnDef}
             initialState={initialState}
             pagination
@@ -752,6 +938,7 @@ export default function DobGrid({
             paginationPageSizeSelector={[20, 50, 100, 200]}
             enableCellTextSelection
             onSelectionChanged={onSelectionChanged}
+            onStateUpdated={onStateUpdated}
             onRowDoubleClicked={onRowDoubleClicked}
             rowClassRules={rowCompletedClassRules}
             getRowId={getRowId}
@@ -763,12 +950,14 @@ export default function DobGrid({
       <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#5b6273' }}>
         Заявки доступны только для просмотра — изменение заявок в этом разделе отключено. Двойной клик по строке
         открывает заявку. Всё управление — средствами AG Grid: кнопка <b>«Колонки»</b> справа — показ/скрытие,
-        порядок, закрепление слева/справа и группировка строк (перетащите колонку в «Группы строк»); кнопка
-        <b> «Фильтры»</b> — все фильтры списком. Фильтр каждой колонки — список значений с галочками (иконка
-        воронки в шапке). Правый клик по таблице — копирование, экспорт в Excel и CSV, группировка. Выделение
-        ячеек мышью — Ctrl+C / Ctrl+V; внизу — счётчики строк и агрегаты по выделению. По умолчанию показаны
-        заявки в статусе «Открыт» и группировка по статусу — и то, и другое снимается одним кликом.
-      </Typography>
+        порядок, закрепление слева/справа, группировка строк и <b>агрегаты</b> (перетащите колонку в «Значения» —
+        сумма, среднее, минимум, максимум, количество по группам); кнопка <b>«Фильтры»</b> — все фильтры списком.
+        Фильтр каждой колонки — список значений с галочками (иконка воронки в шапке). Правый клик — копирование,
+        экспорт в Excel и CSV, группировка, «Развернуть/Свернуть все группы», «Сбросить настройки таблицы».
+        Кнопками над таблицей группы сворачиваются и разворачиваются целиком. Внизу — счётчики строк и агрегаты по
+        выделению. Настройки таблицы (колонки, фильтры, группы, агрегаты, сортировка) сохраняются автоматически и
+        восстанавливаются при следующем открытии.
+</Typography>
     </Box>
   );
 }
@@ -783,4 +972,9 @@ DobGrid.propTypes = {
   // Внутренние имена полей из FieldLinks типов контента списка — по ним решаем,
   // какие поля показывать в таблице заявок (см. selectRequestFields).
   ctFieldNames: PropTypes.oneOfType([PropTypes.instanceOf(Set), PropTypes.array]),
+  // Типы контента списка: { Id/StringId, Name, Description } — для колонки
+  // «Тип контента».
+  contentTypes: PropTypes.array,
+  // Ключ сохранения настроек таблицы в localStorage.
+  stateScope: PropTypes.string,
 };

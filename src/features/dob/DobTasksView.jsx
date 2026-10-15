@@ -25,7 +25,8 @@ import { buildRequestScope, applyRequestScope } from './lib/requestScope';
 export default function DobTasksView({ onOpenDrawer, tasksCount = 0, userProfile = null }) {
   const fieldsQ = useDobFields(true);
   // Типы контента: их поля идут первыми колонками таблицы заявок.
-  const { ctFieldNames } = useDobContentTypes();
+  // contentTypes — для колонки «Тип контента» в таблице (имя из Description).
+  const { ctFieldNames, contentTypes } = useDobContentTypes();
   const fieldsData = useMemo(() => fieldsQ.data || null, [fieldsQ.data]);
   const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: '' });
   const qc = useQueryClient();
@@ -189,7 +190,7 @@ export default function DobTasksView({ onOpenDrawer, tasksCount = 0, userProfile
             flexDirection: 'column',
           }}
         >
-          <DobGrid fields={fields} rows={rows} ctFieldNames={ctFieldNames} readOnly />
+          <DobGrid fields={fields} rows={rows} ctFieldNames={ctFieldNames} contentTypes={contentTypes} readOnly />
         </Box>
       </Box>
     </DobListStateProvider>

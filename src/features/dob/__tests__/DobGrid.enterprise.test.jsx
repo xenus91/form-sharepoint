@@ -42,14 +42,14 @@ const ROWS = [
   { ID: 3, Title: "Третья", Status: "Завершена" },
 ];
 
-async function renderGrid() {
+async function renderGrid(props = {}) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
   await act(async () => {
     root.render(
       <DobListStateProvider fields={FIELDS} rows={ROWS}>
-        <DobGrid fields={FIELDS} rows={ROWS} initialStatusFilter={null} />
+        <DobGrid fields={FIELDS} rows={ROWS} initialStatusFilter={null} {...props} />
       </DobListStateProvider>,
     );
     await new Promise((r) => setTimeout(r, 50));
@@ -75,7 +75,12 @@ const sideButton = (host, label) => {
 const panelText = (host) => (host.querySelector(".ag-tool-panel-wrapper")?.textContent || "").replace(/\s+/g, " ");
 
 describe("DobGrid — управление колонками и строками (AG Grid Enterprise)", () => {
-  beforeEach(() => { document.body.innerHTML = ""; });
+  // Настройки таблицы сохраняются в localStorage — между тестами их стираем,
+  // иначе состояние из предыдущего теста переопределяет стартовый фильтр.
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+  });
 
   it("есть панели «Колонки» и «Фильтры»", async () => {
     const { host } = await renderGrid();
@@ -88,7 +93,8 @@ describe("DobGrid — управление колонками и строкам�
     await click(sideButton(host, "Колонки"));
 
     const text = panelText(host);
-    expect(text).toContain("Row Groups");
+    // Грид переведён на русскую локаль — раздел называется по-русски.
+    expect(text).toContain("Группы строк");
     // статус уже в группах — отсюда его можно убрать или добавить другое поле
     expect(text).toContain("Статус");
     expect(host.querySelector(".ag-column-select")).toBeTruthy();
@@ -106,7 +112,7 @@ describe("DobGrid — управление колонками и строкам�
   });
 
   it("у колонки есть кнопка фильтра, а стартовый фильтр — Set (значения, не текст)", async () => {
-    const { host } = await renderGrid();
+    const { host } = await renderGrid({ stateScope: "ent_filter" });
     expect(host.querySelector('.ag-header-cell[col-id="Status"] .ag-icon-filter')).toBeTruthy();
 
     // Set-фильтр принимает список значений: именно поэтому «Открыт» отбирается
@@ -117,7 +123,12 @@ describe("DobGrid — управление колонками и строкам�
     await act(async () => {
       root2.render(
         <DobListStateProvider fields={FIELDS} rows={ROWS}>
-          <DobGrid fields={FIELDS} rows={ROWS} initialStatusFilter={["Открыт"]} />
+          <DobGrid
+            fields={FIELDS}
+            rows={ROWS}
+            initialStatusFilter={["Открыт"]}
+            stateScope="ent_filter_default"
+          />
         </DobListStateProvider>,
       );
       await new Promise((r) => setTimeout(r, 50));
