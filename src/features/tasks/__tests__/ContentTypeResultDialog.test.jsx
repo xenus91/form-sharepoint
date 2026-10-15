@@ -69,7 +69,14 @@ let MOCK_FIELDS = FIELDS;
 
 vi.mock("../../../tasks/contentTypeFields", async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, fetchContentTypeFields: vi.fn(async () => MOCK_FIELDS) };
+  return {
+    ...actual,
+    fetchContentTypeFields: vi.fn(async () => MOCK_FIELDS),
+    // Диалог читает состав типа через detailed-вариант (знает, откуда поля).
+    fetchContentTypeFieldsDetailed: vi.fn(async () => ({
+      fields: MOCK_FIELDS, source: "fieldlinks", ctId: "0x0100TEST", error: "",
+    })),
+  };
 });
 
 const { default: ContentTypeResultDialog } = await import("../components/ContentTypeResultDialog");

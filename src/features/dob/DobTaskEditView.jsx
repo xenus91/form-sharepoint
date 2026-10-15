@@ -811,8 +811,15 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
         return;
       }
       const body = { Status: 'Завершена', PercentComplete: 1 };
-      const field = resultField || 'DobSearchResult';
-      if (result) body[field] = result;
+      // Колонку результата определяет тип контента (её прислала форма закрытия).
+      // Придумывать 'DobSearchResult' нельзя: в списке задачи такой колонки может
+      // не быть — запись упала бы или создала мусор (принцип: не пишем в колонки,
+      // которых нет).
+      const resultFieldName = String(resultField || '').trim();
+      if (result) {
+        if (resultFieldName) body[resultFieldName] = result;
+        else console.warn('[dob] колонка результата не определена типом контента — значение результата не записано');
+      }
       for (const [name, value] of Object.entries(preparedValues || {})) {
         if (value === undefined || value === null) continue;
         // «Пользователь или группа» → <Field>Id (число или Collection(Edm.Int32))

@@ -25,7 +25,7 @@ import RichEditor from "../../dob/components/RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
 import { toDisplayImages, toStorageImages } from "../../dob/lib/attachmentUrl";
 import { removeImgByFileName } from "../../dob/lib/richImages";
-import { getDobContentTypeFields } from "../../dob/api/dobApi";
+import { getDobContentTypeFieldsDetailed } from "../../dob/api/dobApi";
 import {
   FORM_ACTIONS_SX,
   FORM_FIELD_FULL_SX,
@@ -45,7 +45,7 @@ import {
   buildContentTypeForm,
   normalizeChoiceValue,
   normalizeChoiceValues,
-  fetchContentTypeFields,
+  fetchContentTypeFieldsDetailed,
   plainText,
   validateRequiredFields,
 } from "../../../tasks/contentTypeFields";
@@ -177,26 +177,32 @@ export default function ContentTypeResultDialog({
   const contentRef = React.useRef(null);
 
   const fieldsQ = useQuery({
-    queryKey: ["ct-fields", contentTypeId, listGuid || "main"],
+    queryKey: ["ct-fields-detailed", contentTypeId, listGuid || "main"],
     // Поля читаем у ТОГО списка, в котором лежит задача (у внешних списков свои
-    // типы контента и свои колонки).
+    // типы контента и свои колонки). Берём DETAILED-вариант: он сообщает, ОТКУДА
+    // пришли поля. Без этого фолбэк «все колонки списка» молча рисовал форму
+    // закрытия из чужих полей (задача из RequestsTask — «полей как будто все»).
     queryFn: () => (listGuid
-      ? getDobContentTypeFields(contentTypeId, listGuid)
-      : fetchContentTypeFields(contentTypeId)),
+      ? getDobContentTypeFieldsDetailed(contentTypeId, listGuid)
+      : fetchContentTypeFieldsDetailed(contentTypeId)),
     enabled: Boolean((open || inline) && contentTypeId),
     staleTime: 30 * 60 * 1000,
     retry: 1,
   });
+  // "fieldlinks" — состав типа; "ct-fields" — поля типа без FieldLinks;
+  // "list-fields" — ФОЛБЭК: все колонки списка (тип не найден).
+  const ctFields = React.useMemo(() => fieldsQ.data?.fields || [], [fieldsQ.data]);
+  const ctSource = fieldsQ.data?.source || "";
 
   const form = React.useMemo(
-    () => buildContentTypeForm(fieldsQ.data || [], {
+    () => buildContentTypeForm(ctFields, {
       resultFieldInternalNames: [
         resultFieldInternalName,
         resultField?.internalName,
       ].filter(Boolean),
       fallbackResultField: resultField,
     }),
-    [fieldsQ.data, resultFieldInternalName, resultField],
+    [ctFields, resultFieldInternalName, resultField],
   );
 
   // Инициализация значений из задачи + результата из Behaviour/карточки
@@ -229,6 +235,10 @@ export default function ContentTypeResultDialog({
   React.useEffect(() => {
     if (open || inline) setResult(initialResult || "");
   }, [open, inline, initialResult]);
+
+  // Имя колонки результата из метаданных списка (проп resultField) — отдельной
+  // переменной, чтобы её можно было положить в зависимости хука.
+  const listResultFieldName = resultField?.internalName || "";
 
   const choices = React.useMemo(() => {
     const list = (Array.isArray(resultChoices) ? resultChoices : []).map((c) => String(c)).filter(Boolean);
@@ -355,8 +365,16 @@ export default function ContentTypeResultDialog({
     for (const [key, value] of Object.entries(payload)) {
       stored[key] = typeof value === "string" ? toStorageImages(value) : value;
     }
-    onSubmit?.({ result, values: stored, resultField: form.resultBlock?.internalName || resultFieldInternalName || "" });
-  }, [form, values, result, resultProblem, resultFieldInternalName, onSubmit, onValidationError, readOnly]);
+    // Колонка, в которую пишется результат: поле типа контента → явно заданное
+    // имя → колонка «Результирующий выбор» из метаданных списка. Пустая строка
+    // означает «колонка не определена» — владелец формы тогда не пишет результат
+    // в выдуманное поле.
+    onSubmit?.({
+      result,
+      values: stored,
+      resultField: form.resultBlock?.internalName || resultFieldInternalName || listResultFieldName || "",
+    });
+  }, [form, values, result, resultProblem, resultFieldInternalName, listResultFieldName, onSubmit, onValidationError, readOnly]);
 
   // Отдаём submit наружу (кнопка «Сохранить» в шапке страницы — как у заявки ДОБ).
   React.useEffect(() => {
@@ -419,6 +437,20 @@ export default function ContentTypeResultDialog({
           <Alert severity="error" sx={{ mb: 1.5 }}>
             Не удалось получить поля типа контента — форма построена по частичным данным.
           </Alert>
+        )}
+        {ctSource === "list-fields" && (
+          <Alert severity="warning" data-testid="ct-fallback-warning" sx={{ mb: 1.5 }}>
+            Состав полей типа контента «{contentTypeName}» получить не удалось — показаны
+            все колонки списка, а не поля типа. Так быть не должно: проверьте, что тип
+            контента существует в этом списке.
+          </Alert>
+        )}
+        {(ctSource === "ct-fields" || ctSource === "fieldlinks") && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }} data-testid="ct-source-caption">
+            {ctSource === "ct-fields"
+              ? `Поля взяты у типа контента «${contentTypeName}» (состав типа в списке не отдался).`
+              : `Поля формы — состав типа контента «${contentTypeName}».`}
+          </Typography>
         )}
 
         {!fieldsQ.isLoading && (
