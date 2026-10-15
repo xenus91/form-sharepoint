@@ -32,8 +32,28 @@ import {
   ColumnHoverModule,
   CsvExportModule,
 } from 'ag-grid-community';
-// Row Grouping — Enterprise-модуль AG Grid.
-import { RowGroupingModule, LicenseManager } from 'ag-grid-enterprise';
+// Enterprise-модули AG Grid: группировка, Set-фильтры (выбор значений),
+// панели колонок/фильтров, контекстное меню, буфер обмена, экспорт в Excel,
+// строка состояния, номера строк.
+import {
+  RowGroupingModule,
+  SetFilterModule,
+  MultiFilterModule,
+  SideBarModule,
+  ColumnsToolPanelModule,
+  FiltersToolPanelModule,
+  ContextMenuModule,
+  MenuModule,
+  ColumnMenuModule,
+  ClipboardModule,
+  RangeSelectionModule,
+  ExcelExportModule,
+  StatusBarModule,
+  AggregationModule,
+  RowNumbersModule,
+  FindModule,
+  LicenseManager,
+} from 'ag-grid-enterprise';
 import { Box, CircularProgress, Typography } from '@mui/material';
 import { useDobListState } from '../state/DobListStateContext';
 import { isRowCompleted, statusInternalOf } from '../lib/dobRowStatus';
@@ -49,7 +69,23 @@ ModuleRegistry.registerModules([
   ColumnApiModule,
   ColumnHoverModule,
   CsvExportModule,
+  // Enterprise
   RowGroupingModule,
+  SetFilterModule,
+  MultiFilterModule,
+  SideBarModule,
+  ColumnsToolPanelModule,
+  FiltersToolPanelModule,
+  ContextMenuModule,
+  MenuModule,
+  ColumnMenuModule,
+  ClipboardModule,
+  RangeSelectionModule,
+  ExcelExportModule,
+  StatusBarModule,
+  AggregationModule,
+  RowNumbersModule,
+  FindModule,
 ]);
 
 // Ключ лицензии AG Grid Enterprise — из окружения (VITE_AG_GRID_LICENSE_KEY).
@@ -152,7 +188,7 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
           return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
         },
         cellStyle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-        filter: 'agTextColumnFilter',
+        filter: 'agSetColumnFilter',
       });
       continue;
     }
@@ -167,7 +203,7 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
           if (v && typeof v === 'object') return v.Title || v.Name || '';
           return p.data?.['UserFail/Title'] || p.data?.UserFailTitle || p.data?.['UserFailId'] || '';
         },
-        filter: 'agTextColumnFilter',
+        filter: 'agSetColumnFilter',
       });
       continue;
     }
@@ -193,7 +229,7 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
           return p.data?.[`${internal}/Title`] || p.data?.[internal] || '';
         },
         cellStyle: { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-        filter: 'agTextColumnFilter',
+        filter: 'agSetColumnFilter',
       });
       continue;
     }
@@ -205,7 +241,7 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
         editable: false,
         valueGetter: (p) => (p.data?.Attachments ? 'Да' : 'Нет'),
         cellStyle: (p) => (p.value === 'Да' ? { color: '#2e7d32', fontWeight: 700 } : { color: '#9aa0b4' }),
-        filter: 'agTextColumnFilter',
+        filter: 'agSetColumnFilter',
       });
       continue;
     }
@@ -251,7 +287,7 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
       col.filterValueGetter = (p) => cellText(getODataValue(p?.data, internal));
       col.cellEditor = 'agSelectCellEditor';
       col.cellEditorParams = { values: vals.length ? vals : [''], valueListGap: 0 };
-      col.filter = 'agTextColumnFilter';
+      col.filter = 'agSetColumnFilter';
       col.cellStyle = { background: 'rgba(255,255,255,0.02)' };
       if (internal === '_x043e__x0441__x043d__x043e__x04') {
         col.cellStyle = (p) => ({
@@ -264,12 +300,12 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
       // без нормализации в ячейке был «[object Object]».
       col.valueFormatter = (p) => cellText(p.value);
       col.filterValueGetter = (p) => cellText(getODataValue(p?.data, internal));
-      col.filter = 'agTextColumnFilter';
+      col.filter = 'agSetColumnFilter';
       col.width = 200;
     } else if (t === 'boolean') {
       col.cellRenderer = (p) => (p.value ? '☑ Да' : '☐ Нет');
       col.cellEditor = 'agCheckboxCellEditor';
-      col.filter = 'agTextColumnFilter';
+      col.filter = 'agSetColumnFilter';
       col.valueGetter = (p) => {
         const raw = p.data?.[internal];
         if (raw === true || raw === 1 || raw === '1' || String(raw).toLowerCase() === 'true') return true;
@@ -327,10 +363,10 @@ function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
       };
       col.cellStyle = { textAlign: 'right' };
     } else if (t === 'text' || t === 'note' || t === 'url') {
-      col.filter = 'agTextColumnFilter';
+      col.filter = 'agSetColumnFilter';
       col.cellEditor = t === 'note' ? 'agLargeTextCellEditor' : 'agTextCellEditor';
     } else {
-      col.filter = 'agTextColumnFilter';
+      col.filter = 'agSetColumnFilter';
     }
 
     // Страховка от «[object Object]»: если для типа не задан свой форматтер,
@@ -435,7 +471,16 @@ const HEADER_TEMPLATE = `
 
 // ---------- component ----------
 
-export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStatus = false, readOnly = true }) {
+// Стартовое значение фильтра по статусу (снимается в интерфейсе AG Grid).
+const DEFAULT_STATUS_FILTER = ['Открыт'];
+
+export default function DobGrid({
+  fields,
+  rows,
+  ctFieldNames = null,
+  readOnly = true,
+  initialStatusFilter = DEFAULT_STATUS_FILTER,
+}) {
   const gridRef = useRef(null);
   const {
     selectedId,
@@ -458,15 +503,26 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
   const defaultColDef = useMemo(
     () => ({
       sortable: true,
-      filter: true,
+      // Фильтр по умолчанию — Set-фильтр AG Grid: список значений с галочками
+      // (для полей выбора это ровно то, что нужно).
+      filter: 'agSetColumnFilter',
+      filterParams: {
+        buttons: ['reset', 'apply'],
+        closeOnApply: true,
+        newRowsAction: 'keep',
+        excelMode: 'windows',
+      },
       resizable: true,
       flex: 1,
       minWidth: 120,
       enableCellChangeFlash: true,
       headerComponentParams: { template: HEADER_TEMPLATE },
-      // Community build: do not configure enterprise-only column menu tabs.
+      // Любую колонку можно закрепить, сгруппировать и использовать в
+      // агрегатах — через меню колонки и панель «Колонки».
+      enableRowGroup: true,
+      enableValue: true,
+      menuTabs: ['generalMenuTab', 'filterMenuTab', 'columnsMenuTab'],
       cellStyle: { fontSize: 13, lineHeight: '1.35', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-      filterParams: { buttons: ['reset', 'apply'], closeOnApply: true },
     }),
     [],
   );
@@ -529,10 +585,69 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
       suppressRowHoverHighlight: false,
       ensureDomOrder: true,
       suppressMenuHide: true,
-      // Side bar lets users drag columns between the grid and a hidden panel.
-      // We keep it off by default to match the Theme Builder look.
-      sideBar: false,
-      statusBar: undefined,
+
+      // ── Управление колонками и строками силами AG Grid ────────────────────
+      // Правая панель: «Колонки» (показ/скрытие, порядок, закрепление слева и
+      // справа, группы строк) и «Фильтры» (все фильтры списком).
+      sideBar: {
+        toolPanels: [
+          {
+            id: 'columns',
+            labelDefault: 'Колонки',
+            labelKey: 'columns',
+            iconKey: 'columns',
+            toolPanel: 'agColumnsToolPanel',
+            toolPanelParams: {
+              suppressPivots: true,
+              suppressPivotMode: true,
+              suppressValues: true,
+              suppressRowGroups: false,
+            },
+          },
+          {
+            id: 'filters',
+            labelDefault: 'Фильтры',
+            labelKey: 'filters',
+            iconKey: 'filter',
+            toolPanel: 'agFiltersToolPanel',
+          },
+        ],
+        // Панель не раскрывается сама — кнопки на правом краю таблицы.
+        defaultToolPanel: '',
+      },
+
+      // Строка состояния: сколько всего строк, сколько отфильтровано, сколько
+      // выделено, и агрегаты по выделению (сумма/среднее/мин/макс).
+      statusBar: {
+        statusPanels: [
+          { statusPanel: 'agTotalAndFilteredRowCountComponent', align: 'left' },
+          { statusPanel: 'agSelectedRowCountComponent', align: 'left' },
+          {
+            statusPanel: 'agAggregationComponent',
+            align: 'right',
+            statusPanelParams: { aggFuncs: ['count', 'sum', 'avg', 'min', 'max'] },
+          },
+        ],
+      },
+
+      // Выделение диапазонов ячеек + копирование/вставка (Ctrl+C / Ctrl+V),
+      // номера строк, экспорт в Excel и CSV из контекстного меню.
+      cellSelection: true,
+      rowNumbers: true,
+      suppressClipboardPaste: false,
+      allowContextMenuWithControlKey: false,
+      getContextMenuItems: (params) => [
+        'copy',
+        'copyWithHeaders',
+        'paste',
+        'separator',
+        'export',
+        'separator',
+        'rowGrouping',
+        'separator',
+        ...(params?.defaultItems || []),
+      ],
+      defaultExcelExportParams: { skipColumnHeaders: false },
     }),
     [],
   );
@@ -544,7 +659,7 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
   // «invalid gridOptions property 'rowGroupCols'») — группировка включается
   // флагом rowGroup на самой колонке, поэтому помечаем колонку статуса.
   const columnDefs = useMemo(() => {
-    if (!groupByStatus || !statusInternal) return baseColumnDefs;
+    if (!statusInternal) return baseColumnDefs;
     let marked = false;
     const cols = baseColumnDefs.map((col) => {
       if (col.field !== statusInternal) return col;
@@ -556,7 +671,24 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
       return baseColumnDefs;
     }
     return cols;
-  }, [baseColumnDefs, groupByStatus, statusInternal]);
+  }, [baseColumnDefs, statusInternal]);
+
+  // Стартовый фильтр: открытые заявки (решение 2026-10-15 — «все статусы, но
+  // по умолчанию Открыт»). Снимается одним кликом в фильтре колонки статуса или
+  // в панели «Фильтры» — дальше это уже настройка пользователя. В тестах
+  // отключается пропом initialStatusFilter={null}.
+  // В AG Grid v33 стартовое состояние задаётся единой опцией initialState
+  // (отдельной initialFilterModel нет — грид пишет «invalid gridOptions
+  // property 'initialFilterModel' … did you mean … initialState»).
+  const initialState = useMemo(() => {
+    const values = Array.isArray(initialStatusFilter) ? initialStatusFilter.filter(Boolean) : [];
+    if (!statusInternal || values.length === 0) return undefined;
+    return {
+      filter: {
+        filterModel: { [statusInternal]: { filterType: 'set', values } },
+      },
+    };
+  }, [statusInternal, initialStatusFilter]);
 
   const autoGroupColumnDef = useMemo(
     () => ({
@@ -614,6 +746,7 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
             groupDisplayType="groupRows"
             groupDefaultExpanded={-1}
             autoGroupColumnDef={autoGroupColumnDef}
+            initialState={initialState}
             pagination
             paginationPageSize={50}
             paginationPageSizeSelector={[20, 50, 100, 200]}
@@ -629,9 +762,12 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
 
       <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#5b6273' }}>
         Заявки доступны только для просмотра — изменение заявок в этом разделе отключено. Двойной клик по строке
-        открывает заявку на просмотр. Фильтры по статусу и типу заявки — в шапке. Группировка по статусу — штатная
-        для AG Grid: группы разворачиваются и сворачиваются кликом по шеврону, счётчик показывает число заявок;
-        включается и выключается переключателем в шапке. Скрытие/показ колонок — через меню «⋮» в шапке таблицы.
+        открывает заявку. Всё управление — средствами AG Grid: кнопка <b>«Колонки»</b> справа — показ/скрытие,
+        порядок, закрепление слева/справа и группировка строк (перетащите колонку в «Группы строк»); кнопка
+        <b> «Фильтры»</b> — все фильтры списком. Фильтр каждой колонки — список значений с галочками (иконка
+        воронки в шапке). Правый клик по таблице — копирование, экспорт в Excel и CSV, группировка. Выделение
+        ячеек мышью — Ctrl+C / Ctrl+V; внизу — счётчики строк и агрегаты по выделению. По умолчанию показаны
+        заявки в статусе «Открыт» и группировка по статусу — и то, и другое снимается одним кликом.
       </Typography>
     </Box>
   );
@@ -640,10 +776,10 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
 DobGrid.propTypes = {
   fields: PropTypes.array,
   rows: PropTypes.array,
-  // Группировать строки по статусу (заголовки групп вставляются в rowData).
-  groupByStatus: PropTypes.bool,
   // Только просмотр: ни одна ячейка не редактируется.
   readOnly: PropTypes.bool,
+  // Стартовый Set-фильтр по статусу (null — показывать все статусы).
+  initialStatusFilter: PropTypes.arrayOf(PropTypes.string),
   // Внутренние имена полей из FieldLinks типов контента списка — по ним решаем,
   // какие поля показывать в таблице заявок (см. selectRequestFields).
   ctFieldNames: PropTypes.oneOfType([PropTypes.instanceOf(Set), PropTypes.array]),

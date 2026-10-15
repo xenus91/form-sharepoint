@@ -2,7 +2,9 @@
 // src/features/dob/__tests__/DobTasksView.filters.test.jsx
 //
 // Проводка страницы #dob_requests: какие строки REALLY уходят в таблицу.
-// Проверяем правило видимости по подразделению и фильтр статусов по умолчанию.
+// Проверяем правило видимости по подразделению. Фильтра статусов и
+// переключателя группировки у страницы больше нет (2026-10-15) — фильтрацию,
+// группировку и закрепление колонок пользователь делает интерфейсом AG Grid.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
@@ -69,16 +71,15 @@ const shownIds = () => JSON.parse(document.querySelector('[data-testid="dob-grid
 describe("DobTasksView — что попадает в таблицу", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
 
-  it("обычный сотрудник: свой офис И свой департамент, по умолчанию статус «Открыт»", async () => {
+  it("обычный сотрудник: свой офис И свой департамент, все статусы", async () => {
     await render({
       userOffice: "РЦ-8114",
       userDepartment: "Департамент логистики",
       userDisplayName: "Иванов Иван",
     });
-    // DC=8114 + департамент логистики → 1 и 3; из них «Открыт» → только 1
-    expect(shownIds()).toEqual([1]);
+    // DC=8114 + департамент логистики → 1 и 3; статуса больше не фильтруем
+    expect(shownIds()).toEqual([1, 3]);
     expect(gridProps.readOnly).toBe(true);
-    expect(gridProps.groupByStatus).toBe(true);
   });
 
   it("«Отдел по обеспечению бизнеса»: только офис, департамент не важен", async () => {
@@ -87,22 +88,26 @@ describe("DobTasksView — что попадает в таблицу", () => {
       userDepartment: "Отдел по обеспечению бизнеса",
       userDisplayName: "Петрова Анна",
     });
-    // DC=8114 → 1, 2, 3; «Открыт» → 1 и 2
-    expect(shownIds()).toEqual([1, 2]);
+    // DC=8114 → 1, 2, 3
+    expect(shownIds()).toEqual([1, 2, 3]);
   });
 
-  it("Поршаков Сергей видит все заявки (исключение), но фильтр статуса работает", async () => {
+  it("Поршаков Сергей видит все заявки (исключение)", async () => {
     await render({
       userOffice: "РЦ-8114",
       userDepartment: "Департамент логистики",
       userDisplayName: "Поршаков Сергей",
     });
-    // все офисы и департаменты; «Открыт» → 1, 2, 4
-    expect(shownIds()).toEqual([1, 2, 4]);
+    // все офисы и департаменты, все статусы
+    expect(shownIds()).toEqual([1, 2, 3, 4]);
   });
 
-  it("таблица только для чтения", async () => {
+  it("таблица только для чтения, своих фильтров и группировки у страницы нет", async () => {
     await render({ userOffice: "РЦ-8114", userDepartment: "Департамент логистики" });
     expect(gridProps.readOnly).toBe(true);
+    // фильтрацию, группировку и закрепление настраивает пользователь в AG Grid
+    expect(gridProps.groupByStatus).toBe(undefined);
+    expect(gridProps.statusOptions).toBe(undefined);
+    expect(gridProps.onStatusFilterChange).toBe(undefined);
   });
 });
