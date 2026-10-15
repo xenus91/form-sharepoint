@@ -57,12 +57,27 @@ export async function findDcEmailItem(office, department) {
   });
 }
 
-/** Принципал с таким Id — группа (а не пользователь)? */
+/**
+ * Принципал с таким Id — группа (а не пользователь)?
+ *
+ * Проверяем через /web/siteusers, а НЕ через /web/sitegroups: коллекция
+ * sitegroups знает только группы SharePoint (PrincipalType 8). Группы
+ * безопасности AD (4) и списки рассылки (2) в неё не входят — getbyid на них
+ * отвечает 500 «Невозможно найти группу», из-за чего валидная рассылка
+ * отбраковывалась и заявка не создавалась.
+ * SP.PrincipalType: 1 — пользователь, 2 — список рассылки, 4 — группа
+ * безопасности, 8 — группа SharePoint.
+ */
 async function isGroupPrincipal(id) {
   try {
-    const resp = await dobAxios.get(`${dobApiBase()}/web/sitegroups/getbyid(${id})?$select=Id,Title,LoginName`, ACCEPT);
-    const g = resp?.data?.d || resp?.data;
-    return Boolean(g && (g.Title || g.LoginName));
+    const resp = await dobAxios.get(
+      `${dobApiBase()}/web/siteusers/getbyid(${id})?$select=Id,Title,LoginName,PrincipalType`,
+      ACCEPT,
+    );
+    const p = resp?.data?.d || resp?.data;
+    const type = Number(p?.PrincipalType);
+    if (Number.isFinite(type) && type > 0) return type !== 1;
+    return Boolean(p && (p.Title || p.LoginName));
   } catch {
     return false;
   }
@@ -135,15 +150,24 @@ export async function ensureGroupPrincipal(group) {
 
   const done = (id) => { _groupCache.set(cacheKey, id); return id; };
 
-  // 0) Id уже есть из поиска (siteusers) — подтверждаем, что это группа.
-  if (Number.isFinite(searchId) && searchId > 0 && await isGroupPrincipal(searchId)) {
-    return done(searchId);
+  // 0) Id уже есть из поиска (siteusers). Поиск групп идёт с фильтром
+  //    PrincipalType ne 1, поэтому типу из выдачи можно доверять — это спасает
+  //    AD-группы и списки рассылки, которых нет в sitegroups.
+  if (Number.isFinite(searchId) && searchId > 0) {
+    const knownType = Number(group?.PrincipalType);
+    if (Number.isFinite(knownType) && knownType > 0) {
+      if (knownType !== 1) return done(searchId);
+    } else if (await isGroupPrincipal(searchId)) {
+      return done(searchId);
+    }
   }
 
   // 1) ensureuser: метод ВЕБА (_api/web/ensureuser), а не коллекции siteusers.
   //    Имя параметра в разных сборках — logonName и loginName.
   const candidate = loginName || title;
-  const endpoints = [`${dobApiBase()}/web/ensureuser`, `${dobApiBase()}/web/siteusers/ensureuser`];
+  // /web/siteusers/ensureuser в SharePoint REST не существует (всегда 404) —
+  // раньше этот лишний запрос только пугал ошибками в консоли.
+  const endpoints = [`${dobApiBase()}/web/ensureuser`];
   for (const endpoint of endpoints) {
     for (const key of ["logonName", "loginName"]) {
       try {

@@ -41,7 +41,7 @@ describe("ensureGroupPrincipal", () => {
     dobAxios.get.mockResolvedValue(verbose({ Id: 33, Title: "ООБ", LoginName: "c:0-.f|rolemanager|oob" }));
     const id = await ensureGroupPrincipal({ Id: 33, Title: "ООБ", LoginName: "c:0-.f|rolemanager|oob" });
     expect(id).toBe(33);
-    expect(dobAxios.get.mock.calls[0][0]).toContain("/web/sitegroups/getbyid(33)");
+    expect(dobAxios.get.mock.calls[0][0]).toContain("/web/siteusers/getbyid(33)");
     // Id уже есть — ensureuser не вызываем (нет видимого 404 на AD/security-группах)
     expect(dobAxios.post).not.toHaveBeenCalled();
   });
@@ -72,6 +72,32 @@ describe("ensureGroupPrincipal", () => {
     const id = await ensureGroupPrincipal({ Title: "Группа отгрузки", LoginName: "c:0+.w|s-1-5-21-3594104448-116792928-3034854717-188109" });
     expect(id).toBe(77);
     expect(dobAxios.get.mock.calls.some(([u]) => u.includes("sitegroups/getbyname"))).toBe(true);
+  });
+
+  it("группа рассылки из AD (PrincipalType 4, нет в sitegroups) резолвится по Id из поиска", async () => {
+    // Ровно случай из жизни: «_РЦ 8117 Отгрузка» — группа безопасности/рассылки.
+    // sitegroups её не знает (500 «Невозможно найти группу»), поэтому типу из
+    // выдачи поиска доверяем и лишних запросов не делаем.
+    const id = await ensureGroupPrincipal({
+      Id: 6773,
+      Title: "_РЦ 8117 Отгрузка",
+      LoginName: "c:0t.c|tenant|_РЦ 8117 Отгрузка",
+      PrincipalType: 4,
+    });
+    expect(id).toBe(6773);
+    expect(dobAxios.get).not.toHaveBeenCalled();
+    expect(dobAxios.post).not.toHaveBeenCalled();
+  });
+
+  it("Id без PrincipalType проверяется через siteusers, а не sitegroups", async () => {
+    dobAxios.get.mockResolvedValue(verbose({ Id: 88, Title: "Группа", PrincipalType: 2 }));
+    expect(await ensureGroupPrincipal({ Id: 88, Title: "Группа" })).toBe(88);
+    expect(dobAxios.get.mock.calls[0][0]).toContain("/web/siteusers/getbyid(88)");
+  });
+
+  it("пользователя (PrincipalType 1) группой не считаем", async () => {
+    dobAxios.get.mockRejectedValue({ response: { status: 500 } });
+    expect(await ensureGroupPrincipal({ Id: 5, Title: "Иванов", LoginName: "i:0#.f|membership|ivanov", PrincipalType: 1 })).toBeNull();
   });
 
   it("пустая группа — null, без запроса", async () => {
@@ -117,7 +143,7 @@ describe("ensureDcEmailLink", () => {
 
   it("если элемента нет — резолвит группы (ensureuser+sitegroups) и создаёт элемент", async () => {
     dobAxios.get.mockImplementation((url) => {
-      if (url.includes("/sitegroups/getbyid(")) return Promise.resolve(verbose({ Id: 33, Title: "ООБ" }));
+      if (url.includes("/siteusers/getbyid(")) return Promise.resolve(verbose({ Id: 33, Title: "ООБ", PrincipalType: 8 }));
       if (url.includes("ListItemEntityTypeFullName")) return Promise.resolve(verbose({ ListItemEntityTypeFullName: "SP.Data.DcEmailListItem" }));
       return Promise.resolve(verbose({ results: [] })); // resolveDistribution — пусто
     });
