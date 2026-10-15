@@ -53,8 +53,8 @@ import ManagerPreview from "./ManagerPreview";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
-import MenuIcon from "@mui/icons-material/Menu";
 import AppMenuDrawer from "./features/navigation/AppMenuDrawer";
+import BurgerWithCount from "./features/navigation/BurgerWithCount";
 const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
 import {
   DOB_REQUESTS_HASH,
@@ -1751,15 +1751,16 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: { xs: 'auto', md: 'calc(100vh - 0px)' }, overflowX: 'hidden' }}>
           <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
             {isDobCreate
-              ? <RequestCreateView onOpenMenu={() => setDrawerOpen(true)} userProfile={userProfile} />
+              ? <RequestCreateView onOpenMenu={() => setDrawerOpen(true)} userProfile={userProfile} tasksCount={tasksActiveCount} />
               : isDobEdit
               ? <DobTaskEditView
                   id={String(hashElementId)}
                   listGuid={hashElementListGuid || undefined}
                   onBackHash={hashElementListGuid ? "#tasks" : DOB_REQUESTS_HASH}
                   onOpenMenu={() => setDrawerOpen(true)}
+                  tasksCount={tasksActiveCount}
                 />
-              : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} />}
+              : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} tasksCount={tasksActiveCount} />}
           </React.Suspense>
         </Box>
       </ThemeProvider>
@@ -1779,37 +1780,21 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             display: drawerOpen ? "none" : "block",
           }}
         >
-          <Badge
-            badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null}
-            color="error"
-            max={99}
-            overlap="circular"
-            anchorOrigin={{ vertical: "top", horizontal: "right" }}
-            sx={{
-              "& .MuiBadge-badge": {
-                fontWeight: 800,
-                minWidth: 20,
-                height: 20,
-                fontSize: "0.75rem",
-                border: "2px solid white",
-              },
+          <BurgerWithCount
+            onClick={() => setDrawerOpen(true)}
+            count={tasksActiveCount}
+            size="medium"
+            buttonSx={{
+              bgcolor: "rgba(255,255,255,0.85)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(23,28,143,0.15)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              width: 44,
+              height: 44,
+              "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
             }}
-          >
-            <IconButton
-              onClick={() => setDrawerOpen(true)}
-              sx={{
-                bgcolor: "rgba(255,255,255,0.85)",
-                backdropFilter: "blur(8px)",
-                border: "1px solid rgba(23,28,143,0.15)",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                width: 44,
-                height: 44,
-                "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
-              }}
-            >
-              <MenuIcon sx={{ color: "#171c8f" }} />
-            </IconButton>
-          </Badge>
+            iconSx={{ color: "#171c8f" }}
+          />
         </Box>
         <AppMenuDrawer
           open={drawerOpen}
@@ -1846,37 +1831,21 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           display: drawerOpen ? "none" : "block",
         }}
       >
-        <Badge
-          badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null}
-          color="error"
-          max={99}
-          overlap="circular"
-          anchorOrigin={{ vertical: "top", horizontal: "right" }}
-          sx={{
-            "& .MuiBadge-badge": {
-              fontWeight: 800,
-              minWidth: 20,
-              height: 20,
-              fontSize: "0.75rem",
-              border: "2px solid white",
-            },
+        <BurgerWithCount
+          onClick={() => setDrawerOpen(true)}
+          count={tasksActiveCount}
+          size="medium"
+          buttonSx={{
+            bgcolor: "rgba(255,255,255,0.85)",
+            backdropFilter: "blur(8px)",
+            border: "1px solid rgba(23,28,143,0.15)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            width: 44,
+            height: 44,
+            "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
           }}
-        >
-          <IconButton
-            onClick={() => setDrawerOpen(true)}
-            sx={{
-              bgcolor: "rgba(255,255,255,0.85)",
-              backdropFilter: "blur(8px)",
-              border: "1px solid rgba(23,28,143,0.15)",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-              width: 44,
-              height: 44,
-              "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
-            }}
-          >
-            <MenuIcon sx={{ color: "#171c8f" }} />
-          </IconButton>
-        </Badge>
+          iconSx={{ color: "#171c8f" }}
+        />
       </Box>
       <AppMenuDrawer
         open={drawerOpen}

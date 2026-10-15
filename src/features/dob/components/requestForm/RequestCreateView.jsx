@@ -11,11 +11,11 @@
 // только раскладывает их и показывает состояние.
 import { useCallback } from "react";
 import PropTypes from "prop-types";
+import BurgerWithCount from "../../../navigation/BurgerWithCount";
 import {
   Alert, AppBar, Box, Button, CircularProgress, IconButton, Stack, Toolbar, Typography,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import MenuIcon from "@mui/icons-material/Menu";
 import AddIcon from "@mui/icons-material/Add";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNotifications } from "../../../../NotificationsProvider";
@@ -26,7 +26,7 @@ import RequestTypePicker from "./RequestTypePicker";
 import RequestFormFields from "./RequestFormFields";
 import DcEmailLinkDialog from "./DcEmailLinkDialog";
 
-export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
+export default function RequestCreateView({ onOpenMenu, userProfile = null, tasksCount = 0 }) {
   const qc = useQueryClient();
   const { notify } = useNotifications();
   // userProfile → значения по умолчанию: DC ← Office, InitiatingDepartment ← Department.
@@ -56,7 +56,7 @@ export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
     <Box sx={{ width: "100%", height: "100%", minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "#fff" }}>
       <AppBar position="sticky" color="inherit" elevation={0} sx={{ borderBottom: "1px solid rgba(23,28,143,0.1)" }}>
         <Toolbar variant="dense" sx={{ gap: 1.5 }}>
-          <IconButton onClick={onOpenMenu} size="small" aria-label="Открыть меню"><MenuIcon /></IconButton>
+          <BurgerWithCount onClick={onOpenMenu} count={tasksCount} />
           <IconButton onClick={back} size="small" aria-label="Назад к списку заявок"><ArrowBackIcon /></IconButton>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 700, color: "#1f2347" }}>Новая заявка</Typography>
@@ -138,6 +138,7 @@ export default function RequestCreateView({ onOpenMenu, userProfile = null }) {
 
 RequestCreateView.propTypes = {
   onOpenMenu: PropTypes.func,
+  tasksCount: PropTypes.number,
   // Профиль текущего пользователя (userOffice, userDepartment) — для полей по умолчанию.
   userProfile: PropTypes.shape({
     userOffice: PropTypes.string,

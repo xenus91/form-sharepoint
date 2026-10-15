@@ -16,7 +16,7 @@ import DobListAppBar from './components/DobListAppBar';
 import { DobListStateProvider } from './state/DobListStateContext';
 import { useQueryClient } from '@tanstack/react-query';
 
-export default function DobTasksView({ onOpenDrawer }) {
+export default function DobTasksView({ onOpenDrawer, tasksCount = 0 }) {
   const fieldsQ = useDobFields(true);
   // Типы контента: их поля идут первыми колонками таблицы заявок (2026-10-12).
   const { ctFieldNames } = useDobContentTypes();
@@ -137,7 +137,7 @@ export default function DobTasksView({ onOpenDrawer }) {
           bgcolor: '#ffffff',
         }}
       >
-        <DobListAppBar onOpenDrawer={onOpenDrawer} />
+        <DobListAppBar onOpenDrawer={onOpenDrawer} tasksCount={tasksCount} />
 
         {(fieldsQ.isFetching || itemsQ.isFetching) && (
           <Typography variant="caption" sx={{ px: 2, pt: 1, color: '#5b6273' }}>
@@ -177,4 +177,5 @@ export default function DobTasksView({ onOpenDrawer }) {
 
 DobTasksView.propTypes = {
   onOpenDrawer: PropTypes.func,
+  tasksCount: PropTypes.number,
 };

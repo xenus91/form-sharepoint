@@ -3,8 +3,8 @@
 // buttons (Изменить / Обновить / Сбросить / Сохранить) that used to live
 // above the grid. Reads its state from the DobListStateContext.
 import PropTypes from 'prop-types';
-import { AppBar, Toolbar, Box, Button, Chip, IconButton, Tooltip, CircularProgress, Typography } from '@mui/material';
-import MenuIcon from '@mui/icons-material/Menu';
+import { AppBar, Toolbar, Box, Button, Chip, Tooltip, CircularProgress, Typography } from '@mui/material';
+import BurgerWithCount from '../../navigation/BurgerWithCount';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EditIcon from '@mui/icons-material/Edit';
@@ -12,7 +12,7 @@ import AddIcon from '@mui/icons-material/Add';
 import { buildDobCreateHash } from '../lib/dobRoute';
 import { useDobListState } from '../state/DobListStateContext';
 
-export default function DobListAppBar({ onOpenDrawer }) {
+export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
   const state = useDobListState();
   const {
     rows,
@@ -50,14 +50,7 @@ export default function DobListAppBar({ onOpenDrawer }) {
           flexWrap: 'wrap',
         }}
       >
-        <IconButton
-          onClick={onOpenDrawer}
-          size="small"
-          sx={{ color: '#1f2347' }}
-          aria-label="Открыть меню"
-        >
-          <MenuIcon />
-        </IconButton>
+        <BurgerWithCount onClick={onOpenDrawer} count={tasksCount} buttonSx={{ color: '#1f2347' }} />
 
         <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700, letterSpacing: '-.01em', lineHeight: 1.1, color: '#1f2347' }}>
@@ -237,4 +230,6 @@ export default function DobListAppBar({ onOpenDrawer }) {
 
 DobListAppBar.propTypes = {
   onOpenDrawer: PropTypes.func,
+  // Активные задачи — чип на бургере (число приходит из useActiveTasksCount в App).
+  tasksCount: PropTypes.number,
 };

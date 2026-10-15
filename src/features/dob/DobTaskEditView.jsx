@@ -1,10 +1,10 @@
+import PropTypes from 'prop-types';
 // src/features/dob/DobTaskEditView.jsx
 // Full-screen edit form for single DOB item — with rich ChekResult editor
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Box, Button, Chip, CircularProgress, LinearProgress, Typography, Stack, Alert, Paper, TextField, MenuItem, Checkbox, FormControlLabel, Divider, IconButton, Tooltip, AppBar, Toolbar, ToggleButton, ToggleButtonGroup } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { decodeHtmlEntities } from '../../utils/htmlEntities';
-import MenuIcon from '@mui/icons-material/Menu';
 import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
@@ -22,6 +22,7 @@ import { fileNameFromSrc, removeImgByFileName, removedImgSrcs, removedImgSrcsByV
 import { attachmentDisplayUrl, toDisplayImages, toStorageImages } from './lib/attachmentUrl';
 import { fieldsWithBase64, materializeRichValues } from './lib/materializeRichImages';
 import ContentTypeResultDialog from '../tasks/components/ContentTypeResultDialog';
+import BurgerWithCount from '../navigation/BurgerWithCount';
 import { FIELD_LABEL_OVERRIDES, contentTypeIdOf, contentTypeIdMatches, isDialogRequired, normalizeChoiceValue, normalizeChoiceValues, taskContentTypeName } from '../../tasks/contentTypeFields';
 import { useDobContentTypes } from './hooks/useDobContentTypes';
 import { contentTypeDisplayName } from './lib/requestFields';
@@ -292,7 +293,7 @@ async function resolveDobPrincipal(id) {
   return person;
 }
 
-export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = DOB_REQUESTS_HASH }) {
+export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GUID, onBackHash = DOB_REQUESTS_HASH, tasksCount = 0 }) {
   const { notify } = useNotifications();
   const qc = useQueryClient();
   const [form, setForm] = useState({});
@@ -1158,7 +1159,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       <Box data-dob-edit-page="true" sx={FORM_PAGE_SX}>
         <AppBar position="sticky" elevation={0} sx={FORM_APPBAR_SX}>
           <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
-            <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
+            <BurgerWithCount onClick={onOpenMenu} count={tasksCount} buttonSx={{ color: '#171c8f', borderRadius: .5 }} />
             <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="К задачам"><ArrowBackIcon fontSize="small" /></IconButton>
             <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {heading}
@@ -1228,7 +1229,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     <Box data-dob-edit-page="true" sx={FORM_PAGE_SX}>
       <AppBar position="sticky" elevation={0} sx={FORM_APPBAR_SX}>
         <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
-          <IconButton onClick={onOpenMenu} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label="Открыть меню"><MenuIcon /></IconButton>
+          <BurgerWithCount onClick={onOpenMenu} count={tasksCount} buttonSx={{ color: '#171c8f', borderRadius: .5 }} />
           <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label={isDefaultList ? 'К списку' : 'К задачам'}><ArrowBackIcon fontSize="small" /></IconButton>
           <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {taskTitle ? `${isDefaultList ? 'Заявка ДОБ' : 'Задача'} #${id} · ${taskTitle}` : `${isDefaultList ? 'Заявка ДОБ' : 'Задача'} #${id}`}
@@ -1590,3 +1591,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     </Box>
   );
 }
+
+DobTaskEditView.propTypes = {
+  id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  onOpenMenu: PropTypes.func,
+  listGuid: PropTypes.string,
+  onBackHash: PropTypes.string,
+  // Активные задачи — чип на бургере (число даёт useActiveTasksCount в App).
+  tasksCount: PropTypes.number,
+};
