@@ -30,13 +30,6 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
-  Drawer,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Divider,
 } from "@mui/material";
 import ButtonGroup from "@mui/material/ButtonGroup";
 import { useDropzone } from "react-dropzone";
@@ -61,10 +54,7 @@ import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import MenuIcon from "@mui/icons-material/Menu";
-import HomeIcon from "@mui/icons-material/Home";
-import VisibilityIcon from "@mui/icons-material/Visibility";
-import AssignmentIcon from "@mui/icons-material/Assignment";
-import TableChartIcon from "@mui/icons-material/TableChart";
+import AppMenuDrawer from "./features/navigation/AppMenuDrawer";
 const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
 import {
   DOB_REQUESTS_HASH,
@@ -1742,21 +1732,22 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       <ThemeProvider theme={figmaTheme}>
         {/* The list view renders its own AppBar inside DobTasksView.
             The edit view renders its own AppBar inside DobTaskEditView. */}
-        <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)} PaperProps={{ sx: { width: 280, bgcolor: "rgba(255,255,255,0.92)", backdropFilter: "blur(16px)", borderRight: "1px solid rgba(23,28,143,0.1)" } }}>
-          <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
-            <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
-            <Box sx={{ flex: 1 }} />
-            <IconButton onClick={() => setDrawerOpen(false)} size="small"><CloseIcon /></IconButton>
-          </Box>
-          <Divider />
-          <List>
-            <ListItem disablePadding><ListItemButton onClick={handleOpenForm}><ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
-            <ListItem disablePadding><ListItemButton onClick={handleOpenTasks}><ListItemIcon><AssignmentIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
-            <ListItem disablePadding><ListItemButton onClick={()=> { window.location.hash = DOB_REQUESTS_HASH; setHashElementId(null); }} selected={!isDobEdit && !hashDobCreate}><ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>
-            {canOpenManagerPreview && (<ListItem disablePadding><ListItemButton onClick={handleOpenManagerPreview}><ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon><ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} /></ListItemButton></ListItem>)}
-          </List>
-          <Box sx={{ flex: 1 }} /><Divider /><Box sx={{ p: 2 }}><Typography variant="caption" color="text.secondary">{userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}</Typography></Box>
-        </Drawer>
+        {/* Меню — тот же компонент, что в задачах и на главной: порядок пунктов
+            и бейдж активных задач везде одинаковые (2026-10-15). */}
+        <AppMenuDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          active={!isDobEdit && !hashDobCreate ? "dob" : ""}
+          tasksCount={tasksActiveCount}
+          canOpenManagerPreview={canOpenManagerPreview}
+          onOpenForm={handleOpenForm}
+          onOpenTasks={handleOpenTasks}
+          onOpenDob={() => { window.location.hash = DOB_REQUESTS_HASH; setHashElementId(null); }}
+          onOpenManagerPreview={handleOpenManagerPreview}
+          userName={userProfile.userDisplayName}
+          userTitle={userProfile.userTitle}
+          userOffice={userProfile.userOffice}
+        />
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: { xs: 'auto', md: 'calc(100vh - 0px)' }, overflowX: 'hidden' }}>
           <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
             {isDobCreate
@@ -1820,65 +1811,20 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             </IconButton>
           </Badge>
         </Box>
-        <Drawer
-          anchor="left"
+        <AppMenuDrawer
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
-          PaperProps={{
-            sx: {
-              width: 280,
-              bgcolor: "rgba(255,255,255,0.92)",
-              backdropFilter: "blur(16px)",
-              borderRight: "1px solid rgba(23,28,143,0.1)",
-            },
-          }}
-        >
-          <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
-            <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
-            <Box sx={{ flex: 1 }} />
-            <IconButton onClick={() => setDrawerOpen(false)} size="small"><CloseIcon /></IconButton>
-          </Box>
-          <Divider />
-          <List>
-            <ListItem disablePadding>
-              <ListItemButton onClick={handleOpenForm}>
-                <ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
-                <ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} />
-              </ListItemButton>
-            </ListItem>
-            {canOpenManagerPreview && (
-              <ListItem disablePadding>
-                <ListItemButton onClick={handleOpenManagerPreview}>
-                  <ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
-                  <ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} />
-                </ListItemButton>
-              </ListItem>
-            )}
-            <ListItem disablePadding>
-              <ListItemButton onClick={handleOpenTasks} selected>
-                <ListItemIcon>
-                  <Badge badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null} color="error" max={99}>
-                    <AssignmentIcon sx={{ color: "#171c8f" }} />
-                  </Badge>
-                </ListItemIcon>
-                <ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} />
-              </ListItemButton>
-            </ListItem>
-            <ListItem disablePadding>
-              <ListItemButton onClick={handleOpenDob}>
-                <ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
-                <ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} />
-              </ListItemButton>
-            </ListItem>
-          </List>
-          <Box sx={{ flex: 1 }} />
-          <Divider />
-          <Box sx={{ p: 2 }}>
-            <Typography variant="caption" color="text.secondary">
-              {userProfile.userDisplayName || ""} • {userProfile.userTitle || ""}
-            </Typography>
-          </Box>
-        </Drawer>
+          active="tasks"
+          tasksCount={tasksActiveCount}
+          canOpenManagerPreview={canOpenManagerPreview}
+          onOpenForm={handleOpenForm}
+          onOpenTasks={handleOpenTasks}
+          onOpenDob={handleOpenDob}
+          onOpenManagerPreview={handleOpenManagerPreview}
+          userName={userProfile.userDisplayName}
+          userTitle={userProfile.userTitle}
+          userOffice={userProfile.userOffice}
+        />
         {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
         <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
           <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onTasksChanged={refreshActiveTasksCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} initialElementKind={hashElementKind} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
@@ -1932,70 +1878,22 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </IconButton>
         </Badge>
       </Box>
-      <Drawer
-        anchor="left"
+      <AppMenuDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        PaperProps={{
-          sx: {
-            width: 280,
-            bgcolor: "rgba(255,255,255,0.92)",
-            backdropFilter: "blur(16px)",
-            borderRight: "1px solid rgba(23,28,143,0.1)",
-          },
-        }}
-      >
-        <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800, color: "#171c8f" }}>Меню</Typography>
-          <Box sx={{ flex: 1 }} />
-          <IconButton onClick={() => setDrawerOpen(false)} size="small"><CloseIcon /></IconButton>
-        </Box>
-        <Divider />
-        <List>
-          <ListItem disablePadding>
-            <ListItemButton onClick={handleOpenForm} selected={currentView === "form"}>
-              <ListItemIcon><HomeIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
-              <ListItemText primary="Главная" primaryTypographyProps={{ fontWeight: 600 }} />
-            </ListItemButton>
-          </ListItem>
-          {canOpenManagerPreview && (
-            <ListItem disablePadding>
-              <ListItemButton onClick={handleOpenManagerPreview}>
-                <ListItemIcon><VisibilityIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
-                <ListItemText primary="Просмотр менеджерами" primaryTypographyProps={{ fontWeight: 600 }} />
-              </ListItemButton>
-            </ListItem>
-          )}
-          <ListItem disablePadding>
-            <ListItemButton onClick={handleOpenTasks}>
-              <ListItemIcon>
-                <Badge badgeContent={tasksActiveCount > 0 ? tasksActiveCount : null} color="error" max={99}>
-                  <AssignmentIcon sx={{ color: "#171c8f" }} />
-                </Badge>
-              </ListItemIcon>
-              <ListItemText primary="Задачи" primaryTypographyProps={{ fontWeight: 600 }} />
-            </ListItemButton>
-          </ListItem>
-          <ListItem disablePadding>
-            <ListItemButton onClick={handleOpenDob}>
-              <ListItemIcon><TableChartIcon sx={{ color: "#171c8f" }} /></ListItemIcon>
-              <ListItemText primary="Заявки ДОБ" primaryTypographyProps={{ fontWeight: 600 }} />
-            </ListItemButton>
-          </ListItem>
-        </List>
-        <Box sx={{ flex: 1 }} />
-        <Divider />
-        <Box sx={{ p: 2 }}>
-          <Typography variant="caption" color="text.secondary">
-            {userProfile.userDisplayName || ""} • {userProfile.userTitle || ""} — {userProfile.userOffice || ""}
-          </Typography>
-          <Box sx={{ mt: 1 }}>
-            <Button size="small" variant="outlined" onClick={handleOpenDcThuModal} sx={{ borderRadius: 2, fontSize: 12 }}>
-              РЦ: {getEffectiveDcThu() || "—"}
-            </Button>
-          </Box>
-        </Box>
-      </Drawer>
+        active={currentView === "form" ? "form" : ""}
+        tasksCount={tasksActiveCount}
+        canOpenManagerPreview={canOpenManagerPreview}
+        onOpenForm={handleOpenForm}
+        onOpenTasks={handleOpenTasks}
+        onOpenDob={handleOpenDob}
+        onOpenManagerPreview={handleOpenManagerPreview}
+        userName={userProfile.userDisplayName}
+        userTitle={userProfile.userTitle}
+        userOffice={userProfile.userOffice}
+        rcLabel={getEffectiveDcThu() || ""}
+        onOpenRcModal={handleOpenDcThuModal}
+      />
       {/* Верхняя панель счётчика со смещением под бургер */}
       <MonthlyCounter
         ref={monthlyCounterRef}
