@@ -2,7 +2,8 @@
 // Шапка #dob_requests.
 //
 // Что здесь есть (требования 2026-10-15):
-//   * фильтры: статус и тип заявки (мультивыбор, пусто = все);
+//   * фильтры: статус и тип заявки (мультивыбор, пусто = все) — компактными
+//     контролами в рост кнопок size="small";
 //   * переключатель группировки таблицы по статусу;
 //   * «Создать заявку», «Открыть» (заявка открывается только на просмотр) и
 //     «Обновить».
@@ -33,7 +34,57 @@ const OUTLINED_SX = {
   '&.Mui-disabled': { borderColor: '#e6e9f5', color: '#9aa0b4', bgcolor: '#fafbff' },
 };
 
-const FILTER_SX = { width: { xs: 170, sm: 210 }, '& .MuiInputBase-root': { minHeight: 32 } };
+// Компактные фильтры: высота ровно как у кнопок size="small" (30px), чипы
+// крошечные, метка мелкая. Без этого Autocomplete с чипами вырастает до 56px
+// и шапка выглядит громоздко.
+const CONTROL_HEIGHT = 30;
+
+const FILTER_SX = {
+  width: { xs: 150, sm: 178 },
+  '& .MuiInputBase-root': {
+    height: CONTROL_HEIGHT,
+    minHeight: CONTROL_HEIGHT,
+    padding: '0 4px 0 8px',
+    fontSize: 12,
+    flexWrap: 'nowrap',
+    overflow: 'hidden',
+    borderRadius: '8px',
+  },
+  '& .MuiInputBase-input': {
+    padding: 0,
+    fontSize: 12,
+    height: CONTROL_HEIGHT - 2,
+    flexGrow: 0,
+    width: 0,
+  },
+  // Чипы выбранных значений — одного роста с кнопками.
+  '& .MuiAutocomplete-tag': {
+    height: 20,
+    margin: 0,
+    marginRight: '2px',
+    fontSize: 11,
+    maxWidth: 96,
+  },
+  '& .MuiChip-label': { padding: '0 4px', fontSize: 11, fontWeight: 600 },
+  '& .MuiChip-deleteIcon': { width: 14, height: 14 },
+  '& .MuiAutocomplete-clearIndicator, & .MuiAutocomplete-popupIndicator': {
+    padding: 2,
+    marginRight: 0,
+  },
+  '& .MuiInputLabel-root': { fontSize: 12, lineHeight: '1.4' },
+  '& .MuiInputLabel-shrink': { fontSize: 11 },
+};
+
+// Переключатель группировки — тоже в рост кнопок.
+const SWITCH_LABEL_SX = {
+  m: 0,
+  mr: { xs: 0, sm: 0.5 },
+  ml: 0,
+  '& .MuiSwitch-root': { width: 38, height: 24, p: 0, mr: 0.5 },
+  '& .MuiSwitch-switchBase': { p: 3, '&.Mui-checked': { transform: 'translateX(14px)' } },
+  '& .MuiSwitch-thumb': { width: 12, height: 12 },
+  '& .MuiSwitch-track': { borderRadius: 12, opacity: 1 },
+};
 
 export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
   const state = useDobListState();
@@ -132,7 +183,8 @@ export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
           onChange={(_e, next) => setStatusFilter?.(next)}
           sx={FILTER_SX}
           data-testid="dob-filter-status"
-          limitTags={1}
+          limitTags={0}
+          ChipProps={{ size: "small", variant: "outlined" }}
           renderInput={(params) => (
             <TextField {...params} label="Статус" placeholder={statusFilter.length ? '' : 'Все статусы'} />
           )}
@@ -147,9 +199,10 @@ export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
           isOptionEqualToValue={(a, b) => String(a?.id) === String(b?.id)}
           value={ctOptions.filter((option) => ctFilter.includes(option.id))}
           onChange={(_e, next) => setCtFilter?.(next.map((option) => option.id))}
-          sx={{ ...FILTER_SX, width: { xs: 190, sm: 250 } }}
+          sx={{ ...FILTER_SX, width: { xs: 170, sm: 210 } }}
           data-testid="dob-filter-ct"
-          limitTags={1}
+          limitTags={0}
+          ChipProps={{ size: "small", variant: "outlined" }}
           renderInput={(params) => (
             <TextField {...params} label="Тип заявки" placeholder={ctFilter.length ? '' : 'Все типы'} />
           )}
@@ -165,11 +218,11 @@ export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
             />
           }
           label={
-            <Typography variant="caption" sx={{ fontWeight: 600, color: '#1f2347', whiteSpace: 'nowrap' }}>
+            <Typography variant="caption" sx={{ fontWeight: 600, fontSize: 11, color: '#1f2347', whiteSpace: 'nowrap' }}>
               Группы по статусу
             </Typography>
           }
-          sx={{ mr: 0, ml: 0.5 }}
+          sx={SWITCH_LABEL_SX}
         />
 
         <Tooltip title="Создать заявку: выбор типа контента, затем поля этого типа">

@@ -153,6 +153,7 @@ function taskDescriptionText(raw) {
 }
 import { resolveRelatedRef } from './lib/relatedItem';
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from '../../tasks/status';
+import { statusInternalOf } from './lib/dobRowStatus';
 import { DOB_REQUESTS_HASH, isDobRequestList } from './lib/dobRoute';
 
 
@@ -966,6 +967,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // Связанная заявка: RelatedItems элемента (или lookup на список заявок ДОБ).
   const relatedRef = useMemo(() => resolveRelatedRef(item, fields), [item, fields]);
 
+  // Имя колонки статуса в этом списке («Статус» называется по-разному).
+  const statusInternalName = useMemo(() => statusInternalOf(fields || []), [fields]);
+
   const editableFields = useMemo(() => {
     if (!fields) return [];
     // Состав — по типу контента: если FieldLinks получены, показываем только их
@@ -978,10 +982,16 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       if (isHiddenFormField(f.InternalName)) return false;
       // Show all except hidden system, but mark readOnly
       if (f.Hidden) return false;
-      if (ctNames && !ctNames.has(String(f.InternalName || '').toLowerCase())) return false;
+      if (ctNames && !ctNames.has(String(f?.InternalName || '').toLowerCase())) {
+        // Статус в форме нужен ВСЕГДА — в просмотре заявки без него непонятно,
+        // что с заявкой. У многих типов контента FieldLinks его не содержат, и
+        // селект Status просто не появлялся. Поле не выдумываем: показываем
+        // только реальную колонку списка.
+        if (String(f.InternalName || '') !== statusInternalName) return false;
+      }
       return true;
     });
-  }, [fields, ctFields]);
+  }, [fields, ctFields, statusInternalName]);
 
   const chekField = useMemo(() => {
     if (!fields) return null;

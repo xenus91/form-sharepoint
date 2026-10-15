@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // src/features/dob/__tests__/DobGrid.grouping.test.jsx
 //
-// Группировка таблицы #dob_requests по статусу. Row Grouping в AG Grid —
-// Enterprise-фича, а стоит ag-grid-community, поэтому группы собираются вручную
-// (lib/requestListFilters) — проверяем, что заголовки групп реально видны.
+// Группировка таблицы #dob_requests по статусу — ШТАТНАЯ функция AG Grid
+// (rowGroupCols + groupDisplayType="groupRows", модуль RowGroupingModule из
+// ag-grid-enterprise). Проверяем, что группы реально строятся самим гридом:
+// строки-группы со счётчиком и разворачивание/сворачивание кликом.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
@@ -53,37 +54,57 @@ async function renderGrid({ groupByStatus = true } = {}) {
     );
     await new Promise((r) => setTimeout(r, 50));
   });
-  await act(async () => { await new Promise((r) => setTimeout(r, 120)); });
+  await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
   return { host, root };
 }
 
-describe("DobGrid — группировка по статусу", () => {
+/**
+ * Подписи и счётчики групп без дублей: строка группы в AG Grid лежит и в
+ * pinned-, и в center-контейнере, поэтому смотрим на уникальные значения.
+ */
+const groupLabels = (host) => [
+  ...new Set([...host.querySelectorAll(".ag-group-value")].map((el) => (el.textContent || "").trim())),
+];
+const groupCounts = (host) => [
+  ...new Set([...host.querySelectorAll(".ag-group-child-count")].map((el) => (el.textContent || "").trim())),
+];
+const hasGroupRows = (host) => host.querySelectorAll(".ag-row-group").length;
+
+const text = (host) => (host.textContent || "").replace(/\s+/g, " ");
+
+describe("DobGrid — штатная группировка AG Grid по статусу", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
 
-  it("перед каждой группой стоит заголовок со счётчиком", async () => {
+  it("грид строит группы со счётчиком", async () => {
     const { host } = await renderGrid();
-    // Строка в AG Grid лежит и в pinned-, и в center-контейнере — считаем в одном.
-    const groupRows = [...host.querySelectorAll(".ag-center-cols-container .dob-group-row")];
-    expect(groupRows.length).toBe(2);
-
-    const text = (host.textContent || "").replace(/\s+/g, " ");
-    expect(text).toContain("Открыт — 2");
-    expect(text).toContain("Завершена — 1");
+    expect(host.querySelectorAll(".ag-row-group").length).toBeGreaterThan(0);
+    expect(groupLabels(host)).toEqual(["Открыт", "Завершена"]);
+    expect(groupCounts(host).sort()).toEqual(["(1)", "(2)"]);
+    // признак именно группировки AG Grid: шевроны разворачивания
+    expect(host.querySelectorAll(".ag-group-expanded, .ag-group-contracted").length).toBeGreaterThan(0);
   });
 
-  it("первой идёт группа первой строки, строки групп не перемешаны", async () => {
+  it("группу можно свернуть кликом по шеврону — её строки скрываются", async () => {
     const { host } = await renderGrid();
-    const rows = [...host.querySelectorAll('.ag-center-cols-container [row-id]')];
-    const order = rows.map((row) => {
-      const id = row.getAttribute("row-id");
-      return id.startsWith("group:") ? id : `#${id}`;
+    expect(text(host)).toContain("Первая");
+
+    const toggle = host.querySelector(".ag-group-expanded") || host.querySelector(".ag-group-contracted");
+    expect(toggle).toBeTruthy();
+    await act(async () => {
+      toggle.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      await new Promise((r) => setTimeout(r, 150));
     });
-    expect(order).toEqual(["group:Открыт", "#1", "#2", "group:Завершена", "#3"]);
+
+    // свернули первую группу — её заявок в DOM нет
+    expect(text(host)).not.toContain("Первая");
+    // остальные группы на месте
+    expect(text(host)).toContain("Завершена");
   });
 
-  it("без группировки заголовков групп нет", async () => {
+  it("без группировки групп нет", async () => {
     const { host } = await renderGrid({ groupByStatus: false });
-    expect(host.querySelectorAll(".ag-center-cols-container .dob-group-row").length).toBe(0);
-    expect(host.querySelectorAll('.ag-center-cols-container [row-id="1"]').length).toBe(1);
+    expect(hasGroupRows(host)).toBe(0);
+    expect(text(host)).toContain("Первая");
+    expect(text(host)).toContain("Третья");
   });
 });

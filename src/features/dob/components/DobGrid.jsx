@@ -1,9 +1,14 @@
 // src/features/dob/components/DobGrid.jsx
-// AG Grid (Community) wrapper for the DOB list — dynamic columns from fields
-// metadata. Заявки в этой таблице ТОЛЬКО просматриваются (readOnly): правки в
-// ячейках и накопления dirty-строк больше нет (требование 2026-10-15).
-// Группировка по статусу собирается вручную — Row Grouping в AG Grid это
-// Enterprise-фича, а стоит у нас ag-grid-community (см. lib/requestListFilters).
+// AG Grid wrapper for the DOB list — dynamic columns from fields metadata.
+// Заявки в этой таблице ТОЛЬКО просматриваются (readOnly): правки в ячейках и
+// накопления dirty-строк больше нет (требование 2026-10-15).
+//
+// Группировка по статусу — ШТАТНАЯ функция AG Grid (rowGroupCols +
+// groupDisplayType="groupRows"): разворачиваемые группы со счётчиком и
+// шевроном. Row Grouping входит в AG Grid Enterprise, поэтому подключён пакет
+// ag-grid-enterprise (RowGroupingModule). Ключ лицензии берётся из
+// VITE_AG_GRID_LICENSE_KEY (.env): без ключа грид работает, но показывает
+// водяной знак и предупреждение в консоли.
 // Header uses AG Grid's default
 // `headerComponentParams.template` so every header shows the filter icon
 // (`eFilterButton`) + more icon (`eMenu`) the way the AG Grid Theme Builder
@@ -27,11 +32,12 @@ import {
   ColumnHoverModule,
   CsvExportModule,
 } from 'ag-grid-community';
+// Row Grouping — Enterprise-модуль AG Grid.
+import { RowGroupingModule, LicenseManager } from 'ag-grid-enterprise';
 import { Box, CircularProgress, Typography } from '@mui/material';
 import { useDobListState } from '../state/DobListStateContext';
 import { isRowCompleted, statusInternalOf } from '../lib/dobRowStatus';
 import { selectRequestFields } from '../lib/requestFields';
-import { groupRowsByStatus, regroupSortedNodes, isGroupRow, groupRowId } from '../lib/requestListFilters';
 
 ModuleRegistry.registerModules([
   AllCommunityModule,
@@ -43,7 +49,12 @@ ModuleRegistry.registerModules([
   ColumnApiModule,
   ColumnHoverModule,
   CsvExportModule,
+  RowGroupingModule,
 ]);
+
+// Ключ лицензии AG Grid Enterprise — из окружения (VITE_AG_GRID_LICENSE_KEY).
+const AG_GRID_LICENSE_KEY = import.meta.env?.VITE_AG_GRID_LICENSE_KEY || '';
+if (AG_GRID_LICENSE_KEY) LicenseManager.setLicenseKey(AG_GRID_LICENSE_KEY);
 
 // ---------- helpers (preserved from the previous implementation) ----------
 
@@ -438,17 +449,6 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
     () => buildColumnDefs(fields || ctxFields || [], ctFieldNames, { readOnly }),
     [fields, ctxFields, ctFieldNames, readOnly],
   );
-  // Строка-заголовок группы растягивается на всю ширину таблицы.
-  const columnDefs = useMemo(() => {
-    if (!groupByStatus || baseColumnDefs.length === 0) return baseColumnDefs;
-    const [first, ...rest] = baseColumnDefs;
-    return [
-      { ...first, colSpan: (p) => (isGroupRow(p.data) ? baseColumnDefs.length : undefined) },
-      ...rest,
-    ];
-  }, [baseColumnDefs, groupByStatus]);
-  // В какую колонку пишем подпись группы.
-  const labelField = groupByStatus ? baseColumnDefs[0]?.field || null : null;
   const statusInternal = useMemo(() => statusInternalOf(fields || ctxFields || []), [fields, ctxFields]);
   // Завершённую задачу нельзя править и пакетной записью (кнопка «Сохранить»).
   const rowCompletedClassRules = useMemo(
@@ -479,31 +479,20 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
       if (r.Editor && r.Editor.Title) copy.Editor = r.Editor;
       return copy;
     });
-    return groupByStatus ? groupRowsByStatus(plain, statusInternal, { labelField }) : plain;
-  }, [rows, groupByStatus, statusInternal, labelField]);
-
-  // После любой сортировки пользователя группы собираются заново.
-  const postSortRows = useCallback(
-    (rowNodes) => regroupSortedNodes(rowNodes, statusInternal),
-    [statusInternal],
-  );
+    return plain;
+  }, [rows]);
 
   const getRowId = useCallback(
-    (p) => (isGroupRow(p.data)
-      ? groupRowId(p.data)
-      : String(p.data?.ID ?? p.data?.Id ?? p.data?.OData__ID ?? Math.random())),
-    [],
-  );
-
-  const getRowClass = useCallback(
-    (p) => (isGroupRow(p.data) ? 'dob-group-row' : ''),
+    (p) => String(p.data?.ID ?? p.data?.Id ?? p.data?.OData__ID ?? Math.random()),
     [],
   );
 
   const onRowDoubleClicked = useCallback(
     (evt) => {
+      // Двойной клик по строке ГРУППЫ (шеврон/подпись) заявку не открывает.
+      if (evt?.node?.group) return;
       const data = evt?.data;
-      if (!data || isGroupRow(data)) return;
+      if (!data) return;
       const id = data.ID ?? data.Id ?? data.OData__ID;
       if (id) openItem?.(String(id));
     },
@@ -540,13 +529,44 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
       suppressRowHoverHighlight: false,
       ensureDomOrder: true,
       suppressMenuHide: true,
-      postSortRows: groupByStatus ? postSortRows : undefined,
       // Side bar lets users drag columns between the grid and a hidden panel.
       // We keep it off by default to match the Theme Builder look.
       sideBar: false,
       statusBar: undefined,
     }),
-    [groupByStatus, postSortRows],
+    [],
+  );
+
+  // ── Штатная группировка AG Grid (Row Grouping, Enterprise) ────────────────
+  // Группируем по колонке статуса: разворачиваемые группы со счётчиком.
+  //
+  // В AG Grid v33 опции gridOptions.rowGroupCols БОЛЬШЕ НЕТ (грид пишет
+  // «invalid gridOptions property 'rowGroupCols'») — группировка включается
+  // флагом rowGroup на самой колонке, поэтому помечаем колонку статуса.
+  const columnDefs = useMemo(() => {
+    if (!groupByStatus || !statusInternal) return baseColumnDefs;
+    let marked = false;
+    const cols = baseColumnDefs.map((col) => {
+      if (col.field !== statusInternal) return col;
+      marked = true;
+      return { ...col, rowGroup: true, enableRowGroup: true };
+    });
+    if (!marked) {
+      console.warn(`[DobGrid] колонки «${statusInternal}» нет среди колонок таблицы — группировка не применена`);
+      return baseColumnDefs;
+    }
+    return cols;
+  }, [baseColumnDefs, groupByStatus, statusInternal]);
+
+  const autoGroupColumnDef = useMemo(
+    () => ({
+      headerName: 'Статус',
+      minWidth: 240,
+      flex: 1,
+      pinned: 'left',
+      cellRendererParams: { suppressCount: false },
+    }),
+    [],
   );
 
   return (
@@ -561,14 +581,8 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
         flexDirection: 'column',
         flex: '1 1 0',
         bgcolor: '#ffffff',
-        // Строка-заголовок группы статусов (группировка собирается вручную).
-        '& .dob-group-row .ag-cell': {
-          bgcolor: '#eef1ff',
-          color: '#171c8f',
-          fontWeight: 700,
-          borderBottom: '1px solid #d8ddf5',
-        },
-        '& .dob-group-row': { cursor: 'default' },
+        // Группы AG Grid: подпись и счётчик — в закрепленной группе-колонке.
+        '& .ag-row-group .ag-cell': { fontWeight: 700, color: '#171c8f' },
       }}
     >
       <Box
@@ -597,6 +611,9 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
             rowData={rowData}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
+            groupDisplayType="groupRows"
+            groupDefaultExpanded={-1}
+            autoGroupColumnDef={autoGroupColumnDef}
             pagination
             paginationPageSize={50}
             paginationPageSizeSelector={[20, 50, 100, 200]}
@@ -605,7 +622,6 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
             onRowDoubleClicked={onRowDoubleClicked}
             rowClassRules={rowCompletedClassRules}
             getRowId={getRowId}
-            getRowClass={getRowClass}
             overlayNoRowsTemplate='<span style="padding:12px;color:#5b6273">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'
           />
         )}
@@ -613,8 +629,9 @@ export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStat
 
       <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#5b6273' }}>
         Заявки доступны только для просмотра — изменение заявок в этом разделе отключено. Двойной клик по строке
-        открывает заявку на просмотр. Фильтры по статусу и типу заявки — в шапке; группировку по статусу можно
-        выключить там же. Скрытие/показ колонок — через меню «⋮» в шапке таблицы.
+        открывает заявку на просмотр. Фильтры по статусу и типу заявки — в шапке. Группировка по статусу — штатная
+        для AG Grid: группы разворачиваются и сворачиваются кликом по шеврону, счётчик показывает число заявок;
+        включается и выключается переключателем в шапке. Скрытие/показ колонок — через меню «⋮» в шапке таблицы.
       </Typography>
     </Box>
   );

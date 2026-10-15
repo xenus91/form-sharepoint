@@ -7,6 +7,16 @@ Currently, two official plugins are available:
 - [@vitejs/plugin-react](https://github.com/vitejs/plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.dev/) for Fast Refresh
 - [@vitejs/plugin-react-swc](https://swc.rs/) uses [SWC]( for Fast Refresh
 
+## Переменные окружения
+
+Кладутся в `.env` (или `.env.local`) в корне проекта.
+
+| Переменная | Где читается | Зачем |
+| --- | --- | --- |
+| `VITE_AG_GRID_LICENSE_KEY` | `features/dob/components/DobGrid.jsx` | Ключ лицензии AG Grid **Enterprise** — нужен для штатной группировки строк по статусу в `#dob_requests`. Без ключа грид работает в триальном режиме и показывает водяной знак «License Key Not Found». |
+| `VITE_PROXY_BASE_URL` / `VITE_SP_SITE` / `VITE_SHAREPOINT_URL` | `vite.config.ts` | Адрес основного сайта SharePoint для dev-прокси `/api`. |
+| `VITE_DOB_SITE` | `vite.config.ts` | Адрес сайта ДОБ для dev-прокси `/dob-api`. |
+
 ## Конфигурация UI из SharePoint
 
 Список ниже управляется через два SharePoint-списка в tenant — без правки React-кода.

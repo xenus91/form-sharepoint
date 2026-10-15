@@ -1172,3 +1172,56 @@ DobTaskEditView.requestReadOnly — 4, RequestCreateView.snackbar — 3) + те�
 Snackbar. Тесты сохранения картинок и валидации переведены на форму ЗАДАЧИ
 (заявки больше не редактируются). `vitest run` — 110 файлов / 847 тестов,
 зелёные; `npm run build` — успешно; eslint — не хуже базового по каждому файлу.
+
+## 23. Исправления §22: штатная группировка AG Grid, компактные фильтры, Status в форме
+
+**Дата:** 2026-10-15 (после замечаний к §22)
+
+### 23.1. Группировка — штатная функция AG Grid, не самодельная
+
+В §22 группы собирались вручную (служебные строки в `rowData`), потому что
+стоял только `ag-grid-community`. Это было неверное решение: нужна штатная
+группировка. Что сделано:
+
+* подключён `ag-grid-enterprise@33.3.2` (точно та же версия, что community) и
+  зарегистрирован `RowGroupingModule`;
+* группировка включается флагом **`rowGroup: true` на колонке статуса** —
+  в AG Grid v33 опции `gridOptions.rowGroupCols` больше нет, грид прямо пишет
+  «invalid gridOptions property 'rowGroupCols'»;
+* `groupDisplayType="groupRows"`, `autoGroupColumnDef` (закреплена слева,
+  шапка «Статус»), `groupDefaultExpanded: -1` — группы разворачиваются и
+  сворачиваются кликом по шеврону, счётчик показывает число заявок;
+* самодельные заголовки групп, `colSpan`, `postSortRows` и функции
+  `groupRowsByStatus`/`regroupSortedNodes` из `lib/requestListFilters` удалены.
+
+**Лицензия.** Row Grouping — Enterprise-функция. Ключ берётся из
+`VITE_AG_GRID_LICENSE_KEY` (`.env`, см. README): `LicenseManager.setLicenseKey`.
+Без ключа грид работает в триальном режиме («All AG Grid Enterprise features
+are unlocked for trial») и показывает водяной знак «License Key Not Found» —
+ключ нужно добавить. Цена вопроса в бандле: dist enterprise-пакета 1806 KB
+(community — 1826 KB), итоговый `index`-чанк 3967 KB / gzip 1111 KB.
+
+### 23.2. Контролы фильтров в рост остальным кнопкам
+
+`Autocomplete` с чипами вырастал до ~56px. Теперь: высота контрола 30px (как у
+кнопок `size="small"`), `limitTags={0}` (иначе чипы переносятся и тянут строку),
+чипы 20px с мелким шрифтом, метка 12/11px, `flexWrap: nowrap` и скрытие
+переполнения. Переключатель «Группы по статусу» — тоже 24px.
+
+### 23.3. Селект Status — всегда в форме
+
+`editableFields` в `DobTaskEditView` показывал только поля из `FieldLinks`
+типа контента. У многих типов статуса там нет — и селект Status в форме не
+появлялся вовсе (в том числе в просмотре заявки). Теперь колонка статуса
+показывается всегда, если она реально есть в списке (имя берём через
+`statusInternalOf`). Поле по-прежнему не выдумывается: берётся только
+существующая колонка списка.
+
+**Проверено:** `DobGrid.grouping.test.jsx` переписан под штатную группировку
+(группы со счётчиком «Открыт (2)» / «Завершена (1)», шевроны, сворачивание
+кликом скрывает строки группы) — без `rowGroup: true` 2 теста падают;
+новый `DobTaskEditView.statusField.test.jsx` (2 теста: заявка и задача, когда
+в FieldLinks статуса нет) — без правки `editableFields` оба падают
+(`expected null to be truthy`). `requestListFilters.test.js` ужат до фильтров.
+`vitest run` — 111 файлов / 848 тестов, зелёные; `npm run build` — успешно
+(10.19 s); eslint — не хуже базового по каждому файлу.
