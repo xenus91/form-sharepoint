@@ -46,6 +46,7 @@ import {
   RESULT_TOGGLE_GROUP_SX,
 } from './lib/formStyles';
 import PersonFieldAutocomplete from '../tasks/components/PersonFieldAutocomplete';
+import { userSearchFor } from './lib/dobUserSearch';
 import { resolvePrincipal, principalGetForTask } from '../tasks/lib/assignees';
 
 /**
@@ -338,6 +339,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   // Тип контента элемента → состав формы. Форма строится ТОЛЬКО по полям типа
   // контента (FieldLinks): в списке есть колонки, которых в типе нет, и раньше
   // они попадали в «Остальные поля» (AdditionalActions, AdditionalActionsRequired).
+  // Поля «Пользователь или группа»: поиск людей и их сведений идёт с сайта того
+  // списка, в котором лежит задача (списки ДОБ — сайт ДОБ, Tasks — основной).
+  const personSearch = userSearchFor(listGuid);
   const itemCtId = contentTypeIdOf(item?.ContentTypeId);
   // ⭐ Признак «задача ДОБ» по TaskBehaviour (IsDobTask = Да в записи по имени типа
   // контента): такие задачи ведёт наша форма — внутри неё показываем форму по
@@ -1360,6 +1364,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
               return (
                 <Box key={internal} data-dob-field={internal} sx={FORM_FIELD_WIDE_SX}>
                   <PersonFieldAutocomplete
+                    // Люди ищутся на сайте того списка, в котором лежит задача.
+                    search={personSearch.search}
+                    getPositions={personSearch.getPositions}
                     label={title}
                     required={f.Required === true}
                     error={isInvalid}

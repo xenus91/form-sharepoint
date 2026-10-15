@@ -1039,3 +1039,46 @@ AG Grid сортирует по ЗНАЧЕНИЮ колонки, а не по `v
 строки не сломались; во всей таблице нет `[object Object]`). При отключении
 форматтеров 3 теста падают ровно на `[object Object]`. `vitest run` — 100 файлов
 / 803 теста, зелёные; `npm run build` — успешно; eslint — чисто.
+
+## 21. Поиск людей в форме заявки — только на сайте ДОБ
+
+**Дата:** 2026-10-15
+
+**Проблема.** В `#dob_requests/new` поле «Виновный» (тип «Пользователь или
+группа») искал людей на **основном** сайте (obrazceo), а не на
+`/sites/dob/doblogistic`, где лежит заявка. Причина: `RequestFieldControl`
+рисовал `PersonFieldAutocomplete` без пропа `search`, а у компонента дефолт —
+`searchSiteUsers` из `src/tasks/userSearch.js`, который ходит через `apiClient`
+основного сайта; там же по умолчанию брались и сведения о человеке
+(`getUserPositions`).
+
+**Решение.**
+
+* Правило одно: **запрос идёт на тот сайт, где лежит запись**. Само правило
+  (`isMainSiteList`) вынесено из `dobApi.js` в листовой
+  `src/features/dob/lib/siteRouting.js` (без axios) — `dobApi` его
+  ре-экспортирует, старые импорты не сломались.
+* `src/features/dob/lib/dobUserSearch.js` — единый дом поиска принципалов на
+  сайте ДОБ: `searchDobUsers`, `searchDobGroups`, `dobUserPositions` и
+  `userSearchFor(listGuid)` (основной список → функции основного сайта, иначе
+  ДОБ).
+* `dobGet` достраивает относительные пути базой сайта ДОБ: у `dobAxios`
+  **нет `baseURL`**, поэтому `/web/SiteUserInfoList/items?...` без базы ушёл бы
+  в корень веб-приложения. URL, уже собранные `searchSiteUsers`
+  (`base = dobApiBase()`), второй раз не достраиваются.
+* `PersonFieldAutocomplete` получил проп `getPositions` (дефолт — прежний
+  `getUserPositions`); пропы `search`/`getPositions` держатся стабильными
+  (модульные функции или `useMemo`) — от них зависят deps эффекта дебаунса.
+* Пропы переданы во всех местах, где есть поле «Пользователь или группа» в
+  ДОБ-контексте: `RequestFieldControl`, `DobTaskEditView`,
+  `ContentTypeResultDialog` (`DcEmailLinkDialog` уже искал на ДОБ).
+* `dcEmailApi.searchDobGroups` теперь тонкий делегат нового модуля.
+
+**Проверено:** `dobUserSearch.test.js` (5), `dobUserSearch.url.test.js` (2 —
+настоящие `searchSiteUsers`/`getUserPositions` и настоящая `dobApiBase`,
+подменён только сетевой вызов: URL начинается с
+`/dob-api/sites/dob/doblogistic/_api/`, `apiClient` не вызывается),
+`RequestFieldControl.personSite.test.jsx` (2). Откат пропов — падают 2 теста
+(`search` становится `undefined`); откат достройки базы — падает тест URL.
+`vitest run` — 103 файла / 812 тестов, зелёные; `npm run build` — успешно;
+eslint — не хуже базового по каждому файлу.

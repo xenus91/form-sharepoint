@@ -10,6 +10,7 @@ import {
 import { RESULT_TOGGLE_GROUP_SX } from "../../lib/formStyles";
 import RichEditor from "../RichEditor";
 import PersonFieldAutocomplete from "../../../tasks/components/PersonFieldAutocomplete";
+import { searchDobUsers, dobUserPositions } from "../../lib/dobUserSearch";
 
 export default function RequestFieldControl({ control, value, onChange, invalid = false, readOnly = false, isUploading = false }) {
   const { internalName, title, kind, required, choices = [], multiple = false } = control;
@@ -32,6 +33,10 @@ export default function RequestFieldControl({ control, value, onChange, invalid 
       <PersonFieldAutocomplete
         label={title}
         placeholder={title}
+        // Заявка живёт на сайте ДОБ — людей и их сведения ищем там же,
+        // а не на основном сайте (obrazceo).
+        search={searchDobUsers}
+        getPositions={dobUserPositions}
         value={value ?? (multiple ? [] : null)}
         onChange={(next) => onChange?.(next)}
         multiple={multiple !== false}

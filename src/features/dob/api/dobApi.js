@@ -4,7 +4,7 @@ import { dobApiBase, dobListApi, dobAxios, DOB_LIST_GUID } from './dobClient';
 import { attachmentDisplayUrl } from '../lib/attachmentUrl';
 import { isUserFieldType } from '../lib/dobFormFields';
 import apiClient from '../../../api';
-import { TASKS_LIST_API, TASKS_LIST_GUID } from '../../../tasks/config';
+import { TASKS_LIST_API } from '../../../tasks/config';
 import { fetchContentTypeFields, fetchContentTypeFieldsDetailed } from '../../../tasks/contentTypeFields';
 import { pickInProgressChoice } from '../../../tasks/mutations/takeTaskInWork';
 import { isCompletedStatus, isInProgressStatus } from '../../../tasks/status';
@@ -14,13 +14,10 @@ import { isCompletedStatus, isInProgressStatus } from '../../../tasks/status';
 // через основной клиент (свой digest и прокси /api), для остальных — через DOB-клиент
 // (/dob-api/sites/dob/doblogistic). Так задача «Результат проверки ООБ» открывается
 // в форме ДОБ, а пишется в свой список.
-const MAIN_LIST_GUIDS = new Set([String(TASKS_LIST_GUID || '').toLowerCase()]);
-
-/** Список принадлежит основному сайту (а не сайту ДОБ). */
-export function isMainSiteList(listGuid) {
-  const id = String(listGuid || '').trim().replace(/[{}]/g, '').toLowerCase();
-  return MAIN_LIST_GUIDS.has(id);
-}
+// Само правило живёт в lib/siteRouting (без зависимостей) — ре-экспортируем, чтобы
+// старые импорты `from './dobApi'` продолжали работать.
+export { isMainSiteList } from '../lib/siteRouting';
+import { isMainSiteList } from '../lib/siteRouting';
 
 /** Путь к списку: основной сайт (относительно apiClient) или сайт ДОБ (абсолютный). */
 function listApiOf(listGuid) {

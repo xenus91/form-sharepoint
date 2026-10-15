@@ -46,9 +46,17 @@ export default function PersonFieldAutocomplete({
   // заявки передаёт описание поля (Description).
   placeholder = "Учётная запись, ФИО или e-mail",
   // Поиск принципалов. По умолчанию — пользователи/группы основного сайта;
-  // диалог рассылки передаёт поиск по сайту ДОБ с фильтром «только группы».
+  // форма заявки ДОБ передаёт поиск по сайту ДОБ, диалог рассылки — тот же
+  // поиск с фильтром «только группы».
   search = searchSiteUsers,
+  // Сведения о людях (должность/департамент/офис). По умолчанию — основной сайт;
+  // форма заявки ДОБ передаёт вариант для сайта ДОБ, чтобы не ходить на чужой.
+  getPositions = getUserPositions,
 }) {
+  // В ref: колбэк может быть inline-функцией, а эффект поиска сведений не должен
+  // перезапускаться на каждый рендер.
+  const getPositionsRef = React.useRef(getPositions);
+  React.useEffect(() => { getPositionsRef.current = getPositions; }, [getPositions]);
   const selected = React.useMemo(
     () => (Array.isArray(value) ? value.filter(Boolean) : (value ? [value] : [])),
     [value],
@@ -93,7 +101,7 @@ export default function PersonFieldAutocomplete({
     let cancelled = false;
     (async () => {
       try {
-        const map = await getUserPositions(list);
+        const map = await getPositionsRef.current(list);
         if (!cancelled && Object.keys(map).length > 0) {
           setPositions((prev) => ({ ...prev, ...map }));
         }

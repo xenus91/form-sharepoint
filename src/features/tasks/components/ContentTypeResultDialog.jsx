@@ -26,6 +26,7 @@ import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
 import { toDisplayImages, toStorageImages } from "../../dob/lib/attachmentUrl";
 import { removeImgByFileName } from "../../dob/lib/richImages";
 import { getDobContentTypeFieldsDetailed } from "../../dob/api/dobApi";
+import { userSearchFor } from "../../dob/lib/dobUserSearch";
 import {
   FORM_ACTIONS_SX,
   FORM_FIELD_FULL_SX,
@@ -192,6 +193,8 @@ export default function ContentTypeResultDialog({
   // "fieldlinks" — состав типа; "ct-fields" — поля типа без FieldLinks;
   // "list-fields" — ФОЛБЭК: все колонки списка (тип не найден).
   const ctFields = React.useMemo(() => fieldsQ.data?.fields || [], [fieldsQ.data]);
+  // Поля «Пользователь или группа»: сайт поиска — по списку задачи.
+  const personSearch = React.useMemo(() => userSearchFor(listGuid), [listGuid]);
   const ctSource = fieldsQ.data?.source || "";
 
   const form = React.useMemo(
@@ -578,6 +581,9 @@ export default function ContentTypeResultDialog({
                   // не выезжали за края формы.
                   <Box key={control.internalName} sx={FORM_FIELD_WIDE_SX}>
                     <PersonFieldAutocomplete
+                      // Люди ищутся на сайте того списка, в котором лежит задача.
+                      search={personSearch.search}
+                      getPositions={personSearch.getPositions}
                       label={control.title}
                       value={value || []}
                       onChange={(next) => setValue(control.internalName, next)}

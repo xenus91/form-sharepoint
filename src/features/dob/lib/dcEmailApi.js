@@ -12,7 +12,7 @@
 
 import { dobApiBase, dobAxios } from "../api/dobClient";
 import { DCEMAIL_LIST_TITLE, resolveDistributionViaDcEmail } from "../../../tasks/distribution";
-import { searchSiteUsers } from "../../../tasks/userSearch";
+import { searchDobGroups as searchDobGroupsOnDob } from "./dobUserSearch";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const VERBOSE = { Accept: "application/json;odata=verbose", "Content-Type": "application/json;odata=verbose" };
@@ -29,12 +29,7 @@ export function dcEmailListApi() {
  * Id берутся с того же сайта, что резолвит ensureuser, поэтому валидны для Email.
  */
 export function searchDobGroups(query, opts = {}) {
-  return searchSiteUsers(query, {
-    ...opts,
-    groupsOnly: true,
-    base: dobApiBase(),
-    get: (url, cfg) => dobAxios.get(url, cfg),
-  });
+  return searchDobGroupsOnDob(query, opts);
 }
 
 /** OffDepKey = Office + Department (слитно) — как в tasks/distribution. */
