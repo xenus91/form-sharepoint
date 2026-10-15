@@ -85,6 +85,20 @@ function htmlToCellText(value) {
 
 // ---------- column definitions ----------
 
+/**
+ * Заголовок колонки в #dob_requests — из Description поля (требование
+ * 2026-10-15: все названия колонок берём из Description), с откатом на Title,
+ * если описание пустое. Description чистим тем же htmlToCellText: теги,
+ * сущности (&#58; → «:») и переводы строк в шапке не нужны.
+ * @param {object} f
+ * @returns {string}
+ */
+function columnLabel(f) {
+  const desc = htmlToCellText(f?.Description);
+  if (desc) return desc;
+  return String(f?.Title || f?.InternalName || '').trim();
+}
+
 function buildColumnDefs(fields, ctFieldNames) {
   if (!fields || fields.length === 0) return [];
   // Завершённые задачи — только просмотр (правило общее для всех интерфейсов).
@@ -95,17 +109,23 @@ function buildColumnDefs(fields, ctFieldNames) {
   const ordered = selectRequestFields(fields, { ctFieldNames });
 
   const cols = [];
+  // Title добавленных колонок (нижний регистр) — чтобы отсечь дубли
+  // «Пользователь или группа» рядом с Author/Editor. Сравнивать по headerName
+  // больше нельзя: шапка теперь из Description.
+  const addedTitles = new Set();
   for (const f of ordered) {
     const internal = f.InternalName;
-    const title = f.Title || internal;
+    const title = f.Title || internal; // для логики (ширина, дубли)
+    const label = columnLabel(f);      // для шапки — из Description
     const t = (f.TypeAsString || '').toLowerCase();
     const editable = isEditableField(f);
     const isCalculated = t === 'calculated' || t === 'computed';
 
     if (internal === 'Author' || internal === 'Editor') {
+      addedTitles.add(String(title).toLowerCase());
       cols.push({
         field: internal,
-        headerName: title,
+        headerName: label,
         width: 140,
         editable: false,
         valueGetter: (p) => {
@@ -122,7 +142,7 @@ function buildColumnDefs(fields, ctFieldNames) {
     if (internal === 'UserFail') {
       cols.push({
         field: internal,
-        headerName: 'UserFail (виновный)',
+        headerName: f.Description ? label : 'UserFail (виновный)',
         width: 150,
         editable: false,
         valueGetter: (p) => {
@@ -141,12 +161,13 @@ function buildColumnDefs(fields, ctFieldNames) {
       if ((isDupAuthor && cols.some((c) => c.field === 'Author')) || (isDupEditor && cols.some((c) => c.field === 'Editor'))) {
         continue;
       }
-      if (cols.some((c) => (c.headerName || '').toLowerCase() === lowTitle && c.field !== internal)) {
+      if (addedTitles.has(lowTitle)) {
         continue;
       }
+      addedTitles.add(lowTitle);
       cols.push({
         field: internal,
-        headerName: title + (f.Required ? ' *' : ''),
+        headerName: label + (f.Required ? ' *' : ''),
         width: 140,
         editable: false,
         valueGetter: (p) => {
@@ -162,7 +183,7 @@ function buildColumnDefs(fields, ctFieldNames) {
     if (internal === 'Attachments') {
       cols.push({
         field: 'Attachments',
-        headerName: 'Вложения',
+        headerName: f.Description ? label : 'Вложения',
         width: 100,
         editable: false,
         valueGetter: (p) => (p.data?.Attachments ? 'Да' : 'Нет'),
@@ -174,9 +195,10 @@ function buildColumnDefs(fields, ctFieldNames) {
     if (internal === 'ChekResult' || internal === '_x041a__x043e__x043c__x04') continue;
 
     const isODataField = internal.startsWith('_x');
+    addedTitles.add(String(title).toLowerCase());
     const col = {
       field: internal,
-      headerName: title + (f.Required ? ' *' : ''),
+      headerName: label + (f.Required ? ' *' : ''),
       flex: 1,
       minWidth: 120,
       // editable как ФУНКЦИЯ: ячейка недоступна, если строка — завершённая задача.
