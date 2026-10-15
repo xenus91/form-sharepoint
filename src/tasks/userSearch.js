@@ -222,8 +222,11 @@ export async function searchSiteUsers(query, opts = {}) {
     const all = await fetchUsersPage(get, base);
     users = all.filter((u) => matchesUser(u, query));
     if (groupsOnly) users = users.filter((u) => Number(u.PrincipalType) !== 1);
-  } else if (variants.length > 1) {
-    // сервер вернул только точное совпадение — добавим совпадения с точками из фолбэка, если он уже загружен
+  } else if (variants.length > 1 || groupsOnly) {
+    // сервер вернул только точное совпадение — добавим совпадения с точками из
+    // фолбэка, если он уже загружен. Для групп делаем это всегда: серверный
+    // substringof может соблюдать регистр, а matchesUser() — нет, так что
+    // «_рц 8117 отгрузка» найдёт «_РЦ 8117 Отгрузка».
     const all = _allUsers.get(base);
     if (all?.loaded) {
       users = dedupeUsers([...users, ...all.list.filter((u) => matchesUser(u, query))]);

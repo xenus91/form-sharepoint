@@ -17,7 +17,9 @@ import {
 const verbose = (d) => ({ data: { d } });
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // resetAllMocks, а не clearAllMocks: очищает и очереди mockResolvedValueOnce,
+  // чтобы упавший тест не «докармливал» своими ответами следующий.
+  vi.resetAllMocks();
   clearUserSearchCache();
   clearDcEmailGroupCache();
 });
@@ -46,9 +48,14 @@ describe("ensureGroupPrincipal", () => {
     expect(dobAxios.post).not.toHaveBeenCalled();
   });
 
-  it("без Id из поиска — резолвит через _api/web/ensureuser по logonName", async () => {
+  it("без Id из поиска и без группы на сайте — резолвит через _api/web/ensureuser по logonName", async () => {
     dobAxios.post.mockResolvedValue(verbose({ Id: 44 }));
-    dobAxios.get.mockResolvedValue(verbose({ Id: 44, Title: "ООБ", LoginName: "c:0-.f|rolemanager|oob" }));
+    dobAxios.get.mockImplementation((url) => {
+      if (url.includes("/web/siteusers/getbyid(")) {
+        return Promise.resolve(verbose({ Id: 44, Title: "ООБ", LoginName: "c:0-.f|rolemanager|oob" }));
+      }
+      return Promise.reject({ response: { status: 404 } }); // группы с таким названием на сайте нет
+    });
     const id = await ensureGroupPrincipal({ Title: "ООБ", LoginName: "c:0-.f|rolemanager|oob" });
     expect(id).toBe(44);
     const [url, body] = dobAxios.post.mock.calls[0];
@@ -100,6 +107,24 @@ describe("ensureGroupPrincipal", () => {
     expect(await ensureGroupPrincipal({ Id: 5, Title: "Иванов", LoginName: "i:0#.f|membership|ivanov", PrincipalType: 1 })).toBeNull();
   });
 
+  it("находит группу по названию в ДРУГОМ регистре — без ensureuser", async () => {
+    // ensureuser принимает только точную учётную запись: «_РЦ 8117 ОТГРУЗКА» он
+    // не резолвит. Сверяем название со списком групп сайта в нижнем регистре.
+    dobAxios.get.mockImplementation((url) => {
+      if (url.includes("/web/sitegroups?")) {
+        return Promise.resolve(verbose({ results: [
+          { Id: 6773, Title: "_РЦ 8117 Отгрузка", LoginName: "c:0+.w|s-1-5-21-3594104448-188109" },
+        ] }));
+      }
+      return Promise.reject({ response: { status: 500 } });
+    });
+    const id = await ensureGroupPrincipal({ Title: "_РЦ 8117 ОТГРУЗКА", LoginName: "c:0t.c|tenant|_РЦ 8117 Отгрузка" });
+    expect(id).toBe(6773);
+    expect(dobAxios.post).not.toHaveBeenCalled();
+    // регистрозависимого фильтра по Title больше нет
+    expect(dobAxios.get.mock.calls.some(([u]) => /Title(%20| )eq/.test(u))).toBe(false);
+  });
+
   it("пустая группа — null, без запроса", async () => {
     expect(await ensureGroupPrincipal(null)).toBeNull();
     expect(dobAxios.post).not.toHaveBeenCalled();
@@ -124,6 +149,64 @@ describe("createDcEmailItem", () => {
     expect(url).toBe("/dob-api/sites/dob/doblogistic/_api/web/lists/getbytitle('DcEmail')/items");
     expect(body.OffDepKey).toBe("РЦ-8114Группа");
     expect(body.EmailId).toEqual({ __metadata: { type: "Collection(Edm.Int32)" }, results: [33, 44] });
+  });
+
+  it("в ОДИНОЧНОЕ поле Email пишет просто Id, а не Collection(Edm.Int32)", async () => {
+    // «Обнаружены несовместимые типы. Тип "Collection(Edm.Int32)" относится к
+    // виду "Collection" вместо ожидаемого "Primitive"» — поле без AllowMultipleValues.
+    dobAxios.get.mockImplementation((url) => {
+      if (url.includes("/fields?")) {
+        return Promise.resolve(verbose({ results: [
+          { InternalName: "Email", FieldTypeKind: 20, AllowMultipleValues: false },
+        ] }));
+      }
+      return Promise.resolve(verbose({ ListItemEntityTypeFullName: "SP.Data.DcEmailListItem" }));
+    });
+    dobAxios.post.mockResolvedValue(verbose({ Id: 502 }));
+    const item = await createDcEmailItem({ offDepKey: "РЦ-8117Группа отгрузки", groupIds: [6773] });
+    expect(item.Id).toBe(502);
+    const [url, body] = dobAxios.post.mock.calls[0];
+    expect(url).toBe("/dob-api/sites/dob/doblogistic/_api/web/lists/getbytitle('DcEmail')/items");
+    expect(body.EmailId).toBe(6773);
+  });
+
+  it("поле рассылки с другим именем (единственное «Пользователь или группа») — тоже одиночно", async () => {
+    dobAxios.get.mockImplementation((url) => {
+      if (url.includes("/fields?")) {
+        return Promise.resolve(verbose({ results: [
+          { InternalName: "Title", FieldTypeKind: 2 },
+          { InternalName: "OffDepKey", FieldTypeKind: 2 },
+          { InternalName: "MailGroup", FieldTypeKind: 20, AllowMultipleValues: false },
+        ] }));
+      }
+      return Promise.resolve(verbose({ ListItemEntityTypeFullName: "SP.Data.DcEmailListItem" }));
+    });
+    dobAxios.post.mockResolvedValue(verbose({ Id: 504 }));
+    await createDcEmailItem({ offDepKey: "РЦ-8117Группа отгрузки", groupIds: [6773] });
+    expect(dobAxios.post.mock.calls[0][1].MailGroupId).toBe(6773);
+  });
+
+  it("если SharePoint ждёт Primitive — повторяет POST без Collection", async () => {
+    dobAxios.get.mockResolvedValue(verbose({ ListItemEntityTypeFullName: "SP.Data.DcEmailListItem" }));
+    dobAxios.post
+      .mockRejectedValueOnce({
+        response: {
+          status: 400,
+          data: { error: { message: { value: "Обнаружены несовместимые типы. Тип \"Collection(Edm.Int32)\" относится к виду \"Collection\" вместо ожидаемого \"Primitive\"." } } },
+        },
+      })
+      .mockResolvedValueOnce(verbose({ Id: 503 }));
+    const item = await createDcEmailItem({ offDepKey: "РЦ-8117Группа отгрузки", groupIds: [6773] });
+    expect(item.Id).toBe(503);
+    expect(dobAxios.post.mock.calls[0][1].EmailId.__metadata.type).toBe("Collection(Edm.Int32)");
+    expect(dobAxios.post.mock.calls[1][1].EmailId).toBe(6773);
+  });
+
+  it("обычная ошибка сервера не приводит ко второму POST", async () => {
+    dobAxios.get.mockResolvedValue(verbose({ ListItemEntityTypeFullName: "SP.Data.DcEmailListItem" }));
+    dobAxios.post.mockRejectedValue({ response: { status: 403, data: {} } });
+    await expect(createDcEmailItem({ offDepKey: "X", groupIds: [1] })).rejects.toBeTruthy();
+    expect(dobAxios.post).toHaveBeenCalledTimes(1);
   });
 
   it("без групп — ошибка, ничего не создаём", async () => {
@@ -171,6 +254,19 @@ describe("searchDobGroups", () => {
     const url = dobAxios.get.mock.calls[0][0];
     expect(url.startsWith("/dob-api/sites/dob/doblogistic/_api/web/siteusers")).toBe(true);
     expect(url).toContain("PrincipalType ne 1");
+  });
+
+  it("поиск группы не зависит от регистра (локальный фолбэк по siteusers)", async () => {
+    dobAxios.get.mockImplementation((url) => {
+      if (url.includes("$top=1000")) {
+        return Promise.resolve(verbose({ results: [
+          { Id: 6773, Title: "_РЦ 8117 Отгрузка", LoginName: "c:0t.c|tenant|rc8117", PrincipalType: 4 },
+        ] }));
+      }
+      return Promise.resolve(verbose({ results: [] })); // серверный substringof регистр не пережил
+    });
+    const found = await searchDobGroups("_рц 8117 отгрузка");
+    expect(found.map((g) => g.Id)).toEqual([6773]);
   });
 
   it("отбрасывает пользователей (PrincipalType = 1), даже если сервер вернул", async () => {

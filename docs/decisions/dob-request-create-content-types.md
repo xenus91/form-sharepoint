@@ -139,6 +139,38 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
 применяем, заявка создаётся как раньше. Ошибку создания элемента `DcEmail`
 показываем в диалоге; заявку при этом **не** создаём.
 
+### 8. Резолв группы рассылки и запись в поле `Email`
+
+Два дефекта, из-за которых сохранение рассылки падало (лог из браузера:
+`sitegroups/getbyid(6773)` → 500, `siteusers/ensureuser` → 404,
+«Обнаружены несовместимые типы. Тип "Collection(Edm.Int32)" относится к виду
+"Collection" вместо ожидаемого "Primitive"»):
+
+* **Группу проверяем через `siteusers`, а не `sitegroups`.** Коллекция
+  `sitegroups` знает только группы SharePoint (`PrincipalType 8`); группы
+  безопасности AD (4) и списки рассылки (2) в неё не входят, `getbyid` на них
+  отвечает 500 «Невозможно найти группу». `isGroupPrincipal(id)` теперь читает
+  `PrincipalType` из `/web/siteusers/getbyid(id)` и считает группой всё, что не
+  пользователь (`!== 1`). Типу из выдачи поиска доверяем — `searchDobGroups` и
+  так фильтрует `PrincipalType ne 1`, поэтому для выбранной в автокомплите
+  группы резолв идёт без единого запроса.
+* **По названию ищем без учёта регистра.** `ensureuser` принимает только точную
+  учётную запись, а `sitegroups/getbyname` и `$filter=Title eq '…'` соблюдают
+  регистр — «_рц 8117 отгрузка» не находило «_РЦ 8117 Отгрузка». Теперь
+  название сверяется со списком групп сайта в нижнем регистре (и по `Title`, и
+  по `LoginName`), регистрозависимый фильтр `Title eq` убран, а `ensureuser`
+  перенесён в конец цепочки. `searchSiteUsers` для групп дополнительно
+  домешивает локальную регистронезависимую сверку.
+* **`/web/siteusers/ensureuser` не существует** — `ensureuser` это метод Web
+  (`/_api/web/ensureuser`); лишний эндпоинт убран.
+* **В поле `Email` пишем тот тип, который ждёт список.** Коллекцию
+  `Collection(Edm.Int32)` SharePoint принимает только для поля с
+  `AllowMultipleValues`; в одиночное поле (и в число) нужен просто Id. Перед
+  записью читаем `/fields` списка DcEmail (`InternalName`, `FieldTypeKind`,
+  `AllowMultipleValues`), поле рассылки определяем по имени `Email*`, иначе —
+  единственное поле `FieldTypeKind 20`. Если сервер всё же отвечает ошибкой про
+  Collection/Primitive — повторяем POST вторым вариантом.
+
 ## Проверка
 
 * `vitest run` — 94 файла / 762 теста, зелёные. Обновлены/добавлены:
@@ -148,6 +180,12 @@ controls = buildRequestFormControls(fields).filter(c => c.required === true)
   описания типов; тип по умолчанию), `requestFormFields` (`Title`/`Status`/
   OutcomeChoice отсеиваются), `requestTitle`, `userSearch` (поиск групп по
   принципалам с фильтром `PrincipalType ne 1`), `dcEmailApi`, `DcEmailLinkDialog`.
+* `vitest run` после фикса DcEmail — 93 файла / 772 теста, зелёные; в
+  `dcEmailApi.test.js` 23 теста (в т.ч. AD-группа `PrincipalType 4` резолвится
+  без запросов, название в другом регистре находится без `ensureuser`, в
+  одиночное поле пишется Id без `Collection(Edm.Int32)`, при ошибке про
+  Collection/Primitive POST повторяется вторым вариантом). При возврате
+  старого поведения падают 4 теста.
 * `eslint` по изменённым файлам — чисто.
 * `npm run build` — успешно, отдельный чанк `RequestCreateView-*.js`.
 
