@@ -34,23 +34,43 @@ export default function RequestCreateView({ onOpenMenu, userProfile = null, task
 
   const back = useCallback(() => { window.location.hash = DOB_REQUESTS_HASH; }, []);
 
+  /**
+   * Snackbar после создания заявки (требование 2026-10-15): пишем, на какую
+   * рассылку уйдут результаты проверки. Рассылку берём из DcEmail по
+   * Office+Department — она показывается всегда, а не только когда её
+   * только что создали через диалог.
+   */
+  const notifyCreated = useCallback((titles) => {
+    const list = (titles || []).map((t) => String(t || "").trim()).filter(Boolean);
+    notify(
+      <>
+        {list.length
+          ? `Заявка создана, результаты проверки будут отправлены на рассылку «${list.join("», «")}».`
+          : "Заявка создана."}
+        <br />
+        Ожидайте решения
+      </>,
+      { severity: "success" },
+    );
+  }, [notify]);
+
   const handleCreate = useCallback(async () => {
     const item = await form.submit();
     if (!item) return;
-    notify(`Заявка #${item?.Id ?? item?.ID ?? ""} создана`, { severity: "success" });
+    notifyCreated(form.mailingRef.current);
     try { qc.invalidateQueries({ queryKey: ["dob"] }); } catch (_e) { void _e; }
     back();
-  }, [form, notify, qc, back]);
+  }, [form, notifyCreated, qc, back]);
 
   // Диалог DcEmail: сначала сохраняем рассылку, затем создаём заявку (порядок
   // обеспечивает useRequestForm.saveDcEmailAndCreate).
   const handleDcEmailSave = useCallback(async (groups) => {
     const item = await form.saveDcEmailAndCreate(groups);
     if (!item) return;
-    notify(`Заявка #${item?.Id ?? item?.ID ?? ""} создана`, { severity: "success" });
+    notifyCreated(form.mailingRef.current);
     try { qc.invalidateQueries({ queryKey: ["dob"] }); } catch (_e) { void _e; }
     back();
-  }, [form, notify, qc, back]);
+  }, [form, notifyCreated, qc, back]);
 
   return (
     <Box sx={{ width: "100%", height: "100%", minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "#fff" }}>

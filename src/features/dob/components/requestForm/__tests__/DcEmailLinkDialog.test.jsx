@@ -57,6 +57,18 @@ describe("DcEmailLinkDialog", () => {
     expect(document.body.textContent).toContain("Выберите хотя бы одну группу");
   });
 
+  it("текст диалога — дословно по требованию 2026-10-15", () => {
+    mount({ office: "РЦ-8114", department: "Группа отгрузки", offDepKey: "РЦ-8114Группа отгрузки" });
+    const text = (byTestid("dcemail-dialog-text").textContent || "").replace(/\s+/g, " ").trim();
+    expect(text).toBe(
+      "Для вашего подразделения РЦ-8114 Группа отгрузки отсутствует рассылка для обратной связи, "
+      + "внесите рассылку ниже чтобы получить уведомление о решении Вашей заявки.",
+    );
+    // ключ OffDepKey в видимом тексте не показываем, но для диагностики он в DOM
+    expect(text).not.toContain("РЦ-8114Группа отгрузки");
+    expect(document.querySelector('[data-offdep-key="РЦ-8114Группа отгрузки"]')).toBeTruthy();
+  });
+
   it("после выбора группы отправляет их наверх", () => {
     const onSubmit = vi.fn();
     mount({ office: "РЦ-8114", department: "Группа отгрузки", onSubmit });

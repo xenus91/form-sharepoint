@@ -153,7 +153,7 @@ function taskDescriptionText(raw) {
 }
 import { resolveRelatedRef } from './lib/relatedItem';
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from '../../tasks/status';
-import { DOB_REQUESTS_HASH } from './lib/dobRoute';
+import { DOB_REQUESTS_HASH, isDobRequestList } from './lib/dobRoute';
 
 
 function isEditableField(f) {
@@ -737,12 +737,15 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   }, [id, listGuid, notify]);
 
 
-  const isDefaultList = listGuid === DOB_LIST_GUID;
+  // Это форма ЗАЯВКИ (список Requests), а не задача чужого списка.
+  // isDobRequestList понимает и listGuid === undefined — так приходит
+  // #dob_requests/<id>.
+  const isRequestForm = isDobRequestList(listGuid);
   // Куда ведёт «Назад»: заявка (список Requests) → #dob_requests,
   // задача чужого списка (#dob_tasks/<id>?list=…) → обратно в #tasks.
   const handleBack = useCallback(() => {
-    window.location.hash = onBackHash || (isDefaultList ? DOB_REQUESTS_HASH : '#tasks');
-  }, [onBackHash, isDefaultList]);
+    window.location.hash = onBackHash || (isRequestForm ? DOB_REQUESTS_HASH : '#tasks');
+  }, [onBackHash, isRequestForm]);
 
   // Статус задачи и choices поля Status — чтобы подобрать статус «в работе»
   // именно из вокабуляра этого списка (у списков он разный).
@@ -757,11 +760,13 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
   const taskCompleted = isCompletedStatus(taskStatus, item?.PercentComplete);
   // Завершённую задачу править нельзя — НИ в таблице, НИ по прямой ссылке
   // (#dob_tasks/<id>?list=<GUID>): форма открывается только на просмотр.
-  const readOnly = taskCompleted;
+  // Заявки (#dob_requests) не редактируются вовсе — требование 2026-10-15:
+  // «убрать из #dob_requests возможность изменения заявок совсем».
+  const readOnly = taskCompleted || isRequestForm;
   const taskInProgress = isInProgressStatus(taskStatus);
   // Требовать взятие, только когда статус ЯВНО «не начата»: у заявок без поля
   // Status форма остаётся доступной, как раньше.
-  const needsTake = !!item && isNotStartedStatus(taskStatus) && !taskCompleted && !taskInProgress;
+  const needsTake = !!item && !isRequestForm && isNotStartedStatus(taskStatus) && !taskCompleted && !taskInProgress;
 
   const handleTakeInWork = useCallback(async () => {
     if (!id) return;
@@ -874,10 +879,12 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     </Box>
   ) : null;
 
-  // Задача завершена: форма доступна ТОЛЬКО для просмотра — данных вносить нельзя.
+  // Форма только для просмотра: либо задача завершена, либо это заявка.
   const readOnlyBanner = readOnly ? (
     <Alert severity="info" data-testid="dob-readonly-banner" sx={{ borderRadius: 0 }}>
-      Задача завершена — форма открыта только для просмотра. Изменить данные нельзя.
+      {isRequestForm
+        ? 'Заявка открыта только для просмотра — изменение заявок в этом разделе отключено.'
+        : 'Задача завершена — форма открыта только для просмотра. Изменить данные нельзя.'}
     </Alert>
   ) : null;
 
@@ -1222,7 +1229,7 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
     const msg = itemError?.response?.data?.error?.message?.value || itemError?.message || String(itemError);
     return (
       <Box sx={{ p: 2 }}>
-        <Button startIcon={<ArrowBackIcon />} onClick={handleBack} sx={{ mb: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
+        <Button startIcon={<ArrowBackIcon />} onClick={handleBack} sx={{ mb: 2 }}>{isRequestForm ? 'К списку' : 'К задачам'}</Button>
         <Alert severity="error">Не удалось загрузить заявку {id}: {String(msg).slice(0, 800)}</Alert>
         <Button startIcon={<RefreshIcon />} onClick={()=> refetch()} sx={{ mt: 1 }}>Повторить</Button>
       </Box>
@@ -1234,9 +1241,9 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       <AppBar position="sticky" elevation={0} sx={FORM_APPBAR_SX}>
         <Toolbar variant="dense" sx={{ minHeight: 48, px: { xs: .5, sm: 1 }, gap: .5 }}>
           <BurgerWithCount onClick={onOpenMenu} count={tasksCount} buttonSx={{ color: '#171c8f', borderRadius: .5 }} />
-          <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label={isDefaultList ? 'К списку' : 'К задачам'}><ArrowBackIcon fontSize="small" /></IconButton>
+          <IconButton onClick={handleBack} size="small" sx={{ color: '#171c8f', borderRadius: .5 }} aria-label={isRequestForm ? 'К списку' : 'К задачам'}><ArrowBackIcon fontSize="small" /></IconButton>
           <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {taskTitle ? `${isDefaultList ? 'Заявка ДОБ' : 'Задача'} #${id} · ${taskTitle}` : `${isDefaultList ? 'Заявка ДОБ' : 'Задача'} #${id}`}
+            {taskTitle ? `${isRequestForm ? 'Заявка ДОБ' : 'Задача'} #${id} · ${taskTitle}` : `${isRequestForm ? 'Заявка ДОБ' : 'Задача'} #${id}`}
           </Typography>
           {isFetching && <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>обновление…</Typography>}
           <Tooltip title={relatedRef ? 'Показать данные связанной заявки (только чтение)' : 'У этой записи нет связанной заявки (RelatedItems пустое)'}>
@@ -1581,12 +1588,16 @@ export default function DobTaskEditView({ id, onOpenMenu, listGuid = DOB_LIST_GU
       )}
 
       <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', pb: 2 }}>
-        <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isDefaultList ? 'К списку' : 'К задачам'}</Button>
-        <Box sx={FORM_ACTIONS_SX}>
-          <Button onClick={validateAndSave} variant="contained" disabled={saving || needsTake || readOnly} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
-            {saving ? 'Сохранение…' : 'Сохранить'}
-          </Button>
-        </Box>
+        <Button onClick={handleBack} variant="outlined" sx={{ borderRadius: 2 }}>{isRequestForm ? 'К списку' : 'К задачам'}</Button>
+        {/* В режиме «только просмотр» (завершённая задача или заявка) кнопки
+            сохранения нет вовсе — не disabled, а именно нет. */}
+        {!readOnly && (
+          <Box sx={FORM_ACTIONS_SX}>
+            <Button onClick={validateAndSave} variant="contained" disabled={saving || needsTake} startIcon={<SaveIcon />} sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 160 }}>
+              {saving ? 'Сохранение…' : 'Сохранить'}
+            </Button>
+          </Box>
+        )}
       </Box>
 
       {/* Read-only просмотр связанной заявки: данные тянем из связанного элемента */}

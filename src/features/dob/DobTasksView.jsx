@@ -1,11 +1,15 @@
 // src/features/dob/DobTasksView.jsx
-// Page for hash #dob_requests — owns the AppBar, the DobListStateProvider and
-// the AG Grid. The action toolbar (Изменить / Обновить / Сбросить / Сохранить)
-// used to live above the grid; it now lives in the AppBar and exchanges
-// state with the grid via the DobListStateContext. The whole page is a
-// vertical flex container so the grid fills the remaining viewport height
-// below the sticky AppBar.
-import { useMemo, useEffect, useCallback } from 'react';
+// Страница #dob_requests: шапка, провайдер состояния и таблица.
+//
+// Конвейер строк (требования 2026-10-15):
+//   1) область видимости сотрудника — DC = Office (для «Отдела по обеспечению
+//      бизнеса») либо DC = Office И InitiatingDepartment = Department;
+//      Поршаков Сергей — исключение, видит всё (lib/requestScope);
+//   2) фильтры шапки — статус (по умолчанию «Открыт») и тип заявки;
+//   3) группировка по статусу — уже внутри DobGrid.
+//
+// Заявки здесь только просматриваются: правки в таблице и в шапке нет.
+import { useMemo, useEffect, useCallback, useState } from 'react';
 import PropTypes from 'prop-types';
 import { Box, Typography, CircularProgress, Alert, Button } from '@mui/material';
 import { useDobFields } from './hooks/useDobFields';
@@ -15,11 +19,19 @@ import DobGrid from './components/DobGrid';
 import DobListAppBar from './components/DobListAppBar';
 import { DobListStateProvider } from './state/DobListStateContext';
 import { useQueryClient } from '@tanstack/react-query';
+import { buildRequestScope, applyRequestScope } from './lib/requestScope';
+import { statusTextOf, matchesContentType } from './lib/requestListFilters';
+import { statusInternalOf } from './lib/dobRowStatus';
+import { contentTypeDisplayName } from './lib/requestFields';
 
-export default function DobTasksView({ onOpenDrawer, tasksCount = 0 }) {
+// Фильтр статусов по умолчанию: «Открыт» (его можно снять в шапке).
+const DEFAULT_STATUS_FILTER = ['Открыт'];
+
+export default function DobTasksView({ onOpenDrawer, tasksCount = 0, userProfile = null }) {
   const fieldsQ = useDobFields(true);
-  // Типы контента: их поля идут первыми колонками таблицы заявок (2026-10-12).
-  const { ctFieldNames } = useDobContentTypes();
+  // Типы контента: их поля идут первыми колонками таблицы заявок, а сами типы —
+  // в фильтр «Тип заявки» в шапке.
+  const { contentTypes, ctFieldNames } = useDobContentTypes();
   const fieldsData = useMemo(() => fieldsQ.data || null, [fieldsQ.data]);
   const itemsQ = useDobItemsPaged({ enabled: true, pageSize: 100, fields: fieldsData, filter: '' });
   const qc = useQueryClient();
@@ -51,26 +63,65 @@ export default function DobTasksView({ onOpenDrawer, tasksCount = 0 }) {
 
   const fields = useMemo(() => fieldsData || [], [fieldsData]);
   const rawRows = useMemo(() => itemsQ.data || [], [itemsQ.data]);
+  const statusInternal = useMemo(() => statusInternalOf(fields), [fields]);
 
-  // Клиентский фильтр «Открыт» — OData__ prefix (SP возвращает OData__x...)
+  // ── 1) Область видимости сотрудника (DC / InitiatingDepartment) ────────────
+  const scope = useMemo(
+    () => buildRequestScope({
+      office: userProfile?.userOffice,
+      department: userProfile?.userDepartment,
+      displayName: userProfile?.userDisplayName,
+    }),
+    [userProfile?.userOffice, userProfile?.userDepartment, userProfile?.userDisplayName],
+  );
+
+  const scoped = useMemo(
+    () => applyRequestScope(rawRows, { fields, scope }),
+    [rawRows, fields, scope],
+  );
+  const scopedRows = scoped.rows;
+
+  const scopeNote = useMemo(() => {
+    if (scope.mode === 'all') return scope.reason === 'в профиле нет Office' || scope.reason === 'в профиле нет Department' ? '' : 'Показаны все заявки (фильтр по подразделению не применяется)';
+    if (scope.mode === 'office') return `Показаны заявки офиса ${scope.office}`;
+    return `Показаны заявки: офис ${scope.office}, департамент ${scope.department}`;
+  }, [scope]);
+
+  // ── 2) Фильтры шапки ───────────────────────────────────────────────────────
+  const statusOptions = useMemo(() => {
+    const values = new Set();
+    for (const row of scopedRows) {
+      const text = statusTextOf(row, statusInternal);
+      if (text) values.add(text);
+    }
+    return Array.from(values).sort((a, b) => a.localeCompare(b, 'ru'));
+  }, [scopedRows, statusInternal]);
+
+  const ctOptions = useMemo(
+    () => (contentTypes || [])
+      .map((ct) => ({
+        id: String(ct?.Id || ct?.StringId || '').trim(),
+        label: contentTypeDisplayName(ct) || String(ct?.Name || ''),
+      }))
+      .filter((option) => option.id),
+    [contentTypes],
+  );
+
+  const [statusFilter, setStatusFilter] = useState(DEFAULT_STATUS_FILTER);
+  const [ctFilter, setCtFilter] = useState([]);
+  const [groupByStatus, setGroupByStatus] = useState(true);
+
   const rows = useMemo(() => {
-    if (!rawRows.length || !fields.length) return rawRows;
-    const statusField = fields.find((x) => {
-      const title = String(x.Title || '').trim().toLowerCase();
-      return title === 'статус' || title.includes('статус');
-    });
-    const internal = statusField?.InternalName;
-    if (!internal) {
-      console.warn('[DOB] поле статуса не найдено — фильтр «Открыт» не применён');
-      return rawRows;
+    let out = scopedRows;
+    // Если колонки статуса в списке нет — фильтровать не по чему.
+    if (statusOptions.length && statusFilter.length) {
+      out = out.filter((row) => statusFilter.includes(statusTextOf(row, statusInternal)));
     }
-    function getVal(r, f) {
-      const value = r[f] ?? r['OData__' + f] ?? r['OData_' + f] ?? '';
-      return String(value).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    if (ctFilter.length) {
+      out = out.filter((row) => ctFilter.some((id) => matchesContentType(row?.ContentTypeId, id)));
     }
-    // The list view intentionally contains only open requests.
-    return rawRows.filter((r) => getVal(r, internal).toLowerCase() === 'открыт');
-  }, [rawRows, fields]);
+    return out;
+  }, [scopedRows, statusOptions, statusFilter, statusInternal, ctFilter]);
 
   const handleRefresh = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['dob'] });
@@ -122,6 +173,16 @@ export default function DobTasksView({ onOpenDrawer, tasksCount = 0 }) {
       loading={itemsQ.isLoading}
       isFetching={itemsQ.isFetching}
       onRefresh={handleRefresh}
+      statusOptions={statusOptions}
+      statusFilter={statusFilter}
+      setStatusFilter={setStatusFilter}
+      ctOptions={ctOptions}
+      ctFilter={ctFilter}
+      setCtFilter={setCtFilter}
+      groupByStatus={groupByStatus}
+      setGroupByStatus={setGroupByStatus}
+      scopeNote={scopeNote}
+      scopeWarning={scoped.warning}
     >
       <Box
         data-dob-page="true"
@@ -138,6 +199,12 @@ export default function DobTasksView({ onOpenDrawer, tasksCount = 0 }) {
         }}
       >
         <DobListAppBar onOpenDrawer={onOpenDrawer} tasksCount={tasksCount} />
+
+        {scoped.warning && (
+          <Alert severity="warning" data-testid="dob-scope-alert" sx={{ m: { xs: 1, sm: 2 }, mb: 0, borderRadius: 1.5 }}>
+            {scoped.warning}
+          </Alert>
+        )}
 
         {(fieldsQ.isFetching || itemsQ.isFetching) && (
           <Typography variant="caption" sx={{ px: 2, pt: 1, color: '#5b6273' }}>
@@ -168,7 +235,7 @@ export default function DobTasksView({ onOpenDrawer, tasksCount = 0 }) {
             flexDirection: 'column',
           }}
         >
-          <DobGrid fields={fields} rows={rows} ctFieldNames={ctFieldNames} />
+          <DobGrid fields={fields} rows={rows} ctFieldNames={ctFieldNames} groupByStatus={groupByStatus} readOnly />
         </Box>
       </Box>
     </DobListStateProvider>
@@ -178,4 +245,11 @@ export default function DobTasksView({ onOpenDrawer, tasksCount = 0 }) {
 DobTasksView.propTypes = {
   onOpenDrawer: PropTypes.func,
   tasksCount: PropTypes.number,
+  // Профиль текущего пользователя: Office/Department — для фильтра по
+  // подразделению, ФИО — для исключения (Поршаков Сергей).
+  userProfile: PropTypes.shape({
+    userOffice: PropTypes.string,
+    userDepartment: PropTypes.string,
+    userDisplayName: PropTypes.string,
+  }),
 };

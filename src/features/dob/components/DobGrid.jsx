@@ -1,6 +1,10 @@
 // src/features/dob/components/DobGrid.jsx
 // AG Grid (Community) wrapper for the DOB list — dynamic columns from fields
-// metadata, inline edit + queue dirty rows. Header uses AG Grid's default
+// metadata. Заявки в этой таблице ТОЛЬКО просматриваются (readOnly): правки в
+// ячейках и накопления dirty-строк больше нет (требование 2026-10-15).
+// Группировка по статусу собирается вручную — Row Grouping в AG Grid это
+// Enterprise-фича, а стоит у нас ag-grid-community (см. lib/requestListFilters).
+// Header uses AG Grid's default
 // `headerComponentParams.template` so every header shows the filter icon
 // (`eFilterButton`) + more icon (`eMenu`) the way the AG Grid Theme Builder
 // example does; sort still works on click but no sort icons are rendered.
@@ -23,10 +27,11 @@ import {
   ColumnHoverModule,
   CsvExportModule,
 } from 'ag-grid-community';
-import { Box, CircularProgress, Typography, Alert } from '@mui/material';
+import { Box, CircularProgress, Typography } from '@mui/material';
 import { useDobListState } from '../state/DobListStateContext';
 import { isRowCompleted, statusInternalOf } from '../lib/dobRowStatus';
 import { selectRequestFields } from '../lib/requestFields';
+import { groupRowsByStatus, regroupSortedNodes, isGroupRow, groupRowId } from '../lib/requestListFilters';
 
 ModuleRegistry.registerModules([
   AllCommunityModule,
@@ -100,7 +105,7 @@ function columnLabel(f) {
   return String(f?.Title || f?.InternalName || '').trim();
 }
 
-function buildColumnDefs(fields, ctFieldNames) {
+function buildColumnDefs(fields, ctFieldNames, { readOnly = false } = {}) {
   if (!fields || fields.length === 0) return [];
   // Завершённые задачи — только просмотр (правило общее для всех интерфейсов).
   const statusInternalGlobal = statusInternalOf(fields);
@@ -351,6 +356,14 @@ function buildColumnDefs(fields, ctFieldNames) {
     }
     cols.push(col);
   }
+  // Заявки не редактируются нигде: снимаем editable со всех колонок разом,
+  // чтобы ни одна ветка выше не могла оставить ячейку редактируемой.
+  if (readOnly) {
+    for (const col of cols) {
+      col.editable = false;
+      delete col.cellEditorPopup;
+    }
+  }
   return cols;
 }
 
@@ -411,22 +424,31 @@ const HEADER_TEMPLATE = `
 
 // ---------- component ----------
 
-export default function DobGrid({ fields, rows, ctFieldNames = null }) {
+export default function DobGrid({ fields, rows, ctFieldNames = null, groupByStatus = false, readOnly = true }) {
   const gridRef = useRef(null);
   const {
     selectedId,
     setSelectedId,
-    setDirty,
     fields: ctxFields,
-    saveError,
-    clearSaveError,
     loading,
+    openItem,
   } = useDobListState();
 
   const baseColumnDefs = useMemo(
-    () => buildColumnDefs(fields || ctxFields || [], ctFieldNames),
-    [fields, ctxFields, ctFieldNames],
+    () => buildColumnDefs(fields || ctxFields || [], ctFieldNames, { readOnly }),
+    [fields, ctxFields, ctFieldNames, readOnly],
   );
+  // Строка-заголовок группы растягивается на всю ширину таблицы.
+  const columnDefs = useMemo(() => {
+    if (!groupByStatus || baseColumnDefs.length === 0) return baseColumnDefs;
+    const [first, ...rest] = baseColumnDefs;
+    return [
+      { ...first, colSpan: (p) => (isGroupRow(p.data) ? baseColumnDefs.length : undefined) },
+      ...rest,
+    ];
+  }, [baseColumnDefs, groupByStatus]);
+  // В какую колонку пишем подпись группы.
+  const labelField = groupByStatus ? baseColumnDefs[0]?.field || null : null;
   const statusInternal = useMemo(() => statusInternalOf(fields || ctxFields || []), [fields, ctxFields]);
   // Завершённую задачу нельзя править и пакетной записью (кнопка «Сохранить»).
   const rowCompletedClassRules = useMemo(
@@ -451,13 +473,42 @@ export default function DobGrid({ fields, rows, ctFieldNames = null }) {
 
   const rowData = useMemo(() => {
     if (!rows) return [];
-    return rows.map((r) => {
+    const plain = rows.map((r) => {
       const copy = { ...r };
       if (r.Author && r.Author.Title) copy.Author = r.Author;
       if (r.Editor && r.Editor.Title) copy.Editor = r.Editor;
       return copy;
     });
-  }, [rows]);
+    return groupByStatus ? groupRowsByStatus(plain, statusInternal, { labelField }) : plain;
+  }, [rows, groupByStatus, statusInternal, labelField]);
+
+  // После любой сортировки пользователя группы собираются заново.
+  const postSortRows = useCallback(
+    (rowNodes) => regroupSortedNodes(rowNodes, statusInternal),
+    [statusInternal],
+  );
+
+  const getRowId = useCallback(
+    (p) => (isGroupRow(p.data)
+      ? groupRowId(p.data)
+      : String(p.data?.ID ?? p.data?.Id ?? p.data?.OData__ID ?? Math.random())),
+    [],
+  );
+
+  const getRowClass = useCallback(
+    (p) => (isGroupRow(p.data) ? 'dob-group-row' : ''),
+    [],
+  );
+
+  const onRowDoubleClicked = useCallback(
+    (evt) => {
+      const data = evt?.data;
+      if (!data || isGroupRow(data)) return;
+      const id = data.ID ?? data.Id ?? data.OData__ID;
+      if (id) openItem?.(String(id));
+    },
+    [openItem],
+  );
 
   const onSelectionChanged = useCallback(() => {
     const api = gridRef.current?.api;
@@ -482,30 +533,6 @@ export default function DobGrid({ fields, rows, ctFieldNames = null }) {
     }
   }, [selectedId]);
 
-  const onCellValueChanged = useCallback(
-    (evt) => {
-      const field = evt.colDef.field;
-      const newVal = evt.newValue;
-      const oldVal = evt.oldValue;
-      if (newVal === oldVal) return;
-      // Завершённая задача — только просмотр: правку в dirty не копим
-      // (иначе «Сохранить» записало бы её пакетным MERGE).
-      if (isRowCompleted(evt.data, statusInternal)) return;
-      const id = evt.data?.ID ?? evt.data?.Id ?? evt.data?.OData__ID ?? evt.data?.ID;
-      if (!id) return;
-      setDirty((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(id) || {};
-        const meta = (fields || ctxFields || []).find((f) => f.InternalName === field);
-        const t = (meta?.TypeAsString || '').toLowerCase();
-        const normalized = t === 'boolean' ? (newVal ? true : false) : newVal;
-        next.set(id, { ...existing, [field]: normalized, _orig: evt.data });
-        return next;
-      });
-    },
-    [setDirty, fields, ctxFields, statusInternal],
-  );
-
   const gridOptions = useMemo(
     () => ({
       animateRows: true,
@@ -513,12 +540,13 @@ export default function DobGrid({ fields, rows, ctFieldNames = null }) {
       suppressRowHoverHighlight: false,
       ensureDomOrder: true,
       suppressMenuHide: true,
+      postSortRows: groupByStatus ? postSortRows : undefined,
       // Side bar lets users drag columns between the grid and a hidden panel.
       // We keep it off by default to match the Theme Builder look.
       sideBar: false,
       statusBar: undefined,
     }),
-    [],
+    [groupByStatus, postSortRows],
   );
 
   return (
@@ -533,14 +561,16 @@ export default function DobGrid({ fields, rows, ctFieldNames = null }) {
         flexDirection: 'column',
         flex: '1 1 0',
         bgcolor: '#ffffff',
+        // Строка-заголовок группы статусов (группировка собирается вручную).
+        '& .dob-group-row .ag-cell': {
+          bgcolor: '#eef1ff',
+          color: '#171c8f',
+          fontWeight: 700,
+          borderBottom: '1px solid #d8ddf5',
+        },
+        '& .dob-group-row': { cursor: 'default' },
       }}
     >
-      {saveError && (
-        <Alert severity="error" sx={{ mb: 1, borderRadius: 1.5 }} onClose={clearSaveError}>
-          {saveError}
-        </Alert>
-      )}
-
       <Box
         className="dob-ag-grid"
         sx={{
@@ -563,7 +593,7 @@ export default function DobGrid({ fields, rows, ctFieldNames = null }) {
           <AgGridReact
             ref={gridRef}
             theme={dobTheme}
-            columnDefs={baseColumnDefs}
+            columnDefs={columnDefs}
             rowData={rowData}
             defaultColDef={defaultColDef}
             gridOptions={gridOptions}
@@ -571,20 +601,20 @@ export default function DobGrid({ fields, rows, ctFieldNames = null }) {
             paginationPageSize={50}
             paginationPageSizeSelector={[20, 50, 100, 200]}
             enableCellTextSelection
-            onCellValueChanged={onCellValueChanged}
             onSelectionChanged={onSelectionChanged}
+            onRowDoubleClicked={onRowDoubleClicked}
             rowClassRules={rowCompletedClassRules}
-            stopEditingWhenCellsLoseFocus
-            getRowId={(p) => String(p.data?.ID ?? p.data?.Id ?? p.data?.ID ?? Math.random())}
+            getRowId={getRowId}
+            getRowClass={getRowClass}
             overlayNoRowsTemplate='<span style="padding:12px;color:#5b6273">Нет данных — проверьте доступ к /sites/dob/doblogistic</span>'
           />
         )}
       </Box>
 
       <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#5b6273' }}>
-        Двойной клик по ячейке — редактирование. Choice — выбор из списка, Дата — yyyy-mm-dd или дд.мм.гггг, Валюта/Число —
-        цифры, Чекбокс — клик. После правок нажмите <b>Сохранить</b> (пакетный MERGE). Поля <i>Статус / Неделя / Дата
-        подтверждения / Логин (формула)</i> — вычисляемые, только чтение. Скрытие/показ колонок — через меню «⋮» в шапке.
+        Заявки доступны только для просмотра — изменение заявок в этом разделе отключено. Двойной клик по строке
+        открывает заявку на просмотр. Фильтры по статусу и типу заявки — в шапке; группировку по статусу можно
+        выключить там же. Скрытие/показ колонок — через меню «⋮» в шапке таблицы.
       </Typography>
     </Box>
   );
@@ -593,6 +623,10 @@ export default function DobGrid({ fields, rows, ctFieldNames = null }) {
 DobGrid.propTypes = {
   fields: PropTypes.array,
   rows: PropTypes.array,
+  // Группировать строки по статусу (заголовки групп вставляются в rowData).
+  groupByStatus: PropTypes.bool,
+  // Только просмотр: ни одна ячейка не редактируется.
+  readOnly: PropTypes.bool,
   // Внутренние имена полей из FieldLinks типов контента списка — по ним решаем,
   // какие поля показывать в таблице заявок (см. selectRequestFields).
   ctFieldNames: PropTypes.oneOfType([PropTypes.instanceOf(Set), PropTypes.array]),

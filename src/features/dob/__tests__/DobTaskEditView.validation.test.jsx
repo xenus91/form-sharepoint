@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // src/features/dob/__tests__/DobTaskEditView.validation.test.jsx
 //
-// Валидация формы заявки ДОБ (DobTaskEditView) ДО запроса в SharePoint:
+// Валидация формы задачи (DobTaskEditView) ДО запроса в SharePoint:
 //   • незаполненные обязательные поля (Required=true) акцентируются — поле краснеет
 //     («Обязательное поле»), блок/секция подсвечиваются;
 //   • пользователю показывается snackbar с предупреждением, а не 400 от сервера;
@@ -15,7 +15,9 @@ import { ThemeProvider, createTheme } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FIELD_HEIGHT } from "../lib/formStyles";
 
-const LIST_GUID = "21b5b544-bd98-4b06-891f-c5a137331394";
+// Заявки (#dob_requests) с 2026-10-15 только просматриваются, поэтому механику
+// валидации и сохранения проверяем на форме ЗАДАЧИ чужого списка.
+const LIST_GUID = "463b634e-a71a-4fef-9a1f-b803431d8639";
 
 const LIST_FIELDS = [
   { InternalName: "Title", Title: "Заголовок", TypeAsString: "Text" },
@@ -114,7 +116,7 @@ async function renderForm() {
   return { host, root };
 }
 
-describe("DobTaskEditView — валидация обязательных полей формы заявки", () => {
+describe("DobTaskEditView — валидация обязательных полей формы задачи", () => {
   beforeEach(() => {
     window.location.hash = `#dob_tasks/77?list=${LIST_GUID}`;
     document.body.innerHTML = "";

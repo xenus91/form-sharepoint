@@ -21,7 +21,9 @@ import { useDobContentTypes } from "../../hooks/useDobContentTypes";
 import { toCreatePayload } from "./toCreatePayload";
 import { buildPrefillValues } from "./requestDefaults";
 import { buildRequestTitle } from "./requestTitle";
-import { buildOffDepKey, ensureDcEmailLink, findDcEmailItem } from "../../lib/dcEmailApi";
+import {
+  buildOffDepKey, ensureDcEmailLink, findDcEmailItem, groupTitlesFromItem,
+} from "../../lib/dcEmailApi";
 
 /** Значения профиля, которые считаем «не задано» (см. App.jsx/requestDefaults). */
 const PROFILE_NOT_SET = new Set(["", "не указано", "not specified", "null", "undefined"]);
@@ -69,6 +71,22 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
   const [problems, setProblems] = useState([]);
   const [invalidNames, setInvalidNames] = useState([]);
   const [created, setCreated] = useState(null);
+  // Названия рассылок, на которые уйдёт уведомление о решении заявки.
+  // Ref, а не state: значение нужно вызывающему коду в том же тике, что и
+  // результат submit() (state к этому моменту ещё не обновился бы).
+  const mailingRef = useRef([]);
+
+  /** Названия рассылок элемента DcEmail — молча не ломаем создание заявки. */
+  const readMailingTitles = useCallback(async (item, fallback = []) => {
+    try {
+      const titles = await groupTitlesFromItem(item);
+      if (titles.length) return titles;
+    } catch (e) {
+      console.warn("[useRequestForm] не удалось прочитать рассылку DcEmail", e?.message);
+    }
+    return fallback.filter(Boolean);
+  }, []);
+
   // Гейт DcEmail: если для Office+Department нет элемента в списке DcEmail —
   // перед созданием заявки просим пользователя указать рассылку.
   const [needsDcEmail, setNeedsDcEmail] = useState(false);
@@ -245,20 +263,24 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
           setNeedsDcEmail(true);
           return null;
         }
+        // Рассылка найдена — её название попадёт в Snackbar после создания.
+        mailingRef.current = await readMailingTitles(existing);
       } catch (e) {
         // Не смогли проверить (нет доступа и т.п.) — не блокируем создание.
         console.warn("[useRequestForm] проверка DcEmail не удалась", e?.message);
       }
     }
     return createRequest();
-  }, [ctId, controls, values, profileOffice, profileDepartment, createRequest]);
+  }, [ctId, controls, values, profileOffice, profileDepartment, createRequest, readMailingTitles]);
 
   /** Диалог DcEmail: создаём элемент DcEmail, затем — заявку (именно в этом порядке). */
   const saveDcEmailAndCreate = useCallback(async (groups) => {
     setDcEmailSaving(true);
     setDcEmailError("");
     try {
-      await ensureDcEmailLink({ office: profileOffice, department: profileDepartment, groups });
+      const link = await ensureDcEmailLink({ office: profileOffice, department: profileDepartment, groups });
+      // Рассылку только что создали — берём её название из выбранного и из элемента.
+      mailingRef.current = await readMailingTitles(link?.item, groups.map((g) => g?.Title));
     } catch (e) {
       const msg = e?.response?.data?.error?.message?.value || e?.message || String(e);
       setDcEmailError(String(msg).slice(0, 400));
@@ -268,7 +290,7 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
     setDcEmailSaving(false);
     setNeedsDcEmail(false);
     return createRequest();
-  }, [profileOffice, profileDepartment, createRequest]);
+  }, [profileOffice, profileDepartment, createRequest, readMailingTitles]);
 
   const cancelDcEmail = useCallback(() => {
     setNeedsDcEmail(false);
@@ -301,6 +323,8 @@ export function useRequestForm({ listGuid = DOB_LIST_GUID, userProfile = null } 
     dcEmailOffice: profileOffice,
     dcEmailDepartment: profileDepartment,
     dcEmailKey: buildOffDepKey(profileOffice, profileDepartment),
+    // Названия рассылок для Snackbar (см. mailingRef).
+    mailingRef,
     saveDcEmailAndCreate,
     cancelDcEmail,
   };

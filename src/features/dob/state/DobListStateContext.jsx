@@ -1,12 +1,15 @@
 // src/features/dob/state/DobListStateContext.jsx
-// Shared state between the AppBar (toolbar with buttons) and the AG Grid (DobGrid).
-// Only what is actually shared — dirty/save logic, selection, refresh handle.
+// Общий состояние шапки (#dob_requests) и таблицы (DobGrid).
+//
+// Правки заявок здесь больше нет (требование 2026-10-15: «убрать из
+// #dob_requests возможность изменения заявок совсем») — раньше провайдер копил
+// dirty-строки и отправлял их пакетным MERGE. Осталось только то, что реально
+// разделяют шапка и таблица: отфильтрованные строки, фильтры шапки
+// (статус / тип заявки), признак группировки по статусу и переход к заявке.
 
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
 import { buildDobItemHash } from '../lib/dobRoute';
-import { useNotifications } from '../../../NotificationsProvider';
-import { updateDobItem } from '../api/dobApi';
 
 const DobListStateCtx = createContext(null);
 
@@ -19,78 +22,52 @@ export function useDobListState() {
 }
 
 /**
- * Holds the editable state of the DOB list:
- *  - dirty: Map(id -> payload diff)
- *  - saving, saveError
- *  - selectedId (currently selected row id)
+ * Выбранная строка (selectedId) нужна шапке для кнопки «Открыть».
  *
- * Exposes imperative API via callbacks used by the AppBar:
- *  - handleSave()    -> save all dirty rows
- *  - handleRevert()  -> discard local edits + reload from server
- *  - handleRefresh() -> reload from server
- *  - openEdit(id)    -> navigate to #dob_requests/<id>
+ * @param {object} props
+ * @param {Array<object>} props.fields — метаданные полей списка
+ * @param {Array<object>} props.rows — строки ПОСЛЕ всех фильтров
+ * @param {Function} props.onRefresh — перезагрузить список
+ * @param {Array<string>} props.statusOptions — доступные значения статуса
+ * @param {Array<string>} props.statusFilter — выбранные статусы (пусто = все)
+ * @param {Function} props.setStatusFilter
+ * @param {Array<{id:string,label:string}>} props.ctOptions — типы заявок
+ * @param {Array<string>} props.ctFilter — выбранные id типов (пусто = все)
+ * @param {Function} props.setCtFilter
+ * @param {boolean} props.groupByStatus
+ * @param {Function} props.setGroupByStatus
+ * @param {string} [props.scopeNote] — по какому правилу отобраны заявки
+ * @param {string} [props.scopeWarning] — если правило применить не удалось
  */
-export function DobListStateProvider({ fields, rows, onRefresh, loading, isFetching, children }) {
-  const { notify } = useNotifications();
-
-  const [dirty, setDirty] = useState(() => new Map());
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState('');
+export function DobListStateProvider({
+  fields,
+  rows,
+  onRefresh,
+  loading,
+  isFetching,
+  statusOptions = [],
+  statusFilter = [],
+  setStatusFilter,
+  ctOptions = [],
+  ctFilter = [],
+  setCtFilter,
+  groupByStatus = true,
+  setGroupByStatus,
+  scopeNote = '',
+  scopeWarning = '',
+  children,
+}) {
   const [selectedId, setSelectedId] = useState(null);
-
-  const handleSave = useCallback(async () => {
-    if (dirty.size === 0) return;
-    setSaving(true);
-    setSaveError('');
-    const entries = Array.from(dirty.entries());
-    let success = 0;
-    let fail = 0;
-    for (const [id, payload] of entries) {
-      // Strip `_orig` (snapshot of the row before editing) before sending to SharePoint.
-      const { _orig: _origUnused, ...rest } = payload; // eslint-disable-line no-unused-vars
-      try {
-        await updateDobItem(id, rest);
-        success += 1;
-        setDirty((prev) => {
-          const n = new Map(prev);
-          n.delete(id);
-          return n;
-        });
-      } catch (e) {
-        fail += 1;
-        const msg = e?.response?.data?.error?.message?.value || e?.message || 'Ошибка';
-        setSaveError(`ID ${id}: ${String(msg).slice(0, 200)}`);
-      }
-    }
-    setSaving(false);
-    if (success) {
-      notify(
-        `Сохранено ${success} строк${fail ? `, ошибок ${fail}` : ''}`,
-        { severity: fail ? 'warning' : 'success' },
-      );
-    }
-    if (success && onRefresh) {
-      // Refresh so calculated fields pick up server-side updates.
-      setTimeout(() => onRefresh(), 500);
-    }
-  }, [dirty, notify, onRefresh]);
-
-  const handleRevert = useCallback(() => {
-    setDirty(new Map());
-    setSaveError('');
-    if (onRefresh) onRefresh();
-  }, [onRefresh]);
 
   const handleRefresh = useCallback(() => {
     if (onRefresh) onRefresh();
   }, [onRefresh]);
 
-  const openEdit = useCallback((id) => {
+  // Заявка открывается только на просмотр (форма в режиме readOnly).
+  const openItem = useCallback((id) => {
     if (!id) return;
     window.location.hash = buildDobItemHash(id);
   }, []);
-
-  const clearSaveError = useCallback(() => setSaveError(''), []);
 
   const ctx = useMemo(
     () => ({
@@ -98,34 +75,40 @@ export function DobListStateProvider({ fields, rows, onRefresh, loading, isFetch
       rows,
       loading,
       isFetching,
-      dirty,
-      saving,
-      saveError,
       selectedId,
-
-      setDirty,
       setSelectedId,
-
-      handleSave,
-      handleRevert,
       handleRefresh,
-      openEdit,
-      clearSaveError,
+      openItem,
+      // Фильтры шапки
+      statusOptions,
+      statusFilter,
+      setStatusFilter,
+      ctOptions,
+      ctFilter,
+      setCtFilter,
+      groupByStatus,
+      setGroupByStatus,
+      scopeNote,
+      scopeWarning,
     }),
     [
       fields,
       rows,
       loading,
       isFetching,
-      dirty,
-      saving,
-      saveError,
       selectedId,
-      handleSave,
-      handleRevert,
       handleRefresh,
-      openEdit,
-      clearSaveError,
+      openItem,
+      statusOptions,
+      statusFilter,
+      setStatusFilter,
+      ctOptions,
+      ctFilter,
+      setCtFilter,
+      groupByStatus,
+      setGroupByStatus,
+      scopeNote,
+      scopeWarning,
     ],
   );
 
@@ -138,5 +121,15 @@ DobListStateProvider.propTypes = {
   onRefresh: PropTypes.func,
   loading: PropTypes.bool,
   isFetching: PropTypes.bool,
+  statusOptions: PropTypes.arrayOf(PropTypes.string),
+  statusFilter: PropTypes.arrayOf(PropTypes.string),
+  setStatusFilter: PropTypes.func,
+  ctOptions: PropTypes.arrayOf(PropTypes.shape({ id: PropTypes.string, label: PropTypes.string })),
+  ctFilter: PropTypes.arrayOf(PropTypes.string),
+  setCtFilter: PropTypes.func,
+  groupByStatus: PropTypes.bool,
+  setGroupByStatus: PropTypes.func,
+  scopeNote: PropTypes.string,
+  scopeWarning: PropTypes.string,
   children: PropTypes.node,
 };

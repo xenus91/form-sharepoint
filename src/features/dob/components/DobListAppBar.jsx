@@ -1,31 +1,59 @@
 // src/features/dob/components/DobListAppBar.jsx
-// Sticky header for #dob_requests — holds the title and the four action
-// buttons (Изменить / Обновить / Сбросить / Сохранить) that used to live
-// above the grid. Reads its state from the DobListStateContext.
+// Шапка #dob_requests.
+//
+// Что здесь есть (требования 2026-10-15):
+//   * фильтры: статус и тип заявки (мультивыбор, пусто = все);
+//   * переключатель группировки таблицы по статусу;
+//   * «Создать заявку», «Открыть» (заявка открывается только на просмотр) и
+//     «Обновить».
+//
+// Правки заявок в шапке больше нет: кнопки «Изменить»/«Сбросить»/«Сохранить»
+// и накопление dirty-строк убраны — заявки в этом разделе не редактируются.
 import PropTypes from 'prop-types';
-import { AppBar, Toolbar, Box, Button, Chip, Tooltip, CircularProgress, Typography } from '@mui/material';
+import {
+  AppBar, Toolbar, Box, Button, Chip, Tooltip, CircularProgress, Typography,
+  Autocomplete, TextField, FormControlLabel, Switch,
+} from '@mui/material';
 import BurgerWithCount from '../../navigation/BurgerWithCount';
-import SaveIcon from '@mui/icons-material/Save';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import EditIcon from '@mui/icons-material/Edit';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import AddIcon from '@mui/icons-material/Add';
 import { buildDobCreateHash } from '../lib/dobRoute';
 import { useDobListState } from '../state/DobListStateContext';
+
+const OUTLINED_SX = {
+  borderRadius: 1.5,
+  textTransform: 'none',
+  fontWeight: 600,
+  borderColor: '#cdd2e3',
+  color: '#1f2347',
+  backgroundImage: 'none',
+  bgcolor: '#ffffff',
+  '&:hover': { borderColor: '#171c8f', bgcolor: '#f4f6ff', backgroundImage: 'none' },
+  '&.Mui-disabled': { borderColor: '#e6e9f5', color: '#9aa0b4', bgcolor: '#fafbff' },
+};
+
+const FILTER_SX = { width: { xs: 170, sm: 210 }, '& .MuiInputBase-root': { minHeight: 32 } };
 
 export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
   const state = useDobListState();
   const {
     rows,
-    dirty,
-    saving,
     selectedId,
-    handleSave,
-    handleRevert,
     handleRefresh,
-    openEdit,
+    openItem,
+    statusOptions = [],
+    statusFilter = [],
+    setStatusFilter,
+    ctOptions = [],
+    ctFilter = [],
+    setCtFilter,
+    groupByStatus = true,
+    setGroupByStatus,
+    scopeNote = '',
+    scopeWarning = '',
   } = state;
 
-  const dirtyCount = dirty.size;
   const totalRows = rows?.length ?? 0;
 
   return (
@@ -60,39 +88,89 @@ export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
             <Chip
               size="small"
               label={`${totalRows} записей`}
-              sx={{
-                height: 20,
-                fontSize: 11,
-                fontWeight: 600,
-                bgcolor: '#f4f6ff',
-                color: '#1f2347',
-              }}
+              sx={{ height: 20, fontSize: 11, fontWeight: 600, bgcolor: '#f4f6ff', color: '#1f2347' }}
             />
-            {dirtyCount > 0 && (
-              <Chip
-                size="small"
-                color="warning"
-                label={`Изменено: ${dirtyCount}`}
-                sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
-              />
+            {scopeNote && (
+              <Tooltip title={scopeNote}>
+                <Chip
+                  size="small"
+                  label="Мои заявки"
+                  data-testid="dob-scope-chip"
+                  sx={{ height: 20, fontSize: 11, fontWeight: 600, bgcolor: '#eef1ff', color: '#171c8f' }}
+                />
+              </Tooltip>
+            )}
+            {scopeWarning && (
+              <Tooltip title={scopeWarning}>
+                <Chip
+                  size="small"
+                  color="warning"
+                  label="Фильтр по подразделению не применён"
+                  data-testid="dob-scope-warning"
+                  sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
+                />
+              </Tooltip>
             )}
             {selectedId && (
               <Chip
                 size="small"
                 label={`Выбран: ${selectedId}`}
-                sx={{
-                  height: 20,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  bgcolor: '#171c8f',
-                  color: '#ffffff',
-                }}
+                sx={{ height: 20, fontSize: 11, fontWeight: 600, bgcolor: '#171c8f', color: '#ffffff' }}
               />
             )}
           </Box>
         </Box>
 
         <Box sx={{ flex: 1 }} />
+
+        <Autocomplete
+          multiple
+          size="small"
+          disableCloseOnSelect
+          options={statusOptions}
+          value={statusFilter.filter((s) => statusOptions.includes(s))}
+          onChange={(_e, next) => setStatusFilter?.(next)}
+          sx={FILTER_SX}
+          data-testid="dob-filter-status"
+          limitTags={1}
+          renderInput={(params) => (
+            <TextField {...params} label="Статус" placeholder={statusFilter.length ? '' : 'Все статусы'} />
+          )}
+        />
+
+        <Autocomplete
+          multiple
+          size="small"
+          disableCloseOnSelect
+          options={ctOptions}
+          getOptionLabel={(option) => option?.label || ''}
+          isOptionEqualToValue={(a, b) => String(a?.id) === String(b?.id)}
+          value={ctOptions.filter((option) => ctFilter.includes(option.id))}
+          onChange={(_e, next) => setCtFilter?.(next.map((option) => option.id))}
+          sx={{ ...FILTER_SX, width: { xs: 190, sm: 250 } }}
+          data-testid="dob-filter-ct"
+          limitTags={1}
+          renderInput={(params) => (
+            <TextField {...params} label="Тип заявки" placeholder={ctFilter.length ? '' : 'Все типы'} />
+          )}
+        />
+
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={!!groupByStatus}
+              onChange={(e) => setGroupByStatus?.(e.target.checked)}
+              inputProps={{ 'data-testid': 'dob-group-toggle' }}
+            />
+          }
+          label={
+            <Typography variant="caption" sx={{ fontWeight: 600, color: '#1f2347', whiteSpace: 'nowrap' }}>
+              Группы по статусу
+            </Typography>
+          }
+          sx={{ mr: 0, ml: 0.5 }}
+        />
 
         <Tooltip title="Создать заявку: выбор типа контента, затем поля этого типа">
           <Button
@@ -107,14 +185,15 @@ export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
           </Button>
         </Tooltip>
 
-        <Tooltip title="Открыть форму редактирования выбранной строки">
+        <Tooltip title="Открыть выбранную заявку (только просмотр — заявки здесь не редактируются)">
           <span>
             <Button
               size="small"
               variant="contained"
               disabled={!selectedId}
-              onClick={() => openEdit(selectedId)}
-              startIcon={<EditIcon />}
+              onClick={() => openItem(selectedId)}
+              startIcon={<VisibilityIcon />}
+              data-testid="dob-open-item"
               sx={{
                 borderRadius: 1.5,
                 textTransform: 'none',
@@ -126,7 +205,7 @@ export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
                 '&.Mui-disabled': { bgcolor: '#e6e9f5', color: '#9aa0b4' },
               }}
             >
-              Изменить
+              Открыть
             </Button>
           </span>
         </Tooltip>
@@ -139,87 +218,11 @@ export default function DobListAppBar({ onOpenDrawer, tasksCount = 0 }) {
               onClick={handleRefresh}
               disabled={state.loading || state.isFetching}
               startIcon={
-                state.isFetching ? (
-                  <CircularProgress size={14} color="inherit" />
-                ) : (
-                  <RefreshIcon />
-                )
+                state.isFetching ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon />
               }
-              sx={{
-                borderRadius: 1.5,
-                textTransform: 'none',
-                fontWeight: 600,
-                borderColor: '#cdd2e3',
-                color: '#1f2347',
-                backgroundImage: 'none',
-                bgcolor: '#ffffff',
-                '&:hover': { borderColor: '#171c8f', bgcolor: '#f4f6ff', backgroundImage: 'none' },
-                '&.Mui-disabled': { borderColor: '#e6e9f5', color: '#9aa0b4', bgcolor: '#fafbff' },
-              }}
+              sx={OUTLINED_SX}
             >
               Обновить
-            </Button>
-          </span>
-        </Tooltip>
-
-        <Tooltip title="Отменить локальные изменения и перезагрузить">
-          <span>
-            <Button
-              size="small"
-              variant="outlined"
-              color="inherit"
-              onClick={handleRevert}
-              disabled={dirtyCount === 0 || saving}
-              sx={{
-                borderRadius: 1.5,
-                textTransform: 'none',
-                fontWeight: 600,
-                borderColor: '#cdd2e3',
-                color: '#1f2347',
-                backgroundImage: 'none',
-                bgcolor: '#ffffff',
-                '&:hover': { borderColor: '#171c8f', bgcolor: '#f4f6ff', backgroundImage: 'none' },
-                '&.Mui-disabled': { borderColor: '#e6e9f5', color: '#9aa0b4', bgcolor: '#fafbff' },
-              }}
-            >
-              Сбросить
-            </Button>
-          </span>
-        </Tooltip>
-
-        <Tooltip
-          title={
-            dirtyCount === 0
-              ? 'Нет несохранённых правок'
-              : `Отправить ${dirtyCount} изменений в SharePoint (MERGE)`
-          }
-        >
-          <span>
-            <Button
-              size="small"
-              variant="contained"
-              onClick={handleSave}
-              disabled={dirtyCount === 0 || saving}
-              startIcon={
-                saving ? (
-                  <CircularProgress size={14} color="inherit" />
-                ) : (
-                  <SaveIcon />
-                )
-              }
-              sx={{
-                borderRadius: 1.5,
-                textTransform: 'none',
-                fontWeight: 700,
-                minWidth: 140,
-                color: '#ffffff',
-                backgroundImage: 'none',
-                bgcolor: '#171c8f',
-                '&:hover': { bgcolor: '#10146a', backgroundImage: 'none' },
-                '&.Mui-disabled': { bgcolor: '#e6e9f5', color: '#9aa0b4' },
-              }}
-            >
-              {saving ? 'Сохранение…' : `Сохранить${dirtyCount ? ` (${dirtyCount})` : ''}`}
             </Button>
           </span>
         </Tooltip>

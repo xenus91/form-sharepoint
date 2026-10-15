@@ -1760,7 +1760,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                   onOpenMenu={() => setDrawerOpen(true)}
                   tasksCount={tasksActiveCount}
                 />
-              : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} tasksCount={tasksActiveCount} />}
+              : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} tasksCount={tasksActiveCount} userProfile={userProfile} />}
           </React.Suspense>
         </Box>
       </ThemeProvider>

@@ -382,3 +382,58 @@ export async function ensureDcEmailLink({ office, department, groups = [] }) {
   const item = await createDcEmailItem({ offDepKey, groupIds: principals.map((p) => p.Id) });
   return { created: true, item, offDepKey };
 }
+
+// ── Названия рассылок (для Snackbar после создания заявки) ───────────────────
+
+/**
+ * Принципалы из поля Email элемента DcEmail.
+ * Поле бывает одиночным (объект) и множественным ({results:[…]}), а без
+ * $expand вместо него лежит просто EmailId.
+ * @param {object} item
+ * @returns {Array<{id:number|null, title:string}>}
+ */
+export function emailPrincipalsOf(item) {
+  const raw = item?.Email ?? item?.EmailId;
+  const list = Array.isArray(raw?.results)
+    ? raw.results
+    : Array.isArray(raw)
+      ? raw
+      : raw === undefined || raw === null
+        ? []
+        : [raw];
+  return list.map((entry) => {
+    const id = Number(entry?.Id ?? (typeof entry === "number" ? entry : NaN));
+    return {
+      id: Number.isFinite(id) ? id : null,
+      title: String(entry?.Title || "").trim(),
+    };
+  });
+}
+
+/**
+ * Названия рассылок, привязанных к элементу DcEmail.
+ * Title сервер отдаёт не всегда — тогда добираем его по Id с сайта ДОБ.
+ * @param {object|null} item — элемент DcEmail (findDcEmailItem / ensureDcEmailLink)
+ * @returns {Promise<string[]>}
+ */
+export async function groupTitlesFromItem(item) {
+  const titles = [];
+  for (const principal of emailPrincipalsOf(item)) {
+    if (principal.title) {
+      titles.push(principal.title);
+      continue;
+    }
+    if (!principal.id) continue;
+    try {
+      const { data } = await dobAxios.get(
+        `${dobApiBase()}/web/siteusers/getbyid(${principal.id})?$select=Id,Title`,
+        ACCEPT,
+      );
+      const title = String(data?.d?.Title || "").trim();
+      if (title) titles.push(title);
+    } catch (e) {
+      console.warn("[dcEmail] не удалось прочитать название рассылки", e?.response?.status || e?.message);
+    }
+  }
+  return titles;
+}

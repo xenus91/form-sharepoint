@@ -15,7 +15,9 @@ import { act } from "react-dom/test-utils";
 import { ThemeProvider, createTheme } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const LIST_GUID = "21b5b544-bd98-4b06-891f-c5a137331394";
+// Заявки (#dob_requests) с 2026-10-15 только просматриваются, поэтому сохранение
+// картинок проверяем на форме ЗАДАЧИ чужого списка.
+const LIST_GUID = "463b634e-a71a-4fef-9a1f-b803431d8639";
 const BASE64 = "data:image/png;base64,AQID";
 
 const LIST_FIELDS = [

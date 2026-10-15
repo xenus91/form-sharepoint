@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 // src/features/dob/__tests__/DobGrid.completed.test.jsx
 //
-// Таблица ДОБ (#dob_requests) редактируется прямо в ячейках. Завершённую задачу
-// править нельзя: строка помечается как «только просмотр», правка в dirty не
-// копится (иначе «Сохранить» записало бы её пакетным MERGE).
+// Таблица ДОБ (#dob_requests) с 2026-10-15 только просматривается: правки в
+// ячейках нет ни у открытых, ни у завершённых строк. Завершённая строка при
+// этом по-прежнему помечается визуально («только просмотр»).
 
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -78,7 +78,7 @@ describe("DobGrid — завершённую строку править нел�
     expect(open.classList.contains("dob-row-completed")).toBe(false);
   });
 
-  it("ячейка завершённой строки не редактируется, открытой — редактируется", async () => {
+  it("ячейки заявок не редактируются — ни открытой, ни завершённой строки", async () => {
     const { host } = await renderGrid();
     // В jsdom видны только закреплённые колонки (ID/Title) — остальные
     // виртуализованы за пределами нулевой ширины контейнера.
@@ -97,14 +97,27 @@ describe("DobGrid — завершённую строку править нел�
     });
 
     await dblClick(openCell);
-    // открытая задача: редактор открылся (если AG Grid поднимает его в jsdom)
     const openEditing = rowById(host, 1).querySelector(".ag-cell-inline-editing");
     await dblClick(doneCell);
     const doneEditing = rowById(host, 2).querySelector(".ag-cell-inline-editing");
 
-    // Завершённую строку править нельзя НИ при каких условиях.
+    // Заявки не редактируются вовсе — двойной клик по ячейке ничего не открывает.
+    expect(openEditing).toBeNull();
     expect(doneEditing).toBeNull();
-    // Контроль: механика проверки осмысленна — у открытой задачи редактор есть.
-    expect(openEditing).toBeTruthy();
+  });
+
+  it("в колонках нет ни одной редактируемой ячейки (readOnly)", async () => {
+    const { host } = await renderGrid();
+    const cells = [...host.querySelectorAll(".ag-cell")];
+    expect(cells.length).toBeGreaterThan(0);
+    // AG Grid помечает редактируемую ячейку атрибутом/классом при наведении;
+    // надёжнее проверить, что редактор не поднимается ни в одной ячейке строки.
+    for (const cell of cells) {
+      await act(async () => {
+        cell.dispatchEvent(new window.MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(cell.classList.contains("ag-cell-inline-editing")).toBe(false);
+    }
   });
 });

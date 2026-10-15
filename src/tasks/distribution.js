@@ -103,7 +103,7 @@ export async function resolveDistributionViaDcEmail(office, department, opts = {
     const offDepKeyEsc = offDepKey.replace(/'/g, "''");
     try {
       const { data } = await get(
-        `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+        `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id,Email/Title&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       const items = data?.d?.results || [];
@@ -118,7 +118,7 @@ export async function resolveDistributionViaDcEmail(office, department, opts = {
   // Фолбэк: ни один точный фильтр не нашёл — тянем 100 и ищем case-insensitive по всем кандидатам
   try {
     const { data: data2 } = await get(
-      `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$top=100`,
+      `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id,Email/Title&$expand=Email&$top=100`,
       { headers: { Accept: "application/json;odata=verbose" } }
     );
     const items2 = data2?.d?.results || [];
