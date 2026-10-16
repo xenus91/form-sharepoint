@@ -79,6 +79,41 @@ describe("связанный элемент поверх приложения (A
     expect(unmounts.n).toBe(0);
   });
 
+  it("это окно поверх списка, а не сплошной экран: затемнение + панель с шапкой", async () => {
+    await render();
+    await act(async () => { openRelatedItem(25324); await new Promise((r) => setTimeout(r, 10)); });
+
+    const overlay = host.querySelector('[data-testid="related-item-overlay"]');
+    expect(overlay).toBeTruthy();
+    // Затемнение отдельным слоем — за ним остаётся виден список задач.
+    const backdrop = host.querySelector('[data-testid="related-item-backdrop"]');
+    expect(backdrop).toBeTruthy();
+    // Панель — сосед затемнения, а не сам оверлей на весь экран.
+    const panel = backdrop.nextElementSibling;
+    expect(panel).toBeTruthy();
+    expect(panel.contains(host.querySelector('[data-testid="item-viewer-stub"]'))).toBe(true);
+    // Шапка панели с номером элемента — по ней видно, что это окно внутри страницы.
+    expect(panel.textContent).toContain("Связанный элемент № 25324");
+    // Клик по затемнению закрывает окно.
+    await act(async () => {
+      backdrop.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(host.querySelector('[data-testid="related-item-overlay"]')).toBeNull();
+    expect(unmounts.n).toBe(0);
+  });
+
+  it("Esc закрывает окно, приложение остаётся смонтированным", async () => {
+    await render();
+    await act(async () => { openRelatedItem(25202); await new Promise((r) => setTimeout(r, 10)); });
+    await act(async () => {
+      window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(host.querySelector('[data-testid="related-item-overlay"]')).toBeNull();
+    expect(host.querySelector('[data-testid="app-stub"]')).toBeTruthy();
+  });
+
   it("возврат убирает оверлей, приложение так и не размонтировалось", async () => {
     await render();
     await act(async () => { openRelatedItem(25202); await new Promise((r) => setTimeout(r, 10)); });
