@@ -21,7 +21,7 @@ const MAIN_FIELDS = [
   { InternalName: "ErrorCountValidation", Title: "ErrorCountValidation", TypeAsString: "Number" },
 ];
 
-vi.mock("../../dob/components/RichEditor", () => ({
+vi.mock("../components/RichEditor", () => ({
   default: ({ value }) => <textarea data-testid="rich-editor" value={value || ""} readOnly />,
 }));
 

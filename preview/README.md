@@ -30,7 +30,6 @@ node preview/.ssrout/client-check.mjs   # содержимое карточек 
 npx vite build --config preview/vite.config.js --ssr flow-check.mjs --outDir .ssrout
 node preview/.ssrout/flow-check.mjs     # поток результата: роутинг + клики + диалоги
 
-npx vite-node --config preview/vite.config.js preview/related-check.mjs   # диалог «Связанная заявка» (чипы/подписи/кнопки — не должны находиться)
 
 npx vite-node --config preview/vite.config.js preview/table-check.mjs     # таблица: меню действий в точке клика, заливка строк по статусу, «Срок» как в карточке, фильтр «Я исполнитель»
 
@@ -48,9 +47,7 @@ npx vite-node --config preview/vite.config.js preview/take-check.mjs      # вз
 | `mockApi.js` | заглушка `apiClient`: связанные элементы ProblemsPallet + принципалы `getuserbyid`/`sitegroups` (чтобы «Кому назначено» по одному Id показывало ФИО) |
 | `CardsScene.jsx` | задачи и конфиг `TaskBehaviour` из реального кэша пользователя |
 | `TableScene.jsx` | табличный режим `#tasks` на мок-данных: закреплённая шапка, поиск, меню действий в точке клика (`?scene=table`) |
-| `RelatedScene.jsx` | диалог «Связанная заявка» (read-only) на мок-данных (`?scene=related`) |
 | `mockDob.js` | заглушка DOB-API (`dobApi`/`dobClient`) для сцен предпросмотра + мини-эмуляция SharePoint для dob-списка задач (MERGE/`__metadata.type`) |
-| `related-check.mjs` | jsdom-проверка диалога «Связанная заявка»: печатает текст/поля и ловит лишние чипы, подписи и кнопки |
 | `table-check.mjs` | jsdom-проверка таблицы: действия открываются в точке клика, состав как в карточке (собирает тот же `rowActions.js`); заливка строк по статусу задачи, «Срок» в формате карточки («Осталось …» / «Просрочено … назад»), «Кому назначено» без `Id <номер>`, фильтр «Я исполнитель» (см. `docs/decisions/form-ui-ux.md` §13) |
 | `take-check.mjs` | jsdom-проверка взятия dob-задачи: мок SharePoint отвергает MERGE без `__metadata.type`, реальный `takeTaskInWork` проходит |
 | `main.jsx` | точка входа для браузера |

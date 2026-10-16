@@ -361,55 +361,10 @@ vi.mock("../../../api", () => {
 });
 
 // dobAxios живёт отдельным axios-инстансом (cross-site) — мокаем модуль целиком
-vi.mock("../../dob/api/dobClient", () => {
-  const dobApiBase = () => DOB_BASE;
-  const get = async (url) => {
-    const u = String(url);
-    state.requests.push({ source: "dob", url: u });
-    const d = decodeURIComponent(u);
-    if (u.includes("/web/currentuser")) return { data: { d: { Id: 207 } } };
-    if (u.includes("/web/sitegroups/getbyname") || u.includes("/web/sitegroups?$filter=Title")) {
-      return { data: { d: { Id: 33, Title: "ООБ", results: [{ Id: 33, Title: "ООБ" }] } } };
-    }
-    if (u.includes("/fields?") && /InternalName eq 'Status'/.test(decodeURIComponent(u).replace(/\$filter=/, ""))) {
-      return { data: { d: { results: [{ InternalName: "Status", Title: "Статус", Choices: { results: ["Не начата", "В работе", "Завершена"] } }] } } };
-    }
-    if (d.includes(`${DOB_LIST}/fields`)) return { data: { d: { results: fieldDefs(DOB_FIELDS) } } };
-    if (d.includes(`${DOB_LIST}/items`)) {
-      const filter = parseFilter(u);
-      // После «Взять в работу» (MERGE статуса) элемент реально меняется на сайте —
-      // мок отражает это, иначе «Изменить после взятия» нечем проверить.
-      const applyTaken = (row) => (state.dobTaken[row.Id]
-        ? { ...row, ...state.dobTaken[row.Id] }
-        : row);
-      const rows = [applyTaken(DOB_TASK)];
-      if (/AssignedToId eq 33/.test(filter)) rows.push(applyTaken(DOB_GROUP_TASK));
-      return { data: { d: { results: rows.filter((r) => filter.includes(`eq ${r.AssignedTo.results[0].Id}`)) } } };
-    }
-    return { data: { d: { results: [] } } };
-  };
-  const post = async (url, body) => {
-    state.requests.push({ source: "dob", url: String(url), method: "MERGE", body });
-    // Взятие в работу: статус + Editor (как это делает SharePoint).
-    const itemId = Number(String(url).match(/items\((\d+)\)/)?.[1]);
-    if (Number.isFinite(itemId) && body?.Status === "В работе") {
-      state.dobTaken[itemId] = { Status: "В работе", PercentComplete: 0, Editor: { Id: 207, Title: "Поршаков Сергей" } };
-    }
-    return { data: { d: {} }, status: 204 };
-  };
-  return {
-    DOB_SITE_RELATIVE: "/sites/dob/doblogistic",
-    DOB_LIST_GUID: "21B5B544-BD98-4B06-891F-C5A137331394",
-    dobApiBase,
-    dobListApi: () => `${DOB_BASE}${DOB_LIST}`,
-    getDobDigest: async () => "digest",
-    dobAxios: { get, post, interceptors: { request: { use() {} }, response: { use() {} } } },
-  };
-});
 
 // CKEditor в jsdom не поднимается: рич-текст в диалоге подменяем textarea
 // с тем же контрактом value/onChange.
-vi.mock("../../dob/components/RichEditor", () => ({
+vi.mock("../components/RichEditor", () => ({
   default: ({ value, onChange }) => (
     <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
   ),

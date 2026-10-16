@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { ThemeProvider, createTheme } from "@mui/material";
 import CardsScene from "./CardsScene";
 import TableScene from "./TableScene";
-import RelatedScene from "./RelatedScene";
 
 // ?scene=table — табличный режим #tasks (шапка, поиск, кнопки на строке),
 // ?scene=related — диалог «Связанная заявка»; по умолчанию — карточки.
@@ -30,6 +29,6 @@ createRoot(document.getElementById("root")).render(
   <ThemeProvider theme={theme}>
     {scene === "table"
       ? <TableScene completedMode={completedTab} />
-      : scene === "related" ? <RelatedScene /> : <CardsScene />}
+      : <CardsScene />}
   </ThemeProvider>
 );

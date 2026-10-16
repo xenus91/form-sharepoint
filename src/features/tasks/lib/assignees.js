@@ -15,8 +15,6 @@
 // оттуда отдаются только группы.
 
 import apiClient from "../../../api";
-import { dobApiBase, dobAxios } from "../../dob/api/dobClient";
-import { toRequestUrl } from "../../../tasks/sourceClient";
 import { isInProgressStatus, isCompletedStatus } from "../../../tasks/status";
 import { takerTitleOf } from "./currentUserMatch";
 
@@ -148,13 +146,17 @@ export function isExternalTask(task) {
 }
 
 /**
- * Клиент для уточнения принципала: у задачи внешнего сайта Id живёт в ЕГО
- * сайт-коллекции — на основном сайте тот же Id указывает на ДРУГОГО человека.
+ * Клиент для уточнения принципала.
+ *
+ * Все задачи приложения лежат в списке этого сайта, поэтому Id принципала всегда
+ * из нашей сайт-коллекции. Раньше для задач внешнего сайта (ДОБ) клиент
+ * подменялся: тот же Id на основном сайте указывал бы на ДРУГОГО человека.
+ * Вместе с источником dob и формой DobTaskEditView подмена удалена (2026-10-16).
+ *
+ * Вызывающий код может передать задачу — аргумент игнорируется: сайт один.
  */
-export function principalGetForTask(task) {
-  if (!isExternalTask(task)) return (url, cfg) => apiClient.get(url, cfg);
-  const apiBase = dobApiBase();
-  return (url, cfg) => dobAxios.get(toRequestUrl(apiBase, url), cfg);
+export function principalGetForTask() {
+  return (url, cfg) => apiClient.get(url, cfg);
 }
 
 function cacheRead(key) {
