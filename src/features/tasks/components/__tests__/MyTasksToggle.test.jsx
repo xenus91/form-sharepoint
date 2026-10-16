@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 // src/features/tasks/components/__tests__/MyTasksToggle.test.jsx
 //
-// Тумблер «Я исполнитель» как кнопка вкл/выкл: состояние, подпись со счётчиком,
-// недоступность, когда пользователь не опознан, и переключение с клавиатуры.
+// Кнопка «Я исполнитель» вкл/выкл: нажатое (contained) состояние = фильтр
+// применён, ненажатое (outlined) = выключен. Плюс подпись со счётчиком,
+// недоступность, когда пользователь не опознан, и скрытие в #tasks/<Id>.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -11,7 +12,7 @@ import MyTasksToggle from "../MyTasksToggle";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-describe("MyTasksToggle", () => {
+describe("MyTasksToggle — кнопка вкл/выкл", () => {
   let host;
   let root;
 
@@ -38,12 +39,24 @@ describe("MyTasksToggle", () => {
   }
 
   const click = (el) => el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-  const key = (el, k) => el.dispatchEvent(new window.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
 
-  it("выключен по умолчанию: aria-checked=false", () => {
-    const el = render({ enabled: false, onToggle: () => {}, count: 3 });
-    expect(el.getAttribute("aria-checked")).toBe("false");
-    expect(el.getAttribute("role")).toBe("switch");
+  it("это кнопка, а не ползунок", () => {
+    const el = render({ enabled: false, onToggle: () => {} });
+    expect(el.tagName).toBe("BUTTON");
+    expect(el.getAttribute("role")).not.toBe("switch");
+  });
+
+  it("выключена: aria-pressed=false и контур (outlined)", () => {
+    const el = render({ enabled: false, onToggle: () => {} });
+    expect(el.getAttribute("aria-pressed")).toBe("false");
+    expect(el.className).toContain("MuiButton-outlined");
+    expect(el.className).not.toContain("MuiButton-contained");
+  });
+
+  it("включена: aria-pressed=true и заливка (contained) — фильтр применён", () => {
+    const el = render({ enabled: true, onToggle: () => {} });
+    expect(el.getAttribute("aria-pressed")).toBe("true");
+    expect(el.className).toContain("MuiButton-contained");
   });
 
   it("в подписи видно, сколько задач я веду", () => {
@@ -57,35 +70,25 @@ describe("MyTasksToggle", () => {
     expect(host.textContent).not.toContain("Я исполнитель (");
   });
 
-  it("клик переключает и зовёт onToggle с новым значением", () => {
+  it("клик по выключенной включает", () => {
     const seen = [];
     const el = render({ enabled: false, onToggle: (v) => seen.push(v) });
     act(() => { click(el); });
     expect(seen).toEqual([true]);
   });
 
-  it("включённый — aria-checked=true, клик выключает", () => {
+  it("клик по включённой выключает", () => {
     const seen = [];
     const el = render({ enabled: true, onToggle: (v) => seen.push(v) });
-    expect(el.getAttribute("aria-checked")).toBe("true");
     act(() => { click(el); });
     expect(seen).toEqual([false]);
   });
 
-  it("переключается пробелом и Enter (доступность)", () => {
-    const seen = [];
-    const el = render({ enabled: false, onToggle: (v) => seen.push(v) });
-    act(() => { key(el, " "); });
-    act(() => { key(el, "Enter"); });
-    expect(seen).toEqual([true, true]);
-  });
-
-  it("пользователь не опознан — тумблер недоступен и не переключается", () => {
+  it("пользователь не опознан — кнопка недоступна и не переключается", () => {
     const seen = [];
     const el = render({ enabled: false, onToggle: (v) => seen.push(v), disabled: true });
-    expect(el.getAttribute("aria-disabled")).toBe("true");
+    expect(el.disabled).toBe(true);
     act(() => { click(el); });
-    act(() => { key(el, " "); });
     expect(seen).toEqual([]);
   });
 

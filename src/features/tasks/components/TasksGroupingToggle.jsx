@@ -6,7 +6,9 @@ import { Box, Typography } from "@mui/material";
 export default function TasksGroupingToggle({ groupingEnabled, onToggle, countGroups, isHashMode, tab }) {
   if (isHashMode || tab !== 0) return null;
   return (
-    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1, minHeight: 32, height: 32, width: "100%", flexShrink: 0 }}>
+    // Строку с кнопкой «Я исполнитель» собирает родитель (TasksView), поэтому
+    // здесь ни width:100%, ни собственного нижнего отступа.
+    <Box sx={{ display: "flex", alignItems: "center", minHeight: 32, height: 32, flexShrink: 0 }}>
       <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
         <Typography variant="caption" sx={{ fontWeight: 600, color: "text.secondary" }}>Группировка по ТК</Typography>
         <Box

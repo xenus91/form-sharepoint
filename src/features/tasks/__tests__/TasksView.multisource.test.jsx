@@ -692,7 +692,18 @@ describe("TasksView — multi-source (#tasks)", () => {
 
     const toggle = host.querySelector('[data-testid="my-tasks-toggle"]');
     expect(toggle).toBeTruthy();
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.tagName).toBe("BUTTON");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+    // Кнопка стоит НА ОДНОЙ СТРОКЕ с переключателем группировки.
+    // Проверяем строго: родитель обёртки кнопки — строка ровно из двух детей
+    // (переключатель группировки + обёртка кнопки). Если бы кнопка была на
+    // отдельной строке, её родителем оказалась бы внешняя колонка шапки, в
+    // которой три ребёнка (вкладки, группировка, кнопка).
+    const sharedRow = toggle.parentElement.parentElement;
+    expect(sharedRow.children.length).toBe(2);
+    expect([...sharedRow.children].some((c) => (c.textContent || "").includes("Группировка по ТК"))).toBe(true);
+    expect([...sharedRow.children].some((c) => c.contains(toggle))).toBe(true);
 
     // Пока тумблер выключен — видны и моя, и чужая задача.
     expect(host.textContent).toContain("Чужая задача в работе");
@@ -701,7 +712,9 @@ describe("TasksView — multi-source (#tasks)", () => {
     // Включаем.
     await act(async () => { mouseClick(toggle); await wait200(); });
     await settle(500);
-    expect(host.querySelector('[data-testid="my-tasks-toggle"]').getAttribute("aria-checked")).toBe("true");
+    expect(host.querySelector('[data-testid="my-tasks-toggle"]').getAttribute("aria-pressed")).toBe("true");
+    // нажатое состояние — заливка (contained)
+    expect(host.querySelector('[data-testid="my-tasks-toggle"]').className).toContain("MuiButton-contained");
 
     // Чужая исчезла, моя осталась.
     expect(host.textContent).not.toContain("Чужая задача в работе");
