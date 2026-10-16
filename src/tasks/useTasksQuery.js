@@ -90,6 +90,12 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
     refetchInterval: 5 * 60_000,
+    // Вход в #tasks через меню ВСЕГДА делает запрос.
+    // Без этого свежий (< staleTime) кэш отдавался как есть: бейдж «Задачи»
+    // (отдельный опросчик, 60 с) уже показывал новую задачу, а список оставался
+    // старым до следующего тика refetchInterval — 5 минут.
+    // placeholderData ниже оставляет прежние строки на экране на время запроса.
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     placeholderData: (prev) => prev,

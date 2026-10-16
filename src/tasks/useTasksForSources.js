@@ -142,6 +142,9 @@ export function useTasksForSources({
     enabled: fetchEnabled,
     staleTime: staleTimeMs,
     refetchInterval: refetchIntervalMs,
+    // Как и useTasksQuery: вход в #tasks обязан запрашивать данные, а не
+    // показывать свежий кэш (см. комментарий там же).
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     placeholderData: (prev) => prev,
