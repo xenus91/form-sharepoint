@@ -21,6 +21,9 @@ const TaskList = React.memo(function TaskList({
   groupingEnabled = false,
   expandedGroups = new Set(),
   toggleGroup,
+  // Вложения связанного элемента (RelatedItems): сколько их и чем открывать.
+  relatedAttachmentCountOf = null,
+  onOpenRelatedAttachments = null,
   useVirtual = false,
   flatVirtualizer = null,
   isTabPending = false,
@@ -88,6 +91,8 @@ const TaskList = React.memo(function TaskList({
           onComplete={onComplete}
           currentUserId={currentUserId}
           currentUserTitle={currentUserTitle}
+          relatedAttachmentCount={typeof relatedAttachmentCountOf === "function" ? relatedAttachmentCountOf(task) : 0}
+          onOpenRelatedAttachments={onOpenRelatedAttachments}
         />
       )
   );

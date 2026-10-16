@@ -26,6 +26,7 @@ import {
   Box, Paper, Typography, Button, Chip, CircularProgress, Stack, Divider, TextField, IconButton, Tooltip, Autocomplete,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import AttachFileIcon from "@mui/icons-material/AttachFile";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FolderIcon from "@mui/icons-material/Folder";
 import { keyframes } from "@emotion/react";
@@ -155,7 +156,7 @@ function readTaskValue(task, path) {
   return "";
 }
 
-const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig, pendingAnimation = null }) {
+const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig, pendingAnimation = null, relatedAttachmentCount = 0, onOpenRelatedAttachments = null }) {
   // ⭐ v8: defaults-принцип. getUiConfig объявлен НИЖЕ getBehaviourRuleForChoice/getButtonSx
   // (зависимости ниже в файле). Реорганизация — поведение из TaskBehaviour,
   // никаких legacy-фолбэков на TaskResultDefinitions/TaskPromptFields.
@@ -1022,22 +1023,48 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
 
       {/* ── Заголовок и описание ── */}
       <Box sx={{ mb: 1.25 }}>
-        <Typography
-          sx={{
-            fontWeight: 800,
-            color: "#0F123D",
-            fontSize: "0.98rem",
-            lineHeight: 1.35,
-            wordBreak: "break-word",
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-          title={displayTitle}
-        >
-          {displayTitle}
-        </Typography>
+        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
+          <Typography
+            sx={{
+              fontWeight: 800,
+              color: "#0F123D",
+              fontSize: "0.98rem",
+              lineHeight: 1.35,
+              wordBreak: "break-word",
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+              flex: 1,
+              minWidth: 0,
+            }}
+            title={displayTitle}
+          >
+            {displayTitle}
+          </Typography>
+          {/* Скрепка — только если у СВЯЗАННОГО элемента (RelatedItems →
+              ProblemsPallet) есть вложения. Клик открывает этот элемент на весь
+              viewport через ?ID=<Id связанного элемента> (см. src/ItemViewer.jsx). */}
+          {relatedAttachmentCount > 0 && (
+            <Tooltip title={`Вложения связанного элемента: ${relatedAttachmentCount}. Открыть`}>
+              <IconButton
+                size="small"
+                data-testid="related-attachments-button"
+                aria-label={`Вложения связанного элемента: ${relatedAttachmentCount}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (typeof onOpenRelatedAttachments === "function") onOpenRelatedAttachments(task);
+                }}
+                sx={{ p: 0.5, flexShrink: 0, color: "#171c8f" }}
+              >
+                <AttachFileIcon sx={{ fontSize: 18 }} />
+                <Typography component="span" variant="caption" sx={{ ml: 0.25, fontWeight: 700 }}>
+                  {relatedAttachmentCount}
+                </Typography>
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
         {bodyRows.length > 0 && (
           <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.6 }}>
             {bodyRows.map((row) => (

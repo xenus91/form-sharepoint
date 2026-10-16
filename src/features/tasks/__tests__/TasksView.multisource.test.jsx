@@ -302,6 +302,17 @@ vi.mock("../../../api", () => {
         : TASK_BEHAVIOUR_SEARCH_RECORD;
       return { data: { d: { results: [TASK_BEHAVIOUR_RECORD, searchRecord] } } };
     }
+    // Вложения СВЯЗАННОГО элемента (скрепка на карточке): один батч на страницу.
+    if (d.includes("getbytitle('ProblemsPallet')/items?") && d.includes("$expand=AttachmentFiles")) {
+      const files = state.relatedAttachments || {};
+      const fm = d.match(/\$filter=([^&]*)/);
+      const ids = fm ? [...fm[1].matchAll(/Id eq (\d+)/g)].map((x) => Number(x[1])) : [];
+      const results = ids.map((id) => ({
+        Id: id,
+        AttachmentFiles: { results: (files[id] || []).map((FileName) => ({ FileName })) },
+      }));
+      return { data: { d: { results } } };
+    }
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
@@ -434,6 +445,7 @@ describe("TasksView — multi-source (#tasks)", () => {
   beforeEach(() => {
     state.requests = [];
     state.extraMainTasks = [];
+    state.relatedAttachments = {};
     state.dobTaken = {};
     state.behaviourOverride = null;
     localStorage.clear();
@@ -731,5 +743,45 @@ describe("TasksView — multi-source (#tasks)", () => {
     await act(async () => { mouseClick(host.querySelector('[data-testid="my-tasks-toggle"]')); await wait200(); });
     await settle(500);
     expect(host.textContent).toContain("Чужая задача в работе");
+  }, 40000);
+
+  it("скрепка на карточке: у связанного элемента есть вложения — кнопка со счётчиком и ?ID=", async () => {
+    // Задача СО связанным элементом (ProblemsPallet, Id 25202), у которого 2 вложения.
+    state.extraMainTasks = [{
+      ...MAIN_TASK,
+      Id: 30,
+      Title: "Задача со связанным элементом",
+      RelatedItems: JSON.stringify([{ ListId: "{21b5b544-bd98-4b06-891f-c5a137331394}", ItemId: 25202 }]),
+    }];
+    state.relatedAttachments = { 25202: ["photo.jpg", "act.pdf"] };
+
+    const host = renderTasksView();
+    await settle(2500);
+
+    // вложения связанного элемента грузятся одним батчем
+    const hits = state.requests.filter((r) => r.url.includes("getbytitle('ProblemsPallet')/items?") && r.url.includes("$expand=AttachmentFiles"));
+    expect(hits.length).toBe(1);
+
+    const clips = host.querySelectorAll('[data-testid="related-attachments-button"]');
+    expect(clips.length).toBe(1); // только у задачи со связанным элементом
+    expect(clips[0].textContent).toContain("2");
+
+    // клик ставит ?ID=<Id связанного элемента> — его читает ItemViewer
+    await act(async () => { mouseClick(clips[0]); await wait200(); });
+    expect(new URLSearchParams(window.location.search).get("ID")).toBe("25202");
+  }, 40000);
+
+  it("без вложений у связанного элемента скрепки на карточке нет", async () => {
+    state.extraMainTasks = [{
+      ...MAIN_TASK,
+      Id: 31,
+      Title: "Связанный элемент без вложений",
+      RelatedItems: JSON.stringify([{ ListId: "{21b5b544-bd98-4b06-891f-c5a137331394}", ItemId: 25203 }]),
+    }];
+    state.relatedAttachments = { 25203: [] };
+
+    const host = renderTasksView();
+    await settle(2500);
+    expect(host.querySelector('[data-testid="related-attachments-button"]')).toBeNull();
   }, 40000);
 });

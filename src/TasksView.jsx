@@ -44,6 +44,8 @@ import TasksHeader from "./features/tasks/components/TasksHeader";
 import TasksTabs from "./features/tasks/components/TasksTabs";
 import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle";
 import MyTasksToggle from "./features/tasks/components/MyTasksToggle";
+import { useRelatedAttachments } from "./features/tasks/hooks/useRelatedAttachments";
+import { openRelatedItem, relatedItemIdOf } from "./tasks/relatedAttachments";
 
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import { openTaskForm } from "./features/tasks/lib/openTaskForm";
@@ -254,6 +256,18 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     () => mergeCardTasks(tasksData ?? [], []).map((t) => withDobFlag(t)),
     [tasksData, withDobFlag],
   );
+
+  // Скрепка на карточке: сколько вложений у связанного элемента (RelatedItems →
+  // ProblemsPallet). Счётчики грузятся одним батчем на страницу, а не по запросу
+  // на карточку. Клик открывает этот элемент на весь viewport через ?ID=<Id>.
+  const relatedAttachments = useRelatedAttachments(cardTasks);
+  const handleOpenRelatedAttachments = useCallback((task) => {
+    const id = relatedItemIdOf(task);
+    if (!id) return;
+    if (!openRelatedItem(id)) {
+      notify("Не удалось открыть связанный элемент.", { severity: "error" });
+    }
+  }, [notify]);
 
   // Взятие в работу задачи внешнего источника (dob): MERGE статуса на сайте-владельце;
   // SharePoint сам проставит Editor → «Исполнитель» в карточке/таблице.
@@ -987,6 +1001,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         groupingEnabled={groupingEnabled}
         expandedGroups={expandedGroups}
         toggleGroup={toggleGroup}
+        relatedAttachmentCountOf={relatedAttachments.countOf}
+        onOpenRelatedAttachments={handleOpenRelatedAttachments}
         useVirtual={useVirtual}
         flatVirtualizer={flatVirtualizer}
         isTabPending={isTabPending}

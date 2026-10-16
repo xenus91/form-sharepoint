@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import apiClient from "./api";
 import { useTheme, createTheme, ThemeProvider } from "@mui/material/styles";
 import {
@@ -56,6 +56,8 @@ import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import AppMenuDrawer from "./features/navigation/AppMenuDrawer";
 import BurgerWithCount from "./features/navigation/BurgerWithCount";
 import TasksView from "./TasksView";
+import ItemViewer from "./ItemViewer";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
 import { useNotifications } from './NotificationsProvider';
 import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
@@ -1448,6 +1450,38 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     String(userProfile.userDepartment || "").toLowerCase().includes("группа отгрузки");
 
   const [managerPreviewOpen, setManagerPreviewOpen] = useState(false);
+
+  // ── Связанный элемент по ?ID=<Id> ─────────────────────────────────────────
+  // Скрепка на карточке задачи ставит ?ID=<Id связанного элемента> (см.
+  // tasks/relatedAttachments.js → openRelatedItem), а ItemViewer читает именно
+  // этот параметр и рисует элемент с его вложениями на весь viewport.
+  const readRelatedId = () => {
+    try {
+      return new URLSearchParams(window.location.search || "").get("ID");
+    } catch (_e) {
+      void _e;
+      return null;
+    }
+  };
+  const [relatedViewId, setRelatedViewId] = useState(readRelatedId);
+  useEffect(() => {
+    const read = () => setRelatedViewId(readRelatedId());
+    window.addEventListener("popstate", read);
+    return () => window.removeEventListener("popstate", read);
+  }, []);
+  const closeRelatedView = useCallback(() => {
+    try {
+      const usp = new URLSearchParams(window.location.search || "");
+      usp.delete("ID");
+      const qs = usp.toString();
+      const next = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash || ""}`;
+      window.history.pushState(null, "", next);
+      setRelatedViewId(null);
+    } catch (_e) {
+      void _e;
+      setRelatedViewId(null);
+    }
+  }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   // hash-роут: #tasks / #/tasks / #manager / #form (+ #tasks/id=10, #tasks/10, #tasks?id=10)
   const parseHash = () => {
@@ -1661,6 +1695,30 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     currentUserId,
     distribution: taskDistribution,
   });
+
+  // Связанный элемент важнее остальных видов: он занимает весь viewport.
+  if (relatedViewId) {
+    return (
+      <ThemeProvider theme={figmaTheme}>
+        <Box sx={{ position: "fixed", inset: 0, zIndex: 2000, bgcolor: "#000", overflow: "hidden" }}>
+          <IconButton
+            onClick={closeRelatedView}
+            aria-label="Вернуться к задачам"
+            data-testid="related-view-back"
+            sx={{
+              position: "absolute", top: 10, left: 10, zIndex: 2100,
+              color: "#fff", bgcolor: "rgba(0,0,0,0.45)",
+              "&:hover": { bgcolor: "rgba(0,0,0,0.75)" },
+            }}
+          >
+            <ArrowBackIcon />
+          </IconButton>
+          {/* key — чтобы смена Id перезагружала элемент, а не переиспользовала состояние */}
+          <ItemViewer key={relatedViewId} />
+        </Box>
+      </ThemeProvider>
+    );
+  }
 
   if (currentView === "manager") {
     return (
