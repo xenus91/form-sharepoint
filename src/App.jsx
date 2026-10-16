@@ -53,7 +53,13 @@ import ManagerPreview from "./ManagerPreview";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
+import AppMenuDrawer from "./features/navigation/AppMenuDrawer";
+import BurgerWithCount from "./features/navigation/BurgerWithCount";
+import TasksView from "./TasksView";
+import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
+import useTasksListSyncOnBadgeChange from "./features/tasks/hooks/useTasksListSync";
 import { useNotifications } from './NotificationsProvider';
+import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -846,6 +852,18 @@ const App = () => {
       ? normalizeDcThu(dcThuOverride)
       : getOfficeSuffix(userProfile.userOffice);
 
+  // Эффективный Office для задач — при локальной смене РЦ задачи должны перепоискаться по новому РЦ.
+  // Если dcThuOverride активен, конструируем "РЦ-XXXX" из суффикса, иначе берём офис из профиля.
+  const effectiveOfficeForTasks = isDcThuActive && normalizeDcThu(dcThuOverride)
+    ? `РЦ-${normalizeDcThu(dcThuOverride)}`
+    : userProfile.userOffice;
+  const effectiveUserProfileForTasks = React.useMemo(() => {
+    if (isDcThuActive && effectiveOfficeForTasks) {
+      return { ...userProfile, userOffice: effectiveOfficeForTasks };
+    }
+    return userProfile;
+  }, [userProfile, isDcThuActive, effectiveOfficeForTasks]);
+
   const operationDate = operationDateIso ? new Date(operationDateIso) : null;
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
     getShiftDateOptions();
@@ -1175,6 +1193,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setLoading(true);
 
       const officeSuffix = getEffectiveDcThu();
+      // Title элемента ProblemsPallet: "<DC_THU>_<THU>", без пробелов.
+      const palletTitle = buildProblemsPalletTitle(officeSuffix, eoNumber);
       const digest = await getRequestDigest();
 
       if (editingItemId) {
@@ -1183,6 +1203,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})`,
           {
             __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            Title: palletTitle,
             THU: eoNumber,
             DC_THU: officeSuffix,
             RecipientId: selectedRecipient,
@@ -1236,6 +1257,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           `/web/lists/getbytitle('${LIST_TITLE}')/items`,
           {
             __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            Title: palletTitle,
             THU: eoNumber,
             DC_THU: officeSuffix,
             RecipientId: selectedRecipient,
@@ -1428,8 +1450,107 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
   const [managerPreviewOpen, setManagerPreviewOpen] = useState(false);
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // hash-роут: #tasks / #/tasks / #manager / #form (+ #tasks/id=10, #tasks/10, #tasks?id=10)
+  const parseHash = () => {
+    const raw = window.location.hash || "";
+    const low = raw.toLowerCase();
+    let view = "form";
+    if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
+    else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
+    // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10)
+    let elementId = null;
+    let elementAction = null;
+    // kind: "element" — явная ссылка на элемент ProblemsPallet (id=/elementid=),
+    // "auto" — путь #tasks/<n>: сначала задача с Id=n, элемент — фолбэк (hashRoute.js).
+    let elementKind = "auto";
+    // 1) id=число (любой вариант: id=10, elementid=10, ?id=10 &id=10 /id=10)
+    const mId = low.match(/(?:elementid|\bid)\s*=\s*(\d{1,19})/);
+    if (mId) { elementId = mId[1]; elementKind = "element"; }
+    else {
+      // 2) путь /tasks/10
+      const mPath = raw.match(/#\/?tasks\/(\d{1,19})/i);
+      if (mPath) elementId = mPath[1];
+      else {
+        // 3) чистый ?10 после #tasks (редко) - пробуем последний числовой сегмент
+        const after = low.replace(/^#\/?tasks\/?/, "");
+        if (/^\d{1,19}([\/?&#].*)?$/.test(after.trim())) {
+          const mNum = after.trim().match(/^(\d{1,19})/);
+          if (mNum) elementId = mNum[1];
+        }
+      }
+    }
+    // SearchResult для имитации первого нажатия Найдена/Не найдена
+    const mSearch = low.match(/searchresult\s*=\s*([a-z_]+)/);
+    if (mSearch) {
+      const v = mSearch[1].trim().toLowerCase();
+      if (v === "searchcomplete" || v === "complete" || v === "found") elementAction = "found";
+      else if (v === "searchfail" || v === "fail" || v === "notfound" || v === "not_found") elementAction = "notfound";
+      else elementAction = v;
+    }
+    // action для следующего этапа (found/notfound)
+    const mAct = low.match(/action\s*=\s*([a-zа-я_]+)/);
+    if (!elementAction && mAct) {
+      const v = mAct[1].trim();
+      if (v === "found" || v === "найдена" || v === "найден") elementAction = "found";
+      else if (v === "notfound" || v === "not_found" || v === "не_найдена" || v === "не-найдена" || v === "не найдена" || v === "не найден") elementAction = "notfound";
+      else elementAction = v;
+    } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
+    else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
+    return { view, elementId, elementAction, elementKind };
+  };
+  const getViewFromHash = () => parseHash().view;
+  const [currentView, setCurrentView] = useState(() => getViewFromHash());
+  const [hashElementId, setHashElementId] = useState(() => parseHash().elementId);
+  const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
+  const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
+  const [taskDistribution, setTaskDistribution] = useState(null);
+  const [taskFieldsApp, setTaskFieldsApp] = useState([]);
+
+
+  // синхронизация с hash — прямой переход по #tasks (+ elementId)
+  useEffect(() => {
+    const onHash = () => {
+      const p = parseHash();
+      setCurrentView(p.view);
+      setHashElementId(p.elementId);
+      setHashElementAction(p.elementAction);
+      setHashElementKind(p.elementKind || "auto");
+    };
+    window.addEventListener("hashchange", onHash);
+    onHash();
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  useEffect(() => {
+    const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
+    const parsed = parseHash();
+    if (currentView === "form") {
+      if (window.location.hash && window.location.hash.toLowerCase() !== "#form") window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return;
+    }
+    // если уже на нужном view и hash содержит ожидаемый префикс — не трогаем (сохраняем id=... в url)
+    if (window.location.hash.toLowerCase().startsWith(desired.toLowerCase())) {
+      return;
+    }
+    // иначе ставим желаемый hash (с сохранением elementId если был и view tasks)
+    if (currentView === "tasks" && parsed.elementId) {
+      window.location.hash = `${desired}/id=${parsed.elementId}` + (parsed.elementAction ? `&action=${parsed.elementAction}` : "");
+    } else {
+      window.location.hash = desired;
+    }
+  }, [currentView]);
+
   const handleOpenManagerPreview = () => {
-    setManagerPreviewOpen(true);
+    setCurrentView("manager");
+    setDrawerOpen(false);
+  };
+  const handleOpenForm = () => {
+    setCurrentView("form");
+    setDrawerOpen(false);
+  };
+  const handleOpenTasks = () => {
+    setCurrentView("tasks");
+    setDrawerOpen(false);
   };
 
   const handleLocationChange = (value) => {
@@ -1438,23 +1559,228 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     else setIsTransportationRequired(false);
   };
 
-  if (managerPreviewOpen) {
+  // Keep legacy managerPreviewOpen sync with currentView
+  useEffect(() => {
+    if (managerPreviewOpen) setCurrentView("manager");
+  }, [managerPreviewOpen]);
+
+  // Poll active tasks count for burger badge - uses GUID directly, no discovery, every 60s + on focus/visibility
+  const TASKS_LIST_GUID = "463B634E-A71A-4FEF-9A1F-B803431D8639";
+  const TASKS_LIST_API = `/web/lists(guid'${TASKS_LIST_GUID}')`;
+  const DCEMAIL_LIST_TITLE = "DcEmail";
+
+  async function resolveDistributionViaDcEmailApp(office, department) {
+    if (!office && !department) return null;
+    const officeStr = String(office).trim();
+    const deptStr = String(department).trim();
+    const full = `${officeStr}${deptStr}`;
+    const candidates = [full];
+    const suffix = officeStr.includes("-") ? officeStr.split("-").pop().trim() : "";
+    if (suffix && suffix !== officeStr) {
+      const v1 = `${suffix}${deptStr}`;
+      if (!candidates.includes(v1)) candidates.push(v1);
+      const v2 = `РЦ-${suffix}${deptStr}`;
+      if (!candidates.includes(v2)) candidates.push(v2);
+      const v3 = officeStr.replace("-", "") + deptStr;
+      if (!candidates.includes(v3)) candidates.push(v3);
+    }
+    for (const offDepKey of candidates) {
+      const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+      try {
+        const { data } = await apiClient.get(
+          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        );
+        const items = data?.d?.results || [];
+        if (items.length) return items[0];
+      } catch {}
+    }
+    try {
+      const { data: data2 } = await apiClient.get(
+        `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$top=100`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const items2 = data2?.d?.results || [];
+      for (const cand of candidates) {
+        const norm = cand.trim().toLowerCase();
+        const found = items2.find((it) => String(it.OffDepKey || "").trim().toLowerCase() === norm);
+        if (found) return found;
+      }
+    } catch {}
+    for (const offDepKey of candidates) {
+      const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+      try {
+        const { data } = await apiClient.get(
+          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,EmailId&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        );
+        const items = data?.d?.results || [];
+        if (items.length) return items[0];
+      } catch (e2) {
+        console.warn("DcEmail resolve (App) failed", e2?.message);
+      }
+    }
+    return null;
+  }
+  // Resolve distribution for group-assigned tasks via DcEmail — учитывает локальный РЦ (dcThuOverride)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const officeForTasks = effectiveOfficeForTasks || userProfile.userOffice;
+      const deptForTasks = userProfile.userDepartment;
+      if (!officeForTasks && !deptForTasks) return;
+      const dist = await resolveDistributionViaDcEmailApp(officeForTasks, deptForTasks);
+      if (!cancelled) {
+        setTaskDistribution(dist);
+        // Лог для отладки локальной смены РЦ
+      }
+      try {
+        const { data } = await apiClient.get(`${TASKS_LIST_API}/fields?$select=InternalName`, { headers: { Accept: "application/json;odata=verbose" } });
+        if (!cancelled) setTaskFieldsApp((data?.d?.results || []).map((f) => f.InternalName));
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [userProfile.userOffice, userProfile.userDepartment, effectiveOfficeForTasks, isDcThuActive]);
+
+  // Уведомление при локальной смене РЦ — задачи перепоискаются автоматически
+  const prevOfficeRef = useRef(effectiveOfficeForTasks);
+  useEffect(() => {
+    if (prevOfficeRef.current !== effectiveOfficeForTasks && prevOfficeRef.current) {
+      const msg = isDcThuActive
+        ? `РЦ сменён на ${effectiveOfficeForTasks} — задачи перезагружены`
+        : `Локальный РЦ сброшен, задачи для ${effectiveOfficeForTasks || "профиля"} перезагружены`;
+      try { notify(msg, { severity: "info", autoHideDuration: 3000 }); } catch {}
+    }
+    prevOfficeRef.current = effectiveOfficeForTasks;
+  }, [effectiveOfficeForTasks, isDcThuActive]);
+
+  // Бейдж «активные задачи» в бургер-меню: ОДИН источник правды —
+  // useActiveTasksCount (считает по фильтру «я + мои группы» на сервере).
+  // Раньше число ещё писал TasksView по СВОЕЙ загруженной выборке (фильтры,
+  // поиск, источники), а при уходе из интерфейса задач просто переставал
+  // писать — из-за этого при переключении интерфейсов бейдж «слетал».
+  const { count: tasksActiveCount, refresh: refreshActiveTasksCount } = useActiveTasksCount({
+    currentUserId,
+    distribution: taskDistribution,
+  });
+
+  // Бейдж опрашивает сервер раз в минуту, список задач живёт в react-query со
+  // staleTime/refetchInterval 5 минут. Без этой связки бейдж показывал 4 задачи,
+  // а список оставался на 3 до пятиминутного тика.
+  useTasksListSyncOnBadgeChange(tasksActiveCount);
+
+  if (currentView === "manager") {
     return (
-      <ManagerPreview
-        userProfile={userProfile}
-        onBack={() => setManagerPreviewOpen(false)}
-      />
+      <ThemeProvider theme={figmaTheme}>
+        <ManagerPreview
+          userProfile={userProfile}
+          onBack={() => setCurrentView("form")}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  if (currentView === "tasks") {
+    return (
+      <ThemeProvider theme={figmaTheme}>
+        {/* Burger button for tasks */}
+        <Box
+          sx={{
+            position: "fixed",
+            top: 12,
+            left: 12,
+            zIndex: 1302,
+            display: drawerOpen ? "none" : "block",
+          }}
+        >
+          <BurgerWithCount
+            onClick={() => setDrawerOpen(true)}
+            count={tasksActiveCount}
+            size="medium"
+            buttonSx={{
+              bgcolor: "rgba(255,255,255,0.85)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(23,28,143,0.15)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              width: 44,
+              height: 44,
+              "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
+            }}
+            iconSx={{ color: "#171c8f" }}
+          />
+        </Box>
+        <AppMenuDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          active="tasks"
+          tasksCount={tasksActiveCount}
+          canOpenManagerPreview={canOpenManagerPreview}
+          onOpenForm={handleOpenForm}
+          onOpenTasks={handleOpenTasks}
+          onOpenManagerPreview={handleOpenManagerPreview}
+          userName={userProfile.userDisplayName}
+          userTitle={userProfile.userTitle}
+          userOffice={userProfile.userOffice}
+        />
+        {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
+        <Box sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+          <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onTasksChanged={refreshActiveTasksCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} initialElementKind={hashElementKind} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
+        </Box>
+        {/* Keep modals for operation date etc accessible in tasks view as well */}
+      </ThemeProvider>
     );
   }
 
   return (
     <ThemeProvider theme={figmaTheme}>
-      {/* Верхняя панель счётчика */}
+      {/* Бургер кнопка слева вверху */}
+      <Box
+        sx={{
+          position: "fixed",
+          top: 12,
+          left: 12,
+          zIndex: 1302,
+          display: drawerOpen ? "none" : "block",
+        }}
+      >
+        <BurgerWithCount
+          onClick={() => setDrawerOpen(true)}
+          count={tasksActiveCount}
+          size="medium"
+          buttonSx={{
+            bgcolor: "rgba(255,255,255,0.85)",
+            backdropFilter: "blur(8px)",
+            border: "1px solid rgba(23,28,143,0.15)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            width: 44,
+            height: 44,
+            "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
+          }}
+          iconSx={{ color: "#171c8f" }}
+        />
+      </Box>
+      <AppMenuDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        active={currentView === "form" ? "form" : ""}
+        tasksCount={tasksActiveCount}
+        canOpenManagerPreview={canOpenManagerPreview}
+        onOpenForm={handleOpenForm}
+        onOpenTasks={handleOpenTasks}
+        onOpenManagerPreview={handleOpenManagerPreview}
+        userName={userProfile.userDisplayName}
+        userTitle={userProfile.userTitle}
+        userOffice={userProfile.userOffice}
+        rcLabel={getEffectiveDcThu() || ""}
+        onOpenRcModal={handleOpenDcThuModal}
+      />
+      {/* Верхняя панель счётчика со смещением под бургер */}
       <MonthlyCounter
         ref={monthlyCounterRef}
         listTitle="ProblemsPallet"
         authorId={userProfile.userId}
         position="fixed"
+        leftOffset={64}
         extraContent={
           <Box
             sx={{
@@ -1485,13 +1811,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
-        {canOpenManagerPreview && (
-          <Box sx={{ display: "flex", justifyContent: "center", mb: 1 }}>
-            <Button variant="outlined" onClick={handleOpenManagerPreview} sx={{ borderRadius: 1 }}>
-              Меню просмотра менеджерами
-            </Button>
-          </Box>
-        )}
+        {/* Меню просмотра менеджерами теперь в бургер-меню слева вверху */}
+        {/* canOpenManagerPreview hidden button moved to drawer */}
         <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
           <Button
             variant="outlined"

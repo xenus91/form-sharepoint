@@ -60,3 +60,15 @@ button:focus-visible {
 }
 
 /* Убираем медиазапрос для цветовой схемы */
+
+/* DOB and the rest of the application must not inherit a centered/max-width root. */
+html, body, #root {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
+}
+html, body { overflow-x: hidden; }
+#root { overflow-x: hidden; }
+*, *::before, *::after { box-sizing: border-box; }

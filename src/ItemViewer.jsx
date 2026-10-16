@@ -352,14 +352,14 @@ export default function ItemViewer() {
 
     if (loading) {
         return (
-            <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center" }}>
+            <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
                 <CircularProgress />
             </Box>
         );
     }
     if (error || !item) {
         return (
-            <Box sx={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
+            <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", p: 2 }}>
                 <Paper sx={{ p: 2 }}>
                     <Typography color="error">{error || "Элемент не найден."}</Typography>
                 </Paper>
@@ -372,8 +372,8 @@ export default function ItemViewer() {
             <Box sx={{ 
                 display: "flex", 
                 flexDirection: "column", 
-                height: "100vh", 
-                width: "100vw", 
+                height: "100%",
+                width: "100%",
                 bgcolor: "black",
                 overflow: "hidden" 
             }}>
