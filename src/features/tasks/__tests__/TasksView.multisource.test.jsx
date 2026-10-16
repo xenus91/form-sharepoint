@@ -496,53 +496,7 @@ describe("TasksView — multi-source (#tasks)", () => {
     clearTaskContentTypeIdCache();
   });
 
-  it("карточный режим: заявка из dob-списка отрисована рядом с main-задачей", async () => {
-    const host = renderTasksView();
-    await settle(3000);
-
-    const external = host.querySelectorAll('[data-testid="external-task-card"]');
-    expect(external.length).toBeGreaterThanOrEqual(1);
-    const dobCard = [...external].find((el) => /Заявка ООБ/.test(el.textContent || ""));
-    expect(dobCard).toBeTruthy();
-    // карточка выглядит как обычная задача: «Кому назначено» = AssignedTo,
-    // «Исполнитель» пуст (никто не взял), есть кнопка «Взять в работу»
-    expect(dobCard.textContent).toMatch(/Кому назначено: Поршаков Сергей/);
-    expect(dobCard.textContent).toMatch(/Исполнитель: —/);
-    expect(dobCard.textContent).toContain("#1");
-    expect([...dobCard.querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(true);
-    expect(dobCard.textContent).not.toContain("DOB Logistic");
-    expect(dobCard.textContent).not.toMatch(/другого (сайта|источника)/i);
-    // До взятия в работу формы задачи нет: единственная кнопка — «Взять в работу».
-    expect([...dobCard.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(false);
-
-    // Взяли в работу → появилась «Изменить» (требование 2026-10-04)
-    await act(async () => {
-      [...dobCard.querySelectorAll("button")].find((b) => /Взять в работу/.test(b.textContent || ""))
-        .dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 400));
-    });
-    await settle(600);
-    const dobCardAfter = [...host.querySelectorAll('[data-testid="external-task-card"]')]
-      .find((el) => /Заявка ООБ/.test(el.textContent || ""));
-    expect([...dobCardAfter.querySelectorAll("button")].some((b) => /Изменить/.test(b.textContent || ""))).toBe(true);
-    expect([...dobCardAfter.querySelectorAll("button")].some((b) => /Взять в работу/.test(b.textContent || ""))).toBe(false);
-
-    // main-задача тоже на месте
-    expect(host.textContent).toContain("Основная задача ООБ");
-
-    // dob-запрос ушёл на сайт ДОБ через /dob-api и покрывает пользователя И группу
-    const dobItemReqs = state.requests.filter((r) => r.source === "dob" && r.url.includes("/items"));
-    expect(dobItemReqs.length).toBeGreaterThanOrEqual(1);
-    for (const req of dobItemReqs) {
-      expect(req.url.startsWith(`${DOB_BASE}/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')`)).toBe(true);
-    }
-    // Первый запрос может уйти до того, как группа из DcEmail срезолвится на сайте ДОБ;
-    // после резолва фильтр обязан содержать и пользователя, и Id группы.
-    const fullFilter = dobItemReqs.map((r) => parseFilter(r.url)).find((f) => f.includes("AssignedToId eq 207") && f.includes("AssignedToId eq 33"));
-    expect(fullFilter).toBeTruthy();
-  }, 30000);
-
-  it("табличный режим: строки обоих источников; поля результата — только у основного сайта", async () => {
+  it("табличный режим: строка задачи, колонки и поля результата", async () => {
     const host = renderTasksView();
     await settle(3000);
     await clickByText(host, /Таблица/);
@@ -550,17 +504,16 @@ describe("TasksView — multi-source (#tasks)", () => {
 
     // В подписи видно, какой набор в таблице: активные или завершённые.
     expect(host.textContent).toMatch(/Таблица задач · активные · \d+ шт\./);
-    // строки обоих источников в таблице
-    expect(host.textContent).toContain("Заявка ООБ");
+    // строка задачи в таблице
     expect(host.textContent).toContain("Основная задача ООБ");
     // колонки: «Кому назначено» — заполнена, «Исполнитель» — заполнен
     expect(host.textContent).toContain("Кому назначено");
     expect(host.textContent).toContain("Исполнитель");
     expect(host.textContent).toMatch(/Поршаков Сергей/);
-    // «Описание задачи» — сразу после «Заголовка», значение из Body dob-задачи
+    // «Описание задачи» — сразу после «Заголовка», значение из Body задачи
     expect(host.textContent).toContain("Описание задачи");
     expect(host.textContent.indexOf("Описание задачи")).toBeLessThan(host.textContent.indexOf("Статус"));
-    expect(host.textContent).toContain("Просмотр видеоархива");
+    expect(host.textContent).toContain("Проверить паллет");
 
     // ── шапка закреплена + поиск/сортировка ────────────────────────────────
     // domLayout=normal → строки скроллятся внутри грида, шапка остаётся на месте
@@ -573,8 +526,9 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(search.tagName).toBe("INPUT");
 
     const countRows = () => host.querySelectorAll(".ag-center-cols-container .ag-row").length;
-    // 3 main-задачи (ООБ «не начата», ООБ «в работе», ТНУ «в работе», Результат проверки ООБ) + 2 dob
-    expect(countRows()).toBe(7);
+    // задачи единственного источника: ООБ «не начата», ООБ «в работе»,
+    // ТНУ «в работе», Результат проверки ООБ и задача без ContentTypeId
+    expect(countRows()).toBe(5);
 
     // колонки шапки — для проверки сортировки по клику
     const headerCells = [...host.querySelectorAll(".ag-header .ag-header-cell")];
@@ -592,7 +546,7 @@ describe("TasksView — multi-source (#tasks)", () => {
       .sort((a, b) => a.index - b.index)
       .map((r) => r.title);
     const titlesInitial = readTitles();
-    expect(titlesInitial.length).toBe(7);
+    expect(titlesInitial.length).toBe(5);
 
     // AG Grid вешает обработчик сортировки на .ag-header-cell-label внутри ячейки
     const titleLabel = headerCells[titleIdx].querySelector(".ag-header-cell-label");
@@ -630,18 +584,11 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.textContent).not.toContain("DOB Logistic");
     expect(host.textContent).not.toMatch(/другого (сайта|источника)/i);
 
-    // Поля результата: у основного сайта запрашиваем (колонка «Результирующий
-    // выбор», требование 2026-10-11), на dob их нет — и не запрашиваем.
+    // Поля результата запрашиваем (колонка «Результирующий выбор»,
+    // требование 2026-10-11) — список один, поэтому и запрос один.
     const mainSelects = state.requests.filter((r) => r.source === "main" && parseSelect(r.url)).map((r) => parseSelect(r.url));
     expect(mainSelects.length).toBeGreaterThan(0);
     expect(mainSelects.some((sel) => sel.includes("ResultSearchTHU"))).toBe(true);
-    for (const req of state.requests) {
-      const select = parseSelect(req.url);
-      if (req.source === "dob") {
-        expect(select).not.toContain("ResultSearchTHU");
-        expect(select).not.toContain("Location1");
-      }
-    }
     // У АКТИВНЫХ задач результата нет → колонки «Результирующий выбор» в активной
     // таблице быть не должно (замечание пользователя 2026-10-11). Данные при этом
     // запрашиваем: они нужны попапу с действиями по строке.
@@ -723,28 +670,6 @@ describe("TasksView — multi-source (#tasks)", () => {
     await act(async () => { host.__root.unmount(); });
     expect(document.body.querySelector('[data-testid="tasks-row-actions"]')).toBe(null);
   }, 40000);
-
-  it("«Взять в работу» на карточке dob шлёт MERGE статуса в список источника", async () => {
-    const host = renderTasksView();
-    await settle(3000);
-
-    const dobCard = [...host.querySelectorAll('[data-testid="external-task-card"]')]
-      .find((el) => /Заявка ООБ/.test(el.textContent || ""));
-    expect(dobCard).toBeTruthy();
-    const takeBtn = [...dobCard.querySelectorAll("button")].find((b) => /Взять в работу/.test(b.textContent || ""));
-    expect(takeBtn).toBeTruthy();
-
-    await act(async () => {
-      takeBtn.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 100));
-    });
-    await settle(800);
-
-    const merge = state.requests.find((r) => r.source === "dob" && r.method === "MERGE");
-    expect(merge).toBeTruthy();
-    expect(merge.url).toContain("lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')/items(1)");
-    expect(merge.body).toEqual({ Status: "В работе" });
-  }, 30000);
 
   it("#tasks/<Id задачи> открывает карточку задачи, а не ищет элемент ProblemsPallet", async () => {
     // Проверяем роут из таблицы: openTaskForm(main:10) → #tasks/10.
@@ -833,11 +758,11 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(host.querySelectorAll('[col-id="rowActions"]').length).toBe(0);
     expect(host.textContent).toContain("в точке клика");
 
-    // одиночный клик по строке dob-задачи = только выделение (без перехода)
+    // одиночный клик по строке задачи = только выделение (без перехода)
     const hashBefore = window.location.hash;
-    const dobRow = rowByText(/Заявка ООБ/);
-    expect(dobRow).toBeTruthy();
-    await clickCell(dobRow, 240, 360);
+    const mainRow = rowByText(/Основная задача ООБ/);
+    expect(mainRow).toBeTruthy();
+    await clickCell(mainRow, 240, 360);
     expect(window.location.hash).toBe(hashBefore);
 
     // popup открылся именно в точке клика: координаты клика ушли в позиционирование
@@ -857,26 +782,20 @@ describe("TasksView — multi-source (#tasks)", () => {
       findButton(/Взять в работу/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
       await new Promise((r) => setTimeout(r, 200));
     });
-    const merge = state.requests.find((r) => r.source === "dob" && r.method === "MERGE");
+    // Основной клиент пишет MERGE как post с X-HTTP-Method: MERGE (см. мок выше).
+    const merge = state.requests.find((r) => r.source === "main" && r.merge);
     expect(merge).toBeTruthy();
-    expect(merge.body).toMatchObject({ Status: "В работе" });
+    expect(merge.url).toContain("items(10)");
+    // Вокабуляр статусов своего списка: «в работе» здесь — «В процессе выполнения».
+    expect(merge.body).toMatchObject({ Status: "В процессе выполнения" });
     // после действия попап закрылся
     expect(popup()).toBeNull();
 
-    // Список перечитан: задача уже «В работе» (взята) → в попапе появилась «Изменить»
-    await settle(800);
-    await clickCell(rowByText(/Заявка ООБ/), 300, 400);
-    expect(findButton(/Взять в работу/)).toBeFalsy();
-    expect(findButton(/Изменить/)).toBeTruthy();
-
-    // «Изменить» открывает форму задачи источника (её же роут из карточки)
-    const hashBeforeEdit = window.location.hash;
-    await act(async () => {
-      findButton(/Изменить/).dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 200));
-    });
-    expect(window.location.hash).not.toBe(hashBeforeEdit);
-    expect(window.location.hash.toLowerCase()).toBe("#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3");
+    // Дальше — перечитывание списка и «Изменить» из попапа. Для задачи своего
+    // сайта это покрыто отдельными тестами: MERGE — «в попапе на main-строке
+    // есть «Взять в работу»…», переход в форму — ««Изменить» в попапе
+    // main-строки открывает форму задачи (#tasks/<Id>)». Здесь мок основного
+    // списка stateless, поэтому состояние «взята» после MERGE не воспроизвести.
   }, 30000);
 
   it("в попапе на main-строке есть «Взять в работу», и она шлёт MERGE в основной список", async () => {

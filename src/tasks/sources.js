@@ -3,36 +3,28 @@
 // План: см. artifacts/plan.md (этапы 1, 5, 10).
 //
 // Источник — first-class объект, описывающий:
-//   - id             : строковый идентификатор ("main" | "dob" | …)
+//   - id             : строковый идентификатор ("main" | …)
 //   - label          : короткий человеко-читаемый лейбл
-//   - clientKind     : какой HTTP-клиент обслуживает ("main" | "dob")
+//   - clientKind     : какой HTTP-клиент обслуживает ("main")
 //   - listGuid       : GUID списка задач на сайте-источнике (если известен)
 //   - listTitle      : заголовок списка задач (для fallback-резолва по Title)
 //   - enabled        : глобальный флаг (если false — источник выключен)
 //   - resolveListApi : async () => listApi строка (для случаев, когда нужен runtime-резолв)
 //
 // Override через localStorage["tasks.sources"] (для отладки без пересборки):
-//   JSON: { "dob": { "enabled": false } } — мержится поверх дефолта
+//   JSON: { "main": { "enabled": false } } — мержится поверх дефолта
+//
+// Источник ОДИН — список Tasks на этом сайте. Заявки и задачи ДОБ вынесены в
+// отдельное приложение xenus91/dob-requests, которое живёт на своём сайте,
+// поэтому кросс-сайтовых источников здесь нет (2026-10-16).
 
 import { TASKS_LIST_GUID, TASKS_LIST_API } from "./config";
-
-// GUID списка задач на сайте ДОБ (sites/dob/doblogistic, список "RequestsTask").
-// Подтверждён рабочим запросом пользователя:
-//   /dob-api/sites/dob/doblogistic/_api/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')/items
-// Ответ содержит элементы типа SP.Data.RequestsTaskListItem (заявки ООБ).
-// Раньше GUID был неизвестен (TODO Этап 0 в ADR) и список резолвился по Title —
-// это ломало fetch, если Title в тенанте отличается (пробел/переименование).
-export const DOB_TASKS_LIST_GUID = "03FC1B92-BAFF-44DC-B8A3-D04ACBE329D3";
-// Путь к списку ОТНОСИТЕЛЬНО api-base источника.
-// Полный URL собирает makeSourceClient().toRequestUrl()
-// (в dev → /dob-api/sites/dob/doblogistic/_api/web/lists(guid'…'), в prod → origin + /sites/dob/doblogistic/_api/web/lists(guid'…')).
-export const DOB_TASKS_LIST_API = `/web/lists(guid'${DOB_TASKS_LIST_GUID.toLowerCase()}')`;
 
 /**
  * @typedef {object} TaskSource
  * @property {string} id
  * @property {string} label
- * @property {"main"|"dob"} clientKind
+ * @property {"main"} clientKind
  * @property {string|null} [listGuid]
  * @property {string|null} [listTitle]
  * @property {boolean} [enabled=true]
@@ -92,20 +84,6 @@ export const DEFAULT_TASK_SOURCES = [
     listTitle: "Tasks",
     enabled: true,
     resolveListApi: null,
-  },
-  {
-    id: "dob",
-    label: "DOB Logistic",
-    clientKind: "dob",
-    listGuid: DOB_TASKS_LIST_GUID,
-    listApi: DOB_TASKS_LIST_API, // подтверждённый GUID списка "RequestsTask" (см. выше)
-    listTitle: "RequestsTask", // fallback-резолв по Title, если GUID в тенанте другой
-    enabled: true,
-    resolveListApi: null,
-    // Вокабуляр статусов на сайте ДОБ может отличаться — определяем автоматически
-    // по choice-полям списка; при необходимости задаётся override'ом
-    // localStorage["tasks.sources"] = { "dob": { "inProgressStatus": "В работе" } }.
-    inProgressStatus: null,
   },
 ];
 

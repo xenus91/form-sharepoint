@@ -1,18 +1,13 @@
 // src/tasks/sourceClient.js
 // HTTP-абстракция над источником задач.
 // Возвращает унифицированный клиент: get/post/merge + listApi() + apiBase.
-// Digest-логика уже встроена в базовых клиентах:
+// Digest-логика уже встроена в базовый клиент:
 //   - main → apiClient (axios, прокси /api, digest через contextinfo)
-//   - dob  → dobAxios (axios, прокси /dob-api, digest через getDobDigest())
 //
-// План: см. artifacts/plan.md (этап 1).
+// Источник задач один — список Tasks на этом сайте, поэтому ветка клиента сайта
+// ДОБ удалена вместе с приложением «Заявки ДОБ и задачи» (2026-10-16).
 
 import apiClient from "../api";
-import {
-  dobAxios,
-  dobApiBase,
-  // NOTE: getDobDigest() вызывается автоматически интерцептором dobAxios.
-} from "../features/dob/api/dobClient";
 
 /**
  * @typedef {object} SourceClient
@@ -81,34 +76,6 @@ export function makeSourceClient(source) {
       post: (url, body, opts) => apiClient.post(url, body, opts),
       merge: (url, body, opts) =>
         apiClient.post(url, body, {
-          ...(opts || {}),
-          headers: { ...(opts?.headers || {}), ...MERGE_HEADERS },
-        }),
-    };
-  }
-  if (source.clientKind === "dob") {
-    // dobAxios НЕ имеет baseURL (см. src/features/dob/api/dobClient.js),
-    // поэтому apiBase берётся из dobApiBase() и URL префиксуется через toRequestUrl.
-    const dobClientApiBase = dobApiBase();
-    return {
-      name: source.id,
-      apiBase: dobClientApiBase,
-      toRequestUrl: (url) => toRequestUrl(dobClientApiBase, url),
-      listApi: async () => {
-        if (source.listApi) return source.listApi;
-        // Fallback: резолв по Title (см. sources.js — если GUID в тенанте другой)
-        const { resolveSourceListApi } = await import("./sources");
-        const api = await resolveSourceListApi(source, {
-          apiBase: dobClientApiBase,
-          get: dobAxios.get.bind(dobAxios),
-          toRequestUrl: (url) => toRequestUrl(dobClientApiBase, url),
-        });
-        return api;
-      },
-      get: (url, opts) => dobAxios.get(url, opts),
-      post: (url, body, opts) => dobAxios.post(url, body, opts),
-      merge: (url, body, opts) =>
-        dobAxios.post(url, body, {
           ...(opts || {}),
           headers: { ...(opts?.headers || {}), ...MERGE_HEADERS },
         }),
