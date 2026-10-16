@@ -21,12 +21,12 @@ import {
   DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, TextField, ToggleButton,
   ToggleButtonGroup, Typography,
 } from "@mui/material";
-import RichEditor from "../../dob/components/RichEditor";
+import RichEditor from "./RichEditor";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
-import { toDisplayImages, toStorageImages } from "../../dob/lib/attachmentUrl";
-import { removeImgByFileName } from "../../dob/lib/richImages";
-import { getDobContentTypeFieldsDetailed } from "../../dob/api/dobApi";
-import { userSearchFor } from "../../dob/lib/dobUserSearch";
+import { toDisplayImages, toStorageImages } from "../lib/attachmentUrl";
+import { removeImgByFileName } from "../lib/richImages";
+import { listApiForGuid } from "../../../tasks/config";
+import { getUserPositions, searchSiteUsers } from "../../../tasks/userSearch";
 import {
   FORM_ACTIONS_SX,
   FORM_FIELD_FULL_SX,
@@ -41,7 +41,7 @@ import {
   FORM_SECTION_SX,
   FORM_SECTION_TITLE_SX,
   RESULT_TOGGLE_GROUP_SX,
-} from "../../dob/lib/formStyles";
+} from "../lib/formStyles";
 import {
   buildContentTypeForm,
   normalizeChoiceValue,
@@ -183,9 +183,13 @@ export default function ContentTypeResultDialog({
     // типы контента и свои колонки). Берём DETAILED-вариант: он сообщает, ОТКУДА
     // пришли поля. Без этого фолбэк «все колонки списка» молча рисовал форму
     // закрытия из чужих полей (задача из RequestsTask — «полей как будто все»).
-    queryFn: () => (listGuid
-      ? getDobContentTypeFieldsDetailed(contentTypeId, listGuid)
-      : fetchContentTypeFieldsDetailed(contentTypeId)),
+    // Список задачи — на этом же сайте, поэтому читаем своим клиентом
+            // (кросс-сайтовых запросов в приложении нет).
+    queryFn: () =>
+      fetchContentTypeFieldsDetailed(
+        contentTypeId,
+        listGuid ? { listApi: listApiForGuid(listGuid) } : undefined,
+      ),
     enabled: Boolean((open || inline) && contentTypeId),
     staleTime: 30 * 60 * 1000,
     retry: 1,
@@ -194,7 +198,11 @@ export default function ContentTypeResultDialog({
   // "list-fields" — ФОЛБЭК: все колонки списка (тип не найден).
   const ctFields = React.useMemo(() => fieldsQ.data?.fields || [], [fieldsQ.data]);
   // Поля «Пользователь или группа»: сайт поиска — по списку задачи.
-  const personSearch = React.useMemo(() => userSearchFor(listGuid), [listGuid]);
+  // Поиск людей — свой сайт: те же функции, что и у остального приложения.
+  const personSearch = React.useMemo(
+    () => ({ search: searchSiteUsers, getPositions: getUserPositions }),
+    [],
+  );
   const ctSource = fieldsQ.data?.source || "";
 
   const form = React.useMemo(

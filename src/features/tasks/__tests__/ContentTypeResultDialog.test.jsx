@@ -12,10 +12,10 @@ import { act } from "react-dom/test-utils";
 import { ThemeProvider, createTheme } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RESULT_CHECK_OOO_CT_ID } from "../../../tasks/contentTypeFields";
-import { sameFormValues } from "../../dob/lib/richImages";
+import { sameFormValues } from "../lib/richImages";
 
 // CKEditor в jsdom не поднимаем: рич-текст подменяем textarea с тем же контрактом.
-vi.mock("../../dob/components/RichEditor", () => ({
+vi.mock("../components/RichEditor", () => ({
   default: ({ value, onChange, onUploadImage, isUploading, footer, invalid, readOnly }) => (
     <div data-testid="rich-editor-box" data-invalid={invalid ? "1" : "0"} data-readonly={readOnly ? "1" : "0"}>
     <textarea

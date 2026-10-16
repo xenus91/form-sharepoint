@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 
-vi.mock("../../RichEditor", () => ({
+vi.mock("../../../../tasks/components/RichEditor", () => ({
   default: ({ placeholder, value }) => (
     <textarea data-testid="rich-editor" data-placeholder={placeholder} value={value || ""} readOnly />
   ),

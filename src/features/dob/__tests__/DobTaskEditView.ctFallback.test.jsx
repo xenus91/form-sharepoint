@@ -53,7 +53,7 @@ vi.mock("../api/dobApi", () => ({
   takeDobTaskInWork: vi.fn(async () => ({ ok: false })),
 }));
 
-vi.mock("../components/RichEditor", () => ({
+vi.mock("../../tasks/components/RichEditor", () => ({
   default: ({ value, onChange }) => (
     <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
   ),

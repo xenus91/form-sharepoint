@@ -97,7 +97,7 @@ vi.mock("../api/dobClient", () => {
   };
 });
 
-vi.mock("../components/RichEditor", () => ({
+vi.mock("../../tasks/components/RichEditor", () => ({
   default: ({ value, onChange }) => (
     <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
   ),

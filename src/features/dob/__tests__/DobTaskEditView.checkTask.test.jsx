@@ -61,7 +61,7 @@ vi.mock("../api/dobApi", () => ({
 
 // RichEditor мокаем: важно, что он ПОЛУЧАЕТ onUploadImage (картинки → вложения,
 // их может быть несколько) и умеет отдать html в форму.
-vi.mock("../components/RichEditor", () => ({
+vi.mock("../../tasks/components/RichEditor", () => ({
   // footer — блок вложений, который страница передаёт редактору: он показывается
   // ВНУТРИ редактора (внутри его рамки), а не отдельным блоком под ним.
   default: ({ value, onChange, onUploadImage, footer }) => (

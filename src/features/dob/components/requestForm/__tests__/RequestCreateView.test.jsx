@@ -18,7 +18,7 @@ vi.mock("../../../api/dobApi", () => ({
   updateDobItem: vi.fn(),
   uploadDobAttachment: vi.fn(),
 }));
-vi.mock("../../RichEditor", () => ({ default: () => <textarea data-testid="rich-editor" /> }));
+vi.mock("../../../../tasks/components/RichEditor", () => ({ default: () => <textarea data-testid="rich-editor" /> }));
 vi.mock("../../../../tasks/components/PersonFieldAutocomplete", () => ({ default: () => <input data-testid="person-field" /> }));
 
 import * as dobApi from "../../../api/dobApi";

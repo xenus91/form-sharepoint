@@ -54,7 +54,7 @@ vi.mock("../api/dobApi", () => ({
   getDobEntityType: vi.fn(async () => "SP.Data.TasksListItem"),
 }));
 
-vi.mock("../components/RichEditor", () => ({
+vi.mock("../../tasks/components/RichEditor", () => ({
   default: ({ value, onChange, footer }) => (
     <div>
       <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />

@@ -55,7 +55,7 @@ vi.mock("../api/dobApi", () => ({
 }));
 
 // Редактор показывает флаг readOnly — именно его мы проверяем.
-vi.mock("../components/RichEditor", () => ({
+vi.mock("../../tasks/components/RichEditor", () => ({
   default: ({ value, onChange, readOnly, footer }) => (
     <div>
       <textarea

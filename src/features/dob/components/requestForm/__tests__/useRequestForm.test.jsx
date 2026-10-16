@@ -29,7 +29,7 @@ vi.mock("../../../lib/dcEmailApi", () => ({
   ensureDcEmailLink: vi.fn(),
   buildOffDepKey: (office, department) => `${office || ""}${department || ""}`,
 }));
-vi.mock("../../RichEditor", () => ({
+vi.mock("../../../../tasks/components/RichEditor", () => ({
   default: ({ value, onChange }) => (
     <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
   ),

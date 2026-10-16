@@ -64,7 +64,19 @@ vi.mock("../api/dobApi", () => ({
   takeDobTaskInWork: vi.fn(async () => ({ ok: false })),
 }));
 
-vi.mock("../components/RichEditor", () => ({
+// Поля типа контента диалог закрытия теперь читает основным клиентом
+// (кросс-сайтовых запросов нет), поэтому мокаем fetchContentTypeFieldsDetailed.
+vi.mock("../../../tasks/contentTypeFields", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    fetchContentTypeFieldsDetailed: vi.fn(async () => ({
+      fields: state.ctFields, source: state.source, ctId: OOO_CT_ID, error: state.error,
+    })),
+  };
+});
+
+vi.mock("../../tasks/components/RichEditor", () => ({
   default: ({ value, onChange }) => (
     <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />
   ),

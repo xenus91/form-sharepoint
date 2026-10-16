@@ -12,7 +12,7 @@ import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
 // Функции формы заявки ДОБ нужны здесь ровно для одного: MultiChoice-колонки
 // SharePoint (odata=verbose) принимает ТОЛЬКО объектом-коллекцией, а строка
 // «a;#b» даёт 400 «unexpected 'PrimitiveValue' … 'StartObject' expected».
-import { toVerbosePayload } from "../../dob/api/dobApi";
+import { toVerbosePayload } from "../../../tasks/verbosePayload";
 
 // Минимальное время, которое карточка проводит в состоянии «Сохранение...» (мс).
 // Иначе при быстром ответе сервера оверлей мелькает и кажется, что карточка пропала мгновенно.

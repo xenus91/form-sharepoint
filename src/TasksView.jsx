@@ -24,8 +24,8 @@ import {
 } from "./tasks/distribution";
 import { TASKS_LIST_API, TASKS_LIST_GUID, ADDITIONAL_ACTIONS_STANDARD, fetchAdditionalActionsDefault, getCachedAdditionalActionsDefaultSync, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "./tasks/config";
 import { getSourceById } from "./tasks/sources";
-import { uploadDobAttachment, deleteDobAttachment } from "./features/dob/api/dobApi";
-import { fileNameFromSrc, removedImgSrcsByValues, sameFormValues } from "./features/dob/lib/richImages";
+import { uploadTaskAttachment, deleteTaskAttachment } from "./tasks/attachments";
+import { fileNameFromSrc, removedImgSrcsByValues, sameFormValues } from "./features/tasks/lib/richImages";
 import { resolveTaskResultDefinition } from "./services/taskResultDefinitions";
 import { resolveTaskRule } from "./services/taskBehaviour";
 import { resolveResultFlow } from "./features/tasks/resultFlow";
@@ -58,8 +58,8 @@ import TasksHashContent from "./features/tasks/components/TasksHashContent";
 import TaskLocationDialog from "./features/tasks/components/TaskLocationDialog";
 import ContentTypeResultDialog from "./features/tasks/components/ContentTypeResultDialog";
 import { fetchTaskContentTypeMeta, isDialogRequired, isResultCheckTask, taskContentTypeId, taskContentTypeName } from "./tasks/contentTypeFields";
-import { toStorageImages } from "./features/dob/lib/attachmentUrl";
-import { fieldsWithBase64, materializeRichValues } from "./features/dob/lib/materializeRichImages";
+import { toStorageImages } from "./features/tasks/lib/attachmentUrl";
+import { fieldsWithBase64, materializeRichValues } from "./features/tasks/lib/materializeRichImages";
 import { isTaskTakenByCurrentUser } from "./features/tasks/lib/currentUserMatch";
 import TaskConfirmNotFoundDialog from "./features/tasks/components/TaskConfirmNotFoundDialog";
 import TaskElementDialog from "./features/tasks/components/TaskElementDialog";
@@ -837,7 +837,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     if (!file || !Number.isFinite(id)) return null;
     setCtUploading(true);
     try {
-      return await uploadDobAttachment(id, file, ctListGuidOf(ctDialog?.task));
+      return await uploadTaskAttachment(id, file, ctListGuidOf(ctDialog?.task));
     } catch (e) {
       console.error("[ct-modal] image upload failed", e?.response?.status, e?.message);
       return null;
@@ -872,7 +872,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     for (const src of removedImgSrcsByValues(norm(prev), norm(next))) {
       const fileName = fileNameFromSrc(src);
       if (!fileName) continue;
-      deleteDobAttachment(id, fileName, guid).catch(() => {});
+      deleteTaskAttachment(id, fileName, guid).catch(() => {});
     }
   }, [ctDialog, ctListGuidOf]);
 
@@ -898,7 +898,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     );
     try {
       storedValues = await materializeRichValues(storedValues, {
-        upload: Number.isFinite(id) ? (file) => uploadDobAttachment(id, file, guid) : null,
+        upload: Number.isFinite(id) ? (file) => uploadTaskAttachment(id, file, guid) : null,
         onError: (e) => notify(`Не удалось сохранить картинку вложением: ${String(e?.message || e).slice(0, 160)}`, { severity: "warning" }),
       });
     } catch (e) {

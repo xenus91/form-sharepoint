@@ -54,7 +54,7 @@ vi.mock("../api/dobApi", () => ({
 }));
 
 // Редактор: отдаём наружу footer (блок вложений) и invalid (акцент обязательного поля).
-vi.mock("../components/RichEditor", () => ({
+vi.mock("../../tasks/components/RichEditor", () => ({
   default: ({ value, onChange, footer, invalid }) => (
     <div data-testid="rich-editor-box" data-invalid={invalid ? "1" : "0"}>
       <textarea data-testid="rich-editor" value={value || ""} onChange={(e) => onChange?.(e.target.value)} />

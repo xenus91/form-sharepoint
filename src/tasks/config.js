@@ -8,6 +8,12 @@ export const TASKS_LIST_API = `/web/lists(guid'${TASKS_LIST_GUID}')`;
 // RowLimit для CAML при hash-поиске. Раньше было 100 → цикл fetchFullTask по
 // всем кандидатам мог делать до 101 запроса. Теперь берём топ-20 свежих
 // + fetchFullTask только для лучшего кандидата.
+/** GUID списка → REST-путь к списку на СВОЁМ сайте. */
+export function listApiForGuid(guid = TASKS_LIST_GUID) {
+  const clean = String(guid || TASKS_LIST_GUID).trim().replace(/^\{|\}$/g, "");
+  return `/web/lists(guid'${clean.toLowerCase()}')`;
+}
+
 export const HASH_CAML_ROW_LIMIT = 20;
 
 // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice)
