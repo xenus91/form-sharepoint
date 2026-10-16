@@ -4,17 +4,44 @@ import { useState, useMemo, useCallback } from "react";
 import { isCompletedStatus } from "../../../tasks/status";
 import { extractTKNumberFromTask } from "../../../tasks/formatters";
 
-export function useTasksFiltering(tasks, tab) {
+/**
+ * @param {Array<any>} tasks — задачи текущего источника
+ * @param {number} tab — 0 = активные, 1 = завершённые
+ * @param {{
+ *   onlyMine?: boolean,
+ *   isMyTask?: ((task: any) => boolean) | null,
+ * }} [opts]
+ *   onlyMine — включён тумблер «Я исполнитель»;
+ *   isMyTask — предикат «задачу веду я» (см. lib/currentUserMatch.js).
+ */
+export function useTasksFiltering(tasks, tab, opts = {}) {
+  const { onlyMine = false, isMyTask = null } = opts;
   const [groupingEnabled, setGroupingEnabled] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
 
+  // Счётчики на вкладках считаем по ВСЕМУ списку, а не по отфильтрованному:
+  // иначе при включённом «Я исполнитель» цифры на вкладках менялись бы под
+  // руками, а сколько задач отобрано — видно в подписи самого тумблера.
   const activeCount = useMemo(() => tasks.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete)).length, [tasks]);
   const completedCount = useMemo(() => tasks.filter((t) => isCompletedStatus(t.Status, t.PercentComplete)).length, [tasks]);
 
+  // Сколько всего задач я веду — подпись на тумблере «Я исполнитель (N)».
+  const myCount = useMemo(
+    () => (typeof isMyTask === "function" ? tasks.filter(isMyTask).length : null),
+    [tasks, isMyTask],
+  );
+
+  // Тумблер «Я исполнитель» режет список ДО разделения по вкладкам и до
+  // группировки — тогда он действует и на «Активных», и на «Завершённых».
+  const visibleTasks = useMemo(() => {
+    if (!onlyMine || typeof isMyTask !== "function") return tasks;
+    return tasks.filter(isMyTask);
+  }, [tasks, onlyMine, isMyTask]);
+
   const filteredTasks = useMemo(() => {
-    if (tab === 0) return tasks.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete));
-    return tasks.filter((t) => isCompletedStatus(t.Status, t.PercentComplete));
-  }, [tasks, tab]);
+    if (tab === 0) return visibleTasks.filter((t) => !isCompletedStatus(t.Status, t.PercentComplete));
+    return visibleTasks.filter((t) => isCompletedStatus(t.Status, t.PercentComplete));
+  }, [visibleTasks, tab]);
 
   const groupedTasks = useMemo(() => {
     if (!groupingEnabled) {
@@ -47,8 +74,8 @@ export function useTasksFiltering(tasks, tab) {
   return {
     groupingEnabled, setGroupingEnabled,
     expandedGroups, setExpandedGroups,
-    activeCount, completedCount,
-    filteredTasks, groupedTasks,
+    activeCount, completedCount, myCount,
+    filteredTasks, groupedTasks, visibleTasks,
     toggleGroup,
   };
 }

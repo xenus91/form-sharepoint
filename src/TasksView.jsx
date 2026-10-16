@@ -43,6 +43,7 @@ import { useHashPolling, useTasksFocusPolling } from "./features/tasks/hooks/use
 import TasksHeader from "./features/tasks/components/TasksHeader";
 import TasksTabs from "./features/tasks/components/TasksTabs";
 import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle";
+import MyTasksToggle from "./features/tasks/components/MyTasksToggle";
 
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
 import { openTaskForm } from "./features/tasks/lib/openTaskForm";
@@ -475,14 +476,39 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // mapRawTask, fetchFullTask, searchTaskByRelatedItem импортированы из ./tasks/* —
   // см. mapRawTask (./tasks/mapping), fetchFullTask + searchTaskByRelatedItem (./tasks/hashSearch).
 
+// ── Тумблер «Я исполнитель» ─────────────────────────────────────────────────
+  const [onlyMine, setOnlyMine] = useState(false);
+  // Фильтр имеет смысл, только когда текущий пользователь опознан: известен его
+  // Id ИЛИ ФИО (Editor в задачах часто приходит только строкой — тогда сверяем
+  // по ФИО).
+  const meKnown = !!currentUserId || !!String(currentUserTitle || "").trim();
+  // Если данные о пользователе пропадают (выход/смена пользователя) — тумблер
+  // снимаем: иначе список молча опустеет и это выглядит как «задач нет».
+  useEffect(() => {
+    if (!meKnown && onlyMine) setOnlyMine(false);
+  }, [meKnown, onlyMine]);
+
+  // «Я исполнитель» — задача, которую я ВЕДУ: взял в работу (и ещё не закрыл)
+  // или закрыл сам. Назначение в «Кому назначено» сюда НЕ входит (требование
+  // 2026-10-10): на мне или на моей группе может висеть задача, по которой
+  // работает кто-то другой, и наоборот. Кто взял задачу — по Id / ФИО / учётной
+  // записи (см. features/tasks/lib/currentUserMatch.js).
+  const isMyTask = useCallback((row) => {
+    if (!row) return false;
+    const status = row.Status ?? "";
+    // Ни «в работе», ни «завершена» → показывать нечего (в т.ч. «Не начата»).
+    if (!isInProgressStatus(status) && !isCompletedStatus(status, row.PercentComplete)) return false;
+    return isTaskTakenByCurrentUser(row, { currentUserId, currentUserTitle });
+  }, [currentUserId, currentUserTitle]);
+
 // PR2: фильтрация/группировка вынесены в useTasksFiltering (без смены логики)
   const {
     groupingEnabled, setGroupingEnabled,
     expandedGroups, setExpandedGroups,
-    activeCount, completedCount,
+    activeCount, completedCount, myCount,
     filteredTasks, groupedTasks,
     toggleGroup,
-  } = useTasksFiltering(cardTasks, tab);
+  } = useTasksFiltering(cardTasks, tab, { onlyMine, isMyTask });
 
   // ⭐ Завершённые задачи — отдельный ленивый источник (RenderListDataAsStream):
   // счётчик считаем сразу, карточки грузим порциями по 20 при открытии вкладки.
@@ -500,6 +526,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     completedRefreshRef.current = completed.refresh;
   }, [completed.refresh]);
   const completedTasks = completed.items;
+  // Тумблер «Я исполнитель» действует и на вкладке «Завершённые»: остаются те
+  // задачи, которые закрыл я.
+  const visibleCompletedTasks = React.useMemo(
+    () => (onlyMine ? (completedTasks || []).filter(isMyTask) : (completedTasks || [])),
+    [completedTasks, onlyMine, isMyTask],
+  );
   // Счётчик может быть неизвестен (null) — тогда показываем количество уже загруженных,
   // но НИКОГДА не подставляем 0:completedCount считает завершённые внутри активной выборки,
   // а завершённые в неё не попадают (там всегда 0).
@@ -514,10 +546,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     ((completed.loading && completedTasks.length === 0) ||
       (!completed.loaded && !completed.error && completed.count !== 0));
   const completedGrouped = React.useMemo(() => {
-    if (!completedTasks.length) return [];
-    if (!groupingEnabled) return [["Все", completedTasks]];
+    if (!visibleCompletedTasks.length) return [];
+    if (!groupingEnabled) return [["Все", visibleCompletedTasks]];
     const map = new Map();
-    for (const task of completedTasks) {
+    for (const task of visibleCompletedTasks) {
       const sc = extractTKNumberFromTask(task);
       if (!map.has(sc)) map.set(sc, []);
       map.get(sc).push(task);
@@ -527,7 +559,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       if (b[0] === "Без ТК") return -1;
       return a[0].localeCompare(b[0], "ru");
     });
-  }, [completedTasks, groupingEnabled]);
+  }, [visibleCompletedTasks, groupingEnabled]);
 
   const useVirtual = false;
   const flatVirtualizer = useVirtualizer({
@@ -890,6 +922,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
               <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedTotal} completedCount={completedTotal} hashMode={isHashMode} isTabPending={isTabPending} />
             </Box>
             <TasksGroupingToggle groupingEnabled={groupingEnabled} onToggle={setGroupingEnabled} countGroups={groupedTasks.length} isHashMode={isHashMode} tab={tab} />
+            <MyTasksToggle enabled={onlyMine} onToggle={setOnlyMine} count={myCount} disabled={!meKnown} isHashMode={isHashMode} />
           </Box>
         )}
       </Box>
@@ -942,10 +975,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         "&::-webkit-scrollbar-thumb:hover": { bgcolor: "rgba(23,28,143,0.6)" },
       }}>
       <TaskList
-        tasks={tab === 1 ? completedTasks : tasks}
+        tasks={tab === 1 ? visibleCompletedTasks : tasks}
         tab={tab}
         groupedTasks={tab === 1 ? completedGrouped : groupedTasks}
-        filteredTasks={tab === 1 ? completedTasks : filteredTasks}
+        filteredTasks={tab === 1 ? visibleCompletedTasks : filteredTasks}
         groupingEnabled={groupingEnabled}
         expandedGroups={expandedGroups}
         toggleGroup={toggleGroup}
@@ -977,8 +1010,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       {tab === 1 && !isHashMode && completedTasks.length > 0 && (
         <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.75, pt: 1, pb: 2 }}>
           <Typography variant="caption" sx={{ color: "text.secondary" }}>
-            Показано {completedTasks.length}
-            {completedTotal != null ? ` из ${completedTotal}` : ""}
+            {onlyMine
+              // С тумблером «Я исполнитель» общий счётчик завершённых не имеет
+              // смысла: показываем, сколько отобрано из уже загруженных.
+              ? `Показано ${visibleCompletedTasks.length} из загруженных ${completedTasks.length}`
+              : `Показано ${completedTasks.length}${completedTotal != null ? ` из ${completedTotal}` : ""}`}
           </Typography>
           {completed.hasMore ? (
             <Button

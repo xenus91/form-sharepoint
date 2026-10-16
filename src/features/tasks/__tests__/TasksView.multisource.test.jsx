@@ -316,7 +316,7 @@ vi.mock("../../../api", () => {
     if (d.includes(`${MAIN_LIST}/items`) && d.includes("$orderby=Modified desc")) {
       return { data: { d: { results: [MAIN_DONE_TASK] } } };
     }
-    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS, MAIN_CHECK_IN_PROGRESS, MAIN_CHECK_NO_CT] } } };
+    if (d.includes(`${MAIN_LIST}/items`)) return { data: { d: { results: [MAIN_TASK, MAIN_IN_PROGRESS, MAIN_THU_IN_PROGRESS, MAIN_CHECK_IN_PROGRESS, MAIN_CHECK_NO_CT, ...(state.extraMainTasks || [])] } } };
     if (d.includes(`${MAIN_LIST}?`)) return { data: { d: { ListItemEntityTypeFullName: "SP.Data.TasksListItem" } } };
     // TaskBehaviour / прочие списки — пусто
     return { data: { d: { results: [] } } };
@@ -433,6 +433,7 @@ const wait200 = () => new Promise((r) => setTimeout(r, 200));
 describe("TasksView — multi-source (#tasks)", () => {
   beforeEach(() => {
     state.requests = [];
+    state.extraMainTasks = [];
     state.dobTaken = {};
     state.behaviourOverride = null;
     localStorage.clear();
@@ -673,4 +674,42 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect([...cardWithForm.querySelectorAll("button")].map((b) => b.textContent.trim()).some((t) => /^Сохранить/.test(t))).toBe(true);
   }, 40000);
 
+
+  it("тумблер «Я исполнитель»: оставляет только задачи, которые я взял в работу", async () => {
+    // Чужая задача «в работе»: Editor — не я, поэтому под тумблер не попадает.
+    state.extraMainTasks = [{
+      ...MAIN_TASK,
+      Id: 21,
+      Title: "Чужая задача в работе",
+      Status: "В работе",
+      PercentComplete: 0,
+      AssignedTo: { results: [{ Id: 5, Title: "Иванов Иван Иванович" }] },
+      Editor: { Id: 5, Title: "Иванов Иван Иванович" },
+    }];
+
+    const host = renderTasksView();
+    await settle(2500);
+
+    const toggle = host.querySelector('[data-testid="my-tasks-toggle"]');
+    expect(toggle).toBeTruthy();
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    // Пока тумблер выключен — видны и моя, и чужая задача.
+    expect(host.textContent).toContain("Чужая задача в работе");
+    expect(host.textContent).toContain("Задача в работе ООБ");
+
+    // Включаем.
+    await act(async () => { mouseClick(toggle); await wait200(); });
+    await settle(500);
+    expect(host.querySelector('[data-testid="my-tasks-toggle"]').getAttribute("aria-checked")).toBe("true");
+
+    // Чужая исчезла, моя осталась.
+    expect(host.textContent).not.toContain("Чужая задача в работе");
+    expect(host.textContent).toContain("Задача в работе ООБ");
+
+    // Выключаем — чужая вернулась.
+    await act(async () => { mouseClick(host.querySelector('[data-testid="my-tasks-toggle"]')); await wait200(); });
+    await settle(500);
+    expect(host.textContent).toContain("Чужая задача в работе");
+  }, 40000);
 });
