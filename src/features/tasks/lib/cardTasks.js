@@ -3,7 +3,7 @@
 //
 // Раньше карточки строились только из основного списка (useTasksQuery → main),
 // поэтому задачи сайта ДОБ в карточном режиме не появлялись вовсе — хотя в
-// табличном режиме они уже грузились (useTasksTableData → multi-source).
+// мульти-источниковой загрузке (сейчас источник один — main).
 //
 // Здесь: main-задачи (богатые, с enrich) помечаем sourceId="main" и склеиваем
 // с «внешними» строками (dob и др. источники). Итог сортируется по Created asc
@@ -59,7 +59,7 @@ export function markMainTasks(tasks, opts = {}) {
 /**
  * Сливает main-задачи и строки из других источников для карточек.
  * @param {Array<any>} mainTasks — из useTasksQuery (main, с enrich)
- * @param {Array<any>} extraRows — из useTasksTableData().rows (sourceId !== "main")
+ * @param {Array<any>} extraRows — строки внешних источников (sourceId !== "main")
  * @param {{mainSourceId?:string, mainSourceLabel?:string, orderByField?:string, dir?:"asc"|"desc"}} [opts]
  * @returns {Array<any>}
  */

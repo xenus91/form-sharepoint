@@ -1,7 +1,7 @@
 /* eslint-disable react/prop-types */
 // src/features/tasks/components/TasksHashContent.jsx
 // PR2 — hash-контент (лоадер / карточка / notFound) вынесен из TasksView без смены логики
-// (пропсы не валидируются — как в TasksGrid/ExternalTaskCard: их два десятка)
+// (пропсы не валидируются — как в ExternalTaskCard: их два десятка)
 import React from "react";
 import { Box, Paper, Typography, Button, CircularProgress } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";

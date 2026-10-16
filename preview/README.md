@@ -10,8 +10,8 @@
 npm run preview:cards      # vite с preview/vite.config.js, порт 5180
 ```
 
-Откроется сцена `preview/CardsScene.jsx` (`?scene=table` — табличный режим,
-`?scene=related` — диалог «Связанная заявка» на мок-данных):
+Откроется сцена `preview/CardsScene.jsx` (табличного режима больше нет —
+2026-10-16 задачи показываются только карточками):
 
 - карточка «в работе» (своя запись TaskBehaviour по имени типа контента);
 - просроченная карточка;
@@ -31,7 +31,6 @@ npx vite build --config preview/vite.config.js --ssr flow-check.mjs --outDir .ss
 node preview/.ssrout/flow-check.mjs     # поток результата: роутинг + клики + диалоги
 
 
-npx vite-node --config preview/vite.config.js preview/table-check.mjs     # таблица: меню действий в точке клика, заливка строк по статусу, «Срок» как в карточке, фильтр «Я исполнитель»
 
 npx vite-node --config preview/vite.config.js preview/take-check.mjs      # взятие dob-задачи: MERGE с __metadata.type (иначе SharePoint 400)
 ```
@@ -46,9 +45,6 @@ npx vite-node --config preview/vite.config.js preview/take-check.mjs      # вз
 | `vite.config.js` | root = `preview/`, подменяет `src/api.js` на мок (`resolveId`-плагин) |
 | `mockApi.js` | заглушка `apiClient`: связанные элементы ProblemsPallet + принципалы `getuserbyid`/`sitegroups` (чтобы «Кому назначено» по одному Id показывало ФИО) |
 | `CardsScene.jsx` | задачи и конфиг `TaskBehaviour` из реального кэша пользователя |
-| `TableScene.jsx` | табличный режим `#tasks` на мок-данных: закреплённая шапка, поиск, меню действий в точке клика (`?scene=table`) |
-| `mockDob.js` | заглушка DOB-API (`dobApi`/`dobClient`) для сцен предпросмотра + мини-эмуляция SharePoint для dob-списка задач (MERGE/`__metadata.type`) |
-| `table-check.mjs` | jsdom-проверка таблицы: действия открываются в точке клика, состав как в карточке (собирает тот же `rowActions.js`); заливка строк по статусу задачи, «Срок» в формате карточки («Осталось …» / «Просрочено … назад»), «Кому назначено» без `Id <номер>`, фильтр «Я исполнитель» (см. `docs/decisions/form-ui-ux.md` §13) |
 | `take-check.mjs` | jsdom-проверка взятия dob-задачи: мок SharePoint отвергает MERGE без `__metadata.type`, реальный `takeTaskInWork` проходит |
 | `main.jsx` | точка входа для браузера |
 | `jsdom-setup.mjs` | окружение jsdom (глобали для React/MUI) |

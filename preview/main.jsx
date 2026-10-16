@@ -2,14 +2,9 @@
 import { createRoot } from "react-dom/client";
 import { ThemeProvider, createTheme } from "@mui/material";
 import CardsScene from "./CardsScene";
-import TableScene from "./TableScene";
 
-// ?scene=table — табличный режим #tasks (шапка, поиск, кнопки на строке),
-// ?scene=related — диалог «Связанная заявка»; по умолчанию — карточки.
-const params = new URLSearchParams(window.location.search);
-const scene = params.get("scene");
-// ?scene=table&tab=completed — таблица завершённых (с колонкой «Результирующий выбор»).
-const completedTab = params.get("tab") === "completed";
+// Табличного режима больше нет (2026-10-16) — предпросмотр показывает только
+// карточки задач.
 
 const theme = createTheme({
   palette: {
@@ -27,8 +22,6 @@ const theme = createTheme({
 
 createRoot(document.getElementById("root")).render(
   <ThemeProvider theme={theme}>
-    {scene === "table"
-      ? <TableScene completedMode={completedTab} />
-      : <CardsScene />}
+    <CardsScene />
   </ThemeProvider>
 );

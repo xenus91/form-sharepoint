@@ -35,7 +35,6 @@ vi.mock("../lib/assignees", async (importOriginal) => {
 });
 
 const { TakerButtons } = await import("../components/AssignedToButtons");
-const { default: TasksGrid } = await import("../components/TasksGrid");
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -86,7 +85,7 @@ describe("TakerButtons — «Исполнитель» кнопкой", () => {
     expect(btn.textContent).toBe("Поршаков Сергей");
     expect(btn.getAttribute("data-principal-button")).toBe("true");
     expect(btn.getAttribute("data-principal-id")).toBe("207");
-    // тот же признак, по которому TasksGrid отличает кнопку от клика по строке
+    // тот же признак, по которому кнопка отличается от клика по строке
     expect(btn.closest("[data-principal-button]")).toBe(btn);
 
     await act(async () => {
@@ -111,32 +110,5 @@ describe("TakerButtons — «Исполнитель» кнопкой", () => {
     );
     expect(host.querySelector('[data-testid="taker-button"]')).toBeNull();
     expect(host.querySelector('[data-testid="taker-empty"]')?.textContent).toBe("—");
-  });
-});
-
-describe("TasksGrid — колонка «Исполнитель» кнопкой", () => {
-  beforeEach(() => { document.body.innerHTML = ""; });
-
-  it("в ячейке — кнопка принципала, а клик по ней не открывает поповер действий", async () => {
-    const { host } = await render(<TasksGrid rows={[IN_WORK]} />);
-    const btn = host.querySelector('[data-testid="taker-button"]');
-    expect(btn).toBeTruthy();
-    expect(btn.tagName.toLowerCase()).toBe("button");
-    expect(btn.textContent).toBe("Поршаков Сергей");
-
-    // клик по кнопке исполнителя — поповер действий НЕ открывается
-    await act(async () => {
-      click(btn);
-      await new Promise((r) => setTimeout(r, 30));
-    });
-    expect(document.querySelector('[data-testid="tasks-row-actions"]')).toBeNull();
-
-    // контроль: клик по той же строке МИМО кнопки — поповер открывается
-    const cell = host.querySelector(".ag-center-cols-container .ag-row .ag-cell");
-    await act(async () => {
-      click(cell);
-      await new Promise((r) => setTimeout(r, 30));
-    });
-    expect(document.querySelector('[data-testid="tasks-row-actions"]')).toBeTruthy();
   });
 });
