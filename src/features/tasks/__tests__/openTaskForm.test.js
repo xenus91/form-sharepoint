@@ -1,70 +1,35 @@
 // src/features/tasks/__tests__/openTaskForm.test.js
-// Переход из таблицы #tasks в форму редактирования:
-//   • main → существующий роут #tasks/<Id>;
-//   • dob (внешний источник) → #dob_tasks/<Id>?list=<GUID списка источника>,
-//     то есть та же форма, что dob_requests/[id], но по списку задачи.
+// Переход из таблицы #tasks в форму редактирования: любая задача открывается
+// карточкой #tasks/<Id>. Источник один, отдельных роутов для задач нет
+// (заявки и задачи ДОБ — в приложении xenus91/dob-requests).
 
 import { describe, it, expect } from "vitest";
 import { buildTaskFormHash, isDialogResultTask } from "../lib/openTaskForm";
 import { RESULT_CHECK_OOO_CT_ID, RESULT_CHECK_OOO_CT_FULL_ID } from "../../../tasks/contentTypeFields";
 
-const MAIN = { id: "main", listGuid: "463B634E-A71A-4FEF-9A1F-B803431D8639" };
-const DOB = { id: "dob", listGuid: "03FC1B92-BAFF-44DC-B8A3-D04ACBE329D3" };
-
 describe("buildTaskFormHash", () => {
-  it("main-задача → #tasks/<id>", () => {
-    expect(buildTaskFormHash("main:10", [MAIN, DOB])).toBe("#tasks/10");
+  it("задача → #tasks/<id>", () => {
+    expect(buildTaskFormHash("main:10")).toBe("#tasks/10");
   });
 
-  it("задача dob → #dob_tasks/<id>?list=<guid источника> (нижний регистр)", () => {
-    expect(buildTaskFormHash("dob:1", [MAIN, DOB])).toBe(
-      "#dob_tasks/1?list=03fc1b92-baff-44dc-b8a3-d04acbe329d3",
-    );
-  });
-
-  it("неизвестный источник без listGuid → null (переходить некуда)", () => {
-    expect(buildTaskFormHash("dob:1", [MAIN])).toBeNull();
-    expect(buildTaskFormHash("other:5", [MAIN, DOB])).toBeNull();
-  });
-
-
-  it("main-задача типа «Результат проверки ООБ» → форма ДОБ по основному списку", () => {
-    // Тот же экран, что у задач dob (DobTaskEditView), но список — основной:
-    // задача этого типа не открывается стандартной карточкой #tasks/<id>.
-    const check = { sourceId: "main", Id: 13, contentTypeId: RESULT_CHECK_OOO_CT_ID };
-    expect(isDialogResultTask(check)).toBe(true);
-    expect(buildTaskFormHash("main:13", [MAIN, DOB], check)).toBe(
-      "#dob_tasks/13?list=463b634e-a71a-4fef-9a1f-b803431d8639",
-    );
-    // задача обычного типа не меняется
+  it("«Результат проверки ООБ» — тот же роут, что у обычной задачи", () => {
+    // Отдельной формы у типа больше нет: он rozpoётся для диалога закрытия.
+    expect(buildTaskFormHash("main:13")).toBe("#tasks/13");
+    expect(isDialogResultTask({ sourceId: "main", Id: 13, contentTypeId: RESULT_CHECK_OOO_CT_ID })).toBe(true);
+    expect(isDialogResultTask({ Id: 13, ContentTypeId: RESULT_CHECK_OOO_CT_FULL_ID })).toBe(true);
+    expect(isDialogResultTask({ Id: 8, raw: { ContentType: { Name: "Результат проверки ООБ" } } })).toBe(true);
     expect(isDialogResultTask({ sourceId: "main", Id: 10, contentTypeId: "0x0108AAAA" })).toBe(false);
-    expect(buildTaskFormHash("main:10", [MAIN, DOB], { contentTypeId: "0x0108AAAA" })).toBe("#tasks/10");
+  });
+
+  it("compositeId чужого источника → null (переходить некуда)", () => {
+    expect(buildTaskFormHash("dob:1")).toBeNull();
+    expect(buildTaskFormHash("other:5")).toBeNull();
   });
 
   it("невалидный compositeId → null", () => {
-    expect(buildTaskFormHash("", [MAIN, DOB])).toBeNull();
-    expect(buildTaskFormHash("dob", [MAIN, DOB])).toBeNull();
-    expect(buildTaskFormHash("dob:abc", [MAIN, DOB])).toBeNull();
-    expect(buildTaskFormHash(null, [MAIN, DOB])).toBeNull();
+    expect(buildTaskFormHash("")).toBeNull();
+    expect(buildTaskFormHash("dob")).toBeNull();
+    expect(buildTaskFormHash("dob:abc")).toBeNull();
+    expect(buildTaskFormHash(null)).toBeNull();
   });
-
-  it("реальный id из списка (тип + дочерний сегмент) уводит на форму ДОБ", () => {
-    const task = { Id: 13, ContentTypeId: RESULT_CHECK_OOO_CT_FULL_ID };
-    expect(buildTaskFormHash("main:13", [MAIN, DOB], task)).toBe(
-      "#dob_tasks/13?list=463b634e-a71a-4fef-9a1f-b803431d8639",
-    );
-    expect(isDialogResultTask(task)).toBe(true);
-  });
-
-  it("тип контента в объектной/raw-форме тоже уводит на форму ДОБ", () => {
-    const task = { Id: 7, raw: { ContentTypeId: { StringValue: RESULT_CHECK_OOO_CT_ID } } };
-    expect(buildTaskFormHash("main:7", [MAIN, DOB], task)).toBe(
-      "#dob_tasks/7?list=463b634e-a71a-4fef-9a1f-b803431d8639",
-    );
-    const byName = { Id: 8, raw: { ContentType: { Name: "Результат проверки ООБ" } } };
-    expect(buildTaskFormHash("main:8", [MAIN, DOB], byName)).toBe(
-      "#dob_tasks/8?list=463b634e-a71a-4fef-9a1f-b803431d8639",
-    );
-  });
-
 });

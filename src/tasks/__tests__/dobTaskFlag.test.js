@@ -118,14 +118,17 @@ describe("isDobTaskForTask / markDobTask — признак на задаче", 
     expect(markDobTask(marked, CONFIG)).toBe(marked);
   });
 
-  it("«Изменить» ведёт на форму ДОБ по основному списку", () => {
+  it("признак задачи ставится, но роут один — карточка #tasks/<Id>", () => {
+    // Отдельной формы и #dob_tasks в приложении больше нет (2026-10-16):
+    // признак нужен для диалога закрытия по типу контента, а не для роутинга.
     const stored = { Id: 26, contentTypeId: CT_ID };
     const task = markDobTask({ ...stored, sourceId: "main" }, CONFIG);
-    expect(buildTaskFormHash("main:26", [MAIN, DOB], task)).toBe(
-      "#dob_tasks/26?list=463b634e-a71a-4fef-9a1f-b803431d8639",
+    expect(task.isDobTask).toBe(true);
+    expect(buildTaskFormHash("main:26")).toBe("#tasks/26");
+    // с признаком и без него роут одинаковый
+    expect(buildTaskFormHash("main:26")).toBe(
+      buildTaskFormHash("main:26", [MAIN], { ...stored, sourceId: "main" }),
     );
-    // без признака — обычный роут
-    expect(buildTaskFormHash("main:26", [MAIN, DOB], { ...stored, sourceId: "main" })).toBe("#tasks/26");
   });
 });
 

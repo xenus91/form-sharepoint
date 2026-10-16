@@ -33,7 +33,6 @@ import {
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import CloseIcon from "@mui/icons-material/Close";
 import HomeIcon from "@mui/icons-material/Home";
-import TableChartIcon from "@mui/icons-material/TableChart";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 
 const ICON_SX = { color: "#171c8f" };
@@ -53,7 +52,6 @@ export default function AppMenuDrawer({
   canOpenManagerPreview = false,
   onOpenForm,
   onOpenTasks,
-  onOpenDob,
   onOpenManagerPreview,
   userName = "",
   userTitle = "",
@@ -99,13 +97,6 @@ export default function AppMenuDrawer({
             <ListItemText primary="Задачи" primaryTypographyProps={TEXT_PROPS} />
           </ListItemButton>
         </ListItem>
-
-        <ListItem disablePadding>
-          <ListItemButton onClick={onOpenDob} selected={active === "dob"} data-testid="menu-item-dob">
-            <ListItemIcon><TableChartIcon sx={ICON_SX} /></ListItemIcon>
-            <ListItemText primary="Заявки ДОБ" primaryTypographyProps={TEXT_PROPS} />
-          </ListItemButton>
-        </ListItem>
       </List>
 
       <Box sx={{ flex: 1 }} />
@@ -136,7 +127,6 @@ AppMenuDrawer.propTypes = {
   canOpenManagerPreview: PropTypes.bool,
   onOpenForm: PropTypes.func,
   onOpenTasks: PropTypes.func,
-  onOpenDob: PropTypes.func,
   onOpenManagerPreview: PropTypes.func,
   userName: PropTypes.string,
   userTitle: PropTypes.string,

@@ -55,16 +55,6 @@ import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
 import AppMenuDrawer from "./features/navigation/AppMenuDrawer";
 import BurgerWithCount from "./features/navigation/BurgerWithCount";
-const DobTasksView = React.lazy(() => import("./features/dob/DobTasksView"));
-import {
-  DOB_REQUESTS_HASH,
-  buildDobCreateHash,
-  buildDobItemHash,
-  isLegacyDobRequestHash,
-  toRequestsHash,
-} from "./features/dob/lib/dobRoute";
-const DobTaskEditView = React.lazy(() => import("./features/dob/DobTaskEditView"));
-const RequestCreateView = React.lazy(() => import("./features/dob/components/requestForm/RequestCreateView"));
 import TasksView from "./TasksView";
 import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
 import { useNotifications } from './NotificationsProvider';
@@ -1464,10 +1454,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const raw = window.location.hash || "";
     const low = raw.toLowerCase();
     let view = "form";
-    if (low.includes("dob") || low.includes("dob_tasks") || low.includes("doblogistic")) view = "dob";
-    else if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
+    if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
     else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
-    // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10, #dob_tasks/10)
+    // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10)
     let elementId = null;
     let elementAction = null;
     // kind: "element" — явная ссылка на элемент ProblemsPallet (id=/elementid=),
@@ -1477,29 +1466,18 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const mId = low.match(/(?:elementid|\bid)\s*=\s*(\d{1,19})/);
     if (mId) { elementId = mId[1]; elementKind = "element"; }
     else {
-      // Dob: #dob_requests/9723, #dob_tasks/9723 (старый роут) или #dob/10
-      const mDob = raw.match(/#\/?(?:dob_requests|dob_tasks|dob)\/(\d{1,19})/i);
-      if (mDob) elementId = mDob[1];
+      // 2) путь /tasks/10
+      const mPath = raw.match(/#\/?tasks\/(\d{1,19})/i);
+      if (mPath) elementId = mPath[1];
       else {
-        // 2) путь /tasks/10
-        const mPath = raw.match(/#\/?tasks\/(\d{1,19})/i);
-        if (mPath) elementId = mPath[1];
-        else {
-          // 3) чистый ?10 после #tasks (редко) - пробуем последний числовой сегмент
-          const after = low.replace(/^#\/?tasks\/?/, "");
-          if (/^\d{1,19}([\/?&#].*)?$/.test(after.trim())) {
-            const mNum = after.trim().match(/^(\d{1,19})/);
-            if (mNum) elementId = mNum[1];
-          }
+        // 3) чистый ?10 после #tasks (редко) - пробуем последний числовой сегмент
+        const after = low.replace(/^#\/?tasks\/?/, "");
+        if (/^\d{1,19}([\/?&#].*)?$/.test(after.trim())) {
+          const mNum = after.trim().match(/^(\d{1,19})/);
+          if (mNum) elementId = mNum[1];
         }
       }
     }
-    // list=<guid> — какой список открывать в форме (#dob_tasks/<id>?list=<guid>).
-    // Нужно, чтобы из #tasks открыть задачу источника (например, RequestsTask ООБ),
-    // а не заявку из списка раздела «Заявки ДОБ».
-    let elementListGuid = null;
-    const mList = raw.match(/[?&#]list=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/);
-    if (mList) elementListGuid = mList[1];
     // SearchResult для имитации первого нажатия Найдена/Не найдена
     const mSearch = low.match(/searchresult\s*=\s*([a-z_]+)/);
     if (mSearch) {
@@ -1517,17 +1495,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       else elementAction = v;
     } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
     else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
-    // #dob_requests/new — форма создания заявки (роут раздела, 2026-10-12).
-    const dobCreate = view === "dob" && /#\/?(?:dob_requests|dob_tasks|dob)\/new(\b|[?&#/])/i.test(raw);
-    return { view, elementId, elementAction, elementListGuid, elementKind, dobCreate };
+    return { view, elementId, elementAction, elementKind };
   };
   const getViewFromHash = () => parseHash().view;
   const [currentView, setCurrentView] = useState(() => getViewFromHash());
   const [hashElementId, setHashElementId] = useState(() => parseHash().elementId);
   const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
-  const [hashElementListGuid, setHashElementListGuid] = useState(() => parseHash().elementListGuid);
   const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
-  const [hashDobCreate, setHashDobCreate] = useState(() => !!parseHash().dobCreate);
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
 
@@ -1539,39 +1513,17 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setCurrentView(p.view);
       setHashElementId(p.elementId);
       setHashElementAction(p.elementAction);
-      setHashElementListGuid(p.elementListGuid);
       setHashElementKind(p.elementKind || "auto");
-      setHashDobCreate(!!p.dobCreate);
-      // Заявки живут на #dob_requests, задачи чужого списка — на
-      // #dob_tasks/<id>?list=<guid>. Перезаписываем только СТАРЫЕ ссылки на
-      // заявки (#dob_tasks/12 без ?list=), задачные адреса не трогаем.
-      if (isLegacyDobRequestHash(window.location.hash)) {
-        window.location.hash = toRequestsHash(window.location.hash);
-      }
     };
     window.addEventListener("hashchange", onHash);
     onHash();
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useEffect(() => {
-    const desired = currentView === "dob" ? DOB_REQUESTS_HASH : currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
+    const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
     const parsed = parseHash();
     if (currentView === "form") {
       if (window.location.hash && window.location.hash.toLowerCase() !== "#form") window.history.replaceState(null, "", window.location.pathname + window.location.search);
-      return;
-    }
-    // Форма создания: адрес не переписываем (#dob_requests/new).
-    if (currentView === "dob" && parsed.dobCreate) {
-      if (!/^#\/?dob_requests\/new/i.test(window.location.hash)) window.location.hash = buildDobCreateHash();
-      return;
-    }
-    if (currentView === "dob" && parsed.elementId) {
-      // Заявка (список Requests) → #dob_requests/<id>; задача другого списка
-      // (основной Tasks, RequestsTask ООБ) → #dob_tasks/<id>?list=<guid>.
-      const want = buildDobItemHash(parsed.elementId, parsed.elementListGuid);
-      if (!window.location.hash.toLowerCase().startsWith(want.toLowerCase())) {
-        window.location.hash = want;
-      }
       return;
     }
     // если уже на нужном view и hash содержит ожидаемый префикс — не трогаем (сохраняем id=... в url)
@@ -1596,10 +1548,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   };
   const handleOpenTasks = () => {
     setCurrentView("tasks");
-    setDrawerOpen(false);
-  };
-  const handleOpenDob = () => {
-    setCurrentView("dob");
     setDrawerOpen(false);
   };
 
@@ -1725,48 +1673,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     );
   }
 
-  if (currentView === "dob") {
-    const isDobCreate = !!hashDobCreate && !hashElementId;
-    const isDobEdit = !!hashElementId && /^\d+$/.test(String(hashElementId));
-    return (
-      <ThemeProvider theme={figmaTheme}>
-        {/* The list view renders its own AppBar inside DobTasksView.
-            The edit view renders its own AppBar inside DobTaskEditView. */}
-        {/* Меню — тот же компонент, что в задачах и на главной: порядок пунктов
-            и бейдж активных задач везде одинаковые (2026-10-15). */}
-        <AppMenuDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          active={!isDobEdit && !hashDobCreate ? "dob" : ""}
-          tasksCount={tasksActiveCount}
-          canOpenManagerPreview={canOpenManagerPreview}
-          onOpenForm={handleOpenForm}
-          onOpenTasks={handleOpenTasks}
-          onOpenDob={() => { window.location.hash = DOB_REQUESTS_HASH; setHashElementId(null); }}
-          onOpenManagerPreview={handleOpenManagerPreview}
-          userName={userProfile.userDisplayName}
-          userTitle={userProfile.userTitle}
-          userOffice={userProfile.userOffice}
-        />
-        <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "flex", flexDirection: "column", flex: 1, minHeight: 0, height: { xs: 'auto', md: 'calc(100vh - 0px)' }, overflowX: 'hidden' }}>
-          <React.Suspense fallback={<Box sx={{ display:"grid", placeItems:"center", minHeight:"40vh", p:3 }}><CircularProgress /><Typography color="text.secondary" sx={{ mt:1 }}>Загрузка Заявок ДОБ…</Typography></Box>}>
-            {isDobCreate
-              ? <RequestCreateView onOpenMenu={() => setDrawerOpen(true)} userProfile={userProfile} tasksCount={tasksActiveCount} />
-              : isDobEdit
-              ? <DobTaskEditView
-                  id={String(hashElementId)}
-                  listGuid={hashElementListGuid || undefined}
-                  onBackHash={hashElementListGuid ? "#tasks" : DOB_REQUESTS_HASH}
-                  onOpenMenu={() => setDrawerOpen(true)}
-                  tasksCount={tasksActiveCount}
-                />
-              : <DobTasksView onOpenDrawer={() => setDrawerOpen(true)} tasksCount={tasksActiveCount} userProfile={userProfile} />}
-          </React.Suspense>
-        </Box>
-      </ThemeProvider>
-    );
-  }
-
   if (currentView === "tasks") {
     return (
       <ThemeProvider theme={figmaTheme}>
@@ -1804,14 +1710,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           canOpenManagerPreview={canOpenManagerPreview}
           onOpenForm={handleOpenForm}
           onOpenTasks={handleOpenTasks}
-          onOpenDob={handleOpenDob}
           onOpenManagerPreview={handleOpenManagerPreview}
           userName={userProfile.userDisplayName}
           userTitle={userProfile.userTitle}
           userOffice={userProfile.userOffice}
         />
         {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
-        <Box data-dob-shell={currentView === "dob" ? "true" : undefined} sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+        <Box sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
           <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onTasksChanged={refreshActiveTasksCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} initialElementKind={hashElementKind} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
         </Box>
         {/* Keep modals for operation date etc accessible in tasks view as well */}
@@ -1855,7 +1760,6 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         canOpenManagerPreview={canOpenManagerPreview}
         onOpenForm={handleOpenForm}
         onOpenTasks={handleOpenTasks}
-        onOpenDob={handleOpenDob}
         onOpenManagerPreview={handleOpenManagerPreview}
         userName={userProfile.userDisplayName}
         userTitle={userProfile.userTitle}

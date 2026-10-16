@@ -2,7 +2,7 @@
 // src/features/navigation/__tests__/AppMenuDrawer.test.jsx
 //
 // Меню должно быть одинаковым во всех интерфейсах. Раньше разметка была
-// скопирована в App.jsx трижды, и копия для #dob_requests разъехалась: пункт
+// скопирована в App.jsx несколько раз, и одна копия разъехалась: пункт
 // «Просмотр менеджерами» уехал в конец, а у «Задач» пропал бейдж с количеством
 // активных задач.
 
@@ -36,7 +36,6 @@ async function renderMenu(props = {}) {
           onClose={() => {}}
           onOpenForm={() => {}}
           onOpenTasks={() => {}}
-          onOpenDob={() => {}}
           onOpenManagerPreview={() => {}}
           userName="Иванов Иван"
           userTitle="Начальник смены"
@@ -63,14 +62,20 @@ afterEach(() => {
 });
 
 describe("AppMenuDrawer", () => {
-  it("порядок пунктов один и тот же: Главная → Просмотр менеджерами → Задачи → Заявки ДОБ", async () => {
+  it("порядок пунктов один и тот же: Главная → Просмотр менеджерами → Задачи", async () => {
     const host = await renderMenu({ canOpenManagerPreview: true });
-    expect(itemTexts()).toEqual(["Главная", "Просмотр менеджерами", "Задачи", "Заявки ДОБ"]);
+    expect(itemTexts()).toEqual(["Главная", "Просмотр менеджерами", "Задачи"]);
+  });
+
+  it("пункта «Заявки ДОБ» в меню нет — раздел вынесен в отдельное приложение", async () => {
+    await renderMenu({ canOpenManagerPreview: true });
+    expect(scope().querySelector('[data-testid="menu-item-dob"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("Заявки ДОБ");
   });
 
   it("без права на просмотр менеджерами пункт не показывается, порядок остальных тот же", async () => {
     const host = await renderMenu({ canOpenManagerPreview: false });
-    expect(itemTexts(host)).toEqual(["Главная", "Задачи", "Заявки ДОБ"]);
+    expect(itemTexts(host)).toEqual(["Главная", "Задачи"]);
     expect(scope().querySelector('[data-testid="menu-item-manager"]')).toBeFalsy();
   });
 
@@ -88,10 +93,10 @@ describe("AppMenuDrawer", () => {
     expect(badge === null || badge.textContent === "").toBe(true);
   });
 
-  it("активный интерфейс подсвечен (заявки ДОБ)", async () => {
-    const host = await renderMenu({ active: "dob" });
-    expect(scope().querySelector('[data-testid="menu-item-dob"]').className).toContain("Mui-selected");
-    expect(scope().querySelector('[data-testid="menu-item-tasks"]').className).not.toContain("Mui-selected");
+  it("активный интерфейс подсвечен (задачи)", async () => {
+    const host = await renderMenu({ active: "tasks" });
+    expect(scope().querySelector('[data-testid="menu-item-tasks"]').className).toContain("Mui-selected");
+    expect(scope().querySelector('[data-testid="menu-item-form"]').className).not.toContain("Mui-selected");
   });
 
   it("кнопка РЦ показывается только если передана подпись и обработчик", async () => {
