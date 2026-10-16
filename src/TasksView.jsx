@@ -50,7 +50,7 @@ import { useViewMode } from "./features/nav/viewMode";
 import { useDepartment } from "./features/nav/useDepartment";
 import { useTasksTableData } from "./features/tasks/hooks/useTasksTableData";
 import { mergeCardTasks } from "./features/tasks/lib/cardTasks";
-import { openTaskForm, buildTaskFormHash } from "./features/tasks/lib/openTaskForm";
+import { openTaskForm } from "./features/tasks/lib/openTaskForm";
 import { isDobLikeTask } from "./features/tasks/lib/cardTasks";
 import { buildRowActions, stylingToSx } from "./features/tasks/lib/rowActions";
 import { takeTaskInWork } from "./tasks/mutations/takeTaskInWork";
@@ -1193,33 +1193,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
   // PR2: polling вынесен в useHashPolling (adaptivePolling 60s, focus throttle 30s)
   useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMatch, setIsHashTaskRefreshing, recipientField, scNumberField, currentUserId, distribution, taskFieldNames, resultFieldInternalNames, queryClient, lastHashFocusRef });
-  // ⭐ Задача «Результат проверки ООБ» открывается ФОРМОЙ ДОБ (как задачи сайта dob),
-  // а не стандартной карточкой: deep-link #tasks/<Id> уводим на #dob_tasks/<Id>?list=<основной список>.
-  React.useEffect(() => {
-    const t = elementTaskMatch;
-    // sourceId может быть не проставлен (в hash-режиме задачи приходят из useTasksQuery
-    // без markMainTasks) — отсутствие sourceId = основной список, а не внешний источник.
-    if (!t || (t.sourceId && t.sourceId !== "main")) return;
-    let cancelled = false;
-    (async () => {
-      let task = withCtMeta(t);
-      if (!isDobLikeTask(task) && task?.Id) {
-        const meta = await fetchTaskContentTypeMeta(task.Id).catch(() => null);
-        if (meta && (meta.ctId || meta.ctName)) {
-          task = {
-            ...task,
-            contentTypeId: meta.ctId || taskContentTypeId(task) || null,
-            contentTypeName: meta.ctName || taskContentTypeName(task) || null,
-            raw: { ...(task.raw || {}), ContentTypeId: meta.ctId || task.raw?.ContentTypeId },
-          };
-        }
-      }
-      if (cancelled || !isDobLikeTask(task)) return;
-      const hash = buildTaskFormHash(task.compositeId || `main:${task.Id}`, tableData.sources, task);
-      if (hash && window.location.hash !== hash) window.location.hash = hash;
-    })();
-    return () => { cancelled = true; };
-  }, [elementTaskMatch, tableData.sources, withCtMeta]);
   useTasksFocusPolling({ currentUserId, isHashMode, queryClient, lastFocusLoadRef });
 
   if (fieldsLoading) {

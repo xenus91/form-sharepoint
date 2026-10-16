@@ -6,7 +6,7 @@
 //   а не с многокилобайтной строкой data:image.
 // • ПОКАЗЫВАЕМ рабочий адрес: REST-запрос за СОДЕРЖИМЫМ файла,
 //   «…/_api/web/getfilebyserverrelativeurl('<путь>')/$value» (в dev — через префикс
-//   прокси «/dob-api», в prod — с origin страницы). Почему не просто
+//   прокси «/api», в prod — с origin страницы). Почему не просто
 //   «/sites/…/Attachments/<id>/<file>»: такой путь вне `_api` прокси отдавал как
 //   JSON-запрос (`Accept: application/json`), и браузер получал испорченный файл —
 //   в richtext картинка выглядела «сломанной». `/$value` однозначен для любого
@@ -14,11 +14,13 @@
 //
 // При сохранении (перед MERGE) ссылки прогоняются через attachmentStorageUrl, при
 // отображении (в редакторе) — через attachmentDisplayUrl. Так в базе никогда не
-// остаётся «/dob-api/…», а в браузере картинка открывается и в dev, и в prod.
+// остаётся «/api/…», а в браузере картинка открывается и в dev, и в prod.
 
 import { mapImgSrcs } from './richImages';
 
 /** Прокси-префиксы, которыми браузер ходит на SharePoint (см. vite.config.ts). */
+// '/dob-api' оставлен для распознавания старых сохранённых значений;
+// новые адреса строятся через '/api' — кросс-сайтового прокси больше нет.
 const PROXY_PREFIXES = ['/dob-api', '/api'];
 
 function isDev() {
@@ -68,7 +70,7 @@ export function attachmentDisplayUrl(serverRelativeUrl) {
   // Уже REST-адрес содержимого файла — только добавить префикс прокси/оригин.
   if (FILE_VALUE_RE.test(url)) {
     if (viaProxy) return url;
-    if (isDev()) return `/dob-api${url}`;
+    if (isDev()) return `/api${url}`;
     const origin = originOf();
     return origin ? `${origin}${url}` : url;
   }
@@ -79,12 +81,12 @@ export function attachmentDisplayUrl(serverRelativeUrl) {
   const sitePath = listsAt > 0 ? url.slice(0, listsAt) : '';
   if (sitePath) {
     const rest = `${sitePath}/_api/web/getfilebyserverrelativeurl('${encodePath(url)}')/$value`;
-    if (isDev()) return `/dob-api${rest}`;
+    if (isDev()) return `/api${rest}`;
     const origin = originOf();
     return origin ? `${origin}${rest}` : rest;
   }
 
-  if (isDev()) return `/dob-api${url}`;
+  if (isDev()) return `/api${url}`;
   const origin = originOf();
   return origin ? `${origin}${url}` : url;
 }
