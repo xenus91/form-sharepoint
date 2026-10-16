@@ -384,6 +384,11 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     taskIndex, findTaskByElementId,
     isHashMode,
   } = useHashElement({ initialElementId, initialElementAction, initialElementKind, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
+
+  // Карточка в диалоге #tasks/<Id> берётся отдельным запросом и может не входить
+  // в cardTasks — считаем вложения связанного элемента и для неё.
+  const dialogTask = elementTaskMatch || null;
+  const dialogRelatedAttachments = useRelatedAttachments(dialogTask ? [dialogTask] : []);
   // Для открытой задачи — свежие choices по ContentType, но не на каждый polling tasks (60с)
   // Сравниваем dataUpdatedAt и троттлим 5 мин, чтобы не дёргать 2 тяжёлых запроса каждые 60с
   const lastResultFieldsRefreshRef = React.useRef(0);
@@ -952,6 +957,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             elementLoading={elementLoading}
             elementTaskSearching={elementTaskSearching}
             elementTaskMatch={elementTaskMatch}
+            relatedAttachmentCount={dialogTask ? dialogRelatedAttachments.countOf(dialogTask) : 0}
+            onOpenRelatedAttachments={handleOpenRelatedAttachments}
             elementData={elementData}
             elementError={elementError}
             elementNotFound={elementNotFound}
@@ -1127,6 +1134,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onClearElementHash={onClearElementHash}
         onShowInList={() => { setElementDialogOpen(false); try { const el = document.getElementById('task-' + elementTaskMatch.Id); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} }}
         loadTasks={loadTasks}
+        relatedAttachmentCount={dialogTask ? dialogRelatedAttachments.countOf(dialogTask) : 0}
+        onOpenRelatedAttachments={handleOpenRelatedAttachments}
       />
 
             <TaskConfirmNotFoundDialog

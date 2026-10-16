@@ -34,6 +34,9 @@ export default function TaskElementDialog({
   onClearElementHash,
   onShowInList,
   loadTasks,
+  // Скрепка: вложения СВЯЗАННОГО элемента этой задачи (как в списке карточек).
+  relatedAttachmentCount = 0,
+  onOpenRelatedAttachments = null,
 }) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: "14px", maxHeight: "85vh" } }}>
@@ -118,6 +121,8 @@ export default function TaskElementDialog({
                   currentUserId={currentUserId}
                   currentUserTitle={currentUserTitle}
                   initialAction={elementActionParam}
+                  relatedAttachmentCount={relatedAttachmentCount}
+                  onOpenRelatedAttachments={onOpenRelatedAttachments}
                 />
                 {elementActionParam && (
                   <Box sx={{ mt: 1, p: 1, borderRadius: "10px", bgcolor: elementActionParam === "found" ? "rgba(46,125,50,0.08)" : "rgba(229,57,53,0.08)", border: elementActionParam === "found" ? "1px solid rgba(46,125,50,0.18)" : "1px solid rgba(229,57,53,0.18)" }}>

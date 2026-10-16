@@ -771,6 +771,29 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(new URLSearchParams(window.location.search).get("ID")).toBe("25202");
   }, 40000);
 
+  it("скрепка есть и в карточке #tasks/<Id>: те же вложения связанного элемента", async () => {
+    state.extraMainTasks = [{
+      ...MAIN_TASK,
+      Id: 30,
+      Title: "Задача со связанным элементом",
+      RelatedItems: JSON.stringify([{ ListId: "{21b5b544-bd98-4b06-891f-c5a137331394}", ItemId: 25202 }]),
+    }];
+    state.relatedAttachments = { 25202: ["photo.jpg", "act.pdf"] };
+
+    const host = renderTasksView({ initialElementId: "30" });
+    await settle(3000);
+
+    // карточка задачи открыта в hash-режиме
+    expect(host.textContent).toContain("Задача со связанным элементом");
+
+    const clip = host.querySelector('[data-testid="related-attachments-button"]');
+    expect(clip).toBeTruthy();
+    expect(clip.textContent).toContain("2");
+
+    await act(async () => { mouseClick(clip); await wait200(); });
+    expect(new URLSearchParams(window.location.search).get("ID")).toBe("25202");
+  }, 40000);
+
   it("без вложений у связанного элемента скрепки на карточке нет", async () => {
     state.extraMainTasks = [{
       ...MAIN_TASK,

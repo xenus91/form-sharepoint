@@ -32,6 +32,9 @@ export default function TasksHashContent({
   currentUserId,
   currentUserTitle,
   onClearElementHash,
+  // Скрепка: вложения СВЯЗАННОГО элемента открытой задачи — как в списке карточек.
+  relatedAttachmentCount = 0,
+  onOpenRelatedAttachments = null,
 }) {
   // Поиск ЗАВЕРШЁН, только когда есть задача либо явный результат «не найдено»
   // (elementNotFound) или ошибка. Пока этого нет — идёт загрузка: при первом
@@ -82,6 +85,8 @@ export default function TasksHashContent({
           currentUserId={currentUserId}
           currentUserTitle={currentUserTitle}
           initialAction={elementActionParam}
+          relatedAttachmentCount={relatedAttachmentCount}
+          onOpenRelatedAttachments={onOpenRelatedAttachments}
         />
         {isHashTaskRefreshing && (
           <Box sx={{ position: "absolute", top: 8, right: 8, bgcolor: "rgba(255,255,255,0.9)", borderRadius: "50%", p: 0.5, boxShadow: "0 1px 4px rgba(0,0,0,0.15)", display: "grid", placeItems: "center" }}>
