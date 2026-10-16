@@ -3,8 +3,7 @@ import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "./queryClient";
-import App from "./App.jsx";
-import ItemViewer from "./ItemViewer.jsx";
+import AppWithOverlay from "./AppWithOverlay.jsx";
 import "./index.css";
 import NotificationsProvider from "./NotificationsProvider";
 
@@ -20,11 +19,6 @@ console.info(
 );
 
 
-function hasIdParam() {
-  const usp = new URLSearchParams(window.location.search || "");
-  return usp.has("ID") || usp.has("Id") || usp.has("id");
-}
-
 // Метка сборки — всегда в консоли: по ней видно, какой бандл реально загружен.
 declare const __BUILD_TIME__: string;
 declare const __BUILD_ID__: string;
@@ -39,7 +33,10 @@ createRoot(document.getElementById("root")).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <NotificationsProvider>
-        {hasIdParam() ? <ItemViewer /> : <App />}
+        {/* Приложение смонтировано ВСЕГДА: ?ID=<Id> связанного элемента
+            рисуется поверх него, а не вместо — иначе список задач
+            размонтировался бы и при возврате грузился заново. */}
+        <AppWithOverlay />
       </NotificationsProvider>
     </QueryClientProvider>
   </StrictMode>

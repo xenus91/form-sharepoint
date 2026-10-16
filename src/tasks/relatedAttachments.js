@@ -66,8 +66,8 @@ export async function fetchRelatedAttachmentCounts(itemIds, opts = {}) {
 
 /**
  * Открывает связанный элемент внутри этой же страницы: ставит ?ID=<itemId>
- * в адрес, а ItemViewer (он читает именно этот параметр) рисует элемент
- * на весь viewport. Прежние query-параметры сохраняются, hash не трогаем.
+ * в адрес, а RelatedItemOverlay рисует ItemViewer поверх текущего экрана
+ * (см. src/RelatedItemOverlay.jsx). Прежние query-параметры сохраняются, hash не трогаем.
  *
  * @param {number} itemId
  * @returns {boolean} — удалось ли перейти
@@ -87,5 +87,36 @@ export function openRelatedItem(itemId) {
   } catch (_e) {
     void _e;
     return false;
+  }
+}
+
+/**
+ * Id связанного элемента из адреса (?ID=…), либо null.
+ * @returns {string|null}
+ */
+export function readRelatedId() {
+  try {
+    return new URLSearchParams(window.location.search || "").get("ID");
+  } catch (_e) {
+    void _e;
+    return null;
+  }
+}
+
+/**
+ * Закрывает связанный элемент: убирает ?ID= из адреса, остальные query-параметры
+ * и hash оставляет. Прежний адрес остаётся в истории, поэтому работает и кнопка
+ * «назад» браузера.
+ */
+export function clearRelatedId() {
+  try {
+    const usp = new URLSearchParams(window.location.search || "");
+    if (!usp.has("ID")) return;
+    usp.delete("ID");
+    const qs = usp.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash || ""}`;
+    window.history.pushState(null, "", next);
+  } catch (_e) {
+    void _e;
   }
 }
