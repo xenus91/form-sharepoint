@@ -705,6 +705,13 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect([...sharedRow.children].some((c) => (c.textContent || "").includes("Группировка по ТК"))).toBe(true);
     expect([...sharedRow.children].some((c) => c.contains(toggle))).toBe(true);
 
+    // По РАЗНЫЕ стороны строки: группировка — первый (левый) ребёнок, кнопка —
+    // последний (правый), а строка расталкивает их space-between.
+    const kids = [...sharedRow.children];
+    expect(kids[0].textContent).toContain("Группировка по ТК");
+    expect(kids[kids.length - 1].contains(toggle)).toBe(true);
+    expect(window.getComputedStyle(sharedRow).justifyContent).toBe("space-between");
+
     // Пока тумблер выключен — видны и моя, и чужая задача.
     expect(host.textContent).toContain("Чужая задача в работе");
     expect(host.textContent).toContain("Задача в работе ООБ");

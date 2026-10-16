@@ -921,8 +921,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
               <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedTotal} completedCount={completedTotal} hashMode={isHashMode} isTabPending={isTabPending} />
             </Box>
-            {/* Одна строка: переключатель группировки и кнопка «Я исполнитель». */}
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, mb: 1, minHeight: 32, flexWrap: "wrap" }}>
+            {/* Одна строка, элементы по РАЗНЫЕ стороны: переключатель группировки
+                слева, кнопка «Я исполнитель» справа (space-between). На вкладке
+                «Завершённые» группировки нет — тогда кнопка остаётся одна слева. */}
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5, mb: 1, minHeight: 32, flexWrap: "wrap" }}>
               <TasksGroupingToggle groupingEnabled={groupingEnabled} onToggle={setGroupingEnabled} countGroups={groupedTasks.length} isHashMode={isHashMode} tab={tab} />
               <MyTasksToggle enabled={onlyMine} onToggle={setOnlyMine} count={myCount} disabled={!meKnown} isHashMode={isHashMode} />
             </Box>
