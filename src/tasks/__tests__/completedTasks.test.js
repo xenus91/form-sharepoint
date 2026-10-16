@@ -125,7 +125,8 @@ describe("completedTasks", () => {
       expect(page.source).toBe("REST");
       expect(page.tasks.map((t) => t.Id)).toEqual([11]);
       expect(page.nextPaging).toBe("Paged=TRUE&p_ID=12");
-      const url = apiState.get.mock.calls[0][0];
+      // Первым запросом теперь идёт чтение состава полей списка — проверяем запрос элементов.
+      const url = apiState.get.mock.calls.find(([u]) => /\/items\?/.test(u))[0];
       expect(decodeURIComponent(url)).not.toContain("substringof");
       expect(decodeURIComponent(url)).toContain("Status eq 'Завершена'");
     });

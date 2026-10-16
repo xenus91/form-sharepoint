@@ -27,6 +27,36 @@ describe("apiError", () => {
     ).toBe("Body");
   });
 
+  it("достаёт имя поля из «Поле или свойство X не существует» (RU 400)", () => {
+    expect(
+      extractFieldFromError({
+        response: {
+          status: 400,
+          data: { error: { message: { value: "Поле или свойство AdditionalsActionsRequired не существует." } } },
+        },
+      })
+    ).toBe("AdditionalsActionsRequired");
+  });
+
+  it("достаёт имя поля из английской формы «Field or property X does not exist»", () => {
+    expect(
+      extractFieldFromError({
+        response: {
+          status: 400,
+          data: { error: { message: { value: "Field or property 'OffDepKey' does not exist." } } },
+        },
+      })
+    ).toBe("OffDepKey");
+  });
+
+  it("достаёт имя поля из «Столбец 'X' не существует»", () => {
+    expect(
+      extractFieldFromError({
+        response: { status: 400, data: { error: { message: { value: "Столбец 'ResultOOB' не существует." } } } },
+      })
+    ).toBe("ResultOOB");
+  });
+
   it("не падает на пустой ошибке", () => {
     expect(describeApiError(null)).toBe("");
     expect(extractFieldFromError(undefined)).toBe("");

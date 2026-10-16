@@ -33,13 +33,35 @@ export function describeApiError(error) {
 }
 
 /** Имя поля из текста ошибки SharePoint ("Column 'X' does not exist", "Поле «X»"). */
+/**
+ * Шаблоны извлечения имени поля из текста ошибки SharePoint.
+ *
+ * Порядок важен: сначала конкретные формулировки, потом общие. Захват везде
+ * ограничен пробелом/точкой/запятой — иначе для «Поле или свойство X не
+ * существует» в имя поля попадал весь хвост фразы, поле не находилось в запросе,
+ * и авто-повтор с урезанным набором не срабатывал (ошибка 400 уходила
+ * пользователю).
+ */
+const FIELD_ERROR_PATTERNS = [
+  // «Поле или свойство AdditionalsActionsRequired не существует.»
+  /поле\s+или\s+свойство\s+([^\s.,;:»]+)/i,
+  // "Field or property 'X' does not exist."
+  /field\s+or\s+property\s+['"«]?([^'"»\s.,;:]+)/i,
+  // «Столбец 'X' не существует.» / "Column 'X' does not exist."
+  /столбец\s+['"«]?([^'"»\s.,;:]+)/i,
+  /column\s+['"«]?([^'"»\s.,;:]+)/i,
+  // «Поле X не существует.» / "Field X does not exist."
+  /пол[ея]\s+['"«]?([^'"»\s.,;:]+)/i,
+  /field\s+['"«]?([^'"»\s.,;:]+)/i,
+];
+
 export function extractFieldFromError(error) {
   const text = String(pickMessage(error?.response?.data) || error?.message || "");
-  const m =
-    text.match(/column\s+['"«]?([^'"»]+)['"»]?/i) ||
-    text.match(/field\s+['"«]?([^'"»]+)['"»]?/i) ||
-    text.match(/пол[ея]\s+['"«]?([^'"»]+)['"»]?/i);
-  return m ? m[1].trim() : "";
+  for (const re of FIELD_ERROR_PATTERNS) {
+    const m = text.match(re);
+    if (m && m[1]) return m[1].trim();
+  }
+  return "";
 }
 
 /** Сырые данные ответа сервера (для логов). */

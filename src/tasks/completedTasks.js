@@ -164,10 +164,7 @@ async function renderListData({ viewXml, paging = null }) {
 }
 
 /** Достаёт имя «плохого» поля из текста ошибки SharePoint. */
-function extractBadField(message) {
-  const m = String(message || "").match(/column\s+['"]?([^'"]+)['"]?/i) || String(message || "").match(/пол[ея]\s+['"]?([^'"]+)['"]?/i);
-  return m ? m[1].trim() : "";
-}
+
 
 /**
  * Статус завершённой задачи — ровно один: Status = «Завершена».
@@ -411,6 +408,91 @@ function storeFields(key, fields) {
   } catch {}
 }
 
+// ── Только реально существующие поля ────────────────────────────────────────
+// SharePoint отвечает 400 «Поле или свойство X не существует», если в $select
+// или в ViewFields попало поле, которого в списке нет. Набор полей ниже собран
+// по всем типам контента сразу, поэтому часть колонок в конкретном списке может
+// отсутствовать. Сверяем его с реальными колонками списка ДО запроса: один
+// запрос на состав полей, результат кэшируется на сессию.
+
+let listFieldNamesPromise = null;
+
+/** Реальные внутренние имена колонок списка задач (кэш на сессию). */
+export function fetchListFieldNames() {
+  if (!listFieldNamesPromise) {
+    listFieldNamesPromise = apiClient
+      .get(`${TASKS_LIST_API}/fields?$select=InternalName&$top=5000`, {
+        headers: { Accept: "application/json;odata=verbose" },
+      })
+      .then(({ data }) => {
+        const results = data?.d?.results;
+        const names = Array.isArray(results)
+          ? results.map((f) => String(f?.InternalName || "").toLowerCase()).filter(Boolean)
+          : [];
+        return names.length ? new Set(names) : null;
+      })
+      .catch((e) => {
+        // Состав полей прочитать не удалось — запрашиваем как раньше и полагаемся
+        // на авто-повтор с урезанным набором.
+        dbgWarn("completedTasks:listFields:failed", "состав полей не прочитан — запрашиваем как есть", {
+          status: apiErrorStatus(e),
+          message: describeApiError(e),
+        });
+        return null;
+      });
+  }
+  return listFieldNamesPromise;
+}
+
+/** Сброс кэша состава полей (тесты, смена списка). */
+export function clearListFieldNamesCache() {
+  listFieldNamesPromise = null;
+}
+
+/**
+ * Оставляет только те поля, которые действительно есть в списке.
+ * @param {string[]} fields — желаемый набор
+ * @param {string} label — метка для диагностики ("rest" | "caml")
+ * @returns {Promise<string[]>}
+ */
+/**
+ * Колонки, которые не фильтруем по составу полей.
+ * Служебные ID / ContentTypeId / Attachments не входят в коллекцию Fields
+ * списка (их там просто нет), но в запросе обязательны — без ID таблица не
+ * работает. Status / PercentComplete / Created / Modified / Author / Editor
+ * есть в любом списке задач.
+ */
+const ALWAYS_KEEP_FIELDS = new Set([
+  "ID",
+  "Title",
+  "Created",
+  "Modified",
+  "Author",
+  "Editor",
+  "ContentTypeId",
+  "Attachments",
+  "Status",
+  "PercentComplete",
+]);
+
+async function onlyExistingFields(fields, label) {
+  const real = await fetchListFieldNames();
+  if (!real) return fields;
+  const kept = [];
+  const dropped = [];
+  for (const f of fields) {
+    if (ALWAYS_KEEP_FIELDS.has(f) || real.has(String(f).toLowerCase())) kept.push(f);
+    else dropped.push(f);
+  }
+  // Страховка: пустой набор означал бы, что состав прочитан неверно — лучше
+  // запросить как было и получить понятную ошибку.
+  if (kept.length === 0) return fields;
+  if (dropped.length) {
+    dbgWarn(`completedTasks:fields:notInList:${label}`, "в списке нет таких полей — не запрашиваем", dropped);
+  }
+  return kept;
+}
+
 /** Рабочий набор полей: из памяти → из localStorage → полный список. */
 /**
  * Поля «Результирующий выбор» для выборки завершённых.
@@ -597,7 +679,10 @@ async function fetchCompletedTasksPageRest({
 
   // Поля «Результирующий выбор» — по одному на тип контента; несуществующее
   // SharePoint назовёт в ошибке, и цикл ниже его выкинет (extractFieldFromError).
-  let fields = [...REST_PAGE_FIELDS, ...extraResultFields(resultFieldInternalNames, REST_PAGE_FIELDS)];
+  let fields = await onlyExistingFields(
+    [...REST_PAGE_FIELDS, ...extraResultFields(resultFieldInternalNames, REST_PAGE_FIELDS)],
+    "rest",
+  );
   let select = `${fields.join(",")},AssignedTo/Title,Editor/Title`;
   let lastError = null;
 
@@ -663,7 +748,10 @@ async function fetchCompletedTasksPageCaml({
   scNumberField = null,
   resultFieldInternalNames = [],
 }) {
-  let fields = [...getUsableFields(), ...extraResultFields(resultFieldInternalNames, getUsableFields())];
+  let fields = await onlyExistingFields(
+    [...getUsableFields(), ...extraResultFields(resultFieldInternalNames, getUsableFields())],
+    "caml",
+  );
   let attempt = 0;
   let lastError = null;
   let searched = false;
@@ -700,8 +788,7 @@ async function fetchCompletedTasksPageCaml({
       return { tasks, nextPaging: nextHref, rowCount, source: "RenderListDataAsStream" };
     } catch (e) {
       lastError = e;
-      const msg = String(e?.response?.data?.error?.message?.value || e?.message || "");
-      const bad = extractBadField(msg);
+      const bad = extractFieldFromError(e);
       if (bad) {
         const before = fields.length;
         fields = fields.filter((f) => f.toLowerCase() !== bad.toLowerCase());
