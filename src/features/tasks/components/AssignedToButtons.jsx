@@ -141,9 +141,11 @@ export function PrincipalButtons({
       {assignees.map((person, i) => {
         const info = infos[person.id];
         const kind = info?.kind || "unknown";
-        // Имя — из задачи, иначе из уточнения по Id. «Id 10» остаётся только
-        // как последний вариант (нет ни имени, ни доступа к SharePoint).
-        const label = person.title || info?.title || (person.id ? `Id ${person.id}` : "—");
+        // Имя — из уточнения по Id, и только потом из задачи. В самой задаче
+        // Editor/Title бывает ДОЛЖНОСТЬЮ (у SPUser Title берётся из колонки Title
+        // списка сведений о пользователях), поэтому уточнённое ФИО надёжнее.
+        // «Id 10» остаётся последним вариантом (нет ни имени, ни доступа).
+        const label = info?.title || person.title || (person.id ? `Id ${person.id}` : "—");
         return (
           <Button
             key={`${person.id ?? "no-id"}:${person.title || i}`}
@@ -165,7 +167,7 @@ export function PrincipalButtons({
               e.preventDefault();
               // В диалог отдаём уже уточнённое имя (иначе там на мгновение
               // показался бы пустой «Имя», пока идёт запрос).
-              setOpen({ ...person, title: person.title || info?.title || "" });
+              setOpen({ ...person, title: info?.title || person.title || "" });
               onOpenPrincipal?.(person);
             }}
             startIcon={<KindIcon kind={kind} />}

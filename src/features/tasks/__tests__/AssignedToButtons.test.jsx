@@ -137,3 +137,45 @@ describe("parseAssignees — разбор AssignedTo", () => {
     expect(parseAssignees({})).toEqual([]);
   });
 });
+
+// ── «Исполнитель»: ФИО, а не должность ────────────────────────────────────────
+// В задаче Editor/Title бывает должностью (у SPUser Title берётся из колонки
+// Title списка сведений о пользователях). Кнопка обязана показывать уточнённое
+// по Id ФИО, а не то, что приехало в строке задачи.
+const { TakerButtons } = await import("../components/AssignedToButtons");
+
+async function renderTaker(task) {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  await act(async () => {
+    root.render(
+      <ThemeProvider theme={createTheme()}>
+        <TakerButtons task={task} />
+      </ThemeProvider>,
+    );
+    await new Promise((r) => setTimeout(r, 20));
+  });
+  await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
+  return { host };
+}
+
+describe("«Исполнитель» — ФИО вместо должности", () => {
+  it("в задаче должность, но кнопка показывает уточнённое по Id ФИО", async () => {
+    // Id 5 в state.principals = «Иванов Иван»
+    const task = { Status: "Завершена", PercentComplete: 1, EditorId: 5, EditorTitle: "Кладовщик" };
+    const { host } = await renderTaker(task);
+    const btn = host.querySelector('[data-testid="taker-button"]');
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toContain("Иванов Иван");
+    expect(btn.textContent).not.toContain("Кладовщик");
+  });
+
+  it("уточнить не удалось — показываем то, что есть в задаче (имя не теряем)", async () => {
+    const task = { Status: "Завершена", PercentComplete: 1, EditorId: 999, EditorTitle: "Поршаков Сергей" };
+    const { host } = await renderTaker(task);
+    const btn = host.querySelector('[data-testid="taker-button"]');
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toContain("Поршаков Сергей");
+  });
+});
