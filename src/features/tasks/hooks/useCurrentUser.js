@@ -5,6 +5,31 @@ import { useState, useEffect } from "react";
 import apiClient from "../../../api";
 import { getTasksListFieldsOverview } from "../../../tasks/distribution";
 
+/** Заглушка, которую App кладёт в профиль, когда свойства в тенанте нет. */
+const PROFILE_PLACEHOLDER = "не указано";
+
+/**
+ * Какое имя текущего пользователя считать ФИО.
+ *
+ * Профиль приходит из SP.UserProfiles.PeopleManager/GetMyProperties:
+ *   • userDisplayName — PreferredName, это и есть отображаемое имя
+ *     («Поршаков Сергей»);
+ *   • userTitle — d.Title того же ответа. Это НЕ имя: в нём оказывается
+ *     учётная запись/должность, и именно оно после «взять в работу» попадало
+ *     в «Исполнитель» (useTaskMutations пишет currentUserTitle в EditorTitle).
+ * Поэтому PreferredName в приоритете, а заглушку «Не указано» именем не считаем.
+ *
+ * @param {{userDisplayName?:string, userTitle?:string}|null} profile
+ * @returns {string} — ФИО или ""
+ */
+export function pickCurrentUserName(profile) {
+  const clean = (value) => {
+    const s = String(value ?? "").trim();
+    return s && s.toLowerCase() !== PROFILE_PLACEHOLDER ? s : "";
+  };
+  return clean(profile?.userDisplayName) || clean(profile?.userTitle) || "";
+}
+
 export function useCurrentUser({ propUserProfile, propCurrentUserId }) {
   const [currentUserId, setCurrentUserId] = useState(() => propCurrentUserId ?? null);
   const [userOfficeDept, setUserOfficeDept] = useState({ office: "", department: "" });
@@ -16,8 +41,8 @@ export function useCurrentUser({ propUserProfile, propCurrentUserId }) {
   useEffect(() => {
     if (propCurrentUserId) {
       setCurrentUserId(propCurrentUserId);
-      if (propUserProfile?.userTitle) setCurrentUserTitle(propUserProfile.userTitle);
-      else if (propUserProfile?.userDisplayName) setCurrentUserTitle(propUserProfile.userDisplayName);
+      const name = pickCurrentUserName(propUserProfile);
+      if (name) setCurrentUserTitle(name);
     } else {
       apiClient
         .get("/web/currentuser", { headers: { Accept: "application/json;odata=verbose" } })

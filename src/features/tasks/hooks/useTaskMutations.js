@@ -229,7 +229,23 @@ export function useTaskMutations({
         }
       }
       notify(`Задача #${task.Id} взята в работу`, { severity: "success" });
-      const _takeOpt = { Status: targetInProgress, Modified: new Date().toISOString(), EditorTitle: currentUserTitle || "Вы", Editor: currentUserTitle || "Вы", EditorId: currentUserId };
+      // Исполнитель — тот, кого записал SharePoint, а не локальная догадка.
+      // currentUserTitle приходит из профиля (GetMyProperties), и в нём бывает
+      // учётная запись — она и показывалась в «Исполнителе» после взятия в работу.
+      let takenEditorTitle = currentUserTitle || "Вы";
+      let takenEditorId = currentUserId;
+      try {
+        const taken = await apiClient.get(
+          `${TASKS_LIST_API}/items(${task.Id})?$select=Id,Status,PercentComplete,Modified,Editor/Id,Editor/Title&$expand=Editor`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        );
+        const td = taken?.data?.d;
+        if (td?.Editor?.Title) takenEditorTitle = td.Editor.Title;
+        if (td?.Editor?.Id) takenEditorId = td.Editor.Id;
+      } catch {
+        /* нет доступа к элементу — остаёмся при локальном значении */
+      }
+      const _takeOpt = { Status: targetInProgress, Modified: new Date().toISOString(), EditorTitle: takenEditorTitle, Editor: takenEditorTitle, EditorId: takenEditorId };
       queryClient.setQueryData(
         ["tasks", currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
         (prev) => (Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._takeOpt } : t)) : prev)
