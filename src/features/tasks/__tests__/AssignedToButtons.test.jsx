@@ -74,6 +74,25 @@ describe("AssignedToButtons — «Кому назначено» кнопкой",
     expect(dialog.textContent).toContain("Иванов Иван");
   });
 
+  it("карточка сотрудника: «Имя» и «Учётная запись» — разные значения, без дубля", async () => {
+    // Регрессия: имя брали из колонки Name списка сведений о пользователях, а там
+    // лежит учётная запись — в карточке «Имя» и «Учётная запись» совпадали.
+    const { host } = await render({ AssignedTo: "Иванов Иван", AssignedToId: 5 });
+    const btn = host.querySelector('[data-testid="assigned-to-button"]');
+    await act(async () => { click(btn); await new Promise((r) => setTimeout(r, 60)); });
+
+    const dialog = document.body.querySelector('[data-testid="principal-info-dialog"]');
+    expect(dialog).toBeTruthy();
+    // Строка карточки: подпись <span> + значение <p> рядом с ней.
+    const valueOf = (label) => {
+      const cap = [...dialog.querySelectorAll("span")].find((e) => e.textContent.trim() === label);
+      return cap && cap.nextElementSibling ? cap.nextElementSibling.textContent.trim() : null;
+    };
+    expect(valueOf("Имя")).toBe("Иванов Иван");
+    expect(valueOf("Учётная запись")).toBe("i:0#.f|membership|ivanov@lenta.com");
+    expect(valueOf("Имя")).not.toBe(valueOf("Учётная запись"));
+  });
+
   it("группа: иконка/тип «Группа»", async () => {
     const { host } = await render({ AssignedTo: "ООБ", AssignedToId: 33 });
     const btn = host.querySelector('[data-testid="assigned-to-button"]');

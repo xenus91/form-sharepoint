@@ -1,70 +1,79 @@
 // @vitest-environment jsdom
 // src/features/tasks/lib/__tests__/assignees.displayName.test.js
 //
-// «Исполнитель»/«Кому назначено»: ФИО, а не должность.
+// «Исполнитель»/«Кому назначено»: в карточке принципала ФИО и учётная запись —
+// РАЗНЫЕ значения.
 //
-// Причина бага: имя добирается по Id через /web/getuserbyid(id), а у SPUser
-// поле Title берётся из колонки Title списка сведений о пользователях, где
-// лежит ДОЛЖНОСТЬ (её проект читает отдельно как JobTitle — tasks/userSearch.js).
-// ФИО хранится в колонке Name — её и надо брать.
+// Как устроено на реальном тенанте (проверено по данным пользователя):
+//   • SPUser.Title        — ФИО, «Поршаков Сергей». Тот же источник, откуда
+//                           приложение берёт имя текущего пользователя
+//                           (/web/currentuser → d.Title, hooks/useCurrentUser.js).
+//   • SPUser.LoginName    — учётная запись, «i:0#.w|retail\sergey.porshakov».
+//   • SiteUserInfoList.Name — ТОЖЕ учётная запись. Брать её как ФИО нельзя:
+//                           «Имя» и «Учётная запись» становились одинаковыми.
+//   • должность проект читает отдельно как JobTitle (tasks/userSearch.js).
 import { describe, it, expect, vi } from "vitest";
 import { resolvePrincipal } from "../assignees";
 
-const NAME = "Иванов Иван Иванович";
-const POSITION = "Кладовщик";
+const NAME = "Поршаков Сергей";
+const LOGIN = "i:0#.w|retail\\sergey.porshakov";
+const EMAIL = "sergey.porshakov@lenta.com";
 
-/** Мок SharePoint: разбираем url и отдаём нужный ответ. */
-function makeGet({ user = {}, userInfoItem = null, userInfoFails = false } = {}) {
+function makeGet({ principalType = 1 } = {}) {
   return vi.fn(async (url) => {
     const u = String(url);
     if (u.includes("/web/getuserbyid(")) {
-      return { data: { d: { Id: 207, Title: POSITION, LoginName: "i:0#.w|dob\\ivanov", Email: "iv@dob.ru", PrincipalType: 1, ...user } } };
-    }
-    if (u.includes("/web/SiteUserInfoList/items(")) {
-      if (userInfoFails) {
-        const err = new Error("404");
-        err.response = { status: 404 };
-        throw err;
-      }
-      return { data: { d: userInfoItem === null ? { Id: 207, Name: NAME, Title: POSITION } : userInfoItem } };
+      return { data: { d: { Id: 10, Title: NAME, LoginName: LOGIN, Email: EMAIL, PrincipalType: principalType } } };
     }
     if (u.includes("/web/sitegroups/getbyid(")) {
-      return { data: { d: { Id: 207, Title: "Смена №2", LoginName: "Смена №2" } } };
+      return { data: { d: { Id: 10, Title: "Смена №2", LoginName: "Смена №2" } } };
     }
     throw new Error("unexpected url: " + u);
   });
 }
 
-describe("resolvePrincipal — ФИО вместо должности", () => {
-  it("берёт Name из списка сведений, хотя getuserbyid().Title — должность", async () => {
-    const info = await resolvePrincipal(makeGet(), 207);
+describe("resolvePrincipal — ФИО, а не учётная запись", () => {
+  it("имя — Title принципала, учётная запись — LoginName, они разные", async () => {
+    const info = await resolvePrincipal(makeGet(), 10);
     expect(info.title).toBe(NAME);
-    expect(info.title).not.toBe(POSITION);
+    expect(info.loginName).toBe(LOGIN);
+    expect(info.title).not.toBe(info.loginName);
+    expect(info.email).toBe(EMAIL);
     expect(info.kind).toBe("user");
-    expect(info.loginName).toBe("i:0#.w|dob\\ivanov");
   });
 
-  it("спрашивает колонку Name в списке сведений о пользователях", async () => {
+  it("регрессия: в «список сведений о пользователях» за именем не ходим", async () => {
+    // Колонка Name там содержит учётную запись — из-за неё «Имя» и
+    // «Учётная запись» в карточке сотрудника дублировали друг друга.
     const get = makeGet();
-    await resolvePrincipal(get, 207);
-    const hit = get.mock.calls.map((c) => String(c[0])).find((u) => u.includes("SiteUserInfoList"));
-    expect(hit).toBeTruthy();
-    expect(hit).toContain("$select=Id,Name,Title,EMail,UserName");
-    expect(hit).toContain("/items(207)");
+    await resolvePrincipal(get, 10);
+    const urls = get.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("SiteUserInfoList"))).toBe(false);
+    // Ровно один запрос: тип принципала известен из PrincipalType.
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("/web/getuserbyid(10)");
   });
 
-  it("нет Name (пусто) — остаёмся при Title, имя не теряем", async () => {
-    const info = await resolvePrincipal(makeGet({ userInfoItem: { Id: 207, Name: "", Title: POSITION } }), 207);
-    expect(info.title).toBe(POSITION);
+  it("Title пуст — имени нет, и учётная запись его не подменяет", async () => {
+    const get = vi.fn(async () => ({ data: { d: { Id: 10, Title: "", LoginName: LOGIN, PrincipalType: 1 } } }));
+    const info = await resolvePrincipal(get, 10);
+    expect(info.title).toBeNull();
+    expect(info.loginName).toBe(LOGIN);
   });
 
-  it("список сведений недоступен (404) — фолбэк на Title, резолв не падает", async () => {
-    const info = await resolvePrincipal(makeGet({ userInfoFails: true }), 207);
-    expect(info.title).toBe(POSITION);
+  it("PrincipalType не приехал, группы с таким Id нет — остаёмся пользователем с Title", async () => {
+    const get = vi.fn(async (url) => {
+      const u = String(url);
+      if (u.includes("/web/getuserbyid(")) return { data: { d: { Id: 10, Title: NAME, LoginName: LOGIN, PrincipalType: null } } };
+      if (u.includes("/web/sitegroups/getbyid(")) throw new Error("не группа");
+      throw new Error("unexpected: " + u);
+    });
+    const info = await resolvePrincipal(get, 10);
+    expect(info.title).toBe(NAME);
     expect(info.kind).toBe("user");
   });
 
-  it("группа не трогается: у неё нет ни Name, ни должности", async () => {
+  it("группа: имя группы, учётная запись — её же название", async () => {
     const get = vi.fn(async (url) => {
       const u = String(url);
       if (u.includes("/web/getuserbyid(")) throw new Error("не пользователь");
@@ -74,22 +83,5 @@ describe("resolvePrincipal — ФИО вместо должности", () => {
     const info = await resolvePrincipal(get, 33);
     expect(info.kind).toBe("group");
     expect(info.title).toBe("Смена №2");
-  });
-
-  it("PrincipalType не приехал, группы с таким Id нет — Name тоже в приоритете", async () => {
-    // Тот же Id не должен отвечать ещё и как группа: иначе сработает ветка
-    // «уточняем, не группа ли это» и имя возьмётся у группы.
-    const get = vi.fn(async (url) => {
-      const u = String(url);
-      if (u.includes("/web/getuserbyid(")) {
-        return { data: { d: { Id: 207, Title: POSITION, LoginName: "i:0#.w|dob\\ivanov", PrincipalType: null } } };
-      }
-      if (u.includes("/web/SiteUserInfoList/items(")) return { data: { d: { Id: 207, Name: NAME, Title: POSITION } } };
-      if (u.includes("/web/sitegroups/getbyid(")) throw new Error("не группа");
-      throw new Error("unexpected: " + u);
-    });
-    const info = await resolvePrincipal(get, 207);
-    expect(info.title).toBe(NAME);
-    expect(info.kind).toBe("user");
   });
 });

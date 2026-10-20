@@ -212,33 +212,6 @@ async function getUserEntry(get, id) {
   return null;
 }
 
-/**
- * ФИО из «списка сведений о пользователях» (SiteUserInfoList).
- *
- * Тонкость SharePoint: у SPUser поле Title берётся из колонки Title этого
- * списка, а там на практике лежит ДОЛЖНОСТЬ (её проект читает отдельно как
- * JobTitle — см. tasks/userSearch.js). ФИО же хранится в колонке Name.
- * Поэтому getuserbyid(...).Title может вернуть «Кладовщик» вместо
- * «Иванов Иван Иванович» — в «Исполнителе»/«Кому назначено» показывалась
- * должность.
- *
- * @returns {Promise<string|null>} — ФИО, либо null (нет доступа / нет записи)
- */
-async function getUserNameFromUserInfoList(get, id) {
-  try {
-    const { data } = await get(
-      `/web/SiteUserInfoList/items(${id})?$select=Id,Name,Title,EMail,UserName`,
-      ACCEPT,
-    );
-    const d = data?.d || data;
-    const name = String(d?.Name || "").trim();
-    return name || null;
-  } catch {
-    /* нет колонки Name или нет доступа — останемся при Title */
-    return null;
-  }
-}
-
 async function getGroupEntry(get, id) {
   try {
     const { data } = await get(
@@ -264,15 +237,14 @@ export async function resolvePrincipal(get, id) {
   const user = await getUserEntry(get, id);
   if (user) {
     const fromType = KIND_BY_PRINCIPAL_TYPE[Number(user.PrincipalType)];
-    // ФИО — из Name (список сведений), и только потом Title: в Title бывает
-    // должность, из-за чего в карточке вместо имени рисовалась она.
-    // Для группы Name бессмысленен — лишний запрос не шлём.
-    const displayName = (fromType === "group" ? null : await getUserNameFromUserInfoList(get, id))
-      || user.Title || null;
+    // ФИО — это Title самого принципала (тот же, что отдаёт /web/currentuser:
+    // имя текущего пользователя приложение берёт именно оттуда). Колонку Name из
+    // списка сведений о пользователях брать НЕЛЬЗЯ: там лежит учётная запись
+    // (i:0#.w|retail\user), а должность проект читает отдельно как JobTitle.
     const base = {
       id,
       kind: fromType || "user",
-      title: displayName,
+      title: user.Title || null,
       loginName: user.LoginName || null,
       email: user.Email || user.EMail || null,
     };
