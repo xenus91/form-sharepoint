@@ -60,6 +60,8 @@ import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
 import useTasksListSyncOnBadgeChange from "./features/tasks/hooks/useTasksListSync";
 import { useNotifications } from './NotificationsProvider';
 import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
+import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM, isEoMissingRoute } from "./features/form/lib/eoMissingRoute";
+import { findOtherProblemRow, otherProblemsLabel } from "./features/form/lib/otherProblemConflict";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -426,6 +428,12 @@ const App = () => {
   // Состояния для дубликатов ЕО
   const [duplicateEoDialogOpen, setDuplicateEoDialogOpen] = useState(false);
   const [duplicateEoItem, setDuplicateEoItem] = useState(null);
+  // По этому же ЕО за последние 24 часа на этом же РЦ уже регистрировали ДРУГУЮ
+  // проблему — «Не найдена» скорее всего ошибочна, просим подтвердить.
+  const [otherProblemItem, setOtherProblemItem] = useState(null);
+  const [otherProblemDialogOpen, setOtherProblemDialogOpen] = useState(false);
+  // Подтверждение получено — второй раз не спрашиваем.
+  const skipOtherProblemCheckRef = useRef(false);
   const [editingItemId, setEditingItemId] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [isFetchingItemData, setIsFetchingItemData] = useState(false);
@@ -728,6 +736,39 @@ const App = () => {
       }
     } catch (error) {
       console.error("Ошибка при проверке Номер ЕО:", error);
+    }
+  };
+
+  /**
+   * Есть ли за последние 24 часа на ЭТОМ ЖЕ РЦ заявка по тому же номеру ЕО,
+   * но с другой проблемой (не «Не найдена»)?
+   *
+   * Отличие от checkEoNumberInRecentRecords: та ищет СВОИ заявки по тому же ЕО
+   * (AuthorId eq я) — «вы уже отправляли». Эта смотрит на РЦ целиком и на другие
+   * проблемы: если по ЕО уже зарегистрирована конкретная проблема, то «Не найдена»
+   * в новой заявке противоречит ей.
+   *
+   * @param {string} eoNumber
+   * @returns {Promise<object|null>} — найденная заявка или null
+   */
+  const findOtherProblemForEo = async (eoNumber) => {
+    const eo = String(eoNumber || "").trim();
+    if (!eo || eo === "ЕО отсутствует") return null;
+    const officeSuffix = getEffectiveDcThu();
+    if (!officeSuffix) return null;
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    try {
+      const response = await apiClient.get(
+        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eo}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}')&$select=Id,THU,DC_THU,Created,Problems,Author/Title&$expand=Author`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const rows = response?.data?.d?.results || [];
+      // Саму редактируемую заявку конфликтом не считаем.
+      return findOtherProblemRow(rows, { editingItemId });
+    } catch (error) {
+      console.error("Ошибка при проверке других проблем по ЕО:", error);
+      // Не блокируем отправку из-за сбоя проверки.
+      return null;
     }
   };
 
@@ -1186,6 +1227,19 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       return;
     }
 
+    // «Не найдена» + по этому ЕО на этом же РЦ за 24 часа уже есть заявка с
+    // другой проблемой — спрашиваем подтверждение до отправки.
+    if (problems.includes("Не найдена") && !skipOtherProblemCheckRef.current) {
+      const other = await findOtherProblemForEo(eoNumber);
+      if (other) {
+        setOtherProblemItem(other);
+        setOtherProblemDialogOpen(true);
+        isSubmittingRef.current = false;
+        return;
+      }
+    }
+    skipOtherProblemCheckRef.current = false;
+
     let createdItemId = editingItemId;
 
     try {
@@ -1456,6 +1510,12 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const raw = window.location.hash || "";
     const low = raw.toLowerCase();
     let view = "form";
+    // #eoismissing (или /eoismissing) — главная форма с выбранной «Не найдена».
+    let eoMissing = false;
+    try {
+      eoMissing = isEoMissingRoute(raw, window.location.pathname || "");
+    } catch (_e) { void _e; }
+    if (eoMissing) view = "form";
     if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
     else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
     // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10)
@@ -1497,13 +1557,15 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       else elementAction = v;
     } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
     else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
-    return { view, elementId, elementAction, elementKind };
+    return { view, elementId, elementAction, elementKind, eoMissing };
   };
   const getViewFromHash = () => parseHash().view;
   const [currentView, setCurrentView] = useState(() => getViewFromHash());
   const [hashElementId, setHashElementId] = useState(() => parseHash().elementId);
   const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
   const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
+  // Роут #eoismissing: открыть форму с выбранной проблемой «Не найдена».
+  const [hashEoMissing, setHashEoMissing] = useState(() => parseHash().eoMissing === true);
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
 
@@ -1516,11 +1578,23 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setHashElementId(p.elementId);
       setHashElementAction(p.elementAction);
       setHashElementKind(p.elementKind || "auto");
+      setHashEoMissing(p.eoMissing === true);
     };
     window.addEventListener("hashchange", onHash);
     onHash();
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  // Роут #eoismissing: стандартная форма, проблема «Не найдена» уже выбрана.
+  // Логику повторяем за handleChange — там выбор «Не найдена» так же проставляет
+  // местоположение. Флаг сбрасываем, чтобы не перетирать дальнейшие правки
+  // пользователя при ре-рендерах.
+  useEffect(() => {
+    if (!hashEoMissing) return;
+    setProblems((prev) => (prev.includes(EO_MISSING_PROBLEM) ? prev : [...prev, EO_MISSING_PROBLEM]));
+    setLocation(EO_MISSING_LOCATION);
+    setHashEoMissing(false);
+  }, [hashEoMissing]);
   useEffect(() => {
     const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
     const parsed = parseHash();
@@ -2741,6 +2815,58 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
               }}
             >
               Да, изменить
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* «Не найдена», но по этому ЕО на РЦ уже есть заявка с другой проблемой */}
+        <Dialog
+          open={otherProblemDialogOpen}
+          onClose={() => setOtherProblemDialogOpen(false)}
+          PaperProps={{ sx: { borderRadius: 3, p: 1 } }}
+        >
+          <DialogTitle sx={{ fontWeight: 800 }}>По этому ЕО уже есть проблема</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              {`По ЕО ${otherProblemItem?.THU || eoNumber} за последние 24 часа на этом РЦ уже зарегистрирована проблема в другой заявке`}
+              {otherProblemsLabel(otherProblemItem) ? `: ${otherProblemsLabel(otherProblemItem)}` : ""}
+              {". Вы выбрали «Не найдена». Действительно подать заявку или ЕО всё-таки нашлась?"}
+            </DialogContentText>
+            {otherProblemItem?.Id ? (
+              <DialogContentText sx={{ mt: 1, fontSize: "0.8rem", color: "text.secondary" }} data-testid="other-problem-item-id">
+                {`Заявка № ${otherProblemItem.Id} от ${(() => {
+                  const d = new Date(otherProblemItem.Created);
+                  return Number.isNaN(d.getTime()) ? String(otherProblemItem.Created || "") : d.toLocaleString("ru-RU");
+                })()}${otherProblemItem.Author?.Title ? `, автор: ${otherProblemItem.Author.Title}` : ""}`}
+              </DialogContentText>
+            ) : null}
+          </DialogContent>
+          <DialogActions sx={{ pb: 2, px: 3 }}>
+            <Button
+              onClick={() => setOtherProblemDialogOpen(false)}
+              color="inherit"
+              sx={{ fontWeight: 700 }}
+              data-testid="other-problem-cancel"
+            >
+              Отмена
+            </Button>
+            <Button
+              onClick={() => {
+                setOtherProblemDialogOpen(false);
+                // Подтверждено — подаём без повторного вопроса.
+                skipOtherProblemCheckRef.current = true;
+                handleFormSubmit({ preventDefault: () => {} });
+              }}
+              variant="contained"
+              autoFocus
+              data-testid="other-problem-submit"
+              sx={{
+                borderRadius: 2,
+                fontWeight: 700,
+                backgroundImage: "linear-gradient(180deg, #171c8f 0%, #10146a 100%)",
+              }}
+            >
+              Да, ЕО не нашлась — подать
             </Button>
           </DialogActions>
         </Dialog>

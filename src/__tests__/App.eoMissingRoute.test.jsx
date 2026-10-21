@@ -1,0 +1,100 @@
+// @vitest-environment jsdom
+// src/__tests__/App.eoMissingRoute.test.jsx
+//
+// Сквозная проверка роута #eoismissing: App открывает стандартную форму с уже
+// выбранной проблемой «Не найдена» и проставленным местоположением.
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createRoot } from "react-dom/client";
+import { act } from "react-dom/test-utils";
+import { ThemeProvider, createTheme } from "@mui/material";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+vi.mock("../api", () => {
+  const get = async (url) => {
+    const u = String(url);
+    if (u.includes("GetMyProperties")) {
+      return {
+        data: {
+          d: {
+            Title: "Поршаков Сергей",
+            UserProfileProperties: {
+              results: [
+                { Key: "Office", Value: "РЦ-8117" },
+                { Key: "Department", Value: "Отдел обеспечения бизнеса" },
+              ],
+            },
+          },
+        },
+      };
+    }
+    if (u.includes("/web/currentuser")) return { data: { d: { Id: 10, Title: "Поршаков Сергей" } } };
+    if (u.includes("/fields")) return { data: { d: { results: [] } } };
+    return { data: { d: { results: [] } } };
+  };
+  return {
+    default: { get, post: async () => ({ data: { d: {} } }), defaults: { headers: {} } },
+    invalidate: () => {},
+  };
+});
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+// В jsdom нет matchMedia/getUserMedia — MUI и камера без них падают.
+if (!window.matchMedia) {
+  window.matchMedia = (query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
+if (!window.ResizeObserver) {
+  window.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+}
+if (!navigator.mediaDevices) {
+  Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia: () => Promise.reject(new Error("нет камеры")) }, configurable: true });
+}
+
+const App = (await import("../App")).default;
+
+describe("роут #eoismissing", () => {
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/#eoismissing");
+  });
+
+  it("открывает форму с выбранной проблемой «Не найдена»", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={qc}>
+          <ThemeProvider theme={createTheme()}>
+            <App />
+          </ThemeProvider>
+        </QueryClientProvider>,
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    for (let i = 0; i < 5; i += 1) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    }
+
+    // Значения полей лежат в value инпутов, а не в textContent.
+    const inputs = [...host.querySelectorAll("input, textarea")];
+    const values = inputs.map((i) => String(i.value ?? ""));
+    // Местоположение проставилось вместе с проблемой (как в handleChange).
+    expect(values).toContain("Не найдена в зоне отгрузки");
+    // Сама проблема выбрана: MUI Select multiple держит значения в hidden input.
+    expect(values.some((v) => v.split(",").includes("Не найдена"))).toBe(true);
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  }, 30000);
+});
