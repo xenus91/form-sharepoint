@@ -504,6 +504,35 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(batch[0].url).toContain("Id eq 25413");
   }, 30000);
 
+  // Задача со связанным элементом из списка Requests (другой Id, чтобы не
+  // пересекаться с модульным кэшем попыток enrich между тестами).
+  const enrichTask = () => ({
+    ...MAIN_TASK,
+    Id: 97,
+    Title: "Задача для enrich",
+    RelatedItems: JSON.stringify([{ ListId: "{21b5b544-bd98-4b06-891f-c5a137331394}", ItemId: 25413 }]),
+  });
+  const enrichRequests = () =>
+    state.requests.filter((r) => /lists\(guid'21b5b544-[^']*'\)\/items/.test(r.url));
+
+  it("#tasks/<Id>: нет enrich-запросов к связанным элементам списка", async () => {
+    // Регрессия по логу пользователя: на #tasks/25393 уходил батч
+    // $filter=(Id eq 25325) or … or (Id eq 25415), а по промахам — по три
+    // запроса items(<id>) на каждый соседний элемент (25413, 25414, 25415).
+    state.extraMainTasks = [enrichTask()];
+    renderTasksView({ initialElementId: "10" });
+    await settle(4000);
+    expect(enrichRequests().map((r) => r.url)).toEqual([]);
+  }, 40000);
+
+  it("в режиме списка enrich по-прежнему работает", async () => {
+    // Контроль к предыдущему на тех же данных: отличается только режим.
+    state.extraMainTasks = [enrichTask()];
+    renderTasksView();
+    await settle(4000);
+    expect(enrichRequests().length).toBeGreaterThan(0);
+  }, 40000);
+
   it("#tasks/13 (тип «Результат проверки ООБ») открывает стандартную карточку #tasks/<Id>", async () => {
     // deep-link на задачу нового типа: карточку #tasks/<Id> показывать нельзя —
     // задача ведёт себя как dob-задача и открывается формой DobTaskEditView.

@@ -30,7 +30,7 @@ function markEnrichAttempted(taskIds) {
   }
 }
 
-export function useTasksQuery({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames = [], enabled = true }) {
+export function useTasksQuery({ currentUserId, distribution, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames = [], enabled = true, skipEnrichRef = null }) {
   const queryClient = useQueryClient();
 
   const queryKey = [
@@ -111,6 +111,14 @@ export function useTasksQuery({ currentUserId, distribution, taskFieldNames, rec
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
+        // В hash-режиме (#tasks/<Id>) список карточек не показывается, а связанные
+        // элементы открытой задачи читаются отдельным точечным запросом. Без этого
+        // гейта enrichTasksWithRelated уходил в батч по всем RelatedItems списка,
+        // а по промахам — в цикл items(<id>) по 3 попытки на каждый соседний id.
+        if (skipEnrichRef?.current) {
+          __dlog("[DBG:useTasksQuery] skip enrich — hash mode");
+          return;
+        }
         // Не обогащаем если данные уже обогащены (все задачи с ТК или без RelatedItems)
         __dlog("[DBG:useTasksQuery] effect check", { sample: data.slice(0,3).map(t=>({Id:t.Id, R:t.Recipient||'∅', SC:t.SCNumber||'∅', THU:t.THU||'∅', hasRel:!!t.RelatedItems, ct:String(t.ContentTypeId||'').slice(-12)})) });
         // Фильтруем задачи которые недавно пытались обогатить но не получили Recipient (чтобы не спамить, напр. 537)

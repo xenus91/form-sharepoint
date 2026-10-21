@@ -13,28 +13,7 @@
 import { useQuery } from "@tanstack/react-query";
 import apiClient from "../../../api";
 import { fetchResultFieldsMeta, fetchContentTypeResultMap, fetchContentTypeMeta } from "../../../tasks/resultField";
-import { TASKS_LIST_API } from "../../../tasks/config";
 import { fetchTaskBehaviour } from "../../../services/taskBehaviour";
-
-async function fetchAdditionalActionsMetaByName(internalName) {
-  const name = String(internalName || "AdditionalActions").trim() || "AdditionalActions";
-  try {
-    const url = `${TASKS_LIST_API}/fields/getbytitle('${name}')?$select=InternalName,Title,TypeAsString,Choices,FillInChoice,AllowMultipleValues,Hidden`;
-    const { data } = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
-    const f = data?.d;
-    if (!f || f.Hidden) return null;
-    return {
-      internalName: f.InternalName,
-      title: f.Title,
-      typeAsString: f.TypeAsString,
-      choices: f.Choices?.results ? [...f.Choices.results] : Array.isArray(f.Choices) ? [...f.Choices] : [],
-      allowFillIn: !!f.FillInChoice,
-      allowMultiple: !!f.AllowMultipleValues,
-    };
-  } catch {
-    return null;
-  }
-}
 
 export function useTaskConfiguration({ enabled = true } = {}) {
   const query = useQuery({
@@ -49,7 +28,10 @@ export function useTaskConfiguration({ enabled = true } = {}) {
         fetchContentTypeMeta(apiClient),
         fetchTaskBehaviour(apiClient).catch(() => null),
       ]);
-      const additionalMeta = await fetchAdditionalActionsMetaByName("AdditionalActions");
+      // Поля AdditionalActions в списке Tasks больше нет — запрос его метаданных
+      // всегда возвращал 404 и только нагружал сеть. additionalActionsField
+      // остаётся null: контрол доп. действий driven TaskBehaviour, а не полем.
+      const additionalMeta = null;
 
       // Нормализация O(1) lookup: Map<ContentTypeId, TaskConfig>
       // БЕЗ TaskTypeConfiguration, TaskActionDefinitions — defaults-принцип.
