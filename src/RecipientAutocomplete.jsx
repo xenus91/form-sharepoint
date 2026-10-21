@@ -54,7 +54,16 @@ const RecipientAutocomplete = ({
           hasNext = false;
         }
       }
-      setLookupItems(items);
+      // На всякий случай убираем повторы по Id: если страницы пагинации
+      // наложатся, список не должен содержать один и тот же элемент дважды.
+      const seen = new Set();
+      setLookupItems(
+        items.filter((item) => {
+          if (item.id == null || seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        }),
+      );
     } catch (e) {
       console.error("Ошибка при получении данных подстановки:", e);
     } finally {
@@ -95,11 +104,18 @@ const RecipientAutocomplete = ({
         disableClearable
         disabled={isEOMissing || disabled}
         options={lookupItems}
+        getOptionKey={(option) =>
+          typeof option === "string" ? option : String(option?.id ?? option?.title ?? "")
+        }
         getOptionLabel={(option) => {
           if (typeof option === "string") return option;
           const t = option?.title;
           return t == null ? "" : String(t);
         }}
+        // Без этого MUI берёт ключом getOptionLabel, то есть SCNumber. В SCList
+        // разные элементы могут иметь одинаковый номер магазина — React падал с
+        // «Encountered two children with the same key». Id элемента уникален.
+
         loading={loading}
         value={selectedValue ? lookupItems.find((it) => it.id === selectedValue) ?? null : null}
         inputValue={inputValue}
