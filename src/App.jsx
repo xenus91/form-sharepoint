@@ -1754,7 +1754,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       const offDepKeyEsc = offDepKey.replace(/'/g, "''");
       try {
         const { data } = await apiClient.get(
-          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id,Email/Title&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
           { headers: { Accept: "application/json;odata=verbose" } }
         );
         const items = data?.d?.results || [];
@@ -1801,7 +1801,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         // Лог для отладки локальной смены РЦ
       }
       try {
-        const { data } = await apiClient.get(`${TASKS_LIST_API}/fields?$select=InternalName`, { headers: { Accept: "application/json;odata=verbose" } });
+        const { data } = await apiClient.get(`${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`, { headers: { Accept: "application/json;odata=verbose" } });
         if (!cancelled) setTaskFieldsApp((data?.d?.results || []).map((f) => f.InternalName));
       } catch {}
     })();

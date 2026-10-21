@@ -16,7 +16,6 @@ import { fetchResultFieldsMeta, fetchContentTypeResultMap, getResultFieldForTask
 import { getResultUiConfig } from "./tasks/resultConfig";
 import { HASH_LOG, HASH_WARN } from "./tasks/log";
 import { searchTaskByRelatedItem } from "./tasks/hashSearch";
-import { fetchProblemsPalletItem } from "./tasks/problemsPallet";
 import {
   getGroupIdsFromDistribution,
   resolveDistributionViaDcEmail,

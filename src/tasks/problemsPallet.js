@@ -37,14 +37,47 @@ const FALLBACK_EXPAND = "Author";
 /**
  * Загрузить элемент ProblemsPallet по id.
  * Делает 2 попытки: основную с полным select/expand и fallback с минимальным.
- * Кэшируется автоматически через axios interceptor (TTL 60с).
+ * Дедуплицируется локально (in-flight + 15 с): данные списков глобальным
+ * кэшем намеренно не кэшируются.
  *
  * @param {number|string} itemId
  * @returns {Promise<object|null>} сырой data.d из verbose-ответа, или null
  * @throws если обе попытки упали
  */
+// Данные списков намеренно НЕ кэшируются axios-интерцептором (иначе поллеры
+// встали бы на устаревшее), поэтому дедуп живёт здесь. Эффект useHashElement
+// перезапускается, когда поздно приходит distribution, — без этого элемент
+// запрашивался дважды за одно открытие #tasks/<Id>.
+const _ppInflight = new Map();
+const _ppRecent = new Map();
+const PP_RECENT_TTL_MS = 15_000;
+
 export async function fetchProblemsPalletItem(itemId) {
   HASH_LOG("fetchProblemsPalletItem start", itemId);
+  const _id = Number(itemId);
+  if (_id) {
+    const rec = _ppRecent.get(_id);
+    if (rec && Date.now() - rec.at < PP_RECENT_TTL_MS) {
+      HASH_LOG("fetchProblemsPalletItem recent cache hit", _id);
+      return rec.data;
+    }
+    if (_ppInflight.has(_id)) {
+      HASH_LOG("fetchProblemsPalletItem in-flight dedup", _id);
+      return _ppInflight.get(_id);
+    }
+  }
+  const promise = _fetchProblemsPalletItem(itemId);
+  if (_id) {
+    _ppInflight.set(_id, promise);
+    promise
+      .then((data) => { _ppRecent.set(_id, { data, at: Date.now() }); })
+      .catch(() => {})
+      .finally(() => { _ppInflight.delete(_id); });
+  }
+  return promise;
+}
+
+async function _fetchProblemsPalletItem(itemId) {
   const id = Number(itemId);
   if (!id) throw new Error("Некорректный Id элемента");
   const primaryUrl = `/web/lists/getbytitle('${PROBLEMS_LIST_TITLE}')/items(${id})?$select=${PRIMARY_SELECT.join(",")}&$expand=${PRIMARY_EXPAND.join(",")}`;
