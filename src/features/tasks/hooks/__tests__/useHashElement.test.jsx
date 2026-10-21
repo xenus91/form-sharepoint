@@ -10,12 +10,15 @@ import { act } from "react-dom/test-utils";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+/* eslint-disable react/prop-types -- Probe ниже — тестовая заглушка, не компонент приложения. */
+
 const state = vi.hoisted(() => ({
   palletCalls: [],
   searchCalls: [],
   palletItem: null,
   fullTask: null,
   fullTaskCalls: [],
+  palletGate: null,
 }));
 
 // useHashElement импортирует через "../../../tasks/..." из hooks/
@@ -33,6 +36,7 @@ vi.mock("../../../../tasks/hashSearch", () => ({
 vi.mock("../../../../tasks/problemsPallet", () => ({
   fetchProblemsPalletItem: async (id) => {
     state.palletCalls.push(String(id));
+    if (state.palletGate) await state.palletGate;
     if (!state.palletItem) {
       const e = new Error("not found");
       e.response = { status: 404, data: {} };
@@ -51,14 +55,14 @@ const { useHashElement } = await import("../useHashElement");
 
 const TASK_688 = { Id: 688, Title: "Задача ООБ", Status: "Не начата", PercentComplete: 0, DueDate: null };
 
-function Probe({ elementId, kind = "auto", tasks = [] }) {
+function Probe({ elementId, kind = "auto", tasks = [], distribution = null, currentUserId = 207 }) {
   const st = useHashElement({
     initialElementId: elementId,
     initialElementAction: null,
     initialElementKind: kind,
     tasks,
-    distribution: null,
-    currentUserId: 207,
+    distribution,
+    currentUserId,
     tab: 0,
     setTab: () => {},
     isTabPending: false,
@@ -71,8 +75,40 @@ function Probe({ elementId, kind = "auto", tasks = [] }) {
       data-mode={st.matchMode || ""}
       data-error={st.elementError || ""}
       data-searching={String(st.elementTaskSearching)}
+      data-loading={String(st.elementLoading)}
+      data-notfound={String(st.elementNotFound)}
     />
   );
+}
+
+/** Монтирует стенд с возможностью перерисовки — чтобы менять props на лету. */
+function mountProbe(props) {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() => { root.render(<Probe {...props} />); });
+  const read = () => {
+    const el = host.querySelector('[data-testid="probe"]');
+    return {
+      match: el.getAttribute("data-match"),
+      mode: el.getAttribute("data-mode"),
+      error: el.getAttribute("data-error"),
+      loading: el.getAttribute("data-loading"),
+      searching: el.getAttribute("data-searching"),
+      notfound: el.getAttribute("data-notfound"),
+    };
+  };
+  const tick = async (n = 5) => {
+    for (let i = 0; i < n; i += 1) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+    }
+  };
+  return {
+    read,
+    tick,
+    rerender: (next) => { act(() => { root.render(<Probe {...next} />); }); },
+    close: async () => { await act(async () => { root.unmount(); }); host.remove(); },
+  };
 }
 
 async function renderProbe(props) {
@@ -99,6 +135,7 @@ describe("useHashElement — роут #tasks/<id>", () => {
     state.fullTaskCalls = [];
     state.palletItem = { Id: 1, THU: "808117004013738272", Title: "Паллет" };
     state.fullTask = null;
+    state.palletGate = null;
   });
 
   it("Id задачи есть в списке → открывается карточка задачи, элемент не запрашивается", async () => {
@@ -125,6 +162,30 @@ describe("useHashElement — роут #tasks/<id>", () => {
     expect(state.searchCalls).toEqual(["688"]);
     expect(r.error).toContain("Связанная задача для элемента #688 не найдена");
   });
+
+  it("если ничего не найдено, лоадер останавливается даже при смене distribution во время запроса", async () => {
+    // Ничего не найдено: задачи нет ни локально, ни на сервере, элемент — 404.
+    state.palletItem = null;
+    state.fullTask = null;
+    let release;
+    state.palletGate = new Promise((res) => { release = res; });
+
+    const p = mountProbe({ elementId: "688", tasks: [] });
+    await p.tick(2);
+    // Запрос элемента ещё в полёте — меняем distribution (это зависимость эффекта).
+    p.rerender({ elementId: "688", tasks: [], distribution: { changed: true } });
+    await p.tick(2);
+    release();
+    await p.tick(20);
+
+    const r = p.read();
+    // Иначе TasksHashContent навсегда остаётся на «Загружаю…»: searchFinished
+    // требует match ИЛИ notFound ИЛИ error, и ни того, ни другого нет.
+    expect(r.loading).toBe("false");
+    expect(r.searching).toBe("false");
+    expect(r.notfound === "true" || !!r.error).toBe(true);
+    await p.close();
+  }, 30000);
 
   it("явная ссылка на элемент (#tasks/id=688) не ищет задачу по Id", async () => {
     const r = await renderProbe({ elementId: "688", kind: "element", tasks: [TASK_688] });

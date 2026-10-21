@@ -1,7 +1,7 @@
 // src/features/tasks/hooks/useHashElement.js
 // PR1 — вынос hash-роута элемента ProblemsPallet из TasksView.jsx
 // Сохраняет бизнес-логику: RelatedItems 1→1, CAML + OData фолбэк, троттлинг, guards против storm cancellations
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { buildTaskIndex, findInIndex } from "../../../utils/taskIndex";
 import { HASH_LOG, HASH_WARN } from "../../../tasks/log";
 import { searchTaskByRelatedItem, fetchFullTask } from "../../../tasks/hashSearch";
@@ -26,6 +26,12 @@ export function useHashElement({ initialElementId, initialElementAction, initial
   // "element" — старый путь через элемент ProblemsPallet (RelatedItems.ItemId).
   const [matchMode, setMatchMode] = useState(null);
 
+  // Идёт ли поиск прямо сейчас. Именно ref, а не elementLoading/
+  // elementTaskSearching: state-флаги в замыкании следующего прогона устаревают,
+  // из-за чего прогон молча выходил по guard'у и оставлял лоадер крутиться
+  // навсегда (ничего не найдено, но и результата «не найдено» нет).
+  const searchingRef = useRef(false);
+
   const taskIndex = useMemo(() => buildTaskIndex(tasks), [tasks]);
   const findTaskByElementId = (allTasks, elementId) => findInIndex(taskIndex, elementId);
 
@@ -49,8 +55,10 @@ export function useHashElement({ initialElementId, initialElementAction, initial
       setElementTaskSearching(false);
       setIsHashTaskRefreshing(false);
       setMatchMode(null);
+      searchingRef.current = false;
       return;
     }
+    if (searchingRef.current) { HASH_LOG("guard: already loading/searching, skip"); return; }
     let cancelled = false;
     const run = async () => {
       HASH_LOG("hash run triggered", {elementIdParam, tasksLen: tasks.length, elementTaskMatch: elementTaskMatch?.Id, elementLoading, elementTaskSearching, distribution: distribution? getGroupIdsFromDistribution(distribution): null, currentUserId});
@@ -64,7 +72,6 @@ export function useHashElement({ initialElementId, initialElementAction, initial
           return;
         }
       }
-      if (elementLoading || elementTaskSearching) { HASH_LOG("guard: already loading/searching, skip"); return; }
       if (elementNotFound || elementError) {
         if (tasks.length > 0) {
           const localCheck = findTaskByElementId(tasks, elementIdParam) || findTaskByIdInList(tasks, elementIdParam);
@@ -134,11 +141,15 @@ export function useHashElement({ initialElementId, initialElementAction, initial
             }
           }
         } finally {
-          if (matched) {
-            setElementLoading(false);
-          } else {
-            setElementTaskSearching(true);
-            setElementLoading(false);
+          // Отменённый прогон state не трогает: иначе он перезапишет флаги
+          // нового прогона и лоадер залипнет.
+          if (!cancelled) {
+            if (matched) {
+              setElementLoading(false);
+            } else {
+              setElementTaskSearching(true);
+              setElementLoading(false);
+            }
           }
           HASH_LOG("finally after fetchProblemsPalletItem", {cancelled, matched: matched? matched.Id: null, loading: false, searching: true});
         }
@@ -205,8 +216,17 @@ export function useHashElement({ initialElementId, initialElementAction, initial
         }
       }
     };
-    run();
-    return () => { cancelled = true; };
+    const tracked = async () => {
+      searchingRef.current = true;
+      try {
+        await run();
+      } finally {
+        searchingRef.current = false;
+      }
+    };
+    tracked();
+    // Отменённый прогон обязан освободить ref, иначе следующий выйдет по guard'у.
+    return () => { cancelled = true; searchingRef.current = false; };
   }, [elementIdParam, distribution, currentUserId, initialElementKind]);
 
   useEffect(() => {
