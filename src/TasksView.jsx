@@ -141,10 +141,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   const completedRefreshRef = React.useRef(null);
   const lastHashFocusRef = React.useRef(Date.now());
   const virtualParentRef = React.useRef(null); // для виртуализации списка
-  // true в hash-режиме (#tasks/<Id>): enrich списка не нужен, см. useTasksQuery.
+  // true в hash-режиме (#tasks/<Id>): список задач и его enrich не нужны —
+  // карточка берётся из GetItems + fetchFullTask + связанный элемент.
   // Ref, а не значение, потому что isHashMode становится известен только из
-  // useHashElement, который вызывается ниже useTasksQuery.
-  const skipEnrichRef = React.useRef(false);
+  // useHashElement, который вызывается ниже useTasksQuery. Начальное значение —
+  // из initialElementId, чтобы уже первый рендер deep-link не тянул список.
+  const hashModeRef = React.useRef(!!initialElementId);
   // PR1: hooks extraction — currentUser + distribution + metadata (fieldsLoading etc.)
   const {
     currentUserId, setCurrentUserId,
@@ -185,8 +187,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     recipientField,
     scNumberField,
     resultFieldInternalNames,
+    skipEnrichRef: hashModeRef,
     enabled: tasksQueryEnabled,
-    skipEnrichRef,
   });
 
   // Табличное представление удалено (требование пользователя, 2026-10-16):
@@ -394,7 +396,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     isHashMode,
   } = useHashElement({ initialElementId, initialElementAction, initialElementKind, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
 
-  skipEnrichRef.current = isHashMode;
+  hashModeRef.current = isHashMode;
 
   const relatedAttachments = useRelatedAttachments(isHashMode ? [] : cardTasks);
 

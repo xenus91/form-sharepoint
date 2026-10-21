@@ -214,7 +214,9 @@ export async function fetchContentTypeResultMap(apiClient, opts = {}) {
   // ⭐ v8+: всегда подтягиваем CT метаданные (имя) рядом с ctMap — нужно для TaskBehaviour-by-Name
   const fetchCtMeta = async () => {
     try {
-      const ctUrl = `${TASKS_LIST_API}/contenttypes?$select=Id,StringId,Name&$top=50`;
+      // Тот же URL, что и в fetchContentTypeResultMap: иначе на один и тот же
+      // список типов уходило два запроса с разным $select.
+      const ctUrl = `${TASKS_LIST_API}/contenttypes?$select=Id,StringId,Name&$expand=FieldLinks&$top=50`;
       const { data } = await apiClient.get(ctUrl, { headers: { Accept: "application/json;odata=verbose" }, __noCache: forceRefresh });
       const cts = data?.d?.results || [];
       const metaMap = new Map();

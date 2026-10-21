@@ -27,13 +27,52 @@ function stripQuery(url) {
 }
 
 export function makeKey(method, url, params) {
-  const base = `${(method || "get").toUpperCase()} ${stripQuery(url)}`;
+  // ВАЖНО: query входит в ключ. Вызывающая сторона передаёт $select/$filter/$top
+  // прямо в строке url, поэтому без query запросы к одному пути с разными
+  // параметрами получали один ключ и подменяли друг друга данными.
+  const base = `${(method || "get").toUpperCase()} ${String(url || "")}`;
   if (!params) return base;
   try {
     return `${base}?${JSON.stringify(params)}`;
   } catch {
     return base;
   }
+}
+
+// Справочные данные: меняются редко, в рамках сессии их безопасно переиспользовать.
+// Список намеренно узкий — запросы к элементам (/items, GetItems, вложения) и
+// digest сюда не входят, чтобы опросчики всегда получали свежие данные.
+// Списки-справочники: читаются через /items, но сами являются конфигурацией.
+const CONFIG_LIST_PATTERNS = [
+  /getbytitle\('DcEmail'\)/i,
+  /getbytitle\('TaskBehaviour'\)/i,
+  /getbytitle\('TaskResultDefinitions'\)/i,
+  /getbytitle\('TaskTypeConfiguration'\)/i,
+  /getbytitle\('TaskActionDefinitions'\)/i,
+  /getbytitle\('StylingConfig'\)/i,
+];
+
+const REFERENCE_DATA_PATTERNS = [
+  /\/web\/currentuser(\?|$)/i,
+  /GetMyProperties/i,
+  /\/fields(\?|$)/i,
+  /ListItemEntityTypeFullName/i,
+  /\/contenttypes(\?|$)/i,
+  /\/getuserbyid\(/i,
+  /\/sitegroups\//i,
+  /\/siteusers\//i,
+];
+
+/** Запрос к справочным данным (кэшируется на всю сессию). */
+export function isReferenceDataRequest(url) {
+  const u = String(url || "");
+  // Списки конфигурации — справочник, даже что читаются через /items.
+  if (CONFIG_LIST_PATTERNS.some((re) => re.test(u))) return true;
+  // Обычные /items — это данные, не справочник.
+  if (/\/items(\?|\(|$)/i.test(u)) return false;
+  if (/GetItems/i.test(u)) return false;
+  if (/AttachmentFiles/i.test(u)) return false;
+  return REFERENCE_DATA_PATTERNS.some((re) => re.test(u));
 }
 
 export async function getCached(key, loader, { ttlMs = 60_000 } = {}) {
@@ -122,27 +161,70 @@ export function clearCache() {
 // Декоратор для axios-клиента: автоматически кэширует успешные GET.
 // Уважает config.__noCache (true = пропустить кэш, для polling/refresh).
 // config.__cacheTtlMs — переопределить TTL для конкретного запроса.
-export function installCacheInterceptor(client, { defaultTtlMs = 60_000 } = {}) {
+export function installCacheInterceptor(client, { defaultTtlMs = 60_000, referenceTtlMs = 600_000 } = {}) {
+  const replayFrom = (entry, config) => ({ ...entry, config });
+
   client.interceptors.request.use((config) => {
     if (!config.__cacheKey) {
       config.__cacheKey = makeKey(config.method, config.url, config.params);
     }
+    const key = config.__cacheKey;
+    const method = (config.method || "get").toUpperCase();
+    // Read-through — только для справочных данных и только для GET.
+    // Раньше интерцептор кэш лишь записывал, поэтому каждый хук, которому
+    // понадобился /web/currentuser или метаданные поля, уходил в сеть заново.
+    if (method !== "GET" || config.__noCache || !isReferenceDataRequest(config.url)) {
+      return config;
+    }
+    const hit = cache.get(key);
+    if (hit && hit.expiresAt > Date.now()) {
+      stats.hits += 1;
+      const cachedResponse = hit.data;
+      config.adapter = () => Promise.resolve(replayFrom(cachedResponse, config));
+      return config;
+    }
+    if (inflight.has(key)) {
+      stats.dedup += 1;
+      const pending = inflight.get(key);
+      config.adapter = () => pending.then((r) => replayFrom(r, config));
+      return config;
+    }
+    let settleInflight;
+    const promise = new Promise((resolve) => { settleInflight = resolve; });
+    inflight.set(key, promise);
+    config.__cacheSettleInflight = settleInflight;
     return config;
   });
+
   client.interceptors.response.use(
     (response) => {
       const cfg = response.config || {};
       const key = cfg.__cacheKey;
       const m = (cfg.method || "get").toUpperCase();
       const noCache = !!cfg.__noCache;
-      const ttl = typeof cfg.__cacheTtlMs === "number" ? cfg.__cacheTtlMs : defaultTtlMs;
+      const reference = isReferenceDataRequest(cfg.url);
+      const ttl = typeof cfg.__cacheTtlMs === "number"
+        ? cfg.__cacheTtlMs
+        : (reference ? referenceTtlMs : defaultTtlMs);
       // Не кэшируем ошибки, не-GET и явно помеченные __noCache.
       if (key && m === "GET" && !noCache && response.status >= 200 && response.status < 300) {
         cache.set(key, { data: response, expiresAt: Date.now() + ttl });
       }
+      if (typeof cfg.__cacheSettleInflight === "function") {
+        cfg.__cacheSettleInflight(response);
+        inflight.delete(key);
+      }
       return response;
     },
-    (err) => Promise.reject(err)
+    (err) => {
+      const cfg = err?.config || {};
+      if (typeof cfg.__cacheSettleInflight === "function") {
+        // Ошибка не кэшируется, но ждущих надо отпустить их собственным запросом.
+        cfg.__cacheSettleInflight(err?.response || null);
+        inflight.delete(cfg.__cacheKey);
+      }
+      return Promise.reject(err);
+    }
   );
 }
 
