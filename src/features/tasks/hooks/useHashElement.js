@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { buildTaskIndex, findInIndex } from "../../../utils/taskIndex";
 import { HASH_LOG, HASH_WARN } from "../../../tasks/log";
-import { searchTaskByRelatedItem, fetchFullTask } from "../../../tasks/hashSearch";
+import { searchTaskByRelatedItem } from "../../../tasks/hashSearch";
 import { resolveHashTarget, findTaskByIdInList } from "../../../tasks/hashRoute";
 import { fetchProblemsPalletItem } from "../../../tasks/problemsPallet";
 import { getGroupIdsFromDistribution } from "../../../tasks/distribution";
@@ -86,11 +86,12 @@ export function useHashElement({ initialElementId, initialElementAction, initial
       HASH_LOG("hash run params", {isThu, elementIdParam, tasksLen: tasks.length});
       let matched = null;
 
-      // #tasks/<id>: сначала пробуем открыть ЗАДАЧУ с этим Id (локально или
-      // догрузив с сервера). Элемент ProblemsPallet — только фолбэк (см. hashRoute.js).
+      // #tasks/<n>: n — это Id элемента ProblemsPallet, а не Id задачи.
+      // Задача находится CAML-запросом GetItems по RelatedItems, поля карточки
+      // берутся из ProblemsPallet. Никакой догрузки items(<n>) из списка задач:
+      // на элементной ссылке она всегда давала 404.
       const target = await resolveHashTarget(elementIdParam, {
         tasks,
-        fetchTaskById: fetchFullTask,
         kind: initialElementKind === "element" ? "element" : "auto",
       });
       if (cancelled) { HASH_LOG("cancelled after resolveHashTarget"); return; }

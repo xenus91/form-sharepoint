@@ -41,22 +41,29 @@ export function findTaskByIdInList(tasks, id) {
  * @typedef {object} HashTarget
  * @property {object|null} task — найденная задача (режим "task")
  * @property {"task"|"element"|null} mode — что показывать
- * @property {"list"|"fetch"|null} [source] — откуда взялась задача
+ * @property {"list"|null} [source] — откуда взялась задача
  */
 
 /**
  * Определяет, что открывать по hash-роуту.
  *
+ * Id из #tasks/<n> — это Id элемента ProblemsPallet, а НЕ Id задачи: задача
+ * находится CAML-запросом GetItems по RelatedItems (searchTaskByRelatedItem),
+ * а поля карточки берутся из ProblemsPallet. Поэтому догрузки задачи по Id
+ * здесь больше нет — она всегда давала 404 на элементных ссылках.
+ * Задачей Id может оказаться только если он уже лежит в загруженном списке
+ * (клик по карточке ставит #tasks/<Id задачи>, и эта задача в списке есть) —
+ * это локальная проверка, без запроса на сервер.
+ *
  * @param {number|string} elementId
  * @param {{
  *   tasks?: Array<any>,
- *   fetchTaskById?: ((id:string) => Promise<object|null>)|null,
  *   kind?: "auto"|"element"
  * }} [opts]
  * @returns {Promise<HashTarget>}
  */
 export async function resolveHashTarget(elementId, opts = {}) {
-  const { tasks = [], fetchTaskById = null, kind = "auto" } = opts;
+  const { tasks = [], kind = "auto" } = opts;
   const idStr = String(elementId ?? "").trim();
   if (!idStr) return { task: null, mode: null };
   // Явный элементный вид ссылки или ЕО по THU — сразу элементный путь.
@@ -65,13 +72,5 @@ export async function resolveHashTarget(elementId, opts = {}) {
   const local = findTaskByIdInList(tasks, idStr);
   if (local) return { task: local, mode: "task", source: "list" };
 
-  if (typeof fetchTaskById === "function") {
-    try {
-      const fetched = await fetchTaskById(idStr);
-      if (fetched) return { task: fetched, mode: "task", source: "fetch" };
-    } catch (_e) {
-      void _e;
-    }
-  }
   return { task: null, mode: "element" };
 }

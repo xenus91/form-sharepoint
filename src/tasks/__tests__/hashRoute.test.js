@@ -3,7 +3,7 @@
 // Регрессия 2026-10-03: клик по строке таблицы ставил #tasks/<TaskId>, а роут
 // трактовал число как Id элемента → «Связанная задача для элемента #N не найдена».
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { resolveHashTarget, findTaskByIdInList, isThuValue } from "../hashRoute";
 
 const TASKS = [
@@ -39,45 +39,28 @@ describe("findTaskByIdInList", () => {
 });
 
 describe("resolveHashTarget", () => {
-  it("задача есть в списке → режим task, без запроса на сервер", async () => {
-    const fetchTaskById = vi.fn();
-    const res = await resolveHashTarget("688", { tasks: TASKS, fetchTaskById });
+  // Id из #tasks/<n> — это Id элемента ProblemsPallet. Догрузки задачи по Id
+  // больше нет: на элементной ссылке items(<n>) всегда отдавал 404.
+  it("id уже есть в загруженном списке → режим task, локально и без запроса", async () => {
+    const res = await resolveHashTarget("688", { tasks: TASKS });
     expect(res).toEqual({ task: TASKS[1], mode: "task", source: "list" });
-    expect(fetchTaskById).not.toHaveBeenCalled();
   });
 
-  it("задачи нет в списке → догружаем по Id с сервера", async () => {
-    const fetched = { Id: 700, Title: "Задача из другого фильтра" };
-    const fetchTaskById = vi.fn(async () => fetched);
-    const res = await resolveHashTarget("700", { tasks: TASKS, fetchTaskById });
-    expect(res).toEqual({ task: fetched, mode: "task", source: "fetch" });
-    expect(fetchTaskById).toHaveBeenCalledWith("700");
+  it("id нет в списке → элементный путь (GetItems по RelatedItems)", async () => {
+    expect(await resolveHashTarget("25393", { tasks: TASKS })).toEqual({ task: null, mode: "element" });
   });
 
-  it("задачи нет и на сервере → элементный путь (фолбэк)", async () => {
-    const fetchTaskById = vi.fn(async () => null);
-    const res = await resolveHashTarget("688", { tasks: [], fetchTaskById });
+  it("пустой список → элементный путь", async () => {
+    expect(await resolveHashTarget("688", { tasks: [] })).toEqual({ task: null, mode: "element" });
+  });
+
+  it("явный элементный вид ссылки не ищет задачу даже если Id есть в списке", async () => {
+    const res = await resolveHashTarget("688", { tasks: TASKS, kind: "element" });
     expect(res).toEqual({ task: null, mode: "element" });
-  });
-
-  it("ошибка догрузки → элементный путь, без падения", async () => {
-    const fetchTaskById = vi.fn(async () => { throw new Error("network"); });
-    const res = await resolveHashTarget("688", { tasks: [], fetchTaskById });
-    expect(res.mode).toBe("element");
-  });
-
-  it("явный элементный вид ссылки (#tasks/id=688) не ищет задачу", async () => {
-    const fetchTaskById = vi.fn();
-    const res = await resolveHashTarget("688", { tasks: TASKS, fetchTaskById, kind: "element" });
-    expect(res).toEqual({ task: null, mode: "element" });
-    expect(fetchTaskById).not.toHaveBeenCalled();
   });
 
   it("THU сразу идёт в элементный путь (поиск по ЕО)", async () => {
-    const fetchTaskById = vi.fn();
-    const res = await resolveHashTarget("808117004013738272", { tasks: TASKS, fetchTaskById });
-    expect(res.mode).toBe("element");
-    expect(fetchTaskById).not.toHaveBeenCalled();
+    expect((await resolveHashTarget("808117004013738272", { tasks: TASKS })).mode).toBe("element");
   });
 
   it("пустой id → ничего не открываем", async () => {

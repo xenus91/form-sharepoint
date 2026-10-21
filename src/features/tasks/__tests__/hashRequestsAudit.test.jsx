@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-// Замер: какие именно запросы уходит при открытии #tasks/<Id>.
-// Временный аудит — нужен, чтобы резать сеть по факту, а не на глаз.
-import React from "react";
+// Бюджет сетевых вызовов при открытии #tasks/<Id>.
+// Считает обращения к apiClient, чтобы резать сеть по факту, а не на глаз.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -36,10 +35,6 @@ const TASK_988 = {
 };
 
 const CT_ID = TASK_988.ContentTypeId;
-
-const behaviour = {
-  _default: { rf: [{ f: "THU", ti: "ЕО" }, { f: "Recipient/SCNumberText", ti: "Получатель" }] },
-};
 
 function mockApi() {
   const get = async (url) => {
@@ -138,10 +133,12 @@ describe("аудит запросов #tasks/<Id>", () => {
     // Обязательный путь: GetItems → задача → связанный элемент → карточка.
     expect(state.requests.some((u) => /GetItems/.test(u))).toBe(true);
     expect(state.requests.some((u) => /getbytitle\('ProblemsPallet'\)\/items\(25393\)/.test(u))).toBe(true);
-    // fetchFullTask: полный запрос задачи по найденному Id
-    expect(state.requests.some((u) => /\/items\(\d+\)\?\$select=Id,Title,Body/.test(u))).toBe(true);
+    // Id из хэша больше не пробуется как Id задачи в списке Tasks:
+    // раньше сюда всегда уходил items(25393)?$select=Id,Title,Body,… и на
+    // элементной ссылке отдавал 404.
+    expect(state.requests.filter((u) => /lists\(guid'[^']*'\)\/items\(25393\)/.test(u))).toEqual([]);
 
     // Бюджет вызовов apiClient на hash-роуте.
-    expect(state.requests.length).toBeLessThanOrEqual(16);
+    expect(state.requests.length).toBeLessThanOrEqual(15);
   }, 30000);
 });

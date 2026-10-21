@@ -457,18 +457,22 @@ describe("TasksView — multi-source (#tasks)", () => {
 
 
 
-  it("#tasks/<Id задачи> открывает карточку задачи, а не ищет элемент ProblemsPallet", async () => {
-    // Проверяем роут из таблицы: openTaskForm(main:10) → #tasks/10.
-    const host = renderTasksView({ initialElementId: "10" });
+  it("#tasks/<n> не ходит в список задач по Id — только GetItems и ProblemsPallet", async () => {
+    // #tasks/<n> — это Id элемента ProblemsPallet, а не Id задачи: задача
+    // находится CAML GetItems по RelatedItems, поля карточки берутся из
+    // ProblemsPallet. Раньше сюда всегда уходил items(<n>) к списку задач,
+    // и на элементной ссылке он отдавал 404.
+    renderTasksView({ initialElementId: "25393" });
     await settle(3000);
 
-    // карточка задачи отрисована в hash-режиме
-    expect(host.textContent).toContain("Основная задача ООБ");
-    // и НЕТ сообщения про элемент ProblemsPallet
-    expect(host.textContent).not.toMatch(/Связанная задача для элемента/);
-    expect(host.textContent).not.toMatch(/Задача для элемента #10 не найдена/);
-    // элемент ProblemsPallet по этому Id не запрашивался
-    expect(state.requests.some((r) => /ProblemsPallet/i.test(r.url))).toBe(false);
+    // Id из хэша не используется как Id задачи в списке Tasks.
+    // (items(25393) к ProblemsPallet — это как раз нужный запрос за полями.)
+    const asTaskId = state.requests.filter(
+      (r) => /lists\(guid'[^']*'\)\/items\(25393\)/.test(r.url),
+    );
+    expect(asTaskId.map((r) => r.url)).toEqual([]);
+    expect(state.requests.some((r) => /GetItems/.test(r.url))).toBe(true);
+    expect(state.requests.some((r) => /ProblemsPallet/i.test(r.url))).toBe(true);
   }, 30000);
 
   // Задача со связанным элементом ProblemsPallet — по ней считается вложения.

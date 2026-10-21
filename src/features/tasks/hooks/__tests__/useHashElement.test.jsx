@@ -146,13 +146,17 @@ describe("useHashElement — роут #tasks/<id>", () => {
     expect(state.searchCalls).toEqual([]);
   });
 
-  it("Id задачи не в списке, но есть на сервере → догружаем задачу, элемент не запрашивается", async () => {
+  it("id из #tasks/<n> никогда не догружается как задача из списка задач", async () => {
+    // #tasks/<n> — это Id элемента ProblemsPallet: задача ищется CAML GetItems
+    // по RelatedItems, поля карточки берутся из ProblemsPallet. Догрузки
+    // items(<n>) из списка задач быть не должно — на элементной ссылке она
+    // всегда отдавала 404.
     state.fullTask = { ...TASK_688, Id: 700, Title: "Задача вне фильтра" };
     const r = await renderProbe({ elementId: "700", tasks: [] });
-    expect(r.match).toBe("700");
-    expect(r.mode).toBe("task");
-    expect(state.fullTaskCalls).toEqual(["700"]);
-    expect(state.palletCalls).toEqual([]);
+    expect(state.fullTaskCalls).toEqual([]);
+    expect(r.mode).toBe("element");
+    expect(state.palletCalls).toEqual(["700"]);
+    expect(state.searchCalls).toEqual(["700"]);
   });
 
   it("задачи с таким Id нет → элементный путь (ProblemsPallet + RelatedItems)", async () => {
