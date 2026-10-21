@@ -61,7 +61,7 @@ import useTasksListSyncOnBadgeChange from "./features/tasks/hooks/useTasksListSy
 import { useNotifications } from './NotificationsProvider';
 import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
 import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM, isEoMissingRoute } from "./features/form/lib/eoMissingRoute";
-import { findOtherProblemRow, otherProblemsLabel } from "./features/form/lib/otherProblemConflict";
+import { eoCheckKindForProblems, eoCheckSignature, findOtherProblemRow, otherProblemsLabel } from "./features/form/lib/otherProblemConflict";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -432,8 +432,11 @@ const App = () => {
   // проблему — «Не найдена» скорее всего ошибочна, просим подтвердить.
   const [otherProblemItem, setOtherProblemItem] = useState(null);
   const [otherProblemDialogOpen, setOtherProblemDialogOpen] = useState(false);
-  // Подтверждение получено — второй раз не спрашиваем.
-  const skipOtherProblemCheckRef = useRef(false);
+  // Проверки ЕО взаимоисключающие и срабатывают ПОСЛЕ выбора проблемы. Чтобы не
+  // спрашивать одно и то же дважды, помним подпись (номер ЕО + тип проверки),
+  // на которую оператор уже ответил.
+  const answeredCheckSigRef = useRef(null);
+  const pendingCheckSigRef = useRef(null);
   const [editingItemId, setEditingItemId] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [isFetchingItemData, setIsFetchingItemData] = useState(false);
@@ -699,15 +702,26 @@ const App = () => {
       setLocation("Не найдена в зоне отгрузки");
     }
     setProblems(selectedProblems);
+    // Проверка ЕО — СРАЗУ после выбора проблемы, а не на выходе из поля номера:
+    // только здесь уже известно, «Не найдена» это или другая проблема, а от этого
+    // зависит, какая из двух проверок применяется.
+    runEoChecks(eoNumber, selectedProblems);
   };
 
   const resetButtonState = () => {
     timer.current = setTimeout(() => setSuccess(false), 3000);
   };
 
+  /**
+   * Своя заявка по этому ЕО за последние 24 часа — «вы уже отправляли».
+   * Возвращает найденный элемент (или null), чтобы вызывающий код решал,
+   * продолжать ли отправку.
+   */
   const checkEoNumberInRecentRecords = async (eoNumber) => {
     // Если мы уже в режиме редактирования этого элемента или только что загрузили данные, не проверяем
-    if (editingItemId) return;
+    if (editingItemId) return null;
+    const eo = String(eoNumber || "").trim();
+    if (!eo || eo === "ЕО отсутствует") return null;
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const officeSuffix = getEffectiveDcThu();
@@ -733,10 +747,12 @@ const App = () => {
         const item = response.data.d.results[0];
         setDuplicateEoItem(item);
         setDuplicateEoDialogOpen(true);
+        return item;
       }
     } catch (error) {
       console.error("Ошибка при проверке Номер ЕО:", error);
     }
+    return null;
   };
 
   /**
@@ -770,6 +786,51 @@ const App = () => {
       // Не блокируем отправку из-за сбоя проверки.
       return null;
     }
+  };
+
+  /**
+   * Проверка номера ЕО. Какая именно — зависит от выбранной проблемы, и только
+   * одна из двух:
+   *   • «Не найдена» → есть ли на этом же РЦ за 24 часа заявка по этому ЕО с
+   *     ДРУГОЙ проблемой («по ЕО уже зарегистрирована проблема в другой заявке»);
+   *   • любая другая проблема → старая проверка «вы уже отправляли заявку с этим
+   *     ЕО за 24 часа, хотите изменить её?».
+   *
+   * Одновременно они не срабатывают — иначе диалоги перекрывают друг друга.
+   *
+   * @param {string} eo
+   * @param {string[]} selectedProblems
+   * @returns {Promise<"duplicate"|"notfound"|null>} — что найдено (открыт диалог)
+   */
+  const runEoChecks = async (eo, selectedProblems) => {
+    const number = String(eo || "").trim();
+    const validPattern = /^(ЕО отсутствует|\d{17}|\d{18})$/;
+    if (!number || number === "ЕО отсутствует" || !validPattern.test(number)) return null;
+    if (editingItemId) return null;
+
+    const signature = eoCheckSignature(number, selectedProblems);
+    // Этот номер с этим типом проблемы уже спрашивали — не повторяем.
+    if (signature === answeredCheckSigRef.current || signature === pendingCheckSigRef.current) return null;
+
+    const kind = eoCheckKindForProblems(selectedProblems);
+    if (kind === "notfound") {
+      const other = await findOtherProblemForEo(number);
+      if (!other) return null;
+      pendingCheckSigRef.current = signature;
+      setOtherProblemItem(other);
+      setOtherProblemDialogOpen(true);
+      return "notfound";
+    }
+    const duplicate = await checkEoNumberInRecentRecords(number);
+    if (!duplicate) return null;
+    pendingCheckSigRef.current = signature;
+    return "duplicate";
+  };
+
+  /** Оператор ответил на диалог проверки — подпись считаем закрытой. */
+  const markEoCheckAnswered = () => {
+    answeredCheckSigRef.current = pendingCheckSigRef.current;
+    pendingCheckSigRef.current = null;
   };
 
   const loadDuplicateEoData = async (itemId) => {
@@ -815,15 +876,15 @@ const App = () => {
     }
   };
 
+  // На выходе из поля — только проверка формата. Проверку дубля перенесли на
+  // отправку: раньше диалог «Дубликат ЕО» вылетал при уходе из поля номера ЕО,
+  // то есть в момент, когда форма ещё не заполнена и отправлять нечего.
   const handleBlurEoNumber = () => {
     const validPattern = /^(ЕО отсутствует|\d{17}|\d{18})$/;
     if (!validPattern.test(eoNumber)) {
       setErrors({ ...errors, eoNumber: "Введите 17 или 18 цифр или 'ЕО отсутствует'" });
     } else {
       setErrors({ ...errors, eoNumber: "" });
-      if (eoNumber && eoNumber !== "ЕО отсутствует") {
-        checkEoNumberInRecentRecords(eoNumber);
-      }
     }
   };
   const fetchChoices = async () => {
@@ -1227,18 +1288,15 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       return;
     }
 
-    // «Не найдена» + по этому ЕО на этом же РЦ за 24 часа уже есть заявка с
-    // другой проблемой — спрашиваем подтверждение до отправки.
-    if (problems.includes("Не найдена") && !skipOtherProblemCheckRef.current) {
-      const other = await findOtherProblemForEo(eoNumber);
-      if (other) {
-        setOtherProblemItem(other);
-        setOtherProblemDialogOpen(true);
+    // Страховка: если проверку не прошли на выборе проблемы (например, номер ЕО
+    // ввели позже) — спрашиваем здесь. На уже отвеченную подпись не спрашиваем.
+    if (answeredCheckSigRef.current !== eoCheckSignature(eoNumber, problems)) {
+      const hit = await runEoChecks(eoNumber, problems);
+      if (hit) {
         isSubmittingRef.current = false;
         return;
       }
     }
-    skipOtherProblemCheckRef.current = false;
 
     let createdItemId = editingItemId;
 
@@ -1448,7 +1506,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       }));
     } else {
       setErrors((prevErrors) => ({ ...prevErrors, eoNumber: "" }));
-      checkEoNumberInRecentRecords(decodedText);
+      // Проверку ЕО здесь не делаем: она одна на все пути и срабатывает после
+      // выбора проблемы (runEoChecks) — иначе диалог вылетал бы до выбора.
     }
     setScannerOpen(false);
     if (scannerRef.current) {
@@ -2794,18 +2853,37 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             </DialogContentText>
           </DialogContent>
           <DialogActions sx={{ pb: 2, px: 3 }}>
-            <Button 
+            {/* Проверка теперь на отправке: «Нет» просто закрывает окно и НЕ
+                стирает введённый номер — иначе форма теряла бы данные. */}
+            <Button
               onClick={() => {
+                markEoCheckAnswered();
                 setDuplicateEoDialogOpen(false);
-                setEoNumber("");
               }}
               color="inherit"
               sx={{ fontWeight: 700 }}
+              data-testid="duplicate-eo-cancel"
             >
               Нет
             </Button>
             <Button
-              onClick={() => loadDuplicateEoData(duplicateEoItem?.Id)}
+              onClick={() => {
+                // Осознанно создаём новую заявку — без повторного вопроса.
+                markEoCheckAnswered();
+                setDuplicateEoDialogOpen(false);
+                handleFormSubmit({ preventDefault: () => {} });
+              }}
+              variant="outlined"
+              sx={{ borderRadius: 2, fontWeight: 700 }}
+              data-testid="duplicate-eo-create-anyway"
+            >
+              Всё равно создать новую
+            </Button>
+            <Button
+              onClick={() => {
+                markEoCheckAnswered();
+                loadDuplicateEoData(duplicateEoItem?.Id);
+              }}
               variant="contained"
               autoFocus
               sx={{ 
@@ -2843,7 +2921,10 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </DialogContent>
           <DialogActions sx={{ pb: 2, px: 3 }}>
             <Button
-              onClick={() => setOtherProblemDialogOpen(false)}
+              onClick={() => {
+                markEoCheckAnswered();
+                setOtherProblemDialogOpen(false);
+              }}
               color="inherit"
               sx={{ fontWeight: 700 }}
               data-testid="other-problem-cancel"
@@ -2852,9 +2933,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             </Button>
             <Button
               onClick={() => {
-                setOtherProblemDialogOpen(false);
                 // Подтверждено — подаём без повторного вопроса.
-                skipOtherProblemCheckRef.current = true;
+                markEoCheckAnswered();
+                setOtherProblemDialogOpen(false);
                 handleFormSubmit({ preventDefault: () => {} });
               }}
               variant="contained"

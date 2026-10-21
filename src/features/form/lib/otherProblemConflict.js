@@ -47,3 +47,34 @@ export function otherProblemsLabel(row) {
   const list = row?.Problems?.results;
   return Array.isArray(list) ? list.map((p) => String(p)).join(", ") : "";
 }
+
+/**
+ * Какая проверка ЕО относится к выбранному набору проблем.
+ *
+ * Проверки взаимоисключающие — иначе они срабатывают одновременно и перекрывают
+ * друг друга:
+ *   • «notfound» — выбрана «Не найдена»: ищем на РЦ заявку по этому ЕО с ДРУГОЙ
+ *     проблемой (findOtherProblemRow);
+ *   • «duplicate» — любая другая проблема: старая проверка «вы уже отправляли
+ *     заявку с этим ЕО за 24 часа».
+ *
+ * @param {string[]|null|undefined} problems
+ * @returns {"notfound"|"duplicate"}
+ */
+export function eoCheckKindForProblems(problems) {
+  const list = Array.isArray(problems) ? problems : [];
+  const hasNotFound = list.some((p) => String(p ?? "").trim() === NOT_FOUND_PROBLEM);
+  return hasNotFound ? "notfound" : "duplicate";
+}
+
+/**
+ * Подпись текущей пары «номер ЕО + тип проверки». По ней видно, менялось ли
+ * что-то с последней проверки: один и тот же набор не спрашиваем дважды.
+ *
+ * @param {string} eo
+ * @param {string[]|null|undefined} problems
+ * @returns {string}
+ */
+export function eoCheckSignature(eo, problems) {
+  return `${String(eo ?? "").trim()}|${eoCheckKindForProblems(problems)}`;
+}
