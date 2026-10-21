@@ -235,69 +235,28 @@ describe("useTaskMutations.completeTask", () => {
     expect(body.GuiltyId.results).toEqual([936, 20]);
   });
 
-  it("Boolean-колонка не распознана: повторяем запрос со true/false и запоминаем тип", async () => {
-    // Регрессия пользователя: «Не удается преобразовать значение-примитив в ожидаемый тип Edm.Boolean».
+  it("поля AdditionalsActionsRequired/AdditionalActions в payload не отправляются вовсе", async () => {
+    // Поля удалены из списка Tasks: любой запрос с ними падал в 400
+    // «Поле или свойство … не существует». Раньше здесь был авто-повтор с
+    // boolean/строкой — теперь нечего повторять.
     const accepted = [];
-    const flagChanges = [];
-    const booleanError = () => {
-      const err = new Error("Request failed with status code 400");
-      err.response = {
-        status: 400,
-        data: {
-          error: {
-            message: {
-              value:
-                'Не удается преобразовать значение-примитив в ожидаемый тип "Edm.Boolean". Дополнительные сведения см. во внутреннем исключении.',
-            },
-          },
-        },
-      };
-      return err;
-    };
     const { notify, apiState: api } = await mountAndComplete({
-      additionalRequired: "Нет",
-      additionalRequiredIsBoolean: false, // метаданные не распознали Boolean-колонку
-      onFlagChange: (v) => flagChanges.push(v),
-      apiImpl: {
-        post: async (url, body) => {
-          const req = body.AdditionalsActionsRequired ?? body.AdditionalActionsRequired;
-          if (typeof req === "string") throw booleanError(); // строка в Edm.Boolean → 400
-          accepted.push(body);
-          return { data: { d: {} } };
-        },
-      },
-    });
-
-    // первая попытка — строкой (упала), вторая — boolean (успех), тип запомнен
-    expect(api.post).toHaveBeenCalledTimes(2);
-    expect(typeof api.post.mock.calls[0][1].AdditionalsActionsRequired).toBe("string");
-    expect(accepted).toHaveLength(1);
-    expect(accepted[0].AdditionalsActionsRequired).toBe(false);
-    expect(flagChanges).toEqual([true]);
-    expect(notify.mock.calls.at(-1)[0]).toContain("завершена: Найдена");
-  });
-
-  it("текстовая колонка («Да»/«Нет») тоже не теряет результат: Edm.String → строкой", async () => {
-    const accepted = [];
-    const { apiState: api } = await mountAndComplete({
       additionalRequired: "Да",
       additionalActions: ["Проверить ТМЦ"],
-      additionalRequiredIsBoolean: true, // метаданные сказали Boolean, но колонка текстовая
       apiImpl: {
         post: async (url, body) => {
-          const req = body.AdditionalsActionsRequired ?? body.AdditionalActionsRequired;
-          if (typeof req === "boolean") {
-            const err = new Error("Request failed with status code 400");
-            err.response = { status: 400, data: { error: { message: { value: 'Не удается преобразовать значение-примитив в ожидаемый тип "Edm.String".' } } } };
-            throw err;
-          }
           accepted.push(body);
           return { data: { d: {} } };
         },
       },
     });
-    expect(api.post).toHaveBeenCalledTimes(2);
-    expect(accepted[0].AdditionalsActionsRequired).toBe("Да");
+    expect(api.post).toHaveBeenCalledTimes(1);
+    for (const body of accepted) {
+      expect("AdditionalsActionsRequired" in body).toBe(false);
+      expect("AdditionalActionsRequired" in body).toBe(false);
+      expect("AdditionalActions" in body).toBe(false);
+    }
+    expect(notify.mock.calls.at(-1)[0]).toContain("завершена: Найдена");
   });
 
   it("на ошибке сервера показывает уведомление об ошибке", async () => {

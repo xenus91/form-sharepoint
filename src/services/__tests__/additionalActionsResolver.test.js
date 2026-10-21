@@ -4,7 +4,7 @@ import { resolveAdditionalActionsConfig, clearAdditionalActionsResolverCache } f
 describe("additionalActionsResolver", () => {
   beforeEach(() => clearAdditionalActionsResolverCache());
 
-  it("resolves common field when no CT config", async () => {
+  it("обязательность больше не берётся из поля задачи", async () => {
     const task = { contentTypeId: "0x0108AAA", AdditionalsActionsRequired: "Да" };
     const cfg = await resolveAdditionalActionsConfig(task, {
       additionalFieldMeta: {
@@ -16,7 +16,7 @@ describe("additionalActionsResolver", () => {
       },
     });
     expect(cfg.fieldInternalName).toBe("AdditionalActions");
-    expect(cfg.required).toBe(true);
+    expect(cfg.required).toBe(false);
     expect(cfg.choices).toHaveLength(2);
     expect(cfg.allowFillIn).toBe(true);
   });

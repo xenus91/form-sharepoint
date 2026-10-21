@@ -44,7 +44,6 @@ const MAIN_ONLY_FIELDS = ["Location1", "ResultSearchTHU"];
  * @property {"main"|"external"} [selectProfile="main"] — профиль select (см. выше)
  * @property {string[]} [omittedFields=[]] — поля, которых заведомо нет в списке (после 400-ретраев)
  * @property {boolean} [useDueDate=true] — выбирать ли поле DueDate
- * @property {boolean} [useAdditionalActions=true] — включать ли AdditionalActions поля
  * @property {string|null} [recipientField=null] — InternalName поля Recipient (Lookup)
  * @property {string[]} [resultFieldInternalNames=[]] — InternalName полей результата (динамически по ContentType)
  * @property {object|null} [distribution=null] — DcEmail-запись (для фильтра по группе)
@@ -117,7 +116,6 @@ export function buildTaskListQuery(opts = {}) {
     selectProfile = "main",
     omittedFields = [],
     useDueDate = true,
-    useAdditionalActions = true,
     recipientField = null,
     useRecipient = null,
     distribution = null,
@@ -206,20 +204,9 @@ export function buildTaskListQuery(opts = {}) {
   }
   // RelatedItems — критично для enrich (там лежит ListId/ItemId → оттуда тянем Recipient/THU)
   if (allowed("RelatedItems")) pushExtra("RelatedItems");
-  // AdditionalActions поля — только основной сайт (на dob их обычно нет).
-  const hasAdditionalFields = !isExternal && (
-    taskFieldNames.length === 0 ||
-    taskFieldNames.includes("AdditionalActions") ||
-    taskFieldNames.includes("AdditionalsActionsRequired") ||
-    taskFieldNames.includes("AdditionalActionsRequired")
-  );
-  if (useAdditionalActions && hasAdditionalFields) {
-    const hasNew = taskFieldNames.includes("AdditionalsActionsRequired");
-    const hasOld = taskFieldNames.includes("AdditionalActionsRequired");
-    if (taskFieldNames.length === 0 || hasNew) pushExtra("AdditionalsActionsRequired");
-    else if (hasOld) pushExtra("AdditionalActionsRequired");
-    if (taskFieldNames.length === 0 || taskFieldNames.includes("AdditionalActions")) pushExtra("AdditionalActions");
-  }
+  // Поля AdditionalsActionsRequired / AdditionalActions в списке Tasks удалены —
+  // в $select их не добавляем (запрос падал в 400).
+
   const finalExtra = extraFields;
   const selectFields = finalExtra.length
     ? `${baseFields.join(",")},${finalExtra.join(",")}`

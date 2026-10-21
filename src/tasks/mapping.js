@@ -56,38 +56,6 @@ export function mapRawTask(r, opts = {}) {
   if (!scNumberVal) scNumberVal = r.SCNumber || r.ScNumber || r.SC_x0020_Number || "";
   if (typeof scNumberVal === 'object' && scNumberVal?.Title) scNumberVal = scNumberVal.Title;
 
-  // AdditionalsActionsRequired — может быть Choice (Нет/Да) или Boolean (Yes/No). У пользователя поле булевое.
-  let additionalRequiredRaw = r.AdditionalsActionsRequired ?? r.AdditionalActionsRequired;
-  // SharePoint может отдавать также AdditionalsActionsRequired_x0020_ или другое имя — проверяем варианты
-  if (additionalRequiredRaw == null) {
-    additionalRequiredRaw = r.AdditionalsActionsRequired_x0020_ ?? r.OData__AdditionalsActionsRequired ?? "";
-  }
-  let additionalRequired = "";
-  if (additionalRequiredRaw === true || additionalRequiredRaw === 1 || additionalRequiredRaw === "1") {
-    additionalRequired = "Да";
-  } else if (additionalRequiredRaw === false || additionalRequiredRaw === 0 || additionalRequiredRaw === "0") {
-    additionalRequired = "Нет";
-  } else if (typeof additionalRequiredRaw === "string") {
-    const s = additionalRequiredRaw.trim().toLowerCase();
-    if (s === "да" || s === "true" || s === "1") additionalRequired = "Да";
-    else if (s === "нет" || s === "false" || s === "0") additionalRequired = "Нет";
-    else if (s) additionalRequired = additionalRequiredRaw.trim();
-    else additionalRequired = "";
-  } else if (additionalRequiredRaw != null && additionalRequiredRaw !== "") {
-    additionalRequired = String(additionalRequiredRaw).trim();
-  } else {
-    additionalRequired = "";
-  }
-  // AdditionalActions (Multi-Choice Fill-in) — SharePoint verbose возвращает {results: []}
-  let additionalActions = [];
-  const rawAA = r.AdditionalActions ?? null;
-  if (rawAA) {
-    if (Array.isArray(rawAA)) additionalActions = rawAA;
-    else if (Array.isArray(rawAA.results)) additionalActions = rawAA.results;
-    else if (typeof rawAA === "string" && rawAA) additionalActions = [rawAA];
-  }
-  additionalActions = additionalActions.map((v) => String(v).trim()).filter(Boolean);
-
   // ContentTypeId для динамического определения поля результата (по ContentType)
   let contentTypeIdVal = r.ContentTypeId || r.ContentType?.StringValue || r.ContentTypeId?.StringValue || null;
   if (typeof contentTypeIdVal === "object" && contentTypeIdVal?.StringValue) contentTypeIdVal = contentTypeIdVal.StringValue;
@@ -131,9 +99,6 @@ export function mapRawTask(r, opts = {}) {
     // Сохраняем также динамическое значение под универсальным ключом для новой логики
     ResultValue: dynamicResultVal || "",
     Location1: r.Location1 || "",
-    AdditionalsActionsRequired: additionalRequired,
-    AdditionalActionsRequired: additionalRequired, // alias for legacy / wrong spelling compat
-    AdditionalActions: additionalActions,
     Created: r.Created || "",
     Modified: r.Modified || "",
     PercentComplete: r.PercentComplete,

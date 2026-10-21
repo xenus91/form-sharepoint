@@ -121,19 +121,5 @@ export function pickScNumberField(fieldNames) {
   return fieldNames.find((n) => /sc.*number/i.test(n)) || null;
 }
 
-/**
- * Per-source выборка AdditionalActionsField ("AdditionalActions" или "AdditionalsActionsRequired").
- */
-export function pickAdditionalActionsFields(fieldNames) {
-  if (!Array.isArray(fieldNames)) return { required: null, options: null };
-  const hasRequiredNew = fieldNames.includes("AdditionalsActionsRequired");
-  const hasRequiredOld = fieldNames.includes("AdditionalActionsRequired");
-  const hasOptions = fieldNames.includes("AdditionalActions");
-  return {
-    required: hasRequiredNew ? "AdditionalsActionsRequired" : hasRequiredOld ? "AdditionalActionsRequired" : null,
-    options: hasOptions ? "AdditionalActions" : null,
-  };
-}
-
 /** Минимальный CORE_FIELDS набор для запроса (если fields per-source ещё не подгружены). */
 export { CORE_FIELDS };

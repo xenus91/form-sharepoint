@@ -31,21 +31,6 @@ export async function fetchFullTask(id) {
     if (raw) return mapRawTask(raw);
   } catch (e) {
     const st = e?.response?.status;
-    const msg = String(e?.response?.data?.error?.message?.value || e?.message || "").toLowerCase();
-    // Fallback если новые поля AdditionalActions ещё не созданы в списке (старый деплой)
-    if (msg.includes("additionalactions")) {
-      try {
-        const fallbackSelect = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems";
-        const { data } = await apiClient.get(
-          `${TASKS_LIST_API}/items(${id})?$select=${fallbackSelect}&$expand=${FULL_TASK_EXPAND}`,
-          { headers: { Accept: "application/json;odata=verbose" } }
-        );
-        const raw = data?.d;
-        if (raw) return mapRawTask(raw);
-      } catch (e2) {
-        // fallback тоже не удался — логируем исходную ошибку
-      }
-    }
     // 401/403 — нет прав на задачу другого пользователя (например, 396 vs 403
     // при глобальном CAML без AssignedTo фильтра). Не критично, fallback к
     // данным из CAML GetItems.

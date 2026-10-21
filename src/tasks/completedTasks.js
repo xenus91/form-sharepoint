@@ -47,8 +47,6 @@ const VIEW_FIELDS = [
   "ContentTypeId",
   "Location1",
   "ResultSearchTHU",
-  "AdditionalsActionsRequired",
-  "AdditionalActions",
 ];
 
 function escXml(value) {
@@ -358,8 +356,6 @@ function rowToRawTask(row) {
     ContentTypeId: asText(row.ContentTypeId) || null,
     Location1: asText(row.Location1),
     ResultSearchTHU: asText(row.ResultSearchTHU),
-    AdditionalsActionsRequired: row.AdditionalsActionsRequired ?? row.AdditionalActionsRequired ?? null,
-    AdditionalActions: row.AdditionalActions ?? null,
     OffDepKey: row.OffDepKey ?? null,
     __renderRow: row,
   };
@@ -647,7 +643,6 @@ export async function fetchCompletedTasksPage(opts) {
 const REST_PAGE_FIELDS = [
   "Id", "Title", "Body", "Status", "PercentComplete", "DueDate", "Created", "Modified",
   "ContentTypeId", "RelatedItems", "Location1", "ResultSearchTHU",
-  "AdditionalsActionsRequired", "AdditionalActions",
 ];
 
 function restPagingToSkiptoken(paging) {

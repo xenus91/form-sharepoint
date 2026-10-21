@@ -44,12 +44,13 @@ export function toDomainTask(raw, opts = {}) {
     choices: opts.fieldMeta?.choices || null,
   };
 
-  // additionalActions — пока одно поле AdditionalActions (случай A плана), resolver позже выберет поле по CT
+  // Полей AdditionalsActionsRequired / AdditionalActions в списке Tasks больше
+  // нет, поэтому из задачи ничего не читается. Обязательность определяется
+  // конфигурацией типа (TaskTypeConfiguration), а не полем задачи.
   const additionalActions = {
-    fieldInternalName: opts.additionalFieldMeta?.internalName || "AdditionalActions",
-    value: base.AdditionalActions || [],
-    required: base.AdditionalsActionsRequired || "",
-    requiredField: "AdditionalsActionsRequired",
+    fieldInternalName: opts.additionalFieldMeta?.internalName || null,
+    value: [],
+    required: "",
     choices: opts.additionalFieldMeta?.choices || null,
     allowFillIn: opts.additionalFieldMeta?.allowFillIn ?? true,
   };

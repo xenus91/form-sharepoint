@@ -24,7 +24,7 @@ export default function ResultInlineEditor({
   result = "",
   fields = [],
   showAdditionalActions = false,
-  aaFieldInternalName = "AdditionalActions",
+  aaFieldInternalName = null,
   aaChoices = [],
   aaAllowFillIn = true,
   aaInitial = [],

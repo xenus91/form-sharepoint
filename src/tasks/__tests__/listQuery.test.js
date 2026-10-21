@@ -83,7 +83,7 @@ describe("buildTaskListQuery — фильтр по пользователю и �
 });
 
 describe("buildTaskListQuery — профиль main (не меняем поведение)", () => {
-  it("оставляет ResultSearchTHU/Location1/доп.действия", () => {
+  it("оставляет ResultSearchTHU/Location1 и не тянет удалённые поля доп. действий", () => {
     const url = buildTaskListQuery({
       listApi: "/web/lists(guid'463B634E-A71A-4FEF-9A1F-B803431D8639')",
       taskFieldNames: [],
@@ -95,7 +95,12 @@ describe("buildTaskListQuery — профиль main (не меняем пове
     const select = parse(url).$select.split(",");
     expect(select).toContain("ResultSearchTHU");
     expect(select).toContain("Location1");
-    expect(select).toContain("AdditionalActions");
+    // Поля AdditionalsActionsRequired / AdditionalActions в списке Tasks удалены.
+    // Раньше при пустом taskFieldNames (метаданные ещё не пришли) они добавлялись
+    // «на всякий случай» — и запрос падал в 400 «Поле или свойство … не существует».
+    expect(select).not.toContain("AdditionalActions");
+    expect(select).not.toContain("AdditionalsActionsRequired");
+    expect(select).not.toContain("AdditionalActionsRequired");
   });
 });
 

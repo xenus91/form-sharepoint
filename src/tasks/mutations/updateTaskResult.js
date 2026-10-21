@@ -14,8 +14,6 @@ import { makeSourceClient } from "../sourceClient";
  * @property {any} [resultValue]
  * @property {string|null} [ResultSearchTHU]
  * @property {string|null} [Location1]
- * @property {boolean} [AdditionalsActionsRequired]
- * @property {string[]} [AdditionalActions]
  */
 
 /**
@@ -45,8 +43,6 @@ export async function updateTaskResult(compositeKey, payload = {}) {
   }
   if (payload.ResultSearchTHU != null) body.ResultSearchTHU = payload.ResultSearchTHU;
   if (payload.Location1 != null) body.Location1 = payload.Location1;
-  if (payload.AdditionalsActionsRequired != null) body.AdditionalsActionsRequired = payload.AdditionalsActionsRequired;
-  if (payload.AdditionalActions != null) body.AdditionalActions = payload.AdditionalActions;
 
   try {
     const resp = await client.merge(url, body, {

@@ -114,8 +114,6 @@ export function useTaskMutations({
   entityType,
   completedStatusValue,
   inProgressStatusValue,
-  additionalRequiredIsBoolean,
-  setAdditionalRequiredIsBoolean,
   resultFieldsMeta,
   ctResultMap,
   taskConfiguration,
@@ -263,23 +261,6 @@ export function useTaskMutations({
     }
   }, [entityType, inProgressStatusValue, currentUserId, currentUserTitle, notify, loadTasks, queryClient, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, setElementTaskMatch]);
 
-  // Успешное завершение: держим оверлей минимум MIN_OVERLAY_MS, обновляем список и только
-  // потом показываем snackbar — так карточка не «пропадает» раньше отклика сервера.
-  const finishSuccess = useCallback(async (message, startedAt, elementPatch) => {
-    const rest = MIN_OVERLAY_MS - (Date.now() - (startedAt || 0));
-    if (rest > 0) await sleep(rest);
-    queryClient.invalidateQueries({ queryKey: ["tasks"] });
-    invalidate("/items");
-    if (typeof loadTasks === "function") await loadTasks({ silent: true });
-    // Карточка в режиме #tasks/<ID> живёт в отдельном state (elementTaskMatch) и
-    // из списка НЕ обновляется: без этого патча задача оставалась «в работе» до
-    // следующего опроса (до 60 с). Запись подтверждена сервером — закрываем сразу.
-    if (elementPatch) {
-      setElementTaskMatch?.((prev) => (prev && prev.Id === elementPatch.Id ? { ...prev, ...elementPatch.patch } : prev));
-    }
-    notify(message, { severity: "success" });
-  }, [queryClient, invalidate, loadTasks, notify, setElementTaskMatch]);
-
   const completeTask = useCallback(async (task, resultValue, promptFieldValues, additionalRequired, additionalActions) => {
     // Backward compat: legacy string → { Location1: string }
     const normalizedPromptValues = normalizePromptFieldValues(promptFieldValues);
@@ -288,7 +269,6 @@ export function useTaskMutations({
     const startedAt = Date.now();
     setUpdatingId(task.Id);
     const _norm = String(resultValue || "").trim().toLowerCase();
-    const _isNotFound = _norm === "не найдена" || _norm === "не найден" || _norm === "не найдено";
     const _isFound = _norm === "найден" || _norm === "найдена";
     // ⭐ null = «доп. действия в этом результате не участвуют» (в Behaviour нет aa: true).
     // Тогда legacy-поля AdditionalsActionsRequired/AdditionalActions НЕ отправляются вовсе:
@@ -307,13 +287,7 @@ export function useTaskMutations({
         return;
       }
       additionalRequired = reqNorm;
-      additionalActions = reqNorm === "Да" ? acts : [];
-    } else if (_isNotFound || _noAdditionalActions) {
-      additionalRequired = "";
-      additionalActions = [];
-    } else {
-      additionalRequired = additionalRequired ? String(additionalRequired).trim() : (task.AdditionalsActionsRequired || "");
-      additionalActions = Array.isArray(additionalActions) ? additionalActions : (task.AdditionalActions || []);
+      additionalActions = acts;
     }
     let _targetStatusOpt = completedStatusValue || "Завершена";
     if (_targetStatusOpt && String(_targetStatusOpt).toLowerCase().includes("в процессе")) _targetStatusOpt = "Завершена";
@@ -325,8 +299,6 @@ export function useTaskMutations({
       Location1: locationValue !== undefined && locationValue !== null ? locationValue : task.Location1,
       // ⭐ NEW: spread остальных promptable-полей в optimistic state (не Location1)
       ...Object.fromEntries(Object.entries(normalizedPromptValues).filter(([k]) => k !== "Location1").map(([k, v]) => [k, v])),
-      AdditionalsActionsRequired: _isNotFound ? "" : (_isFound && !_noAdditionalActions ? (additionalRequired || "Нет") : (task.AdditionalsActionsRequired || "")),
-      AdditionalActions: _isNotFound ? [] : (_isFound && !_noAdditionalActions ? (additionalRequired === "Да" ? (additionalActions || []) : []) : (task.AdditionalActions || [])),
       // ⭐ НЕ выставляем Status/PercentComplete оптимистично: иначе задача сразу
       // отфильтровывается из вкладки «В работе» и карточка исчезает до ответа сервера,
       // из-за чего оверлей «Сохранение...» не виден. Статус применится после refresh.
@@ -346,7 +318,6 @@ export function useTaskMutations({
       Modified: new Date().toISOString(),
       ...(currentUserTitle ? { EditorTitle: currentUserTitle, Editor: currentUserTitle } : {}),
     });
-    const completeElementPatch = (status) => ({ Id: task.Id, patch: completedElementPatch(status) });
     try {
       let serverEtag = "*";
       let itemEntityType = null;
@@ -382,44 +353,9 @@ export function useTaskMutations({
       // ⭐ NEW: spread остальных promptable-полей из TaskPromptFields (с фильтром системных)
       applyPromptFieldsToPayload(payload, Object.fromEntries(Object.entries(normalizedPromptValues).filter(([k]) => k !== "Location1")));
 
-      const toSPRequired = (reqStr) => {
-        if (additionalRequiredIsBoolean === true) {
-          if (reqStr === "Да") return true;
-          if (reqStr === "Нет") return false;
-          if (reqStr === "") return false;
-          return false;
-        } else if (additionalRequiredIsBoolean === false) return reqStr;
-        else {
-          if (reqStr === "Да") return true;
-          if (reqStr === "Нет") return false;
-          if (reqStr === "") return false;
-          return reqStr;
-        }
-      };
-      if (_isNotFound) {
-        // Behaviour.aa=false: не отправляем legacy AdditionalActions-поля.
-        // Они могут отсутствовать в конкретном Tasks-листе и не нужны для результата «Не исправлено».
-      } else if (_isFound && !_noAdditionalActions) {
-        const reqToSave = additionalRequired || "Нет";
-        const actsToSave = reqToSave === "Да" ? (additionalActions || []) : [];
-        // Поля доп. действий есть не во всех списках Tasks. Отправляем только существующие:
-        // список полей известен (taskFieldNames) — проверяем, иначе доверяем авто-чистке payload.
-        const hasListField = (name) =>
-          missingFields.has(name)
-            ? false
-            : !Array.isArray(taskFieldNames) || taskFieldNames.length === 0
-            ? true
-            : taskFieldNames.some((f) => String(f).toLowerCase() === String(name).toLowerCase());
-        const reqField = hasListField("AdditionalsActionsRequired")
-          ? "AdditionalsActionsRequired"
-          : hasListField("AdditionalActionsRequired")
-            ? "AdditionalActionsRequired"
-            : null;
-        if (reqField) payload[reqField] = toSPRequired(reqToSave);
-        if (hasListField("AdditionalActions")) {
-          payload.AdditionalActions = { __metadata: { type: "Collection(Edm.String)" }, results: actsToSave };
-        }
-      }
+      // Поля AdditionalsActionsRequired / AdditionalActions в списке Tasks
+      // удалены — в payload их не пишем вовсе.
+
 
       const normalizedResult = String(resultValue).trim().toLowerCase();
       const isNotFoundResult = normalizedResult === "не найдена" || normalizedResult === "не найден" || normalizedResult === "не найдено";
@@ -451,26 +387,6 @@ export function useTaskMutations({
       // «Не удается преобразовать значение-примитив в ожидаемый тип Edm.Boolean» (400).
       // Поэтому по такой ошибке один раз переотправляем значение в другом представлении
       // и запоминаем верный тип на будущее.
-      const boolRequiredValue = String(additionalRequired || "").trim() === "Да";
-      const withRequiredAs = (base, asBoolean) => {
-        const next = { ...base };
-        let touched = false;
-        for (const name of ["AdditionalsActionsRequired", "AdditionalActionsRequired"]) {
-          if (Object.prototype.hasOwnProperty.call(next, name)) {
-            next[name] = asBoolean ? boolRequiredValue : (boolRequiredValue ? "Да" : "Нет");
-            touched = true;
-          }
-        }
-        return touched ? next : null;
-      };
-      const retryRequiredAs = async (base, asBoolean) => {
-        const next = withRequiredAs(base, asBoolean);
-        if (!next) return false;
-        await postUpdateSafe(next, "*");
-        if (typeof setAdditionalRequiredIsBoolean === "function") setAdditionalRequiredIsBoolean(asBoolean);
-        return true;
-      };
-
       const postUpdateSafe = async (body, etagOverride) => {
         let current = { ...body };
         let lastErr = null;
@@ -513,24 +429,6 @@ export function useTaskMutations({
             const statusCode = e?.response?.status;
             if (statusCode === 412) { notify(`Задача #${task.Id} уже изменена другим пользователем. Обновите список.`, { severity: "warning" }); await loadTasks(); throw e; }
             const msg = String(e?.response?.data?.error?.message?.value || e?.response?.data || e?.message || "").toLowerCase();
-            // fallbacks (boolean/string, spelling, cleaning) — trimmed but keeps core robustness
-            if (msg.includes("edm.boolean") || (msg.includes("boolean") && msg.includes("additional"))) {
-              try {
-                const flip = { ...payload };
-                if (_isFound) flip.AdditionalsActionsRequired = (additionalRequired || "Нет") === "Да" ? true : false; else if (_isNotFound) flip.AdditionalsActionsRequired = false;
-                const flipWithStatus = { ...flip, Status: targetStatus, PercentComplete: 1 };
-                await postUpdateSafe(_isNotFound ? flip : flipWithStatus, "*");
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
-              } catch {}
-            }
-            if (msg.includes("additionalactions")) {
-              try {
-                const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
-                const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
-                try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
-              } catch {}
-            }
             const isFieldError = msg.includes("status") || msg.includes("percent");
             if (isFieldError) {
               try { await postUpdateSafe({ ...payload, Status: targetStatus }, "*"); } catch { try { await postUpdateSafe({ ...payload, PercentComplete: 1 }, "*"); } catch { await postUpdateSafe(payload, "*"); } }
@@ -547,30 +445,6 @@ export function useTaskMutations({
           const statusCode = e?.response?.status;
           if (statusCode === 412) { notify(`Задача #${task.Id} уже изменена другим пользователем. Обновите список.`, { severity: "warning" }); await loadTasks(); throw e; }
           const msg = String(e?.response?.data?.error?.message?.value || e?.response?.data || e?.message || "").toLowerCase();
-          // Edm.Boolean: тип Required-поля не угадали — переотправляем значением true/false.
-          if (msg.includes("edm.boolean")) {
-            try {
-              if (await retryRequiredAs(payloadWithStatus, true)) {
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
-              }
-            } catch {}
-          }
-          // Edm.String: наоборот, в списке текстовая колонка «Да»/«Нет».
-          if (msg.includes("edm.string")) {
-            try {
-              if (await retryRequiredAs(payloadWithStatus, false)) {
-                await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
-              }
-            } catch {}
-          }
-          if (msg.includes("additionalactions")) {
-            try {
-              const clean = { ...payload }; delete clean.AdditionalsActionsRequired; delete clean.AdditionalActions;
-              const cleanWithStatus = { ...clean, Status: targetStatus, PercentComplete: 1 };
-              try { await postUpdateSafe(cleanWithStatus, "*"); } catch { await postUpdateSafe(clean, "*"); }
-              await finishSuccess(`Задача #${task.Id} завершена: ${resultValue}`, startedAt, completeElementPatch(targetStatus)); return;
-            } catch {}
-          }
           const isFieldError = msg.includes("status") || msg.includes("percent");
           if (isFieldError) {
             try { await postUpdateSafe({ ...payload, Status: targetStatus }, "*"); } catch { try { await postUpdateSafe({ ...payload, PercentComplete: 1 }, "*"); } catch { await postUpdateSafe(payload, "*"); } }
@@ -594,13 +468,13 @@ export function useTaskMutations({
       console.error("complete task error", e);
       const msg = e?.response?.data?.error?.message?.value || e?.message || "Ошибка обновления задачи";
       notify(msg, { severity: "error" });
-      queryClient.setQueryData(qkBase, (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalsActionsRequired: prevTaskSnapshot.AdditionalsActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
-      setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, AdditionalsActionsRequired: prevTaskSnapshot.AdditionalsActionsRequired, AdditionalActions: prevTaskSnapshot.AdditionalActions, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : prev));
+      queryClient.setQueryData(qkBase, (prev) => Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : t)) : prev);
+      setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ResultSearchTHU: prevTaskSnapshot.ResultSearchTHU, Location1: prevTaskSnapshot.Location1, Status: prevTaskSnapshot.Status, PercentComplete: prevTaskSnapshot.PercentComplete, Modified: prevTaskSnapshot.Modified } : prev));
     } finally {
       setUpdatingId(null);
       setUpdatingAction(null);
     }
-  }, [entityType, completedStatusValue, additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult, finishSuccess]);
+  }, [entityType, completedStatusValue, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult]);
 
   return { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask };
 }

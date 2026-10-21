@@ -17,7 +17,6 @@ export function useTasksMetadata() {
   const [entityType, setEntityType] = useState(null);
   const [resultFieldsMeta, setResultFieldsMeta] = useState([]);
   const [ctResultMap, setCtResultMap] = useState(() => new Map());
-  const [additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean] = useState(null);
   const [fieldDefaultActions, setFieldDefaultActions] = useState(() => {
     const sync = getCachedAdditionalActionsDefaultSync();
     return sync !== null ? sync : null;
@@ -88,27 +87,9 @@ export function useTasksMetadata() {
             }
           })
       );
-      promises.push(
-        apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'AdditionalsActionsRequired'`, { headers: { Accept: "application/json;odata=verbose" } })
-          .catch((err)=>{
-            const msg=String(err?.response?.data?.error?.message?.value||"").toLowerCase();
-            const notFound = err?.response?.status===404 || msg.includes("не существует");
-            if(notFound){
-              return apiClient.get(`${TASKS_LIST_API}/fields?$filter=InternalName eq 'AdditionalActionsRequired'`, { headers: { Accept: "application/json;odata=verbose" } });
-            }
-            throw err;
-          })
-          .then(({ data }) => {
-            const field = data?.d?.results?.[0];
-            if (!cancelled && field) {
-              const typeStr = String(field.TypeAsString || field.TypeDisplayName || "").toLowerCase();
-              const isBool = typeStr.includes("boolean") || typeStr.includes("yes/no") || typeStr === "boolean" || typeStr === "yesno";
-              setAdditionalRequiredIsBoolean(isBool);
-            } else if (!cancelled) {
-              setAdditionalRequiredIsBoolean(false);
-            }
-          }).catch(() => { if (!cancelled) setAdditionalRequiredIsBoolean(false); })
-      );
+      // Зонд типа поля AdditionalsActionsRequired убран: поля в списке нет,
+      // а два запроса к fields на старте только нагружали сеть.
+
       promises.push(
         (async () => {
           try {
@@ -128,7 +109,7 @@ export function useTasksMetadata() {
         })()
       );
       promises.push(
-        fetchAdditionalActionsDefault(apiClient).then((vals) => {
+        fetchAdditionalActionsDefault().then((vals) => {
           if (!cancelled) setFieldDefaultActions(vals);
         }).catch(() => { if (!cancelled) setFieldDefaultActions([]); })
       );
@@ -148,7 +129,6 @@ export function useTasksMetadata() {
     entityType, setEntityType,
     resultFieldsMeta, setResultFieldsMeta,
     ctResultMap, setCtResultMap,
-    additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean,
     fieldDefaultActions, setFieldDefaultActions,
   };
 }

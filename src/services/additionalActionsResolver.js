@@ -4,7 +4,7 @@
 // TaskTypeConfiguration §17 ОТКЛЮЧЁН до аудита (нет 404) — оставлен закомментированным, VERIFIED-ready после аудита:
 // иначе fallback к общему полю AdditionalActions (случай A). До tenant аудита таблица UNKNOWN → single field.
 
-import { ADDITIONAL_ACTIONS_FIELD } from "../tasks/config";
+
 import { fetchTaskTypeConfigurationMap, resolveTaskTypeConfig } from "./taskTypeConfiguration";
 
 /**
@@ -104,8 +104,10 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
   if (_normalizedCache.has(cacheKey)) return _normalizedCache.get(cacheKey);
 
   // 1) Пробуем TaskTypeConfiguration (план §17: Title/ContentTypeId/AdditionalActionsFieldInternalName/AdditionalsActionsRequired/Enabled)
-  let fieldInternalName = ADDITIONAL_ACTIONS_FIELD;
-  let source = "sharepoint-field";
+  // Поля с именем AdditionalActions в списке больше нет: без явного имени поля
+  // из TaskTypeConfiguration контрол не показываем.
+  let fieldInternalName = null;
+  let source = "task-type-config";
   let typeCfg = null;
   if (apiClient && ctId) {
     typeCfg = await getTaskTypeConfig(ctId, apiClient);
@@ -135,6 +137,23 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
     }
   }
 
+  if (!fieldInternalName && !additionalFieldMeta) {
+    const cfgNoField = {
+      enabled: false,
+      required: false,
+      fieldInternalName: null,
+      fieldTitle: null,
+      fieldType: "UNKNOWN",
+      allowFillIn: true,
+      choices: [],
+      contentTypeId: ctId,
+      source: "missing-field",
+      error: `AdditionalActions field is not configured for CT ${ctId.slice(0, 12)}`,
+    };
+    _normalizedCache.set(cacheKey, cfgNoField);
+    return cfgNoField;
+  }
+
   // 2) Field metadata
   let fieldMeta = additionalFieldMeta;
   if (!fieldMeta && apiClient) {
@@ -158,7 +177,9 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
     return cfg;
   }
 
-  // 3) Required — приоритет: TaskTypeConfiguration.AdditionalsActionsRequired (план §17), затем task.AdditionalsActionsRequired / task.additionalActions.required
+  // 3) Required — приоритет: TaskTypeConfiguration (план §17), затем
+  // task.additionalActions.required. Поля AdditionalsActionsRequired в списке
+  // Tasks больше нет.
   // Если required=false — контрол отсутствует (план §18)
   let required = false;
   // Сначала из TaskTypeConfiguration (если задан)
@@ -166,8 +187,6 @@ export async function resolveAdditionalActionsConfig(task, opts = {}) {
     required = !!typeCfg.additionalActionsRequired;
   } else if (task?.additionalActions?.required !== undefined) {
     required = String(task.additionalActions.required).toLowerCase() === "да" || task.additionalActions.required === true;
-  } else if (task?.AdditionalsActionsRequired !== undefined && task?.AdditionalsActionsRequired !== null && String(task.AdditionalsActionsRequired).trim() !== "") {
-    required = String(task.AdditionalsActionsRequired).toLowerCase() === "да" || String(task.AdditionalsActionsRequired).toLowerCase() === "true" || String(task.AdditionalsActionsRequired).toLowerCase() === "yes";
   }
 
   const cfg = {
@@ -196,7 +215,7 @@ export function resolveAdditionalActionsConfigSync(task, fieldMetaMap) {
   if (!meta) return null;
   return {
     enabled: true,
-    required: String(task?.AdditionalsActionsRequired).toLowerCase() === "да",
+    required: false,
     fieldInternalName: meta.internalName,
     fieldTitle: meta.title,
     fieldType: meta.typeAsString,

@@ -10,8 +10,6 @@ const rawSearch = {
   Status: "В процессе выполнения",
   ResultSearchTHU: "Найдена",
   Location1: "A-1",
-  AdditionalsActionsRequired: "Да",
-  AdditionalActions: { results: ["Отправить ЕО в OTM"] },
   Created: "2026-09-18T10:00:00Z",
   Modified: "2026-09-18T10:05:00Z",
   PercentComplete: 0.5,
@@ -40,8 +38,10 @@ describe("toDomainTask", () => {
     expect(d.contentTypeName).toBe("Поиск ЕО");
     expect(d.relatedProblem).toEqual(expect.objectContaining({ listId: "guid", itemId: 24785 }));
     expect(d.result.value).toBe("Найдена");
-    expect(d.additionalActions.value).toEqual(["Отправить ЕО в OTM"]);
-    expect(d.additionalActions.required).toBe("Да");
+    // Полей AdditionalsActionsRequired/AdditionalActions в списке больше нет —
+    // даже если они придут в raw, модель их не читает.
+    expect(d.additionalActions.value).toEqual([]);
+    expect(d.additionalActions.required).toBe("");
   });
 
   it("maps completion task with different Result field via fallback", () => {

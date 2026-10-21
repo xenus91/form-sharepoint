@@ -16,9 +16,10 @@ export function listApiForGuid(guid = TASKS_LIST_GUID) {
 
 export const HASH_CAML_ROW_LIMIT = 20;
 
-// Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice)
-export const ADDITIONALS_ACTIONS_REQUIRED_FIELD = "AdditionalsActionsRequired";
-export const ADDITIONAL_ACTIONS_FIELD = "AdditionalActions";
+// Поля AdditionalsActionsRequired и AdditionalActions в списке Tasks удалены
+// (запрос с ними падал в 400 «Поле или свойство … не существует»). Названия
+// полей больше нигде не упоминаются; список значений ниже — только справочник
+// для UI, к полям SharePoint отношения не имеет.
 export const ADDITIONAL_ACTIONS_STANDARD = [
   "Отправить ЕО в OTM",
   "Переместить в корректную линию",
@@ -27,58 +28,25 @@ export const ADDITIONAL_ACTIONS_STANDARD = [
 
 // Дефолт из настроек поля SharePoint (чтобы не хардкодить). Кэшируется в sessionStorage.
 let _cachedDefaultActions = null;
-export async function fetchAdditionalActionsDefault(apiClient) {
-  if (_cachedDefaultActions !== null) return _cachedDefaultActions;
-  const cachedRaw = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("sp:AdditionalActions:Default") : null;
-  if (cachedRaw) {
-    try {
-      const parsed = JSON.parse(cachedRaw);
-      if (Array.isArray(parsed)) {
-        _cachedDefaultActions = parsed;
-        return parsed;
-      }
-    } catch {}
-  }
-  try {
-    const url = `${TASKS_LIST_API}/fields/getbytitle('${ADDITIONAL_ACTIONS_FIELD}')?$select=DefaultValue,DefaultFormula,TypeAsString`;
-    const resp = await apiClient.get(url, { headers: { Accept: "application/json;odata=verbose" } });
-    const data = resp?.data?.d || resp?.data || {};
-    let def = data.DefaultValue ?? "";
-    // MultiChoice с FillIn может хранить дефолт как "Отправить ЕО в OTM" или "a;#b" или ";#a;#b;#"
-    const raw = String(def || "").trim();
-    let values = [];
-    if (raw) {
-      if (raw.includes(";#")) {
-        values = raw.split(";#").map((s) => s.trim()).filter(Boolean);
-      } else if (raw.includes(";")) {
-        values = raw.split(";").map((s) => s.trim()).filter(Boolean);
-      } else {
-        values = [raw];
-      }
-      // Фильтруем только из разрешённых + кастом (но дефолт обычно из стандартных)
-      values = values.map((v) => String(v).trim()).filter(Boolean);
-    }
-    _cachedDefaultActions = values;
-    if (typeof sessionStorage !== "undefined") {
-      sessionStorage.setItem("sp:AdditionalActions:Default", JSON.stringify(values));
-    }
-    return values;
-  } catch (e) {
-    console.warn("fetchAdditionalActionsDefault failed, fallback to []", e?.response?.status, e?.message);
-    _cachedDefaultActions = [];
-    return [];
-  }
+export async function fetchAdditionalActionsDefault() {
+  // Поле AdditionalActions в списке Tasks больше не существует, поэтому его
+  // DefaultValue не запрашиваем (запрос давал 400). Дефолты берутся из
+  // TaskActionDefinitions — см. getDefaultsForThisTask в TaskCard.
+  _cachedDefaultActions = [];
+  return _cachedDefaultActions;
 }
 export function getCachedAdditionalActionsDefaultSync() {
   return _cachedDefaultActions;
 }
 
 // Select/expand для fetchFullTask (используется в TasksView и hashSearch). WorkflowItemId выпилен — всегда null
-export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,AdditionalsActionsRequired,AdditionalActions,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,ContentTypeId";
+export const FULL_TASK_SELECT = "Id,Title,Body,AssignedTo/Id,AssignedTo/Title,Status,ResultSearchTHU,Location1,Created,Modified,PercentComplete,DueDate,Editor/Id,Editor/Title,RelatedItems,ContentTypeId";
 export const FULL_TASK_EXPAND = "AssignedTo,Editor";
 
 // Минимальный select для hash-polling (60с) — нужны только поля для диффа статуса, а не весь Title/Body
-export const HASH_POLL_SELECT = "Id,Status,PercentComplete,Modified,ResultSearchTHU,Location1,AdditionalsActionsRequired,AdditionalActions";
+// Поля AdditionalsActionsRequired и AdditionalActions в списке Tasks удалены —
+// запрос с ними падал в 400 «Поле или свойство … не существует».
+export const HASH_POLL_SELECT = "Id,Status,PercentComplete,Modified,ResultSearchTHU,Location1";
 export const HASH_POLL_EXPAND = "";
 
 // EndJob поле удалено из списка Tasks — гарантируем, что его нет ни в одном select

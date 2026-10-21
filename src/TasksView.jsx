@@ -161,7 +161,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     entityType, setEntityType,
     resultFieldsMeta, setResultFieldsMeta,
     ctResultMap, setCtResultMap,
-    additionalRequiredIsBoolean, setAdditionalRequiredIsBoolean,
     fieldDefaultActions, setFieldDefaultActions,
   } = useTasksMetadata();
   const queryClient = useQueryClient();
@@ -260,7 +259,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // Скрепка на карточке: сколько вложений у связанного элемента (RelatedItems →
   // ProblemsPallet). Счётчики грузятся одним батчем на страницу, а не по запросу
   // на карточку. Клик открывает этот элемент на весь viewport через ?ID=<Id>.
-  const relatedAttachments = useRelatedAttachments(cardTasks);
+  //
+  // ВАЖНО: в hash-режиме (#tasks/<ID>) список карточек не рендерится, поэтому
+  // батч по всему списку не нужен — иначе на каждую ссылку уходил запрос с
+  // $filter=Id eq … на все RelatedItems списка (выглядело как перебор соседних
+  // элементов). Для открытой карточки считается отдельно ниже.
+  // Объявлено ПОСЛЕ useHashElement — нужен isHashMode.
   const handleOpenRelatedAttachments = useCallback((task) => {
     const id = relatedItemIdOf(task);
     if (!id) return;
@@ -385,6 +389,8 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     isHashMode,
   } = useHashElement({ initialElementId, initialElementAction, initialElementKind, tasks, distribution, currentUserId, tab, setTab, isTabPending, startTabTransition });
 
+  const relatedAttachments = useRelatedAttachments(isHashMode ? [] : cardTasks);
+
   // Карточка в диалоге #tasks/<Id> берётся отдельным запросом и может не входить
   // в cardTasks — считаем вложения связанного элемента и для неё.
   const dialogTask = elementTaskMatch || null;
@@ -461,8 +467,6 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     entityType,
     completedStatusValue,
     inProgressStatusValue,
-    additionalRequiredIsBoolean,
-    setAdditionalRequiredIsBoolean,
     resultFieldsMeta,
     ctResultMap,
     taskConfiguration,

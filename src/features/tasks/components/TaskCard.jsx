@@ -483,7 +483,8 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
   // ⭐ Behaviour.ic: подтверждение двумя кнопками В КАРТОЧКЕ («Создать заявку» / «Отмена»),
   // без диалога и без запроса дополнительных полей.
   const [inlineConfirmOnly, setInlineConfirmOnly] = React.useState(false);
-  // Доп. действия по найденной ЕО (AdditionalsActionsRequired + AdditionalActions Multi-Choice Fill-in)
+  // Доп. действия по найденной ЕО (Multi-Choice Fill-in). Полей задачи для них
+  // больше нет — значения приходят из конфигурации типа.
   const [additionalActions, setAdditionalActions] = React.useState(() => {
     // Initial may not have taskConfig yet — use field fallback, will sync via effect when taskConfig loads
     const sync = getCachedAdditionalActionsDefaultSync();
@@ -625,13 +626,10 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     setInlineChoice(null);
     setInlineConfirmOnly(false);
     setPromptFieldValues({});
-    if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
-      setAdditionalActions([...task.AdditionalActions]);
-    } else {
-      setInlineConfirmPending(null);
-      const def = getDefaultsForThisTask() || [];
-      setAdditionalActions([...def]);
-    }
+    // Поле AdditionalActions в задаче больше не существует — предвыбор берётся
+    // только из конфигурации (TaskActionDefinitions / TaskTypeConfiguration).
+    setInlineConfirmPending(null);
+    setAdditionalActions([...(getDefaultsForThisTask() || [])]);
     setCustomActionInput("");
     setAdditionalError("");
   }, [task.Id, initialAction, isCompleted]);
@@ -667,11 +665,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
     }
     if (!needsForm && !ic) return false;
     dbgClick(choice, needsForm ? "form" : "inline-buttons", rule);
-    if (Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0) {
-      setAdditionalActions([...task.AdditionalActions]);
-    } else {
-      setAdditionalActions([...(getDefaultsForThisTask() || [])]);
-    }
+    setAdditionalActions([...(getDefaultsForThisTask() || [])]);
     setPromptFieldValues({});
     setAdditionalError("");
     setCustomActionInput("");
@@ -1163,17 +1157,6 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               );
             })()}
             {task.Location1 && <Chip label={`Где найдено: ${task.Location1}`} size="small" variant="outlined" />}
-            {task.AdditionalsActionsRequired && (
-              <Chip
-                label={`Доп. действия: ${task.AdditionalsActionsRequired}`}
-                size="small"
-                variant="outlined"
-                color={task.AdditionalsActionsRequired === "Да" ? "info" : "default"}
-              />
-            )}
-            {Array.isArray(task.AdditionalActions) && task.AdditionalActions.length > 0 && task.AdditionalActions.map((a) => (
-              <Chip key={a} label={a} size="small" variant="filled" sx={{ bgcolor: "#E3F2FD", color: "#0D47A1", border: "1px solid #90CAF9", fontWeight: 600 }} />
-            ))}
           </Stack>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mt: 0.5 }}>
             <Typography variant="caption" sx={{ color: "text.secondary" }}>

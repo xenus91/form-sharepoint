@@ -21,7 +21,7 @@ const MAIN_LIST = "/web/lists(guid'463B634E-A71A-4FEF-9A1F-B803431D8639')";
 const DOB_BASE = "/dob-api/sites/dob/doblogistic/_api";
 const DOB_LIST = "/web/lists(guid'03fc1b92-baff-44dc-b8a3-d04acbe329d3')";
 
-const MAIN_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems", "ResultSearchTHU", "Location1", "OffDepKey", "AdditionalsActionsRequired", "AdditionalActions"];
+const MAIN_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems", "ResultSearchTHU", "Location1", "OffDepKey"];
 const DOB_FIELDS = ["Id", "Title", "Body", "AssignedTo", "Status", "Created", "Modified", "PercentComplete", "DueDate", "Editor", "ContentTypeId", "RelatedItems"];
 
 const state = vi.hoisted(() => ({ requests: [], behaviourOverride: null, thuChoices: null, dobTaken: {} }));
@@ -471,6 +471,39 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(state.requests.some((r) => /ProblemsPallet/i.test(r.url))).toBe(false);
   }, 30000);
 
+  // Задача со связанным элементом ProblemsPallet — по ней считается вложения.
+  const relatedTask = () => ({
+    ...MAIN_TASK,
+    Id: 99,
+    Title: "Задача со связанным элементом",
+    RelatedItems: JSON.stringify([{ ListId: "{21b5b544-bd98-4b06-891f-c5a137331394}", ItemId: 25413 }]),
+  });
+  const attachmentBatch = () =>
+    state.requests.filter(
+      (r) => /getbytitle\('ProblemsPallet'\)\/items/.test(r.url) && /Id eq /.test(r.url),
+    );
+
+  it("#tasks/<Id>: нет батча вложений по всему списку задач", async () => {
+    // Регрессия: в hash-режиме список карточек не рендерится, но счётчики
+    // вложений считались для ВСЕХ задач — уходил запрос с
+    // $filter=Id eq 25413 or Id eq 25414 or … (выглядело как перебор соседних
+    // элементов ProblemsPallet).
+    state.extraMainTasks = [relatedTask()];
+    renderTasksView({ initialElementId: "10" });
+    await settle(3000);
+    expect(attachmentBatch().map((r) => r.url)).toEqual([]);
+  }, 30000);
+
+  it("в режиме списка батч вложений по-прежнему уходит — скрепка работает", async () => {
+    // Контроль к предыдущему на тех же данных: отличается только режим.
+    state.extraMainTasks = [relatedTask()];
+    renderTasksView();
+    await settle(3000);
+    const batch = attachmentBatch();
+    expect(batch.length).toBeGreaterThan(0);
+    expect(batch[0].url).toContain("Id eq 25413");
+  }, 30000);
+
   it("#tasks/13 (тип «Результат проверки ООБ») открывает стандартную карточку #tasks/<Id>", async () => {
     // deep-link на задачу нового типа: карточку #tasks/<Id> показывать нельзя —
     // задача ведёт себя как dob-задача и открывается формой DobTaskEditView.
@@ -526,12 +559,12 @@ describe("TasksView — multi-source (#tasks)", () => {
     expect(write).toBeTruthy();
     expect(write.url).toContain("items(12)");
     expect(String(write.body.Location1 || "")).toContain("Зона отгрузки");
-    // aa: true → поле обязательности уходит. В этом списке колонка Boolean, а метаданные
-    // приходят как «Text», поэтому первая попытка со строкой падает (400 Edm.Boolean),
-    // а авто-повтор отправляет boolean — успешная запись последняя.
+    // Поля AdditionalsActionsRequired/AdditionalActions удалены из списка —
+    // в записи их быть не должно, и повторных попыток тоже.
     const attempts = state.requests.filter((r) => r.source === "main" && r.merge && r.body && r.body.ResultSearchTHU === "Найдена");
     expect(attempts.length).toBeGreaterThanOrEqual(1);
-    expect(typeof attempts[attempts.length - 1].body.AdditionalsActionsRequired).toBe("boolean");
+    expect("AdditionalsActionsRequired" in attempts[attempts.length - 1].body).toBe(false);
+    expect("AdditionalActions" in attempts[attempts.length - 1].body).toBe(false);
     void write;
   }, 40000);
 

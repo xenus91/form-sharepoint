@@ -56,7 +56,6 @@ export async function fetchTasksForSource(source, client, opts = {}) {
   let recipientField = initialRecipientField || null;
   const omittedFields = new Set((initialOpts.omittedFields || []).map((f) => String(f).toLowerCase()));
   let useDueDate = true;
-  let useAdditionalActions = true;
   let useRecipient = !!recipientField;
   let effectiveRecipientField = recipientField || null;
   const effectiveListApi = initialOpts.listApi || (typeof client.listApi === "function" ? await client.listApi() : "");
@@ -82,7 +81,6 @@ export async function fetchTasksForSource(source, client, opts = {}) {
       selectProfile,
       omittedFields: [...omittedFields],
       useDueDate,
-      useAdditionalActions,
       recipientField: effectiveRecipientField,
       useRecipient,
       resultFieldInternalNames,
@@ -126,11 +124,6 @@ export async function fetchTasksForSource(source, client, opts = {}) {
       }
       if (useDueDate && msg.includes("duedate")) {
         useDueDate = false;
-        nextUrl = buildUrl();
-        continue;
-      }
-      if (useAdditionalActions && (msg.includes("additionalactionsrequired") || msg.includes("additionalactions"))) {
-        useAdditionalActions = false;
         nextUrl = buildUrl();
         continue;
       }
