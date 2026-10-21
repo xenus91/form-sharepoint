@@ -66,8 +66,9 @@ import {
   eoCheckKindForProblems,
   eoCheckSignature,
   findOtherProblemRow,
+  otherProblemLocationLabel,
   otherProblemSinceIso,
-  otherProblemWarningText,
+  otherProblemWarningSegments,
   otherProblemsLabel,
 } from "./features/form/lib/otherProblemConflict";
 
@@ -783,7 +784,7 @@ const App = () => {
     const sinceIso = otherProblemSinceIso();
     try {
       const response = await apiClient.get(
-        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eo}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${sinceIso}')&$select=Id,THU,DC_THU,Created,Problems,Author/Title&$expand=Author`,
+        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eo}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${sinceIso}')&$select=Id,THU,DC_THU,Created,Problems,Location1,Author/Title&$expand=Author`,
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       const rows = response?.data?.d?.results || [];
@@ -2851,7 +2852,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             setEoNumber("");
           }}
           PaperProps={{
-            sx: { borderRadius: 3, p: 1 }
+            // Числом нельзя: в теме shape.borderRadius = 28, и sx умножит его
+            // (borderRadius: 3 давало 84px). Задаём пиксели явно.
+            sx: { borderRadius: "8px", p: 1 }
           }}
         >
           <DialogTitle sx={{ fontWeight: 800 }}>Дубликат ЕО</DialogTitle>
@@ -2909,15 +2912,23 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Dialog
           open={otherProblemDialogOpen}
           onClose={() => setOtherProblemDialogOpen(false)}
-          PaperProps={{ sx: { borderRadius: 3, p: 1 } }}
+          PaperProps={{ sx: { borderRadius: "8px", p: 1 } }}
         >
           <DialogTitle sx={{ fontWeight: 800 }}>{OTHER_PROBLEM_DIALOG_TITLE}</DialogTitle>
           <DialogContent>
             <DialogContentText data-testid="other-problem-text">
-              {otherProblemWarningText({
+              {/* Данные найденной заявки — проблемы и локация — выделены жирным. */}
+              {otherProblemWarningSegments({
                 thu: otherProblemItem?.THU || eoNumber,
                 problems: otherProblemsLabel(otherProblemItem),
-              })}
+                location: otherProblemLocationLabel(otherProblemItem),
+              }).map((seg, i) =>
+                seg.strong ? (
+                  <strong key={i}>{seg.text}</strong>
+                ) : (
+                  <React.Fragment key={i}>{seg.text}</React.Fragment>
+                ),
+              )}
             </DialogContentText>
             {otherProblemItem?.Id ? (
               <DialogContentText sx={{ mt: 1, fontSize: "0.8rem", color: "text.secondary" }} data-testid="other-problem-item-id">

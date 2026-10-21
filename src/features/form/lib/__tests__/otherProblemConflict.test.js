@@ -10,8 +10,10 @@ import {
   eoCheckSignature,
   findOtherProblemRow,
   hasOtherProblems,
+  otherProblemLocationLabel,
   otherProblemLookbackLabel,
   otherProblemSinceIso,
+  otherProblemWarningSegments,
   otherProblemWarningText,
   otherProblemsLabel,
   pluralHours,
@@ -178,5 +180,59 @@ describe("текст предупреждения", () => {
 
   it("«Не найдена» — та же строка, что NOT_FOUND_PROBLEM", () => {
     expect(otherProblemWarningText({ thu: "1" })).toContain(NOT_FOUND_PROBLEM);
+  });
+});
+
+describe("данные найденной заявки в сообщении", () => {
+  const found = {
+    Id: 25411,
+    THU: "808003003005005005",
+    Location1: "Не найдена в зоне отгрузки",
+    Problems: { results: ["Повреждение", "Плохая обмотка"] },
+  };
+
+  it("Location1 пробрасывается в подпись локации", () => {
+    expect(otherProblemLocationLabel(found)).toBe("Не найдена в зоне отгрузки");
+    expect(otherProblemLocationLabel({ Location1: "  Рампа 5  " })).toBe("Рампа 5");
+    expect(otherProblemLocationLabel({})).toBe("");
+    expect(otherProblemLocationLabel(null)).toBe("");
+  });
+
+  it("текст содержит и проблемы, и локацию", () => {
+    expect(
+      otherProblemWarningText({
+        thu: found.THU,
+        problems: otherProblemsLabel(found),
+        location: otherProblemLocationLabel(found),
+      }),
+    ).toBe(
+      "По ЕО 808003003005005005 за последние 48 часов на этом РЦ уже зарегистрирована проблема в другой заявке: " +
+        "Повреждение, Плохая обмотка. Локация: Не найдена в зоне отгрузки. " +
+        "Вы выбрали «Не найдена». Действительно подать заявку или ЕО всё-таки нашлась?",
+    );
+  });
+
+  it("проблемы и локация помечены как выделяемые", () => {
+    const strong = otherProblemWarningSegments({
+      thu: found.THU,
+      problems: otherProblemsLabel(found),
+      location: otherProblemLocationLabel(found),
+    })
+      .filter((seg) => seg.strong)
+      .map((seg) => seg.text);
+    expect(strong).toEqual(["Повреждение, Плохая обмотка", "Не найдена в зоне отгрузки"]);
+  });
+
+  it("нет локации — нет и предложения про локацию", () => {
+    const segments = otherProblemWarningSegments({ thu: "1", problems: "Повреждение" });
+    expect(segments.some((seg) => seg.strong && seg.text === "Повреждение")).toBe(true);
+    expect(segments.map((seg) => seg.text).join("")).not.toContain("Локация");
+  });
+
+  it("строка и сегменты не разъезжаются", () => {
+    const params = { thu: "1", problems: "Повреждение", location: "Рампа 5", lookbackHours: 3 };
+    expect(otherProblemWarningText(params)).toBe(
+      otherProblemWarningSegments(params).map((seg) => seg.text).join(""),
+    );
   });
 });

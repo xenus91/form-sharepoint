@@ -47,6 +47,7 @@ vi.mock("../api", () => {
                 DC_THU: "8117",
                 Created: "2026-10-21T00:44:26Z",
                 Problems: { results: ["Повреждение", "Плохая обмотка"] },
+                Location1: "Не найдена в зоне отгрузки",
                 Author: { Title: "Поршаков Сергей" },
               },
             ],
@@ -208,6 +209,29 @@ describe("проверка ЕО — после выбора проблемы, н
     expect(hours).toBeGreaterThan(47.9);
     expect(hours).toBeLessThan(48.1);
     expect(eoChecks().filter((u) => u.includes("AuthorId"))).toEqual([]);
+
+    // Location1 найденной заявки проброшена в запрос и показана в сообщении.
+    expect(notFound[0]).toContain("Location1");
+    expect(text.textContent).toContain("Локация: Не найдена в зоне отгрузки");
+
+    // Данные найденной заявки — проблемы и локация — выделены.
+    const highlighted = [...text.querySelectorAll("strong")].map((el) => el.textContent);
+    expect(highlighted).toEqual(["Повреждение, Плохая обмотка", "Не найдена в зоне отгрузки"]);
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  }, 30000);
+
+  it("у диалога ЕО маленький бордер-радиус", async () => {
+    const { host, root } = await mountApp();
+    await typeEoAndBlur(host);
+    await pickProblem(host, "Не найдена");
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+
+    const paper = document.querySelector(".MuiDialog-paper");
+    expect(paper).toBeTruthy();
+    // borderRadius: 1 в теме MUI = 8px.
+    expect(window.getComputedStyle(paper).borderRadius).toBe("8px");
 
     await act(async () => { root.unmount(); });
     host.remove();

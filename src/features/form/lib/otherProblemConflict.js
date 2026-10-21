@@ -53,17 +53,49 @@ export function otherProblemSinceIso(now = Date.now()) {
 }
 
 /**
- * Текст предупреждения целиком — одной строкой, чтобы склонение и формулировка
- * проверялись тестом без подъёма формы.
+ * Сообщение предупреждения по частям — чтобы данные найденной заявки (проблемы
+ * и локацию) можно было выделить в интерфейсе, а не только показать строкой.
  *
- * @param {{thu?: string, problems?: string, lookbackHours?: number}} params
+ * @param {{thu?: string, problems?: string, location?: string, lookbackHours?: number}} params
+ * @returns {Array<{text: string, strong: boolean}>}
+ */
+export function otherProblemWarningSegments({
+  thu = "",
+  problems = "",
+  location = "",
+  lookbackHours = OTHER_PROBLEM_LOOKBACK_HOURS,
+} = {}) {
+  const list = String(problems ?? "").trim();
+  const loc = String(location ?? "").trim();
+  /** @type {Array<{text: string, strong: boolean}>} */
+  const segments = [
+    { text: `По ЕО ${thu} за последние ${pluralHours(lookbackHours)} на этом РЦ уже зарегистрирована проблема в другой заявке`, strong: false },
+  ];
+  if (list) {
+    segments.push({ text: ": ", strong: false }, { text: list, strong: true });
+  }
+  segments.push({ text: ".", strong: false });
+  if (loc) {
+    segments.push({ text: " Локация: ", strong: false }, { text: loc, strong: true }, { text: ".", strong: false });
+  }
+  segments.push({
+    text: ` Вы выбрали «${NOT_FOUND_PROBLEM}». Действительно подать заявку или ЕО всё-таки нашлась?`,
+    strong: false,
+  });
+  return segments;
+}
+
+/**
+ * Тот же текст одной строкой — из тех же сегментов, чтобы строка и разметка не
+ * разъезжались. Удобен для тестов и логов.
+ *
+ * @param {{thu?: string, problems?: string, location?: string, lookbackHours?: number}} params
  * @returns {string}
  */
-export function otherProblemWarningText({ thu = "", problems = "", lookbackHours = OTHER_PROBLEM_LOOKBACK_HOURS } = {}) {
-  const list = String(problems ?? "").trim();
-  return `По ЕО ${thu} за последние ${pluralHours(lookbackHours)} на этом РЦ уже зарегистрирована проблема в другой заявке${
-    list ? `: ${list}` : ""
-  }. Вы выбрали «Не найдена». Действительно подать заявку или ЕО всё-таки нашлась?`;
+export function otherProblemWarningText(params = {}) {
+  return otherProblemWarningSegments(params)
+    .map((seg) => seg.text)
+    .join("");
 }
 
 /** Проблема «ЕО не найдена» — её совпадением не считаем. */
@@ -102,6 +134,18 @@ export function findOtherProblemRow(rows, { editingItemId = null } = {}) {
 export function otherProblemsLabel(row) {
   const list = row?.Problems?.results;
   return Array.isArray(list) ? list.map((p) => String(p)).join(", ") : "";
+}
+
+/**
+ * Локация найденной заявки (поле Location1) — для текста предупреждения.
+ * Оператору важно видеть, где именно нашли паллету: это главный аргумент,
+ * что ЕО всё-таки нашлась.
+ *
+ * @param {object|null} row
+ * @returns {string}
+ */
+export function otherProblemLocationLabel(row) {
+  return String(row?.Location1 ?? "").trim();
 }
 
 /**
