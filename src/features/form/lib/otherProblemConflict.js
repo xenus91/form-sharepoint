@@ -76,7 +76,7 @@ export function otherProblemWarningSegments({
   }
   segments.push({ text: ".", strong: false });
   if (loc) {
-    segments.push({ text: " Локация: ", strong: false }, { text: loc, strong: true }, { text: ".", strong: false });
+    segments.push({ text: " Местоположение: ", strong: false }, { text: loc, strong: true }, { text: ".", strong: false });
   }
   segments.push({
     text: ` Вы выбрали «${NOT_FOUND_PROBLEM}». Действительно подать заявку или ЕО всё-таки нашлась?`,
@@ -137,7 +137,7 @@ export function otherProblemsLabel(row) {
 }
 
 /**
- * Локация найденной заявки (поле Location1) — для текста предупреждения.
+ * Местоположение найденной заявки (поле Location1) — для текста предупреждения.
  * Оператору важно видеть, где именно нашли паллету: это главный аргумент,
  * что ЕО всё-таки нашлась.
  *

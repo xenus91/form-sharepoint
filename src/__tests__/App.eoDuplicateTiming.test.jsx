@@ -293,7 +293,7 @@ describe("проверка ЕО — после выбора проблемы, н
 
     // Location1 найденной заявки проброшена в запрос и показана в сообщении.
     expect(notFound[0]).toContain("Location1");
-    expect(text.textContent).toContain("Локация: Не найдена в зоне отгрузки");
+    expect(text.textContent).toContain("Местоположение: Не найдена в зоне отгрузки");
 
     // Данные найденной заявки — проблемы и локация — выделены.
     const highlighted = [...text.querySelectorAll("strong")].map((el) => el.textContent);
