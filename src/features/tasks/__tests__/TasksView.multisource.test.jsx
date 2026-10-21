@@ -313,6 +313,19 @@ vi.mock("../../../api", () => {
       }));
       return { data: { d: { results } } };
     }
+    // Элемент ProblemsPallet целиком. Вложения приезжают в этом же ответе
+    // ($expand=…,AttachmentFiles) — отдельный запрос за счётчиком не нужен.
+    if (d.includes("getbytitle('ProblemsPallet')/items(")) {
+      const n = Number(d.match(/\/items\((\d+)\)/)[1]);
+      const files = (state.relatedAttachments || {})[n] || [];
+      return { data: { d: {
+        Id: n,
+        Title: `Элемент ${n}`,
+        THU: "12345678901234567",
+        DC_THU: "РЦ-8117",
+        AttachmentFiles: { results: files.map((FileName) => ({ FileName })) },
+      } } };
+    }
     // взятие в работу / завершение перечитывают СВЕЖИЙ статус элемента
     const single = d.match(/\/items\((\d+)\)/);
     if (single) {
@@ -855,6 +868,15 @@ describe("TasksView — multi-source (#tasks)", () => {
     const clip = host.querySelector('[data-testid="related-attachments-button"]');
     expect(clip).toBeTruthy();
     expect(clip.textContent).toContain("2");
+
+    // Здесь #tasks/30 — Id ЗАДАЧИ, её связанный элемент 25202 отдельно
+    // загружен не был, поэтому счётчик legitimately считается батчем.
+    // Сценарий «элемент уже загружен → второго запроса нет» покрыт в
+    // src/tasks/__tests__/problemsPallet.dedup.test.js.
+    const probe = state.requests.filter(
+      (r) => r.url.includes("getbytitle('ProblemsPallet')/items?") && r.url.includes("$expand=AttachmentFiles"),
+    );
+    expect(probe.length).toBe(1);
 
     await act(async () => { mouseClick(clip); await wait200(); });
     expect(new URLSearchParams(window.location.search).get("ID")).toBe("25202");

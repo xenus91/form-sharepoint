@@ -404,7 +404,24 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
   // Карточка в диалоге #tasks/<Id> берётся отдельным запросом и может не входить
   // в cardTasks — считаем вложения связанного элемента и для неё.
   const dialogTask = elementTaskMatch || null;
-  const dialogRelatedAttachments = useRelatedAttachments(dialogTask ? [dialogTask] : []);
+  // Вложения связанного элемента. Если нужный элемент ProblemsPallet уже
+  // загружен (hash-роут #tasks/<Id элемента>), AttachmentFiles пришли в том же
+  // ответе (см. tasks/problemsPallet.js) — отдельный запрос
+  // items?$select=Id&$expand=AttachmentFiles&$filter=Id eq … не нужен.
+  // Если загружен другой элемент или не загружен вовсе (например #tasks/<Id
+  // задачи> со ссылкой на элемент), считаем отдельным батчем, как в списке.
+  const dialogRelatedId = dialogTask ? relatedItemIdOf(dialogTask) : null;
+  const elementCoversDialog = !!dialogRelatedId
+    && Number(elementData?.Id) === Number(dialogRelatedId)
+    && Array.isArray(elementData?.AttachmentFiles?.results);
+  const dialogRelatedAttachments = useRelatedAttachments(
+    dialogTask && !elementCoversDialog ? [dialogTask] : [],
+  );
+  const dialogRelatedAttachmentCount = !dialogTask
+    ? 0
+    : elementCoversDialog
+      ? elementData.AttachmentFiles.results.length
+      : dialogRelatedAttachments.countOf(dialogTask);
   // Для открытой задачи — свежие choices по ContentType, но не на каждый polling tasks (60с)
   // Сравниваем dataUpdatedAt и троттлим 5 мин, чтобы не дёргать 2 тяжёлых запроса каждые 60с
   const lastResultFieldsRefreshRef = React.useRef(0);
@@ -971,7 +988,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             elementLoading={elementLoading}
             elementTaskSearching={elementTaskSearching}
             elementTaskMatch={elementTaskMatch}
-            relatedAttachmentCount={dialogTask ? dialogRelatedAttachments.countOf(dialogTask) : 0}
+            relatedAttachmentCount={dialogRelatedAttachmentCount}
             onOpenRelatedAttachments={handleOpenRelatedAttachments}
             elementData={elementData}
             elementError={elementError}
@@ -1148,7 +1165,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onClearElementHash={onClearElementHash}
         onShowInList={() => { setElementDialogOpen(false); try { const el = document.getElementById('task-' + elementTaskMatch.Id); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {} }}
         loadTasks={loadTasks}
-        relatedAttachmentCount={dialogTask ? dialogRelatedAttachments.countOf(dialogTask) : 0}
+        relatedAttachmentCount={dialogRelatedAttachmentCount}
         onOpenRelatedAttachments={handleOpenRelatedAttachments}
       />
 

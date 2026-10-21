@@ -30,9 +30,12 @@ const PRIMARY_SELECT = [
   "Author/Title", "Editor/Title", "Recipient/Title", "Recipient/Id",
   "Shipment", "WhNotEO", "OperationDate",
 ];
-const PRIMARY_EXPAND = ["Author", "Editor", "Recipient"];
+// AttachmentFiles здесь же, чтобы не делать второй запрос за счётчиком
+// вложений для скрепки (раньше уходил отдельный
+// items?$select=Id&$expand=AttachmentFiles&$filter=Id eq <id>).
+const PRIMARY_EXPAND = ["Author", "Editor", "Recipient", "AttachmentFiles"];
 const FALLBACK_SELECT = "Id,Title,THU,Location1,Problems,Status,Created,Modified,Author/Title";
-const FALLBACK_EXPAND = "Author";
+const FALLBACK_EXPAND = "Author,AttachmentFiles";
 
 /**
  * Загрузить элемент ProblemsPallet по id.

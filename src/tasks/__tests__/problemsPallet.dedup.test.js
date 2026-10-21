@@ -38,6 +38,16 @@ describe("fetchProblemsPalletItem — дедупликация", () => {
     expect(state.calls.length).toBe(1);
   });
 
+  it("вложения приезжают в том же запросе, что и сам элемент", async () => {
+    await fetchProblemsPalletItem(25404);
+    expect(state.calls.length).toBe(1);
+    // один запрос к items(<id>) — и в $expand уже AttachmentFiles, отдельный
+    // items?$select=Id&$expand=AttachmentFiles&$filter=Id eq … не нужен
+    expect(state.calls[0]).toMatch(/\/items\(25404\)\?/);
+    expect(state.calls[0]).toContain("$expand=Author,Editor,Recipient,AttachmentFiles");
+    expect(state.calls.some((u) => u.includes("/items?"))).toBe(false);
+  });
+
   it("разные элементы → отдельные запросы", async () => {
     await fetchProblemsPalletItem(25402);
     await fetchProblemsPalletItem(25403);
