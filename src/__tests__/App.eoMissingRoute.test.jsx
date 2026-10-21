@@ -61,40 +61,74 @@ if (!navigator.mediaDevices) {
 
 const App = (await import("../App")).default;
 
+/** Значения полей формы: MUI держит их в value, а не в textContent. */
+const fieldValues = (host) => [...host.querySelectorAll("input, textarea")].map((i) => String(i.value ?? ""));
+
+const mountApp = async () => {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await act(async () => {
+    root.render(
+      <QueryClientProvider client={qc}>
+        <ThemeProvider theme={createTheme()}>
+          <App />
+        </ThemeProvider>
+      </QueryClientProvider>,
+    );
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  for (let i = 0; i < 5; i += 1) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+  }
+  return {
+    host,
+    values: () => fieldValues(host),
+    close: async () => {
+      await act(async () => { root.unmount(); });
+      host.remove();
+    },
+  };
+};
+
 describe("роут #eoismissing", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/#eoismissing");
   });
 
   it("открывает форму с выбранной проблемой «Не найдена»", async () => {
-    const host = document.createElement("div");
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const app = await mountApp();
 
-    await act(async () => {
-      root.render(
-        <QueryClientProvider client={qc}>
-          <ThemeProvider theme={createTheme()}>
-            <App />
-          </ThemeProvider>
-        </QueryClientProvider>,
-      );
-      await new Promise((r) => setTimeout(r, 50));
-    });
-    for (let i = 0; i < 5; i += 1) {
-      await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
-    }
-
-    // Значения полей лежат в value инпутов, а не в textContent.
-    const inputs = [...host.querySelectorAll("input, textarea")];
-    const values = inputs.map((i) => String(i.value ?? ""));
     // Местоположение проставилось вместе с проблемой (как в handleChange).
-    expect(values).toContain("Не найдена в зоне отгрузки");
+    expect(app.values()).toContain("Не найдена в зоне отгрузки");
     // Сама проблема выбрана: MUI Select multiple держит значения в hidden input.
-    expect(values.some((v) => v.split(",").includes("Не найдена"))).toBe(true);
+    expect(app.values().some((v) => v.split(",").includes("Не найдена"))).toBe(true);
 
-    await act(async () => { root.unmount(); });
-    host.remove();
+    await app.close();
+  }, 30000);
+
+  it.each(["#eoismissing", "#/eoismissing"])("не стирает %s из адреса", async (hash) => {
+    window.history.replaceState(null, "", `/${hash}`);
+    const app = await mountApp();
+
+    // Если хэш стереть, после F5 форма откроется пустой.
+    expect(window.location.hash.toLowerCase()).toContain("eoismissing");
+
+    await app.close();
+  }, 30000);
+
+  it("после обновления страницы предвыбор срабатывает снова", async () => {
+    const first = await mountApp();
+    expect(window.location.hash.toLowerCase()).toContain("eoismissing");
+    const urlAfterLoad = window.location.pathname + window.location.search + window.location.hash;
+    await first.close();
+
+    // «Обновление»: тот же адрес, новый монтаж.
+    window.history.replaceState(null, "", urlAfterLoad);
+    const second = await mountApp();
+    expect(second.values()).toContain("Не найдена в зоне отгрузки");
+    expect(second.values().some((v) => v.split(",").includes("Не найдена"))).toBe(true);
+    await second.close();
   }, 30000);
 });

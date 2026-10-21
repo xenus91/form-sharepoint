@@ -1684,7 +1684,14 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
     const parsed = parseHash();
     if (currentView === "form") {
-      if (window.location.hash && window.location.hash.toLowerCase() !== "#form") window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      const hash = window.location.hash;
+      // Роут «ЕО отсутствует» НЕ стираем. Иначе ссылка
+      // .../ProblemPallets.html#eoismissing после первого же рендера теряла
+      // хэш, и обновление страницы открывало пустую форму.
+      const keepHash = !!hash && isEoMissingRoute(hash, "");
+      if (hash && !keepHash && hash.toLowerCase() !== "#form") {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
       return;
     }
     // если уже на нужном view и hash содержит ожидаемый префикс — не трогаем (сохраняем id=... в url)
