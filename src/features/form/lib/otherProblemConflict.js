@@ -3,12 +3,68 @@
 // Конфликт «Не найдена» с уже зарегистрированной проблемой по тому же ЕО.
 //
 // Когда оператор выбирает проблему «Не найдена», по этому же номеру ЕО на том же
-// РЦ за последние 24 часа могла быть подана заявка с КОНКРЕТНОЙ проблемой. Тогда
+// РЦ за последние 48 часов могла быть подана заявка с КОНКРЕТНОЙ проблемой. Тогда
 // «Не найдена» противоречит уже внесённым данным — перед отправкой надо спросить
 // подтверждение.
 //
 // Вынесено из App.jsx: выбор строки-конфликта — чистая функция, её можно
 // проверить тестами без SharePoint и без подъёма формы.
+
+/**
+ * Окно поиска конфликта «Не найдена» — в часах.
+ *
+ * 48, а не 24: за смену ЕО может «потеряться» и найтись на следующий день,
+ * и тогда вчерашняя заявка с конкретной проблемой всё ещё релевантна.
+ */
+export const OTHER_PROBLEM_LOOKBACK_HOURS = 48;
+
+/** Заголовок диалога-предупреждения. */
+export const OTHER_PROBLEM_DIALOG_TITLE = "По этой ЕО уже есть проблема";
+
+/**
+ * Склонение слова «час» под число: 1 час, 2 часа, 5 часов, 21 час, 48 часов.
+ *
+ * @param {number} n
+ * @returns {string} — например, "48 часов"
+ */
+export function pluralHours(n) {
+  const num = Math.abs(Math.trunc(Number(n)));
+  const n10 = num % 10;
+  const n100 = num % 100;
+  let word = "часов";
+  if (n10 === 1 && n100 !== 11) word = "час";
+  else if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) word = "часа";
+  return `${Number(n)} ${word}`;
+}
+
+/** «48 часов» — подпись окна поиска для текста предупреждения. */
+export function otherProblemLookbackLabel() {
+  return pluralHours(OTHER_PROBLEM_LOOKBACK_HOURS);
+}
+
+/**
+ * Нижняя граница окна поиска в ISO — для `$filter ... Created ge datetime'…'`.
+ *
+ * @param {number} [now] — текущее время в мс (параметр для тестов)
+ * @returns {string}
+ */
+export function otherProblemSinceIso(now = Date.now()) {
+  return new Date(now - OTHER_PROBLEM_LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * Текст предупреждения целиком — одной строкой, чтобы склонение и формулировка
+ * проверялись тестом без подъёма формы.
+ *
+ * @param {{thu?: string, problems?: string, lookbackHours?: number}} params
+ * @returns {string}
+ */
+export function otherProblemWarningText({ thu = "", problems = "", lookbackHours = OTHER_PROBLEM_LOOKBACK_HOURS } = {}) {
+  const list = String(problems ?? "").trim();
+  return `По ЕО ${thu} за последние ${pluralHours(lookbackHours)} на этом РЦ уже зарегистрирована проблема в другой заявке${
+    list ? `: ${list}` : ""
+  }. Вы выбрали «Не найдена». Действительно подать заявку или ЕО всё-таки нашлась?`;
+}
 
 /** Проблема «ЕО не найдена» — её совпадением не считаем. */
 export const NOT_FOUND_PROBLEM = "Не найдена";

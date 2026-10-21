@@ -2,7 +2,20 @@
 //
 // «Не найдена» против уже зарегистрированной проблемы по тому же ЕО на РЦ.
 import { describe, it, expect } from "vitest";
-import { eoCheckKindForProblems, eoCheckSignature, findOtherProblemRow, hasOtherProblems, otherProblemsLabel } from "../otherProblemConflict";
+import {
+  NOT_FOUND_PROBLEM,
+  OTHER_PROBLEM_DIALOG_TITLE,
+  OTHER_PROBLEM_LOOKBACK_HOURS,
+  eoCheckKindForProblems,
+  eoCheckSignature,
+  findOtherProblemRow,
+  hasOtherProblems,
+  otherProblemLookbackLabel,
+  otherProblemSinceIso,
+  otherProblemWarningText,
+  otherProblemsLabel,
+  pluralHours,
+} from "../otherProblemConflict";
 
 const row = (Id, problems, extra = {}) => ({ Id, THU: "808003003003003003", DC_THU: "8117", Problems: { results: problems }, ...extra });
 
@@ -96,5 +109,74 @@ describe("eoCheckSignature", () => {
 
   it("одинаковый набор даёт одинаковую подпись — повторно не спрашиваем", () => {
     expect(eoCheckSignature("123", ["Не найдена"])).toBe(eoCheckSignature("123", ["Не найдена"]));
+  });
+});
+
+describe("окно поиска конфликта — 48 часов", () => {
+  it("константа = 48", () => {
+    expect(OTHER_PROBLEM_LOOKBACK_HOURS).toBe(48);
+  });
+
+  it("otherProblemSinceIso отсекает ровно 48 часов", () => {
+    const now = Date.parse("2026-10-21T12:00:00.000Z");
+    expect(otherProblemSinceIso(now)).toBe("2026-10-19T12:00:00.000Z");
+  });
+
+  it("подпись окна склоняется: 48 часов", () => {
+    expect(otherProblemLookbackLabel()).toBe("48 часов");
+  });
+});
+
+describe("pluralHours — склонение «час»", () => {
+  it.each([
+    [1, "1 час"],
+    [2, "2 часа"],
+    [3, "3 часа"],
+    [4, "4 часа"],
+    [5, "5 часов"],
+    [0, "0 часов"],
+    [11, "11 часов"],
+    [12, "12 часов"],
+    [14, "14 часов"],
+    [21, "21 час"],
+    [22, "22 часа"],
+    [24, "24 часа"],
+    [25, "25 часов"],
+    [48, "48 часов"],
+    [101, "101 час"],
+    [111, "111 часов"],
+    [112, "112 часов"],
+    [122, "122 часа"],
+  ])("%i → %s", (n, expected) => {
+    expect(pluralHours(n)).toBe(expected);
+  });
+});
+
+describe("текст предупреждения", () => {
+  it("заголовок — «По этой ЕО уже есть проблема»", () => {
+    expect(OTHER_PROBLEM_DIALOG_TITLE).toBe("По этой ЕО уже есть проблема");
+  });
+
+  it("полный текст со списком проблем и «48 часов»", () => {
+    expect(
+      otherProblemWarningText({
+        thu: "808003003005005005",
+        problems: "Товар не примотан к поддону, Товар выступает за габариты поддона, Повреждение, Плохая обмотка",
+      }),
+    ).toBe(
+      "По ЕО 808003003005005005 за последние 48 часов на этом РЦ уже зарегистрирована проблема в другой заявке: " +
+        "Товар не примотан к поддону, Товар выступает за габариты поддона, Повреждение, Плохая обмотка. " +
+        "Вы выбрали «Не найдена». Действительно подать заявку или ЕО всё-таки нашлась?",
+    );
+  });
+
+  it("без списка проблем — двоеточия нет", () => {
+    const text = otherProblemWarningText({ thu: "1", problems: "" });
+    expect(text).toContain("в другой заявке. Вы выбрали");
+    expect(text).not.toContain(":");
+  });
+
+  it("«Не найдена» — та же строка, что NOT_FOUND_PROBLEM", () => {
+    expect(otherProblemWarningText({ thu: "1" })).toContain(NOT_FOUND_PROBLEM);
   });
 });

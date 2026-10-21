@@ -12,6 +12,7 @@ import { ThemeProvider, createTheme } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const requests = vi.hoisted(() => ({ log: [] }));
+const EO_FOR_MOCK = "808003003003003003";
 
 vi.mock("../api", () => {
   const get = async (url) => {
@@ -33,6 +34,26 @@ vi.mock("../api", () => {
       };
     }
     if (u.includes("/web/currentuser")) return { data: { d: { Id: 10, Title: "Поршаков Сергей" } } };
+    // Проверка «другой проблемы»: тот же ЕО, тот же РЦ, но с конкретной проблемой.
+    // Отличается от проверки дубля отсутствием AuthorId в фильтре.
+    if (u.includes("getbytitle('ProblemsPallet')/items") && !u.includes("AuthorId")) {
+      return {
+        data: {
+          d: {
+            results: [
+              {
+                Id: 25411,
+                THU: EO_FOR_MOCK,
+                DC_THU: "8117",
+                Created: "2026-10-21T00:44:26Z",
+                Problems: { results: ["Повреждение", "Плохая обмотка"] },
+                Author: { Title: "Поршаков Сергей" },
+              },
+            ],
+          },
+        },
+      };
+    }
     // Выбор проблем для мультиселекта
     if (u.includes("getbytitle('ProblemsPallet')/fields")) {
       return { data: { d: { results: [{ InternalName: "Problems", Choices: { results: ["Не найдена", "Брак упаковки"] } }] } } };
@@ -108,6 +129,22 @@ async function typeEoAndBlur(host) {
   return input;
 }
 
+/** Открыть мультиселект проблем и отметить нужную. */
+async function pickProblem(host, label) {
+  const combo = host.querySelector('#select-multiple-chip') || host.querySelector('[role="combobox"]');
+  expect(combo).toBeTruthy();
+  await act(async () => {
+    combo.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 120));
+  });
+  const option = [...document.body.querySelectorAll('[role="option"]')].find((o) => (o.textContent || "").includes(label));
+  expect(option).toBeTruthy();
+  await act(async () => {
+    option.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 120));
+  });
+}
+
 describe("проверка ЕО — после выбора проблемы, не на blur", () => {
   beforeEach(() => {
     requests.log.length = 0;
@@ -131,25 +168,46 @@ describe("проверка ЕО — после выбора проблемы, н
     await typeEoAndBlur(host);
     expect(eoChecks()).toEqual([]);
 
-    // Открываем мультиселект проблем и выбираем «Не найдена».
-    const combo = host.querySelector('#select-multiple-chip') || host.querySelector('[role="combobox"]');
-    expect(combo).toBeTruthy();
-    await act(async () => {
-      combo.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 120));
-    });
-    const option = [...document.body.querySelectorAll('[role="option"]')]
-      .find((o) => (o.textContent || "").includes("Не найдена"));
-    expect(option).toBeTruthy();
-    await act(async () => {
-      option.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
-      await new Promise((r) => setTimeout(r, 120));
-    });
+    await pickProblem(host, "Не найдена");
 
     // Проверка ушла — и именно по нашему номеру ЕО.
     const hits = eoChecks();
     expect(hits.length).toBeGreaterThan(0);
     expect(hits[0]).toContain(EO);
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  }, 30000);
+
+  it("«Не найдена»: диалог про 48 часов, а не про 24", async () => {
+    const { host, root } = await mountApp();
+    await typeEoAndBlur(host);
+    await pickProblem(host, "Не найдена");
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+
+    const body = document.body.textContent || "";
+    // Заголовок и текст — новая формулировка и 48 часов.
+    expect(body).toContain("По этой ЕО уже есть проблема");
+    expect(body).not.toContain("По этому ЕО уже есть проблема");
+    const text = document.querySelector('[data-testid="other-problem-text"]');
+    expect(text).toBeTruthy();
+    expect(text.textContent).toContain(`По ЕО ${EO} за последние 48 часов`);
+    expect(text.textContent).toContain("Повреждение, Плохая обмотка");
+    expect(text.textContent).not.toContain("24 часа");
+    expect(body).toContain("Заявка № 25411");
+    expect(body).toContain("автор: Поршаков Сергей");
+    // Дата в формате «21.10.2026, 03:44:26».
+    expect(body).toMatch(/\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}:\d{2}/);
+
+    // Само окно запроса — действительно 48 часов, и проверка дубля не уходит.
+    const notFound = eoChecks().filter((u) => !u.includes("AuthorId"));
+    expect(notFound.length).toBe(1);
+    const since = /Created ge datetime'([^']+)'/.exec(notFound[0]);
+    expect(since).toBeTruthy();
+    const hours = (Date.now() - new Date(since[1]).getTime()) / (60 * 60 * 1000);
+    expect(hours).toBeGreaterThan(47.9);
+    expect(hours).toBeLessThan(48.1);
+    expect(eoChecks().filter((u) => u.includes("AuthorId"))).toEqual([]);
 
     await act(async () => { root.unmount(); });
     host.remove();

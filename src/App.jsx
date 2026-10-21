@@ -61,7 +61,15 @@ import useTasksListSyncOnBadgeChange from "./features/tasks/hooks/useTasksListSy
 import { useNotifications } from './NotificationsProvider';
 import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
 import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM, isEoMissingRoute } from "./features/form/lib/eoMissingRoute";
-import { eoCheckKindForProblems, eoCheckSignature, findOtherProblemRow, otherProblemsLabel } from "./features/form/lib/otherProblemConflict";
+import {
+  OTHER_PROBLEM_DIALOG_TITLE,
+  eoCheckKindForProblems,
+  eoCheckSignature,
+  findOtherProblemRow,
+  otherProblemSinceIso,
+  otherProblemWarningText,
+  otherProblemsLabel,
+} from "./features/form/lib/otherProblemConflict";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -428,7 +436,7 @@ const App = () => {
   // Состояния для дубликатов ЕО
   const [duplicateEoDialogOpen, setDuplicateEoDialogOpen] = useState(false);
   const [duplicateEoItem, setDuplicateEoItem] = useState(null);
-  // По этому же ЕО за последние 24 часа на этом же РЦ уже регистрировали ДРУГУЮ
+  // По этому же ЕО за последние 48 часов на этом же РЦ уже регистрировали ДРУГУЮ
   // проблему — «Не найдена» скорее всего ошибочна, просим подтвердить.
   const [otherProblemItem, setOtherProblemItem] = useState(null);
   const [otherProblemDialogOpen, setOtherProblemDialogOpen] = useState(false);
@@ -756,7 +764,7 @@ const App = () => {
   };
 
   /**
-   * Есть ли за последние 24 часа на ЭТОМ ЖЕ РЦ заявка по тому же номеру ЕО,
+   * Есть ли за последние 48 часов на ЭТОМ ЖЕ РЦ заявка по тому же номеру ЕО,
    * но с другой проблемой (не «Не найдена»)?
    *
    * Отличие от checkEoNumberInRecentRecords: та ищет СВОИ заявки по тому же ЕО
@@ -772,10 +780,10 @@ const App = () => {
     if (!eo || eo === "ЕО отсутствует") return null;
     const officeSuffix = getEffectiveDcThu();
     if (!officeSuffix) return null;
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const sinceIso = otherProblemSinceIso();
     try {
       const response = await apiClient.get(
-        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eo}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${twentyFourHoursAgo}')&$select=Id,THU,DC_THU,Created,Problems,Author/Title&$expand=Author`,
+        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eo}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${sinceIso}')&$select=Id,THU,DC_THU,Created,Problems,Author/Title&$expand=Author`,
         { headers: { Accept: "application/json;odata=verbose" } }
       );
       const rows = response?.data?.d?.results || [];
@@ -791,7 +799,7 @@ const App = () => {
   /**
    * Проверка номера ЕО. Какая именно — зависит от выбранной проблемы, и только
    * одна из двух:
-   *   • «Не найдена» → есть ли на этом же РЦ за 24 часа заявка по этому ЕО с
+   *   • «Не найдена» → есть ли на этом же РЦ за 48 часов заявка по этому ЕО с
    *     ДРУГОЙ проблемой («по ЕО уже зарегистрирована проблема в другой заявке»);
    *   • любая другая проблема → старая проверка «вы уже отправляли заявку с этим
    *     ЕО за 24 часа, хотите изменить её?».
@@ -2903,12 +2911,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           onClose={() => setOtherProblemDialogOpen(false)}
           PaperProps={{ sx: { borderRadius: 3, p: 1 } }}
         >
-          <DialogTitle sx={{ fontWeight: 800 }}>По этому ЕО уже есть проблема</DialogTitle>
+          <DialogTitle sx={{ fontWeight: 800 }}>{OTHER_PROBLEM_DIALOG_TITLE}</DialogTitle>
           <DialogContent>
-            <DialogContentText>
-              {`По ЕО ${otherProblemItem?.THU || eoNumber} за последние 24 часа на этом РЦ уже зарегистрирована проблема в другой заявке`}
-              {otherProblemsLabel(otherProblemItem) ? `: ${otherProblemsLabel(otherProblemItem)}` : ""}
-              {". Вы выбрали «Не найдена». Действительно подать заявку или ЕО всё-таки нашлась?"}
+            <DialogContentText data-testid="other-problem-text">
+              {otherProblemWarningText({
+                thu: otherProblemItem?.THU || eoNumber,
+                problems: otherProblemsLabel(otherProblemItem),
+              })}
             </DialogContentText>
             {otherProblemItem?.Id ? (
               <DialogContentText sx={{ mt: 1, fontSize: "0.8rem", color: "text.secondary" }} data-testid="other-problem-item-id">
