@@ -101,6 +101,21 @@ describe("buildTaskListQuery — профиль main (не меняем пове
     expect(select).not.toContain("AdditionalActions");
     expect(select).not.toContain("AdditionalsActionsRequired");
     expect(select).not.toContain("AdditionalActionsRequired");
+    // OffDepKey в списке Tasks на тенанте нет, а значение нигде не используется.
+    // Раньше поле добавлялось «на всякий случай», и каждая загрузка списка
+    // начиналась с 400 «Поле или свойство OffDepKey не существует» + ретрай.
+    expect(select).not.toContain("OffDepKey");
+  });
+
+  it("OffDepKey добавляется, когда поле реально есть в списке", () => {
+    const url = buildTaskListQuery({
+      listApi: "/web/lists(guid'X')",
+      taskFieldNames: ["Id", "Title", "OffDepKey"],
+      selectProfile: "main",
+      currentUserId: 1,
+      assignedIds: [1],
+    });
+    expect(parse(url).$select.split(",")).toContain("OffDepKey");
   });
 });
 

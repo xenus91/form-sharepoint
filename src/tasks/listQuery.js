@@ -193,7 +193,13 @@ export function buildTaskListQuery(opts = {}) {
       pushExtra(f);
     }
   }
-  if (!isExternal && (taskFieldNames.length === 0 || has("OffDepKey"))) pushExtra("OffDepKey");
+  // OffDepKey добавляем ТОЛЬКО если поле реально есть в списке. Раньше оно
+  // попадало в $select оптимистично, пока список полей не загрузился, и запрос
+  // падал в 400 «Поле или свойство OffDepKey не существует» (на тенанте такого
+  // поля в Tasks нет) — каждая загрузка начиналась с заведомо падающего
+  // запроса и авто-ретрая. Значение поля при этом нигде не используется:
+  // completedTasks.js лишь пробрасывает его в строку.
+  if (!isExternal && has("OffDepKey")) pushExtra("OffDepKey");
   // Recipient в Tasks отсутствует — не используем дефолт "Recipient" на первом рендере.
   const shouldUseRecipient = useRecipient !== null ? useRecipient : !!recipientField;
   const effectiveRecipientFieldRaw = shouldUseRecipient ? (recipientField || null) : null;
