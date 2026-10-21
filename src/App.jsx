@@ -849,6 +849,16 @@ const App = () => {
     pendingCheckSigRef.current = null;
   };
 
+  /**
+   * Отмена или закрытие диалога проверки: НЕ считаем её отвеченной.
+   *
+   * Иначе при повторном нажатии «Отправить» затвор решит, что оператор уже
+   * ответил, пропустит проверку — и форма уйдёт молча.
+   */
+  const discardEoCheck = () => {
+    pendingCheckSigRef.current = null;
+  };
+
   const loadDuplicateEoData = async (itemId) => {
     setIsFetchingItemData(true);
     setLoading(true);
@@ -2855,8 +2865,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Dialog
           open={duplicateEoDialogOpen}
           onClose={() => {
+            // Закрытие по фону/Esc равносильно «Нет».
+            discardEoCheck();
             setDuplicateEoDialogOpen(false);
-            setEoNumber("");
           }}
           PaperProps={{
             // То же скругление, что у кнопок внутри. Числом — потому что в теме
@@ -2875,7 +2886,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                 стирает введённый номер — иначе форма теряла бы данные. */}
             <Button
               onClick={() => {
-                markEoCheckAnswered();
+                // «Нет» — решение не принято: при следующей отправке спросим снова.
+                discardEoCheck();
                 setDuplicateEoDialogOpen(false);
               }}
               color="inherit"
@@ -2918,7 +2930,11 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         {/* «Не найдена», но по этому ЕО на РЦ уже есть заявка с другой проблемой */}
         <Dialog
           open={otherProblemDialogOpen}
-          onClose={() => setOtherProblemDialogOpen(false)}
+          onClose={() => {
+            // Закрытие по фону/Esc равносильно «Отмена».
+            discardEoCheck();
+            setOtherProblemDialogOpen(false);
+          }}
           PaperProps={{ sx: { borderRadius: EO_DIALOG_RADIUS, p: 1 } }}
         >
           <DialogTitle sx={{ fontWeight: 800 }}>{OTHER_PROBLEM_DIALOG_TITLE}</DialogTitle>
@@ -2949,7 +2965,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           <DialogActions sx={{ pb: 2, px: 3 }}>
             <Button
               onClick={() => {
-                markEoCheckAnswered();
+                // «Отмена» — решение не принято: при следующей отправке спросим снова.
+                discardEoCheck();
                 setOtherProblemDialogOpen(false);
               }}
               color="inherit"

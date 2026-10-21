@@ -11,7 +11,7 @@ import { act } from "react-dom/test-utils";
 import { ThemeProvider, createTheme } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const requests = vi.hoisted(() => ({ log: [] }));
+const requests = vi.hoisted(() => ({ log: [], posts: [] }));
 const EO_FOR_MOCK = "808003003003003003";
 
 vi.mock("../api", () => {
@@ -67,6 +67,10 @@ vi.mock("../api", () => {
         },
       };
     }
+    // Список получателей для RecipientAutocomplete
+    if (u.includes("getbytitle('SCList')/items")) {
+      return { data: { d: { results: [{ ID: 55, Title: "Магазин 55", SCNumberText: "55", SCNumber: "55" }] } } };
+    }
     // Выбор проблем для мультиселекта
     if (u.includes("getbytitle('ProblemsPallet')/fields")) {
       return { data: { d: { results: [{ InternalName: "Problems", Choices: { results: ["Не найдена", "Брак упаковки"] } }] } } };
@@ -74,7 +78,14 @@ vi.mock("../api", () => {
     return { data: { d: { results: [] } } };
   };
   return {
-    default: { get, post: async () => ({ data: { d: {} } }), defaults: { headers: {} } },
+    default: {
+      get,
+      post: async (url) => {
+        requests.posts.push(String(url));
+        return { data: { d: { GetContextWebInformation: { FormDigestValue: "digest" } } } };
+      },
+      defaults: { headers: {} },
+    },
     invalidate: () => {},
   };
 });
@@ -169,9 +180,57 @@ async function waitForTestId(testid, timeoutMs = 5000) {
   }
 }
 
+/** Инпут поля по тексту подписи (MUI добавляет « *» для required). */
+function inputByLabel(root, label) {
+  const lab = [...root.querySelectorAll("label")].find(
+    (l) => (l.textContent || "").replace(/\s*\*\s*$/, "").trim() === label,
+  );
+  if (!lab) return null;
+  const box = lab.closest(".MuiFormControl-root") || lab.parentElement;
+  return box ? box.querySelector("input") : null;
+}
+
+/** Ждать исчезновения элемента: диалог закрывается с анимацией. */
+async function waitForGone(testid, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!document.querySelector(`[data-testid="${testid}"]`)) return;
+    if (Date.now() > deadline) throw new Error(`Элемент ${testid} так и не исчез`);
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+  }
+}
+
+async function setInputValue(input, value) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+  await act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 30));
+  });
+}
+
+/** Выбрать получателя в автокомплите. */
+async function pickRecipient(host) {
+  const input = inputByLabel(host, "Номер получателя");
+  expect(input).toBeTruthy();
+  await act(async () => {
+    input.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 150));
+  });
+  const option = [...document.body.querySelectorAll('[role="option"]')].find((o) =>
+    (o.textContent || "").includes("55"),
+  );
+  expect(option).toBeTruthy();
+  await act(async () => {
+    option.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 100));
+  });
+}
+
 describe("проверка ЕО — после выбора проблемы, не на blur", () => {
   beforeEach(() => {
     requests.log.length = 0;
+    requests.posts.length = 0;
     window.history.replaceState(null, "", "/#form");
   });
 
@@ -285,6 +344,78 @@ describe("проверка ЕО — после выбора проблемы, н
     await act(async () => { root.unmount(); });
     host.remove();
   }, 30000);
+
+  it("после «Отмена» повторная отправка СНОВА показывает диалог", async () => {
+    // Без даты операции форма не дойдёт до проверки — кладём её в кэш.
+    window.localStorage.setItem(
+      "operationDateSelection",
+      JSON.stringify({ value: "2026-10-21T10:00", expiresAt: Date.now() + 3600 * 1000 }),
+    );
+
+    const { host, root } = await mountApp();
+    await typeEoAndBlur(host);
+    await pickProblem(host, "Не найдена");
+    await waitForTestId("other-problem-text");
+
+    // Закрываем диалог отменой.
+    const cancel = document.querySelector('[data-testid="other-problem-cancel"]');
+    expect(cancel).toBeTruthy();
+    await act(async () => {
+      cancel.click();
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    await waitForGone("other-problem-text");
+
+    // Дозаполняем обязательные поля и жмём «Отправить».
+    await setInputValue(inputByLabel(host, "Другое местоположение"), "Не найдена в зоне отгрузки");
+    await pickRecipient(host);
+    const submit = host.querySelector('button[type="submit"]');
+    expect(submit).toBeTruthy();
+    await act(async () => {
+      submit.click();
+      await new Promise((r) => setTimeout(r, 300));
+    });
+
+    // Диалог обязан появиться снова, а заявка — НЕ создаться.
+    await waitForTestId("other-problem-text", 5000);
+    expect(requests.posts.filter((u) => u.includes("ProblemsPallet") && !u.includes("contextinfo"))).toEqual([]);
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+    window.localStorage.removeItem("operationDateSelection");
+  }, 40000);
+
+  it("после «Да, ЕО не нашлась — подать» отправка идёт БЕЗ повторного вопроса", async () => {
+    window.localStorage.setItem(
+      "operationDateSelection",
+      JSON.stringify({ value: "2026-10-21T10:00", expiresAt: Date.now() + 3600 * 1000 }),
+    );
+
+    const { host, root } = await mountApp();
+    await typeEoAndBlur(host);
+    // Обязательные поля заполняем ДО подтверждения: иначе отправка остановится
+    // на валидации, и тест ничего не докажет.
+    await setInputValue(inputByLabel(host, "Другое местоположение"), "Не найдена в зоне отгрузки");
+    await pickRecipient(host);
+    await pickProblem(host, "Не найдена");
+    await waitForTestId("other-problem-text");
+
+    // Подтверждаем — дальше форма обязана уйти без второго вопроса.
+    const confirm = document.querySelector('[data-testid="other-problem-submit"]');
+    expect(confirm).toBeTruthy();
+    await act(async () => {
+      confirm.click();
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    await waitForGone("other-problem-text");
+
+    const created = requests.posts.filter((u) => u.includes("ProblemsPallet") && !u.includes("contextinfo"));
+    expect(created.length).toBeGreaterThan(0);
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+    window.localStorage.removeItem("operationDateSelection");
+  }, 40000);
 
   it("некорректный номер на blur даёт подсказку, но тоже без запроса", async () => {
     const { host, root } = await mountApp();
