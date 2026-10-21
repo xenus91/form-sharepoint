@@ -19,12 +19,14 @@ const state = vi.hoisted(() => ({
   fullTask: null,
   fullTaskCalls: [],
   palletGate: null,
+  searchGate: null,
 }));
 
 // useHashElement импортирует через "../../../tasks/..." из hooks/
 vi.mock("../../../../tasks/hashSearch", () => ({
   searchTaskByRelatedItem: async (id) => {
     state.searchCalls.push(String(id));
+    if (state.searchGate) await state.searchGate;
     return null;
   },
   fetchFullTask: async (id) => {
@@ -129,10 +131,45 @@ async function renderProbe(props) {
 }
 
 describe("useHashElement — роут #tasks/<id>", () => {
+  it("отменённый прогон не оставляет вечный лоадер, если следующий нашёл задачу локально", async () => {
+    // Регрессия: #tasks/25393 периодически залипал на «Загружаю элемент #25393…».
+    // Прогон отменялся (приходил distribution) посреди searchTaskByRelatedItem и
+    // оставлял elementTaskSearching=true. Следующий прогон находил задачу локально
+    // и сбрасывал только elementLoading, а ворота лоадера в TasksHashContent
+    // смотрят на searching через || — лоадер не гас никогда.
+    state.palletItem = { Id: 25393, Title: "Элемент 25393" };
+    let releaseSearch;
+    state.searchGate = new Promise((r) => { releaseSearch = r; });
+
+    const p = mountProbe({ elementId: "25393", tasks: [], distribution: null });
+    await p.tick(4);
+    expect(p.read().searching).toBe("true"); // идёт поиск связанной задачи
+
+    // Пришёл distribution и загрузился список → эффект перезапускается,
+    // предыдущий прогон отменён прямо посреди поиска.
+    const task = {
+      Id: 777,
+      Title: "Задача 777",
+      Status: "Не начата",
+      PercentComplete: 0,
+      RelatedItems: JSON.stringify([{ ListId: "{21b5b544-bd98-4b06-891f-c5a137331394}", ItemId: 25393 }]),
+    };
+    p.rerender({ elementId: "25393", tasks: [task], distribution: { Id: 5 } });
+    releaseSearch();
+    await p.tick(10);
+
+    const r = p.read();
+    expect(r.match).toBe("777");
+    expect(r.searching).toBe("false"); // до правки здесь было "true"
+    expect(r.loading).toBe("false");
+    await p.close();
+  });
+
   beforeEach(() => {
     state.palletCalls = [];
     state.searchCalls = [];
     state.fullTaskCalls = [];
+    state.searchGate = null;
     state.palletItem = { Id: 1, THU: "808117004013738272", Title: "Паллет" };
     state.fullTask = null;
     state.palletGate = null;

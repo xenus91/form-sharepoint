@@ -146,6 +146,10 @@ export function useHashElement({ initialElementId, initialElementAction, initial
           // нового прогона и лоадер залипнет.
           if (!cancelled) {
             if (matched) {
+              // Оба флага: предыдущий ОТМЕНЁННЫЙ прогон мог оставить
+              // elementTaskSearching=true, а ворота лоадера в TasksHashContent
+              // смотрят на него через || — лоадер залипал навсегда.
+              setElementTaskSearching(false);
               setElementLoading(false);
             } else {
               setElementTaskSearching(true);
@@ -172,6 +176,8 @@ export function useHashElement({ initialElementId, initialElementAction, initial
         }
         if (!cancelled) {
           HASH_LOG("final setElementTaskMatch", matched? `found #${matched.Id}`: "null", "elementData", elementDataLocal? elementDataLocal.Id: null);
+          setElementTaskSearching(false);
+          setElementLoading(false);
           setElementTaskMatch(matched || null);
           if (!matched) {
             HASH_WARN("final: no task found for", elementIdParam, "tasks len", tasks.length, "elementDataLocal", elementDataLocal);
@@ -203,6 +209,7 @@ export function useHashElement({ initialElementId, initialElementAction, initial
         if (!cancelled) {
           HASH_LOG("THU final", matched? matched.Id: null);
           setElementData(null);
+          setElementTaskSearching(false);
           setElementLoading(false);
           setElementTaskMatch(matched || null);
           if (matched && !autoTabAppliedForElement) {
