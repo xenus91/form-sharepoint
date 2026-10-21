@@ -253,6 +253,13 @@ const figmaTheme = createTheme({
   },
 });
 
+/**
+ * Скругление диалогов проверки ЕО и кнопок внутри них — ОДНО значение, чтобы
+ * они совпадали. Число в sx умножается на shape.borderRadius (28), поэтому
+ * 2 = 56px.
+ */
+const EO_DIALOG_RADIUS = 2;
+
 const MenuProps = {
   PaperProps: {
     style: {
@@ -2852,9 +2859,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             setEoNumber("");
           }}
           PaperProps={{
-            // Числом нельзя: в теме shape.borderRadius = 28, и sx умножит его
-            // (borderRadius: 3 давало 84px). Задаём пиксели явно.
-            sx: { borderRadius: "8px", p: 1 }
+            // То же скругление, что у кнопок внутри. Числом — потому что в теме
+            // shape.borderRadius = 28 и sx умножает на него (3 давало 84px).
+            sx: { borderRadius: EO_DIALOG_RADIUS, p: 1 }
           }}
         >
           <DialogTitle sx={{ fontWeight: 800 }}>Дубликат ЕО</DialogTitle>
@@ -2872,7 +2879,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                 setDuplicateEoDialogOpen(false);
               }}
               color="inherit"
-              sx={{ fontWeight: 700 }}
+              sx={{ borderRadius: EO_DIALOG_RADIUS, fontWeight: 700 }}
               data-testid="duplicate-eo-cancel"
             >
               Нет
@@ -2885,7 +2892,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                 handleFormSubmit({ preventDefault: () => {} });
               }}
               variant="outlined"
-              sx={{ borderRadius: 2, fontWeight: 700 }}
+              sx={{ borderRadius: EO_DIALOG_RADIUS, fontWeight: 700 }}
               data-testid="duplicate-eo-create-anyway"
             >
               Всё равно создать новую
@@ -2898,7 +2905,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
               variant="contained"
               autoFocus
               sx={{ 
-                borderRadius: 2,
+                borderRadius: EO_DIALOG_RADIUS,
                 fontWeight: 700,
                 backgroundImage: "linear-gradient(180deg, #171c8f 0%, #10146a 100%)",
               }}
@@ -2912,7 +2919,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Dialog
           open={otherProblemDialogOpen}
           onClose={() => setOtherProblemDialogOpen(false)}
-          PaperProps={{ sx: { borderRadius: "8px", p: 1 } }}
+          PaperProps={{ sx: { borderRadius: EO_DIALOG_RADIUS, p: 1 } }}
         >
           <DialogTitle sx={{ fontWeight: 800 }}>{OTHER_PROBLEM_DIALOG_TITLE}</DialogTitle>
           <DialogContent>
@@ -2946,7 +2953,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                 setOtherProblemDialogOpen(false);
               }}
               color="inherit"
-              sx={{ fontWeight: 700 }}
+              sx={{ borderRadius: EO_DIALOG_RADIUS, fontWeight: 700 }}
               data-testid="other-problem-cancel"
             >
               Отмена
@@ -2962,7 +2969,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
               autoFocus
               data-testid="other-problem-submit"
               sx={{
-                borderRadius: 2,
+                borderRadius: EO_DIALOG_RADIUS,
                 fontWeight: 700,
                 backgroundImage: "linear-gradient(180deg, #171c8f 0%, #10146a 100%)",
               }}

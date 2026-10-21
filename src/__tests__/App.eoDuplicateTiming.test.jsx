@@ -55,6 +55,18 @@ vi.mock("../api", () => {
         },
       };
     }
+    // Проверка дубля: своя заявка по тому же ЕО (в фильтре есть AuthorId).
+    if (u.includes("getbytitle('ProblemsPallet')/items") && u.includes("AuthorId")) {
+      return {
+        data: {
+          d: {
+            results: [
+              { Id: 777, THU: EO_FOR_MOCK, DC_THU: "8117", Created: "2026-10-21T00:44:26Z", Author: { Title: "Поршаков Сергей" } },
+            ],
+          },
+        },
+      };
+    }
     // Выбор проблем для мультиселекта
     if (u.includes("getbytitle('ProblemsPallet')/fields")) {
       return { data: { d: { results: [{ InternalName: "Problems", Choices: { results: ["Не найдена", "Брак упаковки"] } }] } } };
@@ -146,6 +158,17 @@ async function pickProblem(host, label) {
   });
 }
 
+/** Ждать появления элемента: фиксированная пауза на холодном прогоне не надёжна. */
+async function waitForTestId(testid, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const el = document.querySelector(`[data-testid="${testid}"]`);
+    if (el) return el;
+    if (Date.now() > deadline) throw new Error(`Не дождались ${testid}`);
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+  }
+}
+
 describe("проверка ЕО — после выбора проблемы, не на blur", () => {
   beforeEach(() => {
     requests.log.length = 0;
@@ -190,8 +213,7 @@ describe("проверка ЕО — после выбора проблемы, н
     // Заголовок и текст — новая формулировка и 48 часов.
     expect(body).toContain("По этой ЕО уже есть проблема");
     expect(body).not.toContain("По этому ЕО уже есть проблема");
-    const text = document.querySelector('[data-testid="other-problem-text"]');
-    expect(text).toBeTruthy();
+    const text = await waitForTestId("other-problem-text");
     expect(text.textContent).toContain(`По ЕО ${EO} за последние 48 часов`);
     expect(text.textContent).toContain("Повреждение, Плохая обмотка");
     expect(text.textContent).not.toContain("24 часа");
@@ -222,16 +244,43 @@ describe("проверка ЕО — после выбора проблемы, н
     host.remove();
   }, 30000);
 
-  it("у диалога ЕО маленький бордер-радиус", async () => {
+
+  it("скругление диалога «Не найдена» = скруглению кнопок внутри", async () => {
     const { host, root } = await mountApp();
     await typeEoAndBlur(host);
     await pickProblem(host, "Не найдена");
     await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
-    const paper = document.querySelector(".MuiDialog-paper");
-    expect(paper).toBeTruthy();
-    // borderRadius: 1 в теме MUI = 8px.
-    expect(window.getComputedStyle(paper).borderRadius).toBe("8px");
+    // Берём бумагу именно этого диалога: во время анимации закрытия в DOM
+    // может висеть ещё одна бумага.
+    const paper = (await waitForTestId("other-problem-text")).closest(".MuiDialog-paper");
+    const buttons = [...paper.querySelectorAll("button")];
+    expect(buttons.length).toBe(2);
+    const paperRadius = window.getComputedStyle(paper).borderRadius;
+    buttons.forEach((b) => {
+      expect(window.getComputedStyle(b).borderRadius).toBe(paperRadius);
+    });
+    expect(paperRadius).toBe("56px");
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  }, 30000);
+
+  it("скругление диалога «Дубликат ЕО» = скруглению кнопок внутри", async () => {
+    const { host, root } = await mountApp();
+    await typeEoAndBlur(host);
+    // Любая проблема кроме «Не найдена» — срабатывает старая проверка дубля.
+    await pickProblem(host, "Брак упаковки");
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+
+    const paper = (await waitForTestId("duplicate-eo-cancel")).closest(".MuiDialog-paper");
+    const buttons = [...paper.querySelectorAll("button")];
+    expect(buttons.length).toBe(3);
+    const paperRadius = window.getComputedStyle(paper).borderRadius;
+    buttons.forEach((b) => {
+      expect(window.getComputedStyle(b).borderRadius).toBe(paperRadius);
+    });
+    expect(paperRadius).toBe("56px");
 
     await act(async () => { root.unmount(); });
     host.remove();
