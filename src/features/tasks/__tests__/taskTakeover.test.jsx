@@ -67,9 +67,58 @@ describe("Правило перехвата — 30 минут с момента 
   });
 });
 
-// Карточный уровень (ветка isLockedForMe в TaskCard.jsx) jsdom-стендом не
-// воспроизводится: при «в работе у другого» карточка в тестовой конфигурации
-// всё равно рисует кнопки результата, то есть до ветки блокировки не доходит.
-// Правило 30 минут покрыто юнит-тестами выше, а в карточку оно заведено одной
-// строкой: `&& !isTakeoverAvailable(task)` (TaskCard.jsx:1251,
-// ExternalTaskCard.jsx:63, useTaskMutations.js:166).
+// Карточный уровень: баннер перехвата рендерится ОТДЕЛЬНО от дерева веток
+// действий (IIFE перед ним в TaskCard.jsx), поэтому воспроизводится в jsdom —
+// в отличие от ветки isLockedForMe, до которой тестовая конфигурация не доходит.
+import TaskCardCmp from "../components/TaskCard";
+
+// ВАЖНО: от реального Date.now(), а не от фиксированной даты — isTakeoverAvailable
+// внутри карточки времени теста не знает, и «5 минут назад» от фиксированного
+// NOW превращалось в «6 часов назад», из-за чего баннер показывался всегда.
+const minAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+
+async function mountCard(modifiedIso) {
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  act(() => {
+    root.render(
+      React.createElement(ThemeProvider, { theme: createTheme() },
+        React.createElement(TaskCardCmp, {
+          taskConfig: { contentTypes: [], behaviour: {}, prompts: [], resultFields: [], actions: {}, styling: {} },
+          task: {
+            Id: 555, Title: "ЕО 123456", Status: "В процессе выполнения",
+            Editor: "Иванов Иван", EditorTitle: "Иванов Иван", EditorId: 999,
+            AssignedToId: 999, AssignedTo: "Иванов Иван", Modified: modifiedIso,
+            raw: { Editor: { Id: 999, Title: "Иванов Иван" } },
+          },
+          isCompleted: false, isOverdue: false, fieldDefaultActions: [],
+          choices: ["Найдена", "Не найдена"],
+          currentUserId: 207, currentUserTitle: "Поршаков Сергей",
+          onResultClick: vi.fn(), onComplete: vi.fn(), onTakeInWork: vi.fn(),
+        }))
+    );
+  });
+  await act(async () => { await new Promise((r) => setTimeout(r, 600)); });
+  return {
+    hint: () => host.querySelector('[data-testid="takeover-hint"]'),
+    text: () => host.textContent,
+    close: () => act(() => { root.unmount(); host.remove(); }),
+  };
+}
+
+describe("Карточка — баннер перехвата", () => {
+  it("5 минут назад: баннера нет (задача ещё чужая)", async () => {
+    const v = await mountCard(minAgo(5));
+    expect(v.hint()).toBeNull();
+    v.close();
+  });
+
+  it("40 минут назад: баннер виден и называет того, у кого задача", async () => {
+    const v = await mountCard(minAgo(40));
+    expect(v.hint()).not.toBeNull();
+    expect(v.text()).toContain("В работе у Иванов Иван более 30 минут");
+    expect(v.text()).toContain("можно перехватить");
+    v.close();
+  });
+});

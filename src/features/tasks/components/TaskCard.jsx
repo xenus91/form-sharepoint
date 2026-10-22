@@ -17,7 +17,7 @@ import { resolveStylingForChoice } from "../../../services/stylingConfig"; // �
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
-import { isTakeoverAvailable } from "../../../tasks/takeover";
+import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../../../tasks/takeover";
 import { resolveStylingIcon, isGradient } from "../../../services/stylingConfig";
 import { renderStylingIcon } from "../../../services/stylingIcons";
 import AdditionalActionsField from "./AdditionalActionsField";
@@ -1170,6 +1170,30 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         </Box>
       ) : (
         <>
+          {/* Перехват: задача в работе у другого сотрудника, но с момента взятия
+              прошло больше 30 минут. Блокировка снята (см. isLockedForMe ниже),
+              кнопки результата уже доступны — говорим об этом явно, иначе
+              человек не понимает, почему чужая задача вдруг стала доступна. */}
+          {(() => {
+            const t = task.EditorTitle || task.AssignedTo || task.Editor || "";
+            const assignedToMe = currentUserId && task.AssignedToId && Number(task.AssignedToId) === Number(currentUserId);
+            const editorMine = isTaskTakenByCurrentUser(
+              { ...task, EditorId: task.EditorId || task.raw?.Editor?.Id || null, EditorTitle: t },
+              { currentUserId, currentUserTitle },
+            );
+            const byOther = !assignedToMe && !editorMine && t && t !== "—";
+            if (!isInProgressStatus(task.Status) || isCompleted || !byOther || !isTakeoverAvailable(task)) return null;
+            return (
+              <Box sx={{ mt: 1.5, p: 1.25, borderRadius: "10px", bgcolor: "rgba(25,118,210,0.08)", border: "1px solid rgba(25,118,210,0.25)" }}>
+                <Typography variant="body2" sx={{ fontWeight: 700, color: "#0d47a1" }}>
+                  {`В работе у ${t} более ${TAKEOVER_AFTER_MINUTES} минут`}
+                </Typography>
+                <Typography variant="caption" sx={{ color: "text.secondary" }} data-testid="takeover-hint">
+                  Задача долго не закрывалась — её можно перехватить: выберите результат ниже, исполнителем станете вы.
+                </Typography>
+              </Box>
+            );
+          })()}
           {(() => {
             const status = task.Status || "";
             const notStarted = isNotStartedStatus(status);
