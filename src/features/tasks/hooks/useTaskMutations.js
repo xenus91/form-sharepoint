@@ -9,6 +9,7 @@ import { getResultFieldForTask } from "../../../tasks/resultField";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { TASKS_LIST_API } from "../../../tasks/config";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
+import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../lib/taskTakeover";
 // Функции формы заявки ДОБ нужны здесь ровно для одного: MultiChoice-колонки
 // SharePoint (odata=verbose) принимает ТОЛЬКО объектом-коллекцией, а строка
 // «a;#b» даёт 400 «unexpected 'PrimitiveValue' … 'StartObject' expected».
@@ -158,7 +159,12 @@ export function useTaskMutations({
         freshEditorId = d?.Editor?.Id || null;
         freshModified = d?.Modified || "";
         etag = d?.__metadata?.etag || resp?.headers?.etag || resp?.headers?.ETag || resp?.headers?.["etag"] || "*";
-        if (!isNotStartedStatus(freshStatus)) {
+        // Перехват: задача в работе у другого, но с момента взятия прошло больше
+        // TAKEOVER_AFTER_MINUTES минут — не отказываем, берём себе.
+        const canTakeOver = isInProgressStatus(freshStatus)
+          && !takenByMe({ EditorId: freshEditorId, EditorTitle: freshEditor })
+          && isTakeoverAvailable({ Modified: freshModified });
+        if (!isNotStartedStatus(freshStatus) && !canTakeOver) {
           if (isCompletedStatus(freshStatus, d?.PercentComplete)) {
             notify(`Задача #${task.Id} уже завершена пользователем ${freshEditor || "—"} (${freshStatus}). Возьмите другую задачу.`, { severity: "warning" });
           } else if (isInProgressStatus(freshStatus) && takenByMe({ EditorId: freshEditorId, EditorTitle: freshEditor })) {
@@ -179,6 +185,12 @@ export function useTaskMutations({
           setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._freshOpt } : prev));
           await loadTasks();
           return;
+        }
+        if (canTakeOver) {
+          notify(
+            `Задача #${task.Id} была в работе у ${freshEditor || "другого пользователя"} более ${TAKEOVER_AFTER_MINUTES} минут — перехватываю.`,
+            { severity: "info" }
+          );
         }
       } catch (e) {
         console.warn("take check fetch failed", e?.response?.status);

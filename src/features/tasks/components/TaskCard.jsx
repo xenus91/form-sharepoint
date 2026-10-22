@@ -17,6 +17,7 @@ import { resolveStylingForChoice } from "../../../services/stylingConfig"; // �
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
+import { isTakeoverAvailable } from "../lib/taskTakeover";
 import { resolveStylingIcon, isGradient } from "../../../services/stylingConfig";
 import { renderStylingIcon } from "../../../services/stylingIcons";
 import AdditionalActionsField from "./AdditionalActionsField";
@@ -1243,7 +1244,11 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
               // So we show buttons with hint; the take logic already protects.
               // To implement proper "В работе у X" we need currentUserTitle; fallback: show buttons anyway
               // Let's show buttons, but also show hint who took if not mine
-              const isLockedForMe = !isMine && !isEditorMine && taker && taker !== "—";
+              // Блокировка «задача у другого» снимается, если с момента взятия
+              // в работу прошло больше 30 минут — тогда задачу может завершить
+              // любой (см. lib/taskTakeover.js).
+              const isLockedForMe = !isMine && !isEditorMine && taker && taker !== "—"
+                && !isTakeoverAvailable(task);
               if (isLockedForMe) {
                 return (
                   <>

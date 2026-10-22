@@ -22,6 +22,7 @@ import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../../../tasks/status";
 import { resolveTaker } from "../lib/resolveTaker";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
+import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../lib/taskTakeover";
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import AssignedToButtons, { TakerButtons } from "./AssignedToButtons";
 
@@ -57,7 +58,9 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
   // Требования 2026-10-04: у задачи ДОБ сначала только «Взять в работу», а
   // «Изменить» появляется ПОСЛЕ взятия в работу (задача в работе и не у другого
   // пользователя). Завершённые задачи — вообще без кнопок.
-  const takenByOther = taken && !!taker && !isMine;
+  // Через 30 минут без активности задачу можно перехватить — блокировка снимается.
+  const takeoverAvailable = isTakeoverAvailable(task);
+  const takenByOther = taken && !!taker && !isMine && !takeoverAvailable;
   const canEdit = !completed && taken && !takenByOther;
 
   return (
@@ -193,9 +196,14 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, taking
           <Typography variant="body2" sx={{ fontWeight: 700, color: "#8d6e00" }}>
             {isMine ? "В работе у вас" : `В работе у ${taker}`}
           </Typography>
-          {!isMine && (
+          {!isMine && !takeoverAvailable && (
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
               Задача уже взята другим пользователем. Возьмите другую задачу.
+            </Typography>
+          )}
+          {!isMine && takeoverAvailable && (
+            <Typography variant="caption" sx={{ color: "text.secondary" }}>
+              {`Более ${TAKEOVER_AFTER_MINUTES} минут без активности — задачу можно перехватить.`}
             </Typography>
           )}
         </Box>
