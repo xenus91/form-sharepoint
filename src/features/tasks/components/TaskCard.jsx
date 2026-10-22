@@ -17,7 +17,7 @@ import { resolveStylingForChoice } from "../../../services/stylingConfig"; // тн
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
-import { isTakeoverAvailable } from "../lib/taskTakeover";
+import { isTakeoverAvailable } from "../../../tasks/takeover";
 import { resolveStylingIcon, isGradient } from "../../../services/stylingConfig";
 import { renderStylingIcon } from "../../../services/stylingIcons";
 import AdditionalActionsField from "./AdditionalActionsField";

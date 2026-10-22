@@ -9,7 +9,7 @@ import { getResultFieldForTask } from "../../../tasks/resultField";
 import { isCompletedStatus, isNotStartedStatus, isInProgressStatus } from "../../../tasks/status";
 import { TASKS_LIST_API } from "../../../tasks/config";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
-import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../lib/taskTakeover";
+import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../../../tasks/takeover";
 // Функции формы заявки ДОБ нужны здесь ровно для одного: MultiChoice-колонки
 // SharePoint (odata=verbose) принимает ТОЛЬКО объектом-коллекцией, а строка
 // «a;#b» даёт 400 «unexpected 'PrimitiveValue' … 'StartObject' expected».
@@ -215,6 +215,24 @@ export function useTaskMutations({
             const s = check?.data?.d?.Status || "";
             const ed = check?.data?.d?.Editor?.Title || "другим пользователем";
             const edId = check?.data?.d?.Editor?.Id || null;
+            const freshMod = check?.data?.d?.Modified || "";
+            // 412 = IF-MATCH (ETag) не совпал: элемент тронул другой пользователь.
+            // Раньше это был тупик («возьмите другую задачу»). Если с момента
+            // взятия в работу прошло больше 30 минут — перехватываем: повторяем
+            // MERGE с IF-MATCH: *, то есть сознательно поверх чужой версии.
+            if (isInProgressStatus(s) && !takenByMe({ EditorId: edId, EditorTitle: ed }) && isTakeoverAvailable({ Modified: freshMod })) {
+              try {
+                await apiClient.post(`${TASKS_LIST_API}/items(${task.Id})`, payload, { headers: { ...headers, "IF-MATCH": "*" } });
+                notify(
+                  `Задача #${task.Id} была в работе у ${ed} более ${TAKEOVER_AFTER_MINUTES} минут — перехватываю.`,
+                  { severity: "info" }
+                );
+                await loadTasks();
+                return;
+              } catch (e412) {
+                console.warn("takeover retry failed", e412?.response?.status);
+              }
+            }
             if (takenByMe({ EditorId: edId, EditorTitle: ed })) {
               notify(`Задача #${task.Id} уже в работе у вас (${s}).`, { severity: "info" });
             } else {

@@ -156,3 +156,68 @@ describe("takeTaskInWork", () => {
     expect(res.reason).toBe("invalid-id");
   });
 });
+
+// Перехват задачи, взятой в работу другим сотрудником: правило одно на все
+// типы задач и все источники — src/tasks/takeover.js.
+describe("takeTaskInWork — перехват через 30 минут", () => {
+  const NOW = new Date("2026-10-22T12:00:00Z");
+  const minutesAgo = (m) => new Date(NOW.getTime() - m * 60_000).toISOString();
+
+  beforeEach(() => {
+    state.requests = [];
+    state.choices = ["Не начата", "В работе", "Завершена"];
+    state.mergeError = null;
+    state.onMerge = null;
+    vi.useRealTimers();
+  });
+
+  it("5 минут назад: задача ещё чужая — already-taken", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    state.item = { Id: 1, Status: "В работе", Editor: { Id: 999, Title: "Иванов Иван" }, Modified: minutesAgo(5) };
+    const res = await takeTaskInWork("dob:1", { allSources: [SOURCE] });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe("already-taken");
+    expect(state.requests.some((r) => r.method === "MERGE")).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("40 минут назад: перехватываем — MERGE уходит, ok + tookOver", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    state.item = { Id: 1, Status: "В работе", Editor: { Id: 999, Title: "Иванов Иван" }, Modified: minutesAgo(40) };
+    const res = await takeTaskInWork("dob:1", { allSources: [SOURCE] });
+    expect(res.ok).toBe(true);
+    expect(res.tookOver).toBe(true);
+    expect(res.previousEditor).toBe("Иванов Иван");
+    expect(state.requests.some((r) => r.method === "MERGE")).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("ровно 30 минут — уже можно перехватить", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    state.item = { Id: 1, Status: "В процессе выполнения", Editor: { Id: 999, Title: "Иванов Иван" }, Modified: minutesAgo(30) };
+    const res = await takeTaskInWork("dob:1", { allSources: [SOURCE] });
+    expect(res.ok).toBe(true);
+    expect(res.tookOver).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("обычное взятие (Не начата) — без флага перехвата", async () => {
+    state.item = { Id: 1, Status: "Не начата", Editor: null, Modified: new Date().toISOString() };
+    const res = await takeTaskInWork("dob:1", { allSources: [SOURCE] });
+    expect(res.ok).toBe(true);
+    expect(res.tookOver).toBe(false);
+  });
+
+  it("завершённую задачу перехватить нельзя даже спустя час", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    state.item = { Id: 1, Status: "Завершена", PercentComplete: 1, Editor: { Id: 999, Title: "Иванов Иван" }, Modified: minutesAgo(120) };
+    const res = await takeTaskInWork("dob:1", { allSources: [SOURCE] });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toBe("completed");
+    vi.useRealTimers();
+  });
+});

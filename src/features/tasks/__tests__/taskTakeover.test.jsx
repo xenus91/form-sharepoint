@@ -16,7 +16,7 @@ import {
   isTakeoverAvailable,
   takenInWorkAtMs,
   TAKEOVER_AFTER_MINUTES,
-} from "../lib/taskTakeover";
+} from "../../../tasks/takeover";
 
 vi.mock("../../../tasks/resultField", () => ({
   fetchResultFieldsMeta: async () => [],

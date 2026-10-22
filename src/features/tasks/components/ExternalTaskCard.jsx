@@ -22,7 +22,7 @@ import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../../../tasks/status";
 import { resolveTaker } from "../lib/resolveTaker";
 import { isTaskTakenByCurrentUser } from "../lib/currentUserMatch";
-import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../lib/taskTakeover";
+import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../../../tasks/takeover";
 import { formatDueLeft, formatDueDateFull, formatSolveTime } from "../../../tasks/formatters";
 import AssignedToButtons, { TakerButtons } from "./AssignedToButtons";
 

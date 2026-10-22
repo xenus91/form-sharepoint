@@ -290,7 +290,12 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     try {
       const res = await takeTaskInWork(key, { allSources: getTaskSources() });
       if (res.ok) {
-        notify(`Задача #${task.Id} взята в работу`, { severity: "success" });
+        notify(
+          res.tookOver
+            ? `Задача #${task.Id} была в работе${res.previousEditor ? ` у ${res.previousEditor}` : ""} более 30 минут — перехвачена`
+            : `Задача #${task.Id} взята в работу`,
+          { severity: "success" }
+        );
       } else if (res.reason === "already-taken") {
         // Если «взял» — сам текущий пользователь (Id на сайте источника/ФИО),
         // «возьмите другую» показывать нельзя: это его задача.

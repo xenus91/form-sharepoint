@@ -16,6 +16,7 @@ import { parseCompositeId } from "../multiSource";
 import { getSourceById } from "../sources";
 import { makeSourceClient } from "../sourceClient";
 import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../status";
+import { isTakeoverAvailable } from "../takeover";
 
 // Маркеры статуса «взято в работу» (нижний регистр, в порядке приоритета).
 // ВАЖНО: без «начата»/«начато» — иначе «Не начата» ошибочно попадает под маркер.
@@ -169,7 +170,11 @@ export async function takeTaskInWork(compositeKey, opts = {}) {
   if (isCompletedStatus(currentStatus, fresh.PercentComplete)) {
     return { ok: false, reason: "completed", status: currentStatus, editorTitle, editorId };
   }
-  if (isInProgressStatus(currentStatus)) {
+  // Перехват: задача висит в работе у другого, но с момента взятия прошло
+  // больше TAKEOVER_AFTER_MINUTES минут — не отказываем, берём себе. Правило
+  // одно на все типы задач (см. src/tasks/takeover.js).
+  const tookOver = isInProgressStatus(currentStatus) && isTakeoverAvailable(fresh);
+  if (isInProgressStatus(currentStatus) && !tookOver) {
     return { ok: false, reason: "already-taken", status: currentStatus, editorTitle, editorId };
   }
 
@@ -234,5 +239,11 @@ export async function takeTaskInWork(compositeKey, opts = {}) {
     return { ok: false, reason: "error", status: currentStatus, message };
   }
 
-  return { ok: true, status: target, previousStatus: currentStatus };
+  return {
+    ok: true,
+    status: target,
+    previousStatus: currentStatus,
+    tookOver,
+    previousEditor: tookOver ? editorTitle : "",
+  };
 }
