@@ -22,7 +22,7 @@ const config = {
   workstation: process.env.VITE_SP_WORKSTATION || "",
 };
 
-const sharepointBaseUrl = process.env.VITE_SP_SITE + "/_api";
+const sharepointBaseUrl = (process.env.VITE_SP_SITE || process.env.VITE_PROXY_BASE_URL || "") + "/_api";
 
 console.log("🚀 NTLM Proxy запущен");
 console.log("🔹 SharePoint Base URL:", sharepointBaseUrl);
@@ -39,10 +39,11 @@ function ensureApiUrl(originalUrl = "") {
   return fixed;
 }
 
-// Бинарные GET: файл контента (картинки/документы), а не JSON
-function isBinaryRequest(url = "") {
-  return /\/\$value(\?|$)/i.test(url) || /OpenBinaryStream/i.test(url);
-}
+// Бинарные GET: файл контента (картинки/документы), а не JSON.
+// Разбор — в scripts/spProxyUrl.cjs (покрыт тестом): помимо `$value` бинарём
+// считается ПРЯМАЯ ссылка на вложение/файл (`/sites/.../Attachments/1/a.png`) —
+// иначе картинка из rich-текста приезжает в браузер битой.
+const { isBinaryRequest } = require("./scripts/spProxyUrl.cjs");
 
 // Нужен ли X-RequestDigest: для POST/MERGE/DELETE и т.п.
 // (GET без тела — не требует)
@@ -53,8 +54,8 @@ function needsDigest(method, override) {
 }
 
 // Получение FormDigest (X-RequestDigest) как Promise
-function getRequestDigest() {
-  const url = `${sharepointBaseUrl}/contextinfo`;
+function getRequestDigest(baseUrl = sharepointBaseUrl) {
+  const url = `${baseUrl}/contextinfo`;
   return new Promise((resolve) => {
     httpntlm.post(
       {

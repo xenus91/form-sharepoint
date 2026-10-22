@@ -53,7 +53,24 @@ import ManagerPreview from "./ManagerPreview";
 import FiberManualRecordIcon from "@mui/icons-material/FiberManualRecord";
 import StopIcon from "@mui/icons-material/Stop";
 import PlayCircleOutlineIcon from "@mui/icons-material/PlayCircleOutline";
+import AppMenuDrawer from "./features/navigation/AppMenuDrawer";
+import BurgerWithCount from "./features/navigation/BurgerWithCount";
+import TasksView from "./TasksView";
+import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
+import useTasksListSyncOnBadgeChange from "./features/tasks/hooks/useTasksListSync";
 import { useNotifications } from './NotificationsProvider';
+import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
+import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM, isEoMissingRoute } from "./features/form/lib/eoMissingRoute";
+import {
+  OTHER_PROBLEM_DIALOG_TITLE,
+  eoCheckKindForProblems,
+  eoCheckSignature,
+  findOtherProblemRow,
+  otherProblemLocationLabel,
+  otherProblemSinceIso,
+  otherProblemWarningSegments,
+  otherProblemsLabel,
+} from "./features/form/lib/otherProblemConflict";
 
 SwiperCore.use([Pagination, Navigation]);
 
@@ -235,6 +252,13 @@ const figmaTheme = createTheme({
     },
   },
 });
+
+/**
+ * Скругление диалогов проверки ЕО и кнопок внутри них — ОДНО значение, чтобы
+ * они совпадали. Число в sx умножается на shape.borderRadius (28), поэтому
+ * 2 = 56px.
+ */
+const EO_DIALOG_RADIUS = 2;
 
 const MenuProps = {
   PaperProps: {
@@ -420,6 +444,15 @@ const App = () => {
   // Состояния для дубликатов ЕО
   const [duplicateEoDialogOpen, setDuplicateEoDialogOpen] = useState(false);
   const [duplicateEoItem, setDuplicateEoItem] = useState(null);
+  // По этому же ЕО за последние 48 часов на этом же РЦ уже регистрировали ДРУГУЮ
+  // проблему — «Не найдена» скорее всего ошибочна, просим подтвердить.
+  const [otherProblemItem, setOtherProblemItem] = useState(null);
+  const [otherProblemDialogOpen, setOtherProblemDialogOpen] = useState(false);
+  // Проверки ЕО взаимоисключающие и срабатывают ПОСЛЕ выбора проблемы. Чтобы не
+  // спрашивать одно и то же дважды, помним подпись (номер ЕО + тип проверки),
+  // на которую оператор уже ответил.
+  const answeredCheckSigRef = useRef(null);
+  const pendingCheckSigRef = useRef(null);
   const [editingItemId, setEditingItemId] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [isFetchingItemData, setIsFetchingItemData] = useState(false);
@@ -685,15 +718,26 @@ const App = () => {
       setLocation("Не найдена в зоне отгрузки");
     }
     setProblems(selectedProblems);
+    // Проверка ЕО — СРАЗУ после выбора проблемы, а не на выходе из поля номера:
+    // только здесь уже известно, «Не найдена» это или другая проблема, а от этого
+    // зависит, какая из двух проверок применяется.
+    runEoChecks(eoNumber, selectedProblems);
   };
 
   const resetButtonState = () => {
     timer.current = setTimeout(() => setSuccess(false), 3000);
   };
 
+  /**
+   * Своя заявка по этому ЕО за последние 24 часа — «вы уже отправляли».
+   * Возвращает найденный элемент (или null), чтобы вызывающий код решал,
+   * продолжать ли отправку.
+   */
   const checkEoNumberInRecentRecords = async (eoNumber) => {
     // Если мы уже в режиме редактирования этого элемента или только что загрузили данные, не проверяем
-    if (editingItemId) return;
+    if (editingItemId) return null;
+    const eo = String(eoNumber || "").trim();
+    if (!eo || eo === "ЕО отсутствует") return null;
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const officeSuffix = getEffectiveDcThu();
@@ -719,10 +763,100 @@ const App = () => {
         const item = response.data.d.results[0];
         setDuplicateEoItem(item);
         setDuplicateEoDialogOpen(true);
+        return item;
       }
     } catch (error) {
       console.error("Ошибка при проверке Номер ЕО:", error);
     }
+    return null;
+  };
+
+  /**
+   * Есть ли за последние 48 часов на ЭТОМ ЖЕ РЦ заявка по тому же номеру ЕО,
+   * но с другой проблемой (не «Не найдена»)?
+   *
+   * Отличие от checkEoNumberInRecentRecords: та ищет СВОИ заявки по тому же ЕО
+   * (AuthorId eq я) — «вы уже отправляли». Эта смотрит на РЦ целиком и на другие
+   * проблемы: если по ЕО уже зарегистрирована конкретная проблема, то «Не найдена»
+   * в новой заявке противоречит ей.
+   *
+   * @param {string} eoNumber
+   * @returns {Promise<object|null>} — найденная заявка или null
+   */
+  const findOtherProblemForEo = async (eoNumber) => {
+    const eo = String(eoNumber || "").trim();
+    if (!eo || eo === "ЕО отсутствует") return null;
+    const officeSuffix = getEffectiveDcThu();
+    if (!officeSuffix) return null;
+    const sinceIso = otherProblemSinceIso();
+    try {
+      const response = await apiClient.get(
+        `/web/lists/getbytitle('ProblemsPallet')/items?$filter=(THU eq '${eo}' and DC_THU eq '${officeSuffix}' and Created ge datetime'${sinceIso}')&$select=Id,THU,DC_THU,Created,Problems,Location1,Author/Title&$expand=Author`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const rows = response?.data?.d?.results || [];
+      // Саму редактируемую заявку конфликтом не считаем.
+      return findOtherProblemRow(rows, { editingItemId });
+    } catch (error) {
+      console.error("Ошибка при проверке других проблем по ЕО:", error);
+      // Не блокируем отправку из-за сбоя проверки.
+      return null;
+    }
+  };
+
+  /**
+   * Проверка номера ЕО. Какая именно — зависит от выбранной проблемы, и только
+   * одна из двух:
+   *   • «Не найдена» → есть ли на этом же РЦ за 48 часов заявка по этому ЕО с
+   *     ДРУГОЙ проблемой («по ЕО уже зарегистрирована проблема в другой заявке»);
+   *   • любая другая проблема → старая проверка «вы уже отправляли заявку с этим
+   *     ЕО за 24 часа, хотите изменить её?».
+   *
+   * Одновременно они не срабатывают — иначе диалоги перекрывают друг друга.
+   *
+   * @param {string} eo
+   * @param {string[]} selectedProblems
+   * @returns {Promise<"duplicate"|"notfound"|null>} — что найдено (открыт диалог)
+   */
+  const runEoChecks = async (eo, selectedProblems) => {
+    const number = String(eo || "").trim();
+    const validPattern = /^(ЕО отсутствует|\d{17}|\d{18})$/;
+    if (!number || number === "ЕО отсутствует" || !validPattern.test(number)) return null;
+    if (editingItemId) return null;
+
+    const signature = eoCheckSignature(number, selectedProblems);
+    // Этот номер с этим типом проблемы уже спрашивали — не повторяем.
+    if (signature === answeredCheckSigRef.current || signature === pendingCheckSigRef.current) return null;
+
+    const kind = eoCheckKindForProblems(selectedProblems);
+    if (kind === "notfound") {
+      const other = await findOtherProblemForEo(number);
+      if (!other) return null;
+      pendingCheckSigRef.current = signature;
+      setOtherProblemItem(other);
+      setOtherProblemDialogOpen(true);
+      return "notfound";
+    }
+    const duplicate = await checkEoNumberInRecentRecords(number);
+    if (!duplicate) return null;
+    pendingCheckSigRef.current = signature;
+    return "duplicate";
+  };
+
+  /** Оператор ответил на диалог проверки — подпись считаем закрытой. */
+  const markEoCheckAnswered = () => {
+    answeredCheckSigRef.current = pendingCheckSigRef.current;
+    pendingCheckSigRef.current = null;
+  };
+
+  /**
+   * Отмена или закрытие диалога проверки: НЕ считаем её отвеченной.
+   *
+   * Иначе при повторном нажатии «Отправить» затвор решит, что оператор уже
+   * ответил, пропустит проверку — и форма уйдёт молча.
+   */
+  const discardEoCheck = () => {
+    pendingCheckSigRef.current = null;
   };
 
   const loadDuplicateEoData = async (itemId) => {
@@ -768,15 +902,15 @@ const App = () => {
     }
   };
 
+  // На выходе из поля — только проверка формата. Проверку дубля перенесли на
+  // отправку: раньше диалог «Дубликат ЕО» вылетал при уходе из поля номера ЕО,
+  // то есть в момент, когда форма ещё не заполнена и отправлять нечего.
   const handleBlurEoNumber = () => {
     const validPattern = /^(ЕО отсутствует|\d{17}|\d{18})$/;
     if (!validPattern.test(eoNumber)) {
       setErrors({ ...errors, eoNumber: "Введите 17 или 18 цифр или 'ЕО отсутствует'" });
     } else {
       setErrors({ ...errors, eoNumber: "" });
-      if (eoNumber && eoNumber !== "ЕО отсутствует") {
-        checkEoNumberInRecentRecords(eoNumber);
-      }
     }
   };
   const fetchChoices = async () => {
@@ -845,6 +979,18 @@ const App = () => {
     isDcThuActive
       ? normalizeDcThu(dcThuOverride)
       : getOfficeSuffix(userProfile.userOffice);
+
+  // Эффективный Office для задач — при локальной смене РЦ задачи должны перепоискаться по новому РЦ.
+  // Если dcThuOverride активен, конструируем "РЦ-XXXX" из суффикса, иначе берём офис из профиля.
+  const effectiveOfficeForTasks = isDcThuActive && normalizeDcThu(dcThuOverride)
+    ? `РЦ-${normalizeDcThu(dcThuOverride)}`
+    : userProfile.userOffice;
+  const effectiveUserProfileForTasks = React.useMemo(() => {
+    if (isDcThuActive && effectiveOfficeForTasks) {
+      return { ...userProfile, userOffice: effectiveOfficeForTasks };
+    }
+    return userProfile;
+  }, [userProfile, isDcThuActive, effectiveOfficeForTasks]);
 
   const operationDate = operationDateIso ? new Date(operationDateIso) : null;
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
@@ -1168,6 +1314,16 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       return;
     }
 
+    // Страховка: если проверку не прошли на выборе проблемы (например, номер ЕО
+    // ввели позже) — спрашиваем здесь. На уже отвеченную подпись не спрашиваем.
+    if (answeredCheckSigRef.current !== eoCheckSignature(eoNumber, problems)) {
+      const hit = await runEoChecks(eoNumber, problems);
+      if (hit) {
+        isSubmittingRef.current = false;
+        return;
+      }
+    }
+
     let createdItemId = editingItemId;
 
     try {
@@ -1175,6 +1331,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setLoading(true);
 
       const officeSuffix = getEffectiveDcThu();
+      // Title элемента ProblemsPallet: "<DC_THU>_<THU>", без пробелов.
+      const palletTitle = buildProblemsPalletTitle(officeSuffix, eoNumber);
       const digest = await getRequestDigest();
 
       if (editingItemId) {
@@ -1183,6 +1341,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           `/web/lists/getbytitle('${LIST_TITLE}')/items(${editingItemId})`,
           {
             __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            Title: palletTitle,
             THU: eoNumber,
             DC_THU: officeSuffix,
             RecipientId: selectedRecipient,
@@ -1236,6 +1395,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           `/web/lists/getbytitle('${LIST_TITLE}')/items`,
           {
             __metadata: { type: "SP.Data.ProblemsPalletListItem" },
+            Title: palletTitle,
             THU: eoNumber,
             DC_THU: officeSuffix,
             RecipientId: selectedRecipient,
@@ -1372,7 +1532,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       }));
     } else {
       setErrors((prevErrors) => ({ ...prevErrors, eoNumber: "" }));
-      checkEoNumberInRecentRecords(decodedText);
+      // Проверку ЕО здесь не делаем: она одна на все пути и срабатывает после
+      // выбора проблемы (runEoChecks) — иначе диалог вылетал бы до выбора.
     }
     setScannerOpen(false);
     if (scannerRef.current) {
@@ -1428,8 +1589,134 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
   const [managerPreviewOpen, setManagerPreviewOpen] = useState(false);
 
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // hash-роут: #tasks / #/tasks / #manager / #form (+ #tasks/id=10, #tasks/10, #tasks?id=10)
+  const parseHash = () => {
+    const raw = window.location.hash || "";
+    const low = raw.toLowerCase();
+    let view = "form";
+    // #eoismissing (или /eoismissing) — главная форма с выбранной «Не найдена».
+    let eoMissing = false;
+    try {
+      eoMissing = isEoMissingRoute(raw, window.location.pathname || "");
+    } catch (_e) { void _e; }
+    if (eoMissing) view = "form";
+    if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
+    else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
+    // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10)
+    let elementId = null;
+    let elementAction = null;
+    // kind: "element" — явная ссылка на элемент ProblemsPallet (id=/elementid=),
+    // "auto" — путь #tasks/<n>: сначала задача с Id=n, элемент — фолбэк (hashRoute.js).
+    let elementKind = "auto";
+    // 1) id=число (любой вариант: id=10, elementid=10, ?id=10 &id=10 /id=10)
+    const mId = low.match(/(?:elementid|\bid)\s*=\s*(\d{1,19})/);
+    if (mId) { elementId = mId[1]; elementKind = "element"; }
+    else {
+      // 2) путь /tasks/10
+      const mPath = raw.match(/#\/?tasks\/(\d{1,19})/i);
+      if (mPath) elementId = mPath[1];
+      else {
+        // 3) чистый ?10 после #tasks (редко) - пробуем последний числовой сегмент
+        const after = low.replace(/^#\/?tasks\/?/, "");
+        if (/^\d{1,19}([\/?&#].*)?$/.test(after.trim())) {
+          const mNum = after.trim().match(/^(\d{1,19})/);
+          if (mNum) elementId = mNum[1];
+        }
+      }
+    }
+    // SearchResult для имитации первого нажатия Найдена/Не найдена
+    const mSearch = low.match(/searchresult\s*=\s*([a-z_]+)/);
+    if (mSearch) {
+      const v = mSearch[1].trim().toLowerCase();
+      if (v === "searchcomplete" || v === "complete" || v === "found") elementAction = "found";
+      else if (v === "searchfail" || v === "fail" || v === "notfound" || v === "not_found") elementAction = "notfound";
+      else elementAction = v;
+    }
+    // action для следующего этапа (found/notfound)
+    const mAct = low.match(/action\s*=\s*([a-zа-я_]+)/);
+    if (!elementAction && mAct) {
+      const v = mAct[1].trim();
+      if (v === "found" || v === "найдена" || v === "найден") elementAction = "found";
+      else if (v === "notfound" || v === "not_found" || v === "не_найдена" || v === "не-найдена" || v === "не найдена" || v === "не найден") elementAction = "notfound";
+      else elementAction = v;
+    } else if (!elementAction && (low.includes("/found") || low.includes("__found"))) elementAction = "found";
+    else if (!elementAction && (low.includes("/notfound") || low.includes("not_found") || low.includes("не_найдена") || low.includes("not-found"))) elementAction = "notfound";
+    return { view, elementId, elementAction, elementKind, eoMissing };
+  };
+  const getViewFromHash = () => parseHash().view;
+  const [currentView, setCurrentView] = useState(() => getViewFromHash());
+  const [hashElementId, setHashElementId] = useState(() => parseHash().elementId);
+  const [hashElementAction, setHashElementAction] = useState(() => parseHash().elementAction);
+  const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
+  // Роут #eoismissing: открыть форму с выбранной проблемой «Не найдена».
+  const [hashEoMissing, setHashEoMissing] = useState(() => parseHash().eoMissing === true);
+  const [taskDistribution, setTaskDistribution] = useState(null);
+  const [taskFieldsApp, setTaskFieldsApp] = useState([]);
+
+
+  // синхронизация с hash — прямой переход по #tasks (+ elementId)
+  useEffect(() => {
+    const onHash = () => {
+      const p = parseHash();
+      setCurrentView(p.view);
+      setHashElementId(p.elementId);
+      setHashElementAction(p.elementAction);
+      setHashElementKind(p.elementKind || "auto");
+      setHashEoMissing(p.eoMissing === true);
+    };
+    window.addEventListener("hashchange", onHash);
+    onHash();
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  // Роут #eoismissing: стандартная форма, проблема «Не найдена» уже выбрана.
+  // Логику повторяем за handleChange — там выбор «Не найдена» так же проставляет
+  // местоположение. Флаг сбрасываем, чтобы не перетирать дальнейшие правки
+  // пользователя при ре-рендерах.
+  useEffect(() => {
+    if (!hashEoMissing) return;
+    setProblems((prev) => (prev.includes(EO_MISSING_PROBLEM) ? prev : [...prev, EO_MISSING_PROBLEM]));
+    setLocation(EO_MISSING_LOCATION);
+    setHashEoMissing(false);
+  }, [hashEoMissing]);
+  useEffect(() => {
+    const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
+    const parsed = parseHash();
+    if (currentView === "form") {
+      const hash = window.location.hash;
+      // Роут «ЕО отсутствует» НЕ стираем. Иначе ссылка
+      // .../ProblemPallets.html#eoismissing после первого же рендера теряла
+      // хэш, и обновление страницы открывало пустую форму.
+      const keepHash = !!hash && isEoMissingRoute(hash, "");
+      if (hash && !keepHash && hash.toLowerCase() !== "#form") {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
+      return;
+    }
+    // если уже на нужном view и hash содержит ожидаемый префикс — не трогаем (сохраняем id=... в url)
+    if (window.location.hash.toLowerCase().startsWith(desired.toLowerCase())) {
+      return;
+    }
+    // иначе ставим желаемый hash (с сохранением elementId если был и view tasks)
+    if (currentView === "tasks" && parsed.elementId) {
+      window.location.hash = `${desired}/id=${parsed.elementId}` + (parsed.elementAction ? `&action=${parsed.elementAction}` : "");
+    } else {
+      window.location.hash = desired;
+    }
+  }, [currentView]);
+
   const handleOpenManagerPreview = () => {
-    setManagerPreviewOpen(true);
+    setCurrentView("manager");
+    setDrawerOpen(false);
+  };
+  const handleOpenForm = () => {
+    setCurrentView("form");
+    setDrawerOpen(false);
+  };
+  const handleOpenTasks = () => {
+    setCurrentView("tasks");
+    setDrawerOpen(false);
   };
 
   const handleLocationChange = (value) => {
@@ -1438,23 +1725,228 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     else setIsTransportationRequired(false);
   };
 
-  if (managerPreviewOpen) {
+  // Keep legacy managerPreviewOpen sync with currentView
+  useEffect(() => {
+    if (managerPreviewOpen) setCurrentView("manager");
+  }, [managerPreviewOpen]);
+
+  // Poll active tasks count for burger badge - uses GUID directly, no discovery, every 60s + on focus/visibility
+  const TASKS_LIST_GUID = "463B634E-A71A-4FEF-9A1F-B803431D8639";
+  const TASKS_LIST_API = `/web/lists(guid'${TASKS_LIST_GUID}')`;
+  const DCEMAIL_LIST_TITLE = "DcEmail";
+
+  async function resolveDistributionViaDcEmailApp(office, department) {
+    if (!office && !department) return null;
+    const officeStr = String(office).trim();
+    const deptStr = String(department).trim();
+    const full = `${officeStr}${deptStr}`;
+    const candidates = [full];
+    const suffix = officeStr.includes("-") ? officeStr.split("-").pop().trim() : "";
+    if (suffix && suffix !== officeStr) {
+      const v1 = `${suffix}${deptStr}`;
+      if (!candidates.includes(v1)) candidates.push(v1);
+      const v2 = `РЦ-${suffix}${deptStr}`;
+      if (!candidates.includes(v2)) candidates.push(v2);
+      const v3 = officeStr.replace("-", "") + deptStr;
+      if (!candidates.includes(v3)) candidates.push(v3);
+    }
+    for (const offDepKey of candidates) {
+      const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+      try {
+        const { data } = await apiClient.get(
+          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id,Email/Title&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        );
+        const items = data?.d?.results || [];
+        if (items.length) return items[0];
+      } catch {}
+    }
+    try {
+      const { data: data2 } = await apiClient.get(
+        `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id&$expand=Email&$top=100`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const items2 = data2?.d?.results || [];
+      for (const cand of candidates) {
+        const norm = cand.trim().toLowerCase();
+        const found = items2.find((it) => String(it.OffDepKey || "").trim().toLowerCase() === norm);
+        if (found) return found;
+      }
+    } catch {}
+    for (const offDepKey of candidates) {
+      const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+      try {
+        const { data } = await apiClient.get(
+          `/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,EmailId&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+          { headers: { Accept: "application/json;odata=verbose" } }
+        );
+        const items = data?.d?.results || [];
+        if (items.length) return items[0];
+      } catch (e2) {
+        console.warn("DcEmail resolve (App) failed", e2?.message);
+      }
+    }
+    return null;
+  }
+  // Resolve distribution for group-assigned tasks via DcEmail — учитывает локальный РЦ (dcThuOverride)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const officeForTasks = effectiveOfficeForTasks || userProfile.userOffice;
+      const deptForTasks = userProfile.userDepartment;
+      if (!officeForTasks && !deptForTasks) return;
+      const dist = await resolveDistributionViaDcEmailApp(officeForTasks, deptForTasks);
+      if (!cancelled) {
+        setTaskDistribution(dist);
+        // Лог для отладки локальной смены РЦ
+      }
+      try {
+        const { data } = await apiClient.get(`${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`, { headers: { Accept: "application/json;odata=verbose" } });
+        if (!cancelled) setTaskFieldsApp((data?.d?.results || []).map((f) => f.InternalName));
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [userProfile.userOffice, userProfile.userDepartment, effectiveOfficeForTasks, isDcThuActive]);
+
+  // Уведомление при локальной смене РЦ — задачи перепоискаются автоматически
+  const prevOfficeRef = useRef(effectiveOfficeForTasks);
+  useEffect(() => {
+    if (prevOfficeRef.current !== effectiveOfficeForTasks && prevOfficeRef.current) {
+      const msg = isDcThuActive
+        ? `РЦ сменён на ${effectiveOfficeForTasks} — задачи перезагружены`
+        : `Локальный РЦ сброшен, задачи для ${effectiveOfficeForTasks || "профиля"} перезагружены`;
+      try { notify(msg, { severity: "info", autoHideDuration: 3000 }); } catch {}
+    }
+    prevOfficeRef.current = effectiveOfficeForTasks;
+  }, [effectiveOfficeForTasks, isDcThuActive]);
+
+  // Бейдж «активные задачи» в бургер-меню: ОДИН источник правды —
+  // useActiveTasksCount (считает по фильтру «я + мои группы» на сервере).
+  // Раньше число ещё писал TasksView по СВОЕЙ загруженной выборке (фильтры,
+  // поиск, источники), а при уходе из интерфейса задач просто переставал
+  // писать — из-за этого при переключении интерфейсов бейдж «слетал».
+  const { count: tasksActiveCount, refresh: refreshActiveTasksCount } = useActiveTasksCount({
+    currentUserId,
+    distribution: taskDistribution,
+  });
+
+  // Бейдж опрашивает сервер раз в минуту, список задач живёт в react-query со
+  // staleTime/refetchInterval 5 минут. Без этой связки бейдж показывал 4 задачи,
+  // а список оставался на 3 до пятиминутного тика.
+  useTasksListSyncOnBadgeChange(tasksActiveCount);
+
+  if (currentView === "manager") {
     return (
-      <ManagerPreview
-        userProfile={userProfile}
-        onBack={() => setManagerPreviewOpen(false)}
-      />
+      <ThemeProvider theme={figmaTheme}>
+        <ManagerPreview
+          userProfile={userProfile}
+          onBack={() => setCurrentView("form")}
+        />
+      </ThemeProvider>
+    );
+  }
+
+  if (currentView === "tasks") {
+    return (
+      <ThemeProvider theme={figmaTheme}>
+        {/* Burger button for tasks */}
+        <Box
+          sx={{
+            position: "fixed",
+            top: 12,
+            left: 12,
+            zIndex: 1302,
+            display: drawerOpen ? "none" : "block",
+          }}
+        >
+          <BurgerWithCount
+            onClick={() => setDrawerOpen(true)}
+            count={tasksActiveCount}
+            size="medium"
+            buttonSx={{
+              bgcolor: "rgba(255,255,255,0.85)",
+              backdropFilter: "blur(8px)",
+              border: "1px solid rgba(23,28,143,0.15)",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+              width: 44,
+              height: 44,
+              "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
+            }}
+            iconSx={{ color: "#171c8f" }}
+          />
+        </Box>
+        <AppMenuDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          active="tasks"
+          tasksCount={tasksActiveCount}
+          canOpenManagerPreview={canOpenManagerPreview}
+          onOpenForm={handleOpenForm}
+          onOpenTasks={handleOpenTasks}
+          onOpenManagerPreview={handleOpenManagerPreview}
+          userName={userProfile.userDisplayName}
+          userTitle={userProfile.userTitle}
+          userOffice={userProfile.userOffice}
+        />
+        {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
+        <Box sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
+          <TasksView userProfile={effectiveUserProfileForTasks} currentUserId={currentUserId} isLocalRcActive={isDcThuActive} localRcValue={getEffectiveDcThu()} localRcOffice={effectiveOfficeForTasks} onClearLocalRc={handleClearDcThu} onTasksChanged={refreshActiveTasksCount} onBack={() => setCurrentView("form")} initialElementId={hashElementId} initialElementAction={hashElementAction} initialElementKind={hashElementKind} onClearElementHash={() => { setHashElementId(null); setHashElementAction(null); window.location.hash="#tasks"; }} />
+        </Box>
+        {/* Keep modals for operation date etc accessible in tasks view as well */}
+      </ThemeProvider>
     );
   }
 
   return (
     <ThemeProvider theme={figmaTheme}>
-      {/* Верхняя панель счётчика */}
+      {/* Бургер кнопка слева вверху */}
+      <Box
+        sx={{
+          position: "fixed",
+          top: 12,
+          left: 12,
+          zIndex: 1302,
+          display: drawerOpen ? "none" : "block",
+        }}
+      >
+        <BurgerWithCount
+          onClick={() => setDrawerOpen(true)}
+          count={tasksActiveCount}
+          size="medium"
+          buttonSx={{
+            bgcolor: "rgba(255,255,255,0.85)",
+            backdropFilter: "blur(8px)",
+            border: "1px solid rgba(23,28,143,0.15)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+            width: 44,
+            height: 44,
+            "&:hover": { bgcolor: "rgba(255,255,255,0.95)" },
+          }}
+          iconSx={{ color: "#171c8f" }}
+        />
+      </Box>
+      <AppMenuDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        active={currentView === "form" ? "form" : ""}
+        tasksCount={tasksActiveCount}
+        canOpenManagerPreview={canOpenManagerPreview}
+        onOpenForm={handleOpenForm}
+        onOpenTasks={handleOpenTasks}
+        onOpenManagerPreview={handleOpenManagerPreview}
+        userName={userProfile.userDisplayName}
+        userTitle={userProfile.userTitle}
+        userOffice={userProfile.userOffice}
+        rcLabel={getEffectiveDcThu() || ""}
+        onOpenRcModal={handleOpenDcThuModal}
+      />
+      {/* Верхняя панель счётчика со смещением под бургер */}
       <MonthlyCounter
         ref={monthlyCounterRef}
         listTitle="ProblemsPallet"
         authorId={userProfile.userId}
         position="fixed"
+        leftOffset={64}
         extraContent={
           <Box
             sx={{
@@ -1485,13 +1977,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
-        {canOpenManagerPreview && (
-          <Box sx={{ display: "flex", justifyContent: "center", mb: 1 }}>
-            <Button variant="outlined" onClick={handleOpenManagerPreview} sx={{ borderRadius: 1 }}>
-              Меню просмотра менеджерами
-            </Button>
-          </Box>
-        )}
+        {/* Меню просмотра менеджерами теперь в бургер-меню слева вверху */}
+        {/* canOpenManagerPreview hidden button moved to drawer */}
         <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
           <Button
             variant="outlined"
@@ -2385,11 +2872,14 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Dialog
           open={duplicateEoDialogOpen}
           onClose={() => {
+            // Закрытие по фону/Esc равносильно «Нет».
+            discardEoCheck();
             setDuplicateEoDialogOpen(false);
-            setEoNumber("");
           }}
           PaperProps={{
-            sx: { borderRadius: 3, p: 1 }
+            // То же скругление, что у кнопок внутри. Числом — потому что в теме
+            // shape.borderRadius = 28 и sx умножает на него (3 давало 84px).
+            sx: { borderRadius: EO_DIALOG_RADIUS, p: 1 }
           }}
         >
           <DialogTitle sx={{ fontWeight: 800 }}>Дубликат ЕО</DialogTitle>
@@ -2399,27 +2889,116 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             </DialogContentText>
           </DialogContent>
           <DialogActions sx={{ pb: 2, px: 3 }}>
-            <Button 
+            {/* Проверка теперь на отправке: «Нет» просто закрывает окно и НЕ
+                стирает введённый номер — иначе форма теряла бы данные. */}
+            <Button
               onClick={() => {
+                // «Нет» — решение не принято: при следующей отправке спросим снова.
+                discardEoCheck();
                 setDuplicateEoDialogOpen(false);
-                setEoNumber("");
               }}
               color="inherit"
-              sx={{ fontWeight: 700 }}
+              sx={{ borderRadius: EO_DIALOG_RADIUS, fontWeight: 700 }}
+              data-testid="duplicate-eo-cancel"
             >
               Нет
             </Button>
             <Button
-              onClick={() => loadDuplicateEoData(duplicateEoItem?.Id)}
+              onClick={() => {
+                // Осознанно создаём новую заявку — без повторного вопроса.
+                markEoCheckAnswered();
+                setDuplicateEoDialogOpen(false);
+                handleFormSubmit({ preventDefault: () => {} });
+              }}
+              variant="outlined"
+              sx={{ borderRadius: EO_DIALOG_RADIUS, fontWeight: 700 }}
+              data-testid="duplicate-eo-create-anyway"
+            >
+              Всё равно создать новую
+            </Button>
+            <Button
+              onClick={() => {
+                markEoCheckAnswered();
+                loadDuplicateEoData(duplicateEoItem?.Id);
+              }}
               variant="contained"
               autoFocus
               sx={{ 
-                borderRadius: 2,
+                borderRadius: EO_DIALOG_RADIUS,
                 fontWeight: 700,
                 backgroundImage: "linear-gradient(180deg, #171c8f 0%, #10146a 100%)",
               }}
             >
               Да, изменить
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* «Не найдена», но по этому ЕО на РЦ уже есть заявка с другой проблемой */}
+        <Dialog
+          open={otherProblemDialogOpen}
+          onClose={() => {
+            // Закрытие по фону/Esc равносильно «Отмена».
+            discardEoCheck();
+            setOtherProblemDialogOpen(false);
+          }}
+          PaperProps={{ sx: { borderRadius: EO_DIALOG_RADIUS, p: 1 } }}
+        >
+          <DialogTitle sx={{ fontWeight: 800 }}>{OTHER_PROBLEM_DIALOG_TITLE}</DialogTitle>
+          <DialogContent>
+            <DialogContentText data-testid="other-problem-text">
+              {/* Данные найденной заявки — проблемы и локация — выделены жирным. */}
+              {otherProblemWarningSegments({
+                thu: otherProblemItem?.THU || eoNumber,
+                problems: otherProblemsLabel(otherProblemItem),
+                location: otherProblemLocationLabel(otherProblemItem),
+              }).map((seg, i) =>
+                seg.strong ? (
+                  <strong key={i}>{seg.text}</strong>
+                ) : (
+                  <React.Fragment key={i}>{seg.text}</React.Fragment>
+                ),
+              )}
+            </DialogContentText>
+            {otherProblemItem?.Id ? (
+              <DialogContentText sx={{ mt: 1, fontSize: "0.8rem", color: "text.secondary" }} data-testid="other-problem-item-id">
+                {`Заявка № ${otherProblemItem.Id} от ${(() => {
+                  const d = new Date(otherProblemItem.Created);
+                  return Number.isNaN(d.getTime()) ? String(otherProblemItem.Created || "") : d.toLocaleString("ru-RU");
+                })()}${otherProblemItem.Author?.Title ? `, автор: ${otherProblemItem.Author.Title}` : ""}`}
+              </DialogContentText>
+            ) : null}
+          </DialogContent>
+          <DialogActions sx={{ pb: 2, px: 3 }}>
+            <Button
+              onClick={() => {
+                // «Отмена» — решение не принято: при следующей отправке спросим снова.
+                discardEoCheck();
+                setOtherProblemDialogOpen(false);
+              }}
+              color="inherit"
+              sx={{ borderRadius: EO_DIALOG_RADIUS, fontWeight: 700 }}
+              data-testid="other-problem-cancel"
+            >
+              Отмена
+            </Button>
+            <Button
+              onClick={() => {
+                // Подтверждено — подаём без повторного вопроса.
+                markEoCheckAnswered();
+                setOtherProblemDialogOpen(false);
+                handleFormSubmit({ preventDefault: () => {} });
+              }}
+              variant="contained"
+              autoFocus
+              data-testid="other-problem-submit"
+              sx={{
+                borderRadius: EO_DIALOG_RADIUS,
+                fontWeight: 700,
+                backgroundImage: "linear-gradient(180deg, #171c8f 0%, #10146a 100%)",
+              }}
+            >
+              Да, ЕО не нашлась — подать
             </Button>
           </DialogActions>
         </Dialog>
