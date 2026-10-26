@@ -83,10 +83,14 @@ describe("Автокомплит получателя", () => {
   beforeEach(() => { state.items = SC; });
   afterEach(() => { document.body.innerHTML = ""; });
 
-  it("ровно одно совпадение — выбирается автоматически и показывается чипом", async () => {
+  it("ровно одно совпадение — выбирается после паузы, а не мгновенно", async () => {
     const spy = vi.fn();
     const v = await mount(spy);
     await v.type("999");
+    // Сразу после ввода ещё НЕ выбрано — даём человеку допечатать номер.
+    expect(spy).not.toHaveBeenCalled();
+    expect(v.chip()).toBeNull();
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(spy).toHaveBeenCalledWith(3);
     expect(v.chip()).not.toBeNull();
     expect(v.chip().textContent).toContain("99999");
@@ -107,6 +111,7 @@ describe("Автокомплит получателя", () => {
     const spy = vi.fn();
     const v = await mount(spy);
     await v.type("999");
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(v.chip()).not.toBeNull();
     // Текст гасится стилем (состояние inputValue намеренно не трогаем — его
     // подмена ломала сценарий «ЕО не нашлось» в App.eoDuplicateTiming).
@@ -119,6 +124,7 @@ describe("Автокомплит получателя", () => {
     const spy = vi.fn();
     const v = await mount(spy);
     await v.type("999");
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     const del = v.chip().querySelector("[data-testid='CancelIcon'], .MuiChip-deleteIcon");
     expect(del).not.toBeNull();
     await act(async () => {

@@ -24,6 +24,11 @@ const matchesQuery = (option, query) => {
   }
 };
 
+// Пауза перед автовыбором единственного совпадения. Пока человек печатает,
+// совпадение может перестать быть единственным: без задержки первая же цифра
+// выбирала получателя и очищала поле, не давая допечатать номер.
+export const AUTOSELECT_DELAY_MS = 350;
+
 const MENU_PROPS = {
   PaperProps: {
     sx: {
@@ -128,11 +133,16 @@ const RecipientAutocomplete = ({
     const q = String(inputValue ?? "").trim();
     if (!q) return;
     const matches = lookupItems.filter((o) => matchesQuery(o, q));
-    if (matches.length === 1 && matches[0].id !== selectedValue) {
-      setSelectedValue(matches[0].id);
-      onSelect(matches[0].id);
+    if (matches.length !== 1 || matches[0].id === selectedValue) return undefined;
+    const hit = matches[0];
+    // Каждый новый символ сбрасывает таймер (cleanup эффекта) — выбираем только
+    // после того, как ввод остановился на AUTOSELECT_DELAY_MS.
+    const timer = setTimeout(() => {
+      setSelectedValue(hit.id);
+      onSelect(hit.id);
       setInputValue("");
-    }
+    }, AUTOSELECT_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [inputValue, lookupItems, selectedValue, onSelect, isEOMissing, disabled]);
 
   // Очистка видимого ввода, когда isEOMissing = false
