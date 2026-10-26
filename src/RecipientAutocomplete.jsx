@@ -2,9 +2,27 @@ import React, { useState, useEffect } from "react";
 import TextField from "@mui/material/TextField";
 import Autocomplete from "@mui/material/Autocomplete";
 import CircularProgress from "@mui/material/CircularProgress";
+import Chip from "@mui/material/Chip";
 import FormHelperText from "@mui/material/FormHelperText";
 
 import apiClient, { normalizeNextUrl } from "./api";
+
+// Экранирование для RegExp: номер получателя вводится с клавиатуры, и символ
+// вроде «+» без экранирования ломал бы регулярку (и выпадающий список, и автовыбор).
+const escapeRe = (str) => String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Один предикат на двоих: им фильтруется выпадающий список (filterOptions) и он
+// же решает, сработал ли автовыбор единственного совпадения. Иначе список и
+// автовыбор могли бы разойтись.
+const matchesQuery = (option, query) => {
+  const q = String(query ?? "").trim();
+  if (!q) return true;
+  try {
+    return new RegExp(`\\b${escapeRe(q)}`, "i").test(String(option?.title ?? ""));
+  } catch {
+    return false;
+  }
+};
 
 const MENU_PROPS = {
   PaperProps: {
@@ -77,6 +95,16 @@ const RecipientAutocomplete = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const selectedOption = selectedValue
+    ? lookupItems.find((it) => it.id === selectedValue) ?? null
+    : null;
+
+  const clearRecipient = () => {
+    setSelectedValue("");
+    onSelect("");
+    setInputValue("");
+  };
+
   // Автовыбор при "Нет ЕО"
   useEffect(() => {
     if (isEOMissing) {
@@ -92,6 +120,20 @@ const RecipientAutocomplete = ({
       }
     }
   }, [isEOMissing, lookupItems, onSelect, value, selectedValue]);
+
+  // Автовыбор: если по введённому номеру найден РОВНО ОДИН получатель —
+  // выбираем его сами, не заставляя человека лезть в выпадающий список.
+  useEffect(() => {
+    if (isEOMissing || disabled) return;
+    const q = String(inputValue ?? "").trim();
+    if (!q) return;
+    const matches = lookupItems.filter((o) => matchesQuery(o, q));
+    if (matches.length === 1 && matches[0].id !== selectedValue) {
+      setSelectedValue(matches[0].id);
+      onSelect(matches[0].id);
+      setInputValue("");
+    }
+  }, [inputValue, lookupItems, selectedValue, onSelect, isEOMissing, disabled]);
 
   // Очистка видимого ввода, когда isEOMissing = false
   useEffect(() => {
@@ -118,7 +160,8 @@ const RecipientAutocomplete = ({
         // «Encountered two children with the same key». Id элемента уникален.
 
         loading={loading}
-        value={selectedValue ? lookupItems.find((it) => it.id === selectedValue) ?? null : null}
+        value={selectedOption}
+        // Когда получатель выбран, текст в поле не показываем — его заменяет чип.
         inputValue={inputValue}
         onInputChange={(_, newVal) => setInputValue(newVal)}
         onChange={(_, newValue) => {
@@ -157,6 +200,11 @@ const RecipientAutocomplete = ({
               padding: "0 14px",
               height: "100%",
               boxSizing: "border-box",
+              // Выбранного получателя показывает чип, поэтому текст варианта в
+              // поле гасим — иначе он дублировался бы рядом с чипом. Состояние
+              // inputValue при этом не трогаем: его подмена (inputValue={…}) и
+              // setInputValue("") после выбора ломали сценарий «ЕО не нашлась».
+              ...(selectedOption ? { color: "transparent" } : {}),
             },
           },
         }}
@@ -172,6 +220,22 @@ const RecipientAutocomplete = ({
             InputProps={{
               ...params.InputProps,
               inputMode: "numeric",
+              // Выбранный получатель показываем чипом прямо в поле: номер + название.
+              startAdornment: selectedOption ? (
+                <Chip
+                  size="small"
+                  label={
+                    selectedOption.description
+                      ? `${selectedOption.title} — ${selectedOption.description}`
+                      : String(selectedOption.title)
+                  }
+                  onDelete={isEOMissing || disabled ? undefined : clearRecipient}
+                  sx={{ ml: 0.5, maxWidth: "70%" }}
+                  data-testid="recipient-chip"
+                />
+              ) : (
+                params.InputProps.startAdornment
+              ),
               endAdornment: (
                 <>
                   {loading ? <CircularProgress color="inherit" size={20} /> : null}
