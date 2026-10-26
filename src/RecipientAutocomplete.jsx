@@ -51,6 +51,9 @@ const RecipientAutocomplete = ({
   const [lookupItems, setLookupItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
+  // Управляем открытием сами: автовыбор не проходит через onChange MUI, поэтому
+  // без этого выпадающий список оставался открытым после выбора получателя.
+  const [open, setOpen] = useState(false);
   const [selectedValue, setSelectedValue] = useState(value);
 
   const fetchLookupValues = async () => {
@@ -141,6 +144,9 @@ const RecipientAutocomplete = ({
       setSelectedValue(hit.id);
       onSelect(hit.id);
       setInputValue("");
+      // Список закрываем сразу вместе с выбором — иначе он висит открытым,
+      // хотя выбирать уже нечего.
+      setOpen(false);
     }, AUTOSELECT_DELAY_MS);
     return () => clearTimeout(timer);
   }, [inputValue, lookupItems, selectedValue, onSelect, isEOMissing, disabled]);
@@ -155,6 +161,9 @@ const RecipientAutocomplete = ({
       <Autocomplete
         freeSolo
         disableClearable
+        open={open}
+        onOpen={() => setOpen(true)}
+        onClose={() => setOpen(false)}
         disabled={isEOMissing || disabled}
         options={lookupItems}
         getOptionKey={(option) =>
@@ -178,6 +187,8 @@ const RecipientAutocomplete = ({
           if (newValue) {
             setSelectedValue(newValue.id);
             onSelect(newValue.id);
+            // Ручной выбор из списка — тоже закрываем моментально.
+            setOpen(false);
           } else {
             setSelectedValue("");
             onSelect("");

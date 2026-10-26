@@ -90,9 +90,13 @@ describe("Автокомплит получателя", () => {
     // Сразу после ввода ещё НЕ выбрано — даём человеку допечатать номер.
     expect(spy).not.toHaveBeenCalled();
     expect(v.chip()).toBeNull();
+    // До паузы список открыт — есть что выбирать.
+    expect(document.body.querySelectorAll('[role="option"]').length).toBeGreaterThan(0);
     await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(spy).toHaveBeenCalledWith(3);
     expect(v.chip()).not.toBeNull();
+    // После автовыбора список обязан закрыться.
+    expect(document.body.querySelectorAll('[role="option"]').length).toBe(0);
     expect(v.chip().textContent).toContain("99999");
     expect(v.chip().textContent).toContain("РЦ Пулково");
     v.close();
