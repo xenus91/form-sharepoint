@@ -1506,16 +1506,14 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       // остаются выбранными, чтобы можно было сразу подать следующую.
       // Получателя не проставляем: при isEOMissing RecipientAutocomplete сам
       // подставляет склад по умолчанию.
-      // ВАЖНО: смотрим на СОСТОЯНИЕ «ЕО отсутствует», а не на window.location.hash —
-      // к моменту отправки хэш уже может быть нормализован эффектом синхронизации
-      // вида, и проверка по URL молча не срабатывала (форма уходила в дефолт).
+      // Сброс после отправки из /#eoismissing отличается от обычного ТОЛЬКО двумя
+      // полями — дефолтами этого роута: проблема «Не найдена» и местоположение
+      // «Не найдена в зоне отгрузки». Номер ЕО, режим «ЕО отсутствует» и получатель
+      // сбрасываются как обычно: включать isEOMissing здесь нельзя, иначе поле ЕО
+      // превращается в «ЕО отсутствует», а RecipientAutocomplete подставляет склад.
       const backToEoMissing = isEOMissing || isEoMissingRoute(window.location.hash || "", "");
-      // И возвращаем хэш роута, чтобы ссылка осталась «/#eoismissing».
-      if (backToEoMissing && !isEoMissingRoute(window.location.hash || "", "")) {
-        window.history.replaceState(null, "", window.location.pathname + window.location.search + "#eoismissing");
-      }
       setEoNumber("");
-      setIsEOMissing(backToEoMissing);
+      setIsEOMissing(false);
       cameraVideos.forEach(v => URL.revokeObjectURL(v.url));
       setCameraPhotos([]);
       setGalleryPhotos([]);
