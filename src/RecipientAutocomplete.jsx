@@ -23,6 +23,7 @@ const RecipientAutocomplete = ({
   onFocus,
   disabled,
   isEOMissing,
+  inputTabIndex,
 }) => {
   const [lookupItems, setLookupItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -163,6 +164,8 @@ const RecipientAutocomplete = ({
           <TextField
             required
             {...params}
+            // Порядок Tab главной формы задаётся явно из App.jsx (см. handleFormKeyDown).
+            inputProps={{ ...params.inputProps, ...(inputTabIndex != null ? { tabIndex: inputTabIndex } : {}) }}
             label="Номер получателя"
             error={error}
             onFocus={onFocus}

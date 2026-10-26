@@ -1244,6 +1244,27 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     throw new Error("Невозможно преобразовать фото к Blob");
   }
 
+  // Порядок переходов по Tab в главной форме задаётся явными tabIndex:
+  // 1 Номер ЕО → 2 Номер получателя → 3 Тип проблемы → 4 Транспортировка →
+  // 5 Другое местоположение → 6 Отправить. Всё без tabIndex (радио-группа
+  // склада, иконки-сканеры, загрузка фото) остаётся в конце в DOM-порядке —
+  // так у радио-группы сохраняется навигация стрелками одним таб-стопом.
+  const FORM_TAB = { eo: 1, recipient: 2, problems: 3, transportation: 4, location: 5, submit: 6 };
+
+  // Enter отправляет форму. Кроме полей, где Enter выбирает вариант:
+  // автокомплит получателя и мультиселект проблем обрабатывают его сами.
+  const handleFormKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    const el = e.target;
+    if (!el || typeof el.closest !== "function") return;
+    if (el.tagName === "TEXTAREA") return;
+    if (el.getAttribute?.("role") === "combobox") return;
+    if (el.closest(".MuiAutocomplete-root")) return;
+    if (el.closest(".MuiSelect-select") || el.closest('[role="listbox"]')) return;
+    e.preventDefault();
+    handleFormSubmit(e);
+  };
+
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (isSubmittingRef.current) return;
@@ -1992,7 +2013,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
         {/* Контейнер формы без «овала» — без фона и рамки */}
         <Box sx={{ p: 0, border: "none", background: "transparent" }}>
-          <form onSubmit={handleFormSubmit}>
+          <form onSubmit={handleFormSubmit} onKeyDown={handleFormKeyDown}>
             <Grid container direction="column" sx={{ gap: 1.5 }}>
               {/* Номер ЕО */}
               <Grid item xs={12}>
@@ -2007,7 +2028,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                   value={eoNumber}
                   onChange={handleInputChange}
                   onBlur={handleBlurEoNumber}
-                  inputProps={{ inputMode: "numeric" }}
+                  inputProps={{ inputMode: "numeric", tabIndex: FORM_TAB.eo }}
                   InputProps={{
                     startAdornment: isEOMissing ? (
                       <InputAdornment position="start" sx={{ ml: 0.5 }}>
@@ -2142,6 +2163,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                   error={!!errors.selectedRecipient}
                   helperText={errors.selectedRecipient}
                   onFocus={() => handleFocus("selectedRecipient")}
+                  inputTabIndex={FORM_TAB.recipient}
 
                 />
               </Grid>
@@ -2152,6 +2174,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                   <InputLabel required id="multiple-chip-label">Выберите проблемы</InputLabel>
 
                   <Select
+                  inputProps={{ tabIndex: FORM_TAB.problems }}
                     labelId="multiple-chip-label"
                     id="select-multiple-chip"
                     multiple
@@ -2231,6 +2254,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                     helperText={errors?.transportation || ""}
                     type="number"
                     label="Транспортировка"
+                    inputProps={{ tabIndex: FORM_TAB.transportation }}
                     fullWidth
                     disabled={loading}
                     required
@@ -2275,6 +2299,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                   disabled={loading}
                   required
                   value={location}
+                  inputProps={{ tabIndex: FORM_TAB.location }}
                   onChange={(e) => handleLocationChange(e.target.value)}
                   onFocus={() => handleFocus("location")}
                 />
@@ -2382,6 +2407,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
                 <Button
                   disabled={loading}
                   type="submit"
+                  tabIndex={FORM_TAB.submit}
                   endIcon={loading ? "" : <SendIcon />}
                   sx={buttonSxSubmit}
                 >
