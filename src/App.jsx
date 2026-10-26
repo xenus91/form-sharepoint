@@ -1500,15 +1500,22 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         monthlyCounterRef.current.refresh();
       }
 
+      // Сброс после отправки. Если работали по роуту #eoismissing — сбрасываем
+      // НЕ в обычный дефолт, а в состояние этого роута: «ЕО отсутствует»,
+      // проблема «Не найдена» и местоположение «Не найдена в зоне отгрузки»
+      // остаются выбранными, чтобы можно было сразу подать следующую.
+      // Получателя не проставляем: при isEOMissing RecipientAutocomplete сам
+      // подставляет склад по умолчанию.
+      const backToEoMissing = isEoMissingRoute(window.location.hash || "", "");
       setEoNumber("");
-      setIsEOMissing(false);
+      setIsEOMissing(backToEoMissing);
       cameraVideos.forEach(v => URL.revokeObjectURL(v.url));
       setCameraPhotos([]);
       setGalleryPhotos([]);
       setCameraVideos([]);
-      setProblems([]);
+      setProblems(backToEoMissing ? [EO_MISSING_PROBLEM] : []);
       setSelectedRecipient(null);
-      setLocation("");
+      setLocation(backToEoMissing ? EO_MISSING_LOCATION : "");
       setTransportation("");
       setKey((prevKey) => prevKey + 1);
       setSelectedRadioValue("");
