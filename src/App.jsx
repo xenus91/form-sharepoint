@@ -46,6 +46,7 @@ import "swiper/swiper-bundle.css";
 import SwiperCore from "swiper/core";
 import { Pagination, Navigation } from "swiper/modules";
 import RecipientAutocomplete from "./RecipientAutocomplete";
+import DashboardView from "./features/dashboard/DashboardView";
 import BtnGroupLocation from "./btngroupLocation";
 import CollectionsIcon from "@mui/icons-material/Collections";
 import MonthlyCounter from "./MonthlyCounter";
@@ -1634,7 +1635,8 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       eoMissing = isEoMissingRoute(raw, window.location.pathname || "");
     } catch (_e) { void _e; }
     if (eoMissing) view = "form";
-    if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
+    if (low.includes("dashboard")) view = "dashboard";
+    else if (low.includes("tasks") || low.includes("tasksview")) view = "tasks";
     else if (low.includes("manager") || low.includes("managerpreview")) view = "manager";
     // elementId: поддерживает id=число (любой вариант: id=10, elementid=10, #tasks/10, #tasks?id=10, #tasks/id=10, #tasks&elementid=10)
     let elementId = null;
@@ -1714,7 +1716,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     setHashEoMissing(false);
   }, [hashEoMissing]);
   useEffect(() => {
-    const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : "#form";
+    const desired = currentView === "tasks" ? "#tasks" : currentView === "manager" ? "#manager" : currentView === "dashboard" ? "#dashboard" : "#form";
     const parsed = parseHash();
     if (currentView === "form") {
       const hash = window.location.hash;
@@ -1749,6 +1751,10 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   };
   const handleOpenTasks = () => {
     setCurrentView("tasks");
+    setDrawerOpen(false);
+  };
+  const handleOpenDashboard = () => {
+    setCurrentView("dashboard");
     setDrawerOpen(false);
   };
 
@@ -1868,6 +1874,31 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   // а список оставался на 3 до пятиминутного тика.
   useTasksListSyncOnBadgeChange(tasksActiveCount);
 
+  if (currentView === "dashboard") {
+    return (
+      <ThemeProvider theme={figmaTheme}>
+        <Box sx={{ position: "fixed", top: 12, left: 12, zIndex: 1302, display: drawerOpen ? "none" : "block" }}>
+          <BurgerWithCount count={tasksActiveCount} onClick={() => setDrawerOpen(true)} />
+        </Box>
+        <AppMenuDrawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          active="dashboard"
+          tasksCount={tasksActiveCount}
+          canOpenManagerPreview={canOpenManagerPreview}
+          onOpenForm={handleOpenForm}
+          onOpenTasks={handleOpenTasks}
+          onOpenDashboard={handleOpenDashboard}
+          onOpenManagerPreview={handleOpenManagerPreview}
+          userName={userProfile.userDisplayName}
+          userTitle={userProfile.userTitle}
+          userOffice={userProfile.userOffice}
+        />
+        <DashboardView office={effectiveOfficeForTasks} onBack={handleOpenForm} />
+      </ThemeProvider>
+    );
+  }
+
   if (currentView === "manager") {
     return (
       <ThemeProvider theme={figmaTheme}>
@@ -1917,6 +1948,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           onOpenForm={handleOpenForm}
           onOpenTasks={handleOpenTasks}
           onOpenManagerPreview={handleOpenManagerPreview}
+        onOpenDashboard={handleOpenDashboard}
           userName={userProfile.userDisplayName}
           userTitle={userProfile.userTitle}
           userOffice={userProfile.userOffice}
@@ -1967,6 +1999,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         onOpenForm={handleOpenForm}
         onOpenTasks={handleOpenTasks}
         onOpenManagerPreview={handleOpenManagerPreview}
+        onOpenDashboard={handleOpenDashboard}
         userName={userProfile.userDisplayName}
         userTitle={userProfile.userTitle}
         userOffice={userProfile.userOffice}

@@ -30,6 +30,7 @@ import {
   ListItemText,
   Typography,
 } from "@mui/material";
+import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
 import AssignmentIcon from "@mui/icons-material/Assignment";
 import CloseIcon from "@mui/icons-material/Close";
 import HomeIcon from "@mui/icons-material/Home";
@@ -53,6 +54,7 @@ export default function AppMenuDrawer({
   onOpenForm,
   onOpenTasks,
   onOpenManagerPreview,
+  onOpenDashboard,
   userName = "",
   userTitle = "",
   userOffice = "",
@@ -84,6 +86,13 @@ export default function AppMenuDrawer({
             </ListItemButton>
           </ListItem>
         )}
+
+        <ListItem disablePadding>
+          <ListItemButton onClick={onOpenDashboard} selected={active === "dashboard"} data-testid="menu-item-dashboard">
+            <ListItemIcon><DashboardRoundedIcon sx={ICON_SX} /></ListItemIcon>
+            <ListItemText primary="Дашборд" primaryTypographyProps={TEXT_PROPS} />
+          </ListItemButton>
+        </ListItem>
 
         <ListItem disablePadding>
           <ListItemButton onClick={onOpenTasks} selected={active === "tasks"} data-testid="menu-item-tasks">

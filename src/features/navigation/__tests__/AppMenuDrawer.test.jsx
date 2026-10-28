@@ -62,9 +62,9 @@ afterEach(() => {
 });
 
 describe("AppMenuDrawer", () => {
-  it("порядок пунктов один и тот же: Главная → Просмотр менеджерами → Задачи", async () => {
+  it("порядок пунктов: Главная → Просмотр менеджерами → Дашборд → Задачи", async () => {
     const host = await renderMenu({ canOpenManagerPreview: true });
-    expect(itemTexts()).toEqual(["Главная", "Просмотр менеджерами", "Задачи"]);
+    expect(itemTexts()).toEqual(["Главная", "Просмотр менеджерами", "Дашборд", "Задачи"]);
   });
 
   it("пункта «Заявки ДОБ» в меню нет — раздел вынесен в отдельное приложение", async () => {
@@ -75,8 +75,19 @@ describe("AppMenuDrawer", () => {
 
   it("без права на просмотр менеджерами пункт не показывается, порядок остальных тот же", async () => {
     const host = await renderMenu({ canOpenManagerPreview: false });
-    expect(itemTexts(host)).toEqual(["Главная", "Задачи"]);
+    expect(itemTexts(host)).toEqual(["Главная", "Дашборд", "Задачи"]);
     expect(scope().querySelector('[data-testid="menu-item-manager"]')).toBeFalsy();
+  });
+
+  it("пункт «Дашборд» на месте и вызывает onOpenDashboard", async () => {
+    const onOpenDashboard = vi.fn();
+    await renderMenu({ canOpenManagerPreview: false, onOpenDashboard });
+    const item = scope().querySelector('[data-testid="menu-item-dashboard"]');
+    expect(item).toBeTruthy();
+    await act(async () => {
+      item.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    expect(onOpenDashboard).toHaveBeenCalled();
   });
 
   it("у «Задач» виден бейдж с количеством активных задач", async () => {
