@@ -42,12 +42,29 @@ const METRICS = [
 
 function Metric({ label, value, color, big }) {
   return (
-    <Box sx={{ flex: "1 1 64px", minWidth: 0, textAlign: "center" }}>
+    <Box sx={{ flex: "1 1 0", minWidth: 0, textAlign: "center", whiteSpace: "nowrap" }}>
       <Typography sx={{ fontSize: big ? 34 : 28, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
         {value}
       </Typography>
       <Typography variant="caption" sx={{ color: "text.secondary", display: "block", fontSize: 12 }}>{label}</Typography>
     </Box>
+  );
+}
+
+// Двухуровневая подпись оси X: сверху часы, под ними — дата, к которой эти часы
+// относятся. Один XAxis с кастомным тиком: второй XAxis без привязанной серии
+// recharts не рисует, поэтому даты и не появлялись.
+function AxisTick(props) {
+  const v = String(props?.payload?.value ?? "");
+  const day = v.slice(0, 10);
+  const hour = v.slice(11);
+  const showHour = /^(00|06|12|18):00$/.test(hour);
+  const isMid = hour === "12:00";
+  return (
+    <g transform={`translate(${props.x},${props.y})`}>
+      {showHour && <text dy={14} textAnchor="middle" fontSize={11} fill="#7A8194">{hour}</text>}
+      {isMid && <text dy={30} textAnchor="middle" fontSize={12} fontWeight={700} fill="#5A67D8">{`${day.slice(8)}.${day.slice(5, 7)}`}</text>}
+    </g>
   );
 }
 
@@ -83,7 +100,10 @@ export default function DashboardView({ office, onBack }) {
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+    // ВАЖНО: график рендерится только после загрузки, поэтому эффект обязан
+    // перезапускаться при смене loading/error — иначе ref ещё null и слушатель
+    // не вешается вовсе (зум не работал).
+  }, [state.loading, state.error]);
 
   const scrollRail = (dir) => {
     const el = railRef.current;
@@ -224,13 +244,20 @@ export default function DashboardView({ office, onBack }) {
                   const open = row.notStarted + row.inProgress;
                   const hot = row.notStartedOverdue + row.inProgressOverdue;
                   return (
-                    <Tooltip key={row.key} title={(row.openTitles?.length || row.doneTitles?.length) ? (
-                      <Box sx={{ fontSize: 12 }}>
-                        {row.openTitles?.length ? <><Box sx={{ fontWeight: 800, mb: 0.5 }}>Открытые:</Box>{row.openTitles.map((x, i) => <Box key={`o${i}`}>• {x}</Box>)}</> : null}
-                        {row.doneTitles?.length ? <><Box sx={{ fontWeight: 800, mt: 1, mb: 0.5 }}>Завершённые:</Box>{row.doneTitles.map((x, i) => <Box key={`d${i}`}>• {x}</Box>)}</> : null}
-                      </Box>
-                    ) : row.title} arrow>
-                    <Box sx={{ ...CARD_SX, flex: "0 0 min(360px, 86%)", scrollSnapAlign: "start", borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`, transition: "transform .15s, box-shadow .15s", "&:hover": { transform: "translateY(-3px)", boxShadow: "0 12px 36px rgba(23,28,143,0.16)" } }}>
+                    <Tooltip key={row.key} title={(() => {
+                      const lines = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
+                        .map(([k, n]) => <Box key={k}>• {k} — {n}</Box>);
+                      const hasO = Object.keys(row.openCounts || {}).length > 0;
+                      const hasD = Object.keys(row.doneCounts || {}).length > 0;
+                      if (!hasO && !hasD) return row.title;
+                      return (
+                        <Box sx={{ fontSize: 12, maxWidth: 360 }}>
+                          {hasO ? <><Box sx={{ fontWeight: 800, mb: 0.5 }}>Открытые:</Box>{lines(row.openCounts)}</> : null}
+                          {hasD ? <><Box sx={{ fontWeight: 800, mt: 1, mb: 0.5 }}>Завершённые:</Box>{lines(row.doneCounts)}</> : null}
+                        </Box>
+                      );
+                    })()} arrow>
+                    <Box sx={{ ...CARD_SX, flex: "0 0 min(480px, 94%)", scrollSnapAlign: "start", borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`, transition: "transform .15s, box-shadow .15s", "&:hover": { transform: "translateY(-3px)", boxShadow: "0 12px 36px rgba(23,28,143,0.16)" } }}>
                       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 2 }}>
                         <Tooltip title={row.email || row.title}>
                           <Typography sx={{ fontWeight: 900, fontSize: 17, color: "#1A1F36" }} noWrap>{row.title}</Typography>
@@ -239,7 +266,7 @@ export default function DashboardView({ office, onBack }) {
                           открыто {open}
                         </Box>
                       </Box>
-                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                      <Box sx={{ display: "flex", flexWrap: "nowrap", gap: 0.5 }}>
                         {METRICS.map((m) => <Metric key={m.key} label={m.label} value={row[m.key]} color={m.color} />)}
                       </Box>
                     </Box>
@@ -250,12 +277,7 @@ export default function DashboardView({ office, onBack }) {
               </>
             )}
 
-            <Box sx={{ ...CARD_SX, display: "flex", flexWrap: "wrap", gap: 1, mb: 3.5, minWidth: 0 }}>
-              <Box sx={{ flex: 1, minWidth: 96, display: "flex", alignItems: "center" }}>
-                <Typography sx={{ fontWeight: 900, fontSize: 16, color: "#171C8F" }}>Итого</Typography>
-              </Box>
-              {METRICS.map((m) => <Metric key={m.key} label={m.label} value={summary.totals[m.key] || 0} color={m.color} big />)}
-            </Box>
+
 
             <Box sx={CARD_SX}>
               <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", mb: 2 }}>
@@ -299,12 +321,8 @@ export default function DashboardView({ office, onBack }) {
                       <ReferenceLine key={`l_${b.dayKey}`} x={b.x1} stroke="#5A67D8" strokeDasharray="4 4" strokeOpacity={b.isToday ? 0.85 : 0.4}
                         />
                     ))}
-                    {/* Уровень 1 — часы */}
-                    <XAxis xAxisId="h" dataKey="t" tickFormatter={(v) => (/_0?0:00$|_0?6:00$|_12:00$|_18:00$/.test(String(v)) ? String(v).slice(-5) : "")}
-                      tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={{ stroke: "rgba(23,28,143,0.12)" }} interval="preserveStartEnd" minTickGap={18} height={22} />
-                    {/* Уровень 2 — дата под теми часами, что к ней относятся */}
-                    <XAxis xAxisId="d" dataKey="t" height={26} tickFormatter={(v) => (/^\d{4}-\d{2}-\d{2}_12:00$/.test(String(v)) ? String(v).slice(8, 10) + "." + String(v).slice(5, 7) : "")}
-                      tick={{ fontSize: 12, fontWeight: 700, fill: "#5A67D8" }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={10} />
+                    <XAxis xAxisId="h" dataKey="t" tick={<AxisTick />} interval={0} height={44}
+                      tickLine={false} axisLine={{ stroke: "rgba(23,28,143,0.12)" }} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={false} width={44} />
                     <RTooltip content={<ChartTip />} cursor={{ fill: "rgba(90,103,216,0.07)" }} />
                     <Bar xAxisId="h" dataKey="count" name="Завершено" fill="url(#dashBar)" radius={[4, 4, 0, 0]} maxBarSize={26} />
