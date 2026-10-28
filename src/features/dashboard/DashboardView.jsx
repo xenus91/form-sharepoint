@@ -7,7 +7,10 @@ import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
 import Button from "@mui/material/Button";
-import Tooltip from "@mui/material/Tooltip";
+import Dialog from "@mui/material/Dialog";
+import DialogContent from "@mui/material/DialogContent";
+import IconButton from "@mui/material/IconButton";
+import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import PlayCircleOutlineRoundedIcon from "@mui/icons-material/PlayCircleOutlineRounded";
@@ -68,6 +71,7 @@ export default function DashboardView({ office, onBack }) {
   const [state, setState] = useState({ loading: true, error: null, meta: null, tasks: [] });
   const [tick, setTick] = useState(0);
   const railRef = useRef(null);
+  const [detail, setDetail] = useState(null);
   const dragRef = useRef({ active: false, x: 0, left: 0, moved: false });
 
   useEffect(() => {
@@ -140,8 +144,11 @@ export default function DashboardView({ office, onBack }) {
           height: 380,
           fontFamily: "inherit",
           toolbar: { show: true, tools: { download: false, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true } },
-          // Зум колесом мыши и выделением рамки — штатная возможность ApexCharts.
-          zoom: { enabled: true, type: "x", autoScaleYaxis: true },
+          // Зум колесом и рамкой. ВАЖНО: перетаскивание-зум в ApexCharts работает
+          // только при selection.enabled — по умолчанию он false, поэтому рамка
+          // и не срабатывала.
+          selection: { enabled: true, type: "x", fill: { color: "#5A67D8", opacity: 0.12 } },
+          zoom: { enabled: true, type: "x", autoScaleYaxis: true, allowMouseWheelZoom: true },
           animations: { enabled: false },
         },
         plotOptions: { bar: { borderRadius: 3, columnWidth: "72%" } },
@@ -151,7 +158,6 @@ export default function DashboardView({ office, onBack }) {
         grid: { borderColor: "rgba(23,28,143,0.08)", strokeDashArray: 0, yaxis: { lines: { show: true } }, xaxis: { lines: { show: false } } },
         xaxis: {
           categories: cats,
-          tickAmount: 28,
           labels: {
             rotate: 0,
             hideOverlappingLabels: true,
@@ -176,6 +182,24 @@ export default function DashboardView({ office, onBack }) {
         },
       },
     };
+  }, [summary.timeline]);
+
+  // Группировка часов по датам для нижней полосы: каждые сутки — свой сегмент
+  // с мини-столбиками часов внутри и подписью даты под ними.
+  const dayGroups = useMemo(() => {
+    const out = [];
+    let cur = null;
+    let max = 1;
+    for (const p of summary.timeline) {
+      if (!cur || cur.dayKey !== p.dayKey) {
+        cur = { dayKey: p.dayKey, label: `${p.dayLabel} ${String(p.day).padStart(2, "0")}`, month: p.dayKey.slice(5, 7), isToday: p.isToday, hours: [], total: 0 };
+        out.push(cur);
+      }
+      cur.hours.push(p);
+      cur.total += p.count;
+      if (p.count > max) max = p.count;
+    }
+    return { groups: out, max };
   }, [summary.timeline]);
 
   return (
@@ -283,17 +307,24 @@ export default function DashboardView({ office, onBack }) {
                   const open = row.notStarted + row.inProgress;
                   const hot = row.notStartedOverdue + row.inProgressOverdue;
                   return (
-                    <Tooltip key={row.key} title={<TitleSummary row={row} />} arrow>
-                      <Box
-                        sx={{
-                          ...CARD_SX,
-                          // ровно три карточки на всю ширину области
-                          flex: "0 0 calc((100% - 2 * 20px) / 3)",
-                          minWidth: 260,
-                          borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`,
-                          userSelect: "none",
-                        }}
-                      >
+                    <Box
+                      key={row.key}
+                      onClick={() => setDetail(row)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDetail(row); }}
+                      sx={{
+                        ...CARD_SX,
+                        // ровно три карточки на всю ширину области
+                        flex: "0 0 calc((100% - 2 * 20px) / 3)",
+                        minWidth: 260,
+                        cursor: "pointer",
+                        borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`,
+                        userSelect: "none",
+                        transition: "transform .15s, box-shadow .15s",
+                        "&:hover": { transform: "translateY(-3px)", boxShadow: "0 14px 40px rgba(23,28,143,0.18)" },
+                      }}
+                    >
                         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 2 }}>
                           <Typography sx={{ fontWeight: 900, fontSize: 17, color: "#1A1F36" }} noWrap>{row.title}</Typography>
                           <Box sx={{ px: 1.25, py: 0.4, borderRadius: "999px", bgcolor: "rgba(90,103,216,0.1)", color: "#5A67D8", fontSize: 13, fontWeight: 900, whiteSpace: "nowrap" }}>
@@ -304,7 +335,6 @@ export default function DashboardView({ office, onBack }) {
                           {METRICS.map((m) => <Metric key={m.key} label={m.label} value={row[m.key]} color={m.color} />)}
                         </Box>
                       </Box>
-                    </Tooltip>
                   );
                 })}
               </Box>
@@ -320,10 +350,81 @@ export default function DashboardView({ office, onBack }) {
                 </Typography>
               </Box>
               <Chart options={chartOptions} series={chartSeries} type="bar" height={380} width="100%" />
+
+              {/* Группировка времени по датам: часы внутри суток, дата — под ними.
+                  Сегменты резиновые (flex 1 1 0), поэтому полоса адаптируется под
+                  любую ширину и под любое окно зума. */}
+              <Box sx={{ mt: 2.5, pt: 2, borderTop: "1px solid rgba(23,28,143,0.08)", display: "flex", gap: 1, minWidth: 0 }}>
+                {dayGroups.groups.map((g) => (
+                  <Box
+                    key={g.dayKey}
+                    sx={{
+                      flex: "1 1 0",
+                      minWidth: 0,
+                      borderRadius: "14px",
+                      px: 1,
+                      pt: 1,
+                      pb: 0.75,
+                      bgcolor: g.isToday ? "rgba(90,103,216,0.09)" : "rgba(23,28,143,0.03)",
+                      border: `1px solid ${g.isToday ? "rgba(90,103,216,0.35)" : "rgba(23,28,143,0.07)"}`,
+                    }}
+                  >
+                    <Box sx={{ display: "flex", alignItems: "flex-end", gap: "2px", height: 34 }}>
+                      {g.hours.map((h) => (
+                        <Box
+                          key={h.key}
+                          title={`${h.label} — завершено ${h.count}`}
+                          sx={{
+                            flex: "1 1 0",
+                            minWidth: 1,
+                            borderRadius: "2px 2px 0 0",
+                            height: `${Math.max(6, (h.count / dayGroups.max) * 100)}%`,
+                            bgcolor: h.count > 0 ? "#5A67D8" : "rgba(23,28,143,0.13)",
+                            opacity: h.count > 0 ? 1 : 0.65,
+                          }}
+                        />
+                      ))}
+                    </Box>
+                    <Box sx={{ mt: 0.75, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden" }}>
+                      <Typography sx={{ fontSize: 13, fontWeight: 900, color: g.isToday ? "#5A67D8" : "#3B4257", lineHeight: 1.2 }}>
+                        {g.label}
+                      </Typography>
+                      <Typography sx={{ fontSize: 11, color: "text.secondary", lineHeight: 1.2 }}>
+                        {`${g.dayKey.slice(8)}.${g.month} · ${g.total}`}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
             </Box>
           </>
         )}
       </Box>
+
+      {/* Сводка по названиям задач — карточка по клику, а не тултип */}
+      <Dialog open={!!detail} onClose={() => setDetail(null)} maxWidth="sm" fullWidth
+        PaperProps={{ sx: { borderRadius: "22px", p: 0.5 } }}>
+        {detail && (
+          <DialogContent sx={{ p: 3 }}>
+            <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1, mb: 2 }}>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography sx={{ fontSize: 22, fontWeight: 900, color: "#171C8F" }} noWrap>{detail.title}</Typography>
+                <Typography sx={{ color: "text.secondary", fontSize: 13 }}>{detail.email || "—"}</Typography>
+              </Box>
+              <IconButton onClick={() => setDetail(null)} size="small" aria-label="Закрыть"><CloseRoundedIcon /></IconButton>
+            </Box>
+            <Box sx={{ display: "flex", gap: 1, mb: 2.5, flexWrap: "wrap" }}>
+              {METRICS.map((m) => (
+                <Box key={m.key} sx={{ flex: "1 1 92px", minWidth: 92, textAlign: "center", borderRadius: "14px", py: 1, bgcolor: "rgba(23,28,143,0.04)" }}>
+                  <Typography sx={{ fontSize: 26, fontWeight: 900, color: detail[m.key] > 0 ? m.color : "rgba(0,0,0,0.25)" }}>{detail[m.key]}</Typography>
+                  <Typography variant="caption" sx={{ color: "text.secondary" }}>{m.label}</Typography>
+                </Box>
+              ))}
+            </Box>
+            <TitleSummary row={detail} />
+          </DialogContent>
+        )}
+      </Dialog>
     </Box>
   );
 }
