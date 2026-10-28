@@ -2,7 +2,7 @@
 // Сводный дашборд: плитки статусов, карточки по исполнителям и почасовой
 // роллинг-таймлайн завершённых на recharts (адаптивный, с тултипом).
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
@@ -66,6 +66,29 @@ export default function DashboardView({ office, onBack }) {
   const [tick, setTick] = useState(0);
   // Зум таймлайна: сколько последних часов показываем.
   const [zoomHours, setZoomHours] = useState(ROLLING_DAYS * 24);
+  const chartRef = useRef(null);
+  const railRef = useRef(null);
+
+  // Зум колесом прямо на таймлайне. Слушатель вешаем нативно и НЕ пассивно,
+  // иначе preventDefault не сработает и страница будет прокручиваться.
+  useEffect(() => {
+    const el = chartRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      e.preventDefault();
+      setZoomHours((h) => {
+        const next = Math.round(h * (e.deltaY > 0 ? 1.25 : 0.8));
+        return Math.min(ROLLING_DAYS * 24, Math.max(12, next));
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const scrollRail = (dir) => {
+    const el = railRef.current;
+    if (el) el.scrollBy({ left: dir * Math.max(240, el.clientWidth * 0.8), behavior: "smooth" });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -191,12 +214,22 @@ export default function DashboardView({ office, onBack }) {
                 </Typography>
               </Box>
             ) : (
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 2.5, mb: 3.5, minWidth: 0 }}>
+              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 0.5, mb: 1 }}>
+                <Button size="small" onClick={() => scrollRail(-1)} sx={{ borderRadius: "10px", minWidth: 40 }}>←</Button>
+                <Button size="small" onClick={() => scrollRail(1)} sx={{ borderRadius: "10px", minWidth: 40 }}>→</Button>
+              </Box>
+              <Box ref={railRef} sx={{ display: "flex", gap: 2.5, mb: 3.5, minWidth: 0, overflowX: "auto", scrollSnapType: "x mandatory", pb: 1, "&::-webkit-scrollbar": { height: 8 }, "&::-webkit-scrollbar-thumb": { bgcolor: "rgba(90,103,216,0.35)", borderRadius: 4 } }}>
                 {summary.rows.map((row) => {
                   const open = row.notStarted + row.inProgress;
                   const hot = row.notStartedOverdue + row.inProgressOverdue;
                   return (
-                    <Box key={row.key} sx={{ ...CARD_SX, borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`, transition: "transform .15s, box-shadow .15s", "&:hover": { transform: "translateY(-3px)", boxShadow: "0 12px 36px rgba(23,28,143,0.16)" } }}>
+                    <Tooltip key={row.key} title={(row.openTitles?.length || row.doneTitles?.length) ? (
+                      <Box sx={{ fontSize: 12 }}>
+                        {row.openTitles?.length ? <><Box sx={{ fontWeight: 800, mb: 0.5 }}>Открытые:</Box>{row.openTitles.map((x, i) => <Box key={`o${i}`}>• {x}</Box>)}</> : null}
+                        {row.doneTitles?.length ? <><Box sx={{ fontWeight: 800, mt: 1, mb: 0.5 }}>Завершённые:</Box>{row.doneTitles.map((x, i) => <Box key={`d${i}`}>• {x}</Box>)}</> : null}
+                      </Box>
+                    ) : row.title} arrow>
+                    <Box sx={{ ...CARD_SX, flex: "0 0 min(360px, 86%)", scrollSnapAlign: "start", borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`, transition: "transform .15s, box-shadow .15s", "&:hover": { transform: "translateY(-3px)", boxShadow: "0 12px 36px rgba(23,28,143,0.16)" } }}>
                       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 2 }}>
                         <Tooltip title={row.email || row.title}>
                           <Typography sx={{ fontWeight: 900, fontSize: 17, color: "#1A1F36" }} noWrap>{row.title}</Typography>
@@ -209,6 +242,7 @@ export default function DashboardView({ office, onBack }) {
                         {METRICS.map((m) => <Metric key={m.key} label={m.label} value={row[m.key]} color={m.color} />)}
                       </Box>
                     </Box>
+                    </Tooltip>
                   );
                 })}
               </Box>
@@ -243,7 +277,8 @@ export default function DashboardView({ office, onBack }) {
                   </Button>
                 ))}
               </Box>
-              <Box sx={{ width: "100%", height: { xs: 300, md: 380 } }}>
+              <Typography sx={{ color: "text.secondary", fontSize: 12, mb: 1 }}>Колесо мыши над графиком — зум</Typography>
+              <Box ref={chartRef} sx={{ width: "100%", height: { xs: 300, md: 380 } }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
                     <defs>
@@ -260,15 +295,19 @@ export default function DashboardView({ office, onBack }) {
                     {/* Пунктир на границе суток + подпись даты сверху */}
                     {dayBands.map((b) => (
                       <ReferenceLine key={`l_${b.dayKey}`} x={b.x1} stroke="#5A67D8" strokeDasharray="4 4" strokeOpacity={b.isToday ? 0.85 : 0.4}
-                        label={{ value: b.label, position: "top", fill: b.isToday ? "#5A67D8" : "#8A90A6", fontSize: 11, fontWeight: b.isToday ? 800 : 600 }} />
+                        />
                     ))}
-                    <XAxis dataKey="t" tickFormatter={(v) => (String(v).endsWith("_00:00") || String(v).endsWith("_06:00") || String(v).endsWith("_12:00") || String(v).endsWith("_18:00") ? String(v).slice(-5) : "")}
-                      tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={{ stroke: "rgba(23,28,143,0.12)" }} interval="preserveStartEnd" minTickGap={18} />
+                    {/* Уровень 1 — часы */}
+                    <XAxis xAxisId="h" dataKey="t" tickFormatter={(v) => (/_0?0:00$|_0?6:00$|_12:00$|_18:00$/.test(String(v)) ? String(v).slice(-5) : "")}
+                      tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={{ stroke: "rgba(23,28,143,0.12)" }} interval="preserveStartEnd" minTickGap={18} height={22} />
+                    {/* Уровень 2 — дата под теми часами, что к ней относятся */}
+                    <XAxis xAxisId="d" dataKey="t" height={26} tickFormatter={(v) => (/^\d{4}-\d{2}-\d{2}_12:00$/.test(String(v)) ? String(v).slice(8, 10) + "." + String(v).slice(5, 7) : "")}
+                      tick={{ fontSize: 12, fontWeight: 700, fill: "#5A67D8" }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={10} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={false} width={44} />
                     <RTooltip content={<ChartTip />} cursor={{ fill: "rgba(90,103,216,0.07)" }} />
-                    <Bar dataKey="count" name="Завершено" fill="url(#dashBar)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                    <Bar xAxisId="h" dataKey="count" name="Завершено" fill="url(#dashBar)" radius={[4, 4, 0, 0]} maxBarSize={26} />
                     {/* Тонкий зум/панорама внутри выбранного окна */}
-                    <Brush dataKey="t" height={22} travellerWidth={8} stroke="#5A67D8" fill="#fff" tickFormatter={() => ""} />
+                    <Brush xAxisId="h" dataKey="t" height={22} travellerWidth={8} stroke="#5A67D8" fill="#fff" tickFormatter={() => ""} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </Box>
