@@ -15,7 +15,11 @@ vi.mock("../dashboardData", async (orig) => {
   return {
     ...real,
     fetchDashboardData: async () => ({
-      officeApplied: true,
+      applied: true,
+      prefix: "РЦ-",
+      dcEmailCount: 12,
+      peopleCount: 8,
+      totalTasks: 40,
       tasks: [
         { Id: 1, Status: "Не начата", PercentComplete: 0, DueDate: new Date(Date.now() - 86400000).toISOString(), Modified: new Date().toISOString(), AssignedTo: { Id: 10, Title: "Иванов Иван" } },
         { Id: 2, Status: "В процессе выполнения", PercentComplete: 0.3, DueDate: null, Modified: new Date().toISOString(), AssignedTo: { Id: 20, Title: "Петров Пётр" } },
@@ -52,7 +56,9 @@ describe("DashboardView", () => {
     });
     const text = host.textContent;
     expect(text).toContain("Дашборд задач");
-    expect(text).toContain("Office: РЦ-8117");
+    expect(text).toContain("РЦ-8117");
+    expect(text).toContain("префикс DcEmail");
+    expect(text).toContain("РЦ-");
     // плитки
     expect(text).toContain("Не начато");
     expect(text).toContain("В работе");
@@ -60,9 +66,9 @@ describe("DashboardView", () => {
     // карточки исполнителей
     expect(text).toContain("Иванов Иван");
     expect(text).toContain("Петров Пётр");
-    expect(text).toContain("По исполнителям (2)");
+    expect(text).toContain("По исполнителям · 2");
     // таймлайн
-    expect(text).toContain("Завершено за 7 дней");
+    expect(text).toContain("Завершено: 7 суток по часам");
     await act(async () => { root.unmount(); host.remove(); });
   });
 });

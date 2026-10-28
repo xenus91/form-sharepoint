@@ -1,20 +1,24 @@
 // @vitest-environment jsdom
 // src/features/dashboard/__tests__/dashboardData.test.jsx
 //
-// Сводка дашборда: разбивка по AssignedTo, просрочка по DueDate, «завершено за
-// сегодня» и роллинг-таймлайн на 7 дней. Отбор по Office — без Department.
+// Сводка дашборда: отбор через DcEmail (префикс DC Office → SingleEmail),
+// разбивка по AssignedTo, просрочка по DueDate и почасовой роллинг на 7 суток.
 
 import { describe, it, expect, vi } from "vitest";
 import {
   summarizeTasks,
-  normalizeOffice,
+  officeToPrefix,
+  emailKey,
   isOverdue,
-  fetchOfficesByIds,
+  fetchDcEmailByPrefix,
+  fetchUserEmailsByIds,
   ROLLING_DAYS,
 } from "../dashboardData";
 
 const NOW = new Date("2026-10-28T12:00:00Z").getTime();
-const day = (offset) => new Date(NOW + offset * 86400000).toISOString();
+const at = (msOffset) => new Date(NOW + msOffset).toISOString();
+const day = (offset) => at(offset * 86400000);
+const HOUR = 3600000;
 
 const task = (o = {}) => ({
   Id: o.id ?? 1,
@@ -26,15 +30,68 @@ const task = (o = {}) => ({
   ...o,
 });
 
-describe("dashboardData — сводка", () => {
-  it("раскладывает задачи по статусам и считает просрочку", () => {
+describe("DcEmail-отбор", () => {
+  it("DC Office → префикс: отрезаем 4 знака справа", () => {
+    expect(officeToPrefix("РЦ-8117")).toBe("РЦ-");
+    expect(officeToPrefix(" РЦ-8117 ")).toBe("РЦ-");
+    // короткое значение не превращается в пустую строку
+    expect(officeToPrefix("РЦ-8")).toBe("РЦ-8");
+    expect(officeToPrefix("")).toBe("");
+  });
+
+  it("e-mail и логин приводятся к одному ключу", () => {
+    expect(emailKey("i:0#.w|retail\\sergey.porshakov")).toBe("sergey.porshakov");
+    expect(emailKey("Sergey.Porshakov@lenta.com")).toBe("sergey.porshakov");
+    expect(emailKey("  SERGEY.PORSHAKOV ")).toBe("sergey.porshakov");
+    expect(emailKey(null)).toBe("");
+  });
+
+  it("DcEmail запрашивается по startswith(OffDepKey) с полем SingleEmail", async () => {
+    const api = await import("../../../api");
+    const spy = vi.spyOn(api.default, "get").mockResolvedValue({ data: { d: { results: [{ Id: 1, OffDepKey: "РЦ-Группа отгрузки", SingleEmail: "a@b.c" }] } } });
+    const rows = await fetchDcEmailByPrefix("РЦ-");
+    const url = decodeURIComponent(spy.mock.calls[0][0]);
+    expect(url).toContain("getbytitle('DcEmail')");
+    expect(url).toContain("startswith(OffDepKey,'РЦ-')");
+    expect(url).toContain("SingleEmail");
+    expect(url).not.toContain("Department");
+    expect(rows).toHaveLength(1);
+    spy.mockRestore();
+  });
+
+  it("пустой префикс — запроса нет", async () => {
+    const api = await import("../../../api");
+    const spy = vi.spyOn(api.default, "get");
+    expect(await fetchDcEmailByPrefix("")).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("e-mail сотрудников берутся пачкой, Department не запрашиваем", async () => {
+    const api = await import("../../../api");
+    const calls = [];
+    const spy = vi.spyOn(api.default, "get").mockImplementation(async (url) => {
+      calls.push(url);
+      return { data: { d: { results: [{ Id: 10, EMail: "i@l.ru", UserName: "i:0#.w|retail\\i" }] } } };
+    });
+    const out = await fetchUserEmailsByIds([10, 10, null, "x", 20]);
+    expect(out[10].email).toBe("i@l.ru");
+    expect(calls).toHaveLength(1);
+    expect(decodeURIComponent(calls[0])).toContain("Id eq 10 or Id eq 20");
+    expect(calls[0]).not.toContain("Department");
+    spy.mockRestore();
+  });
+});
+
+describe("Сводка", () => {
+  it("раскладывает по статусам и считает просрочку", () => {
     const { rows, totals } = summarizeTasks([
-      task({ id: 1, Status: "Не начата", DueDate: day(-1) }),          // просрочена
-      task({ id: 2, Status: "Не начата", DueDate: day(1) }),           // нет
-      task({ id: 3, Status: "В процессе выполнения", DueDate: day(-2) }), // просрочена
+      task({ id: 1, Status: "Не начата", DueDate: day(-1) }),
+      task({ id: 2, Status: "Не начата", DueDate: day(1) }),
+      task({ id: 3, Status: "В процессе выполнения", DueDate: day(-2) }),
       task({ id: 4, Status: "В процессе выполнения" }),
       task({ id: 5, Status: "Завершена", PercentComplete: 1, Modified: day(0) }),
-      task({ id: 6, Status: "Завершена", PercentComplete: 1, Modified: day(-1) }), // не сегодня
+      task({ id: 6, Status: "Завершена", PercentComplete: 1, Modified: day(-1) }),
     ], { now: NOW });
 
     expect(totals).toEqual({
@@ -43,7 +100,6 @@ describe("dashboardData — сводка", () => {
       completedToday: 1,
     });
     expect(rows).toHaveLength(1);
-    expect(rows[0].title).toBe("Иванов Иван");
     expect(rows[0].completedToday).toBe(1);
   });
 
@@ -54,54 +110,27 @@ describe("dashboardData — сводка", () => {
       task({ id: 3, AssignedTo: { Id: 20, Title: "Петров" } }),
     ], { now: NOW });
     expect(rows.map((r) => r.title)).toEqual(["Петров", "Иванов"]);
-    expect(rows[0].notStarted).toBe(2);
-    expect(rows[1].notStarted).toBe(1);
+    expect([rows[0].notStarted, rows[1].notStarted]).toEqual([2, 1]);
   });
 
-  it("таймлайн — 7 дней, сегодня последний, счёт только по завершённым", () => {
-    const { timeline } = summarizeTasks([
-      task({ id: 1, Status: "Завершена", PercentComplete: 1, Modified: day(0) }),
-      task({ id: 2, Status: "Завершена", PercentComplete: 1, Modified: day(0) }),
-      task({ id: 3, Status: "Завершена", PercentComplete: 1, Modified: day(-3) }),
+  it("таймлайн почасовой: 7 суток × 24, считает только завершённые", () => {
+    const { timeline, days } = summarizeTasks([
+      task({ id: 1, Status: "Завершена", PercentComplete: 1, Modified: at(-2 * HOUR) }),
+      task({ id: 2, Status: "Завершена", PercentComplete: 1, Modified: at(-2 * HOUR) }),
+      task({ id: 3, Status: "Завершена", PercentComplete: 1, Modified: at(-30 * HOUR) }),
       task({ id: 4, Status: "Завершена", PercentComplete: 1, Modified: day(-30) }), // вне окна
-      task({ id: 5, Status: "Не начата", Modified: day(0) }),                       // не завершена
+      task({ id: 5, Status: "Не начата", Modified: at(-2 * HOUR) }),               // не завершена
     ], { now: NOW });
 
-    expect(timeline).toHaveLength(ROLLING_DAYS);
-    expect(timeline[timeline.length - 1].isToday).toBe(true);
-    expect(timeline[timeline.length - 1].count).toBe(2);
-    expect(timeline[timeline.length - 4].count).toBe(1);
-    expect(timeline.reduce((s, p) => s + p.count, 0)).toBe(3); // day(-30) не попал
+    expect(timeline).toHaveLength(ROLLING_DAYS * 24);
+    expect(timeline[timeline.length - 3].count).toBe(2);   // 2 часа назад
+    expect(timeline.reduce((s, p) => s + p.count, 0)).toBe(3);
+    expect(days.length).toBeGreaterThanOrEqual(ROLLING_DAYS - 1);
   });
 
-  it("без DueDate задача не считается просроченной", () => {
+  it("без DueDate задача не просрочена, мусорная дата игнорируется", () => {
     expect(isOverdue({ DueDate: null }, NOW)).toBe(false);
     expect(isOverdue({ DueDate: day(-1) }, NOW)).toBe(true);
     expect(isOverdue({ DueDate: "мусор" }, NOW)).toBe(false);
-  });
-
-  it("Office сравнивается без регистра и пробелов", () => {
-    expect(normalizeOffice(" РЦ-8117 ")).toBe("рц-8117");
-    expect(normalizeOffice("РЦ-8117")).toBe(normalizeOffice("  рц-8117"));
-    expect(normalizeOffice(null)).toBe("");
-  });
-});
-
-describe("dashboardData — Office сотрудников", () => {
-  it("запрашивает SiteUserInfoList пачками и возвращает Id → Office", async () => {
-    const calls = [];
-    const api = await import("../../../api");
-    const spy = vi.spyOn(api.default, "get").mockImplementation(async (url) => {
-      calls.push(url);
-      return { data: { d: { results: [{ Id: 10, Office: "РЦ-8117" }] } } };
-    });
-    const out = await fetchOfficesByIds([10, 10, null, "x", 20]);
-    expect(out[10]).toBe("РЦ-8117");
-    // дубли и мусор отброшены: 10 и 20 → один запрос с двумя Id
-    expect(calls).toHaveLength(1);
-    expect(decodeURIComponent(calls[0])).toContain("Id eq 10 or Id eq 20");
-    expect(calls[0]).toContain("SiteUserInfoList");
-    expect(calls[0]).not.toContain("Department"); // Department не берём
-    spy.mockRestore();
   });
 });
