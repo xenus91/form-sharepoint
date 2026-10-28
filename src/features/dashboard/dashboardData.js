@@ -98,9 +98,9 @@ export function summarizeTasks(tasks, opts = {}) {
     }
 
     const overdue = isOverdue(t, now);
-    const title = String(t?.Title ?? "").trim() || `#${t?.Id ?? ""}`;
+    const taskTitle = String(t?.Title ?? "").trim() || `#${t?.Id ?? ""}`;
     if (isCompletedStatus(t?.Status, t?.PercentComplete)) {
-      if (row.doneTitles.length < 12) row.doneTitles.push(title);
+      if (row.doneTitles.length < 12) row.doneTitles.push(taskTitle);
       // «Завершено за сегодня» — по Modified: отдельного поля «когда завершена»
       // в списке Tasks нет, а завершение всегда обновляет Modified.
       const m = t?.Modified ? new Date(t.Modified) : null;
@@ -109,12 +109,12 @@ export function summarizeTasks(tasks, opts = {}) {
         totals.completedToday += 1;
       }
     } else if (isInProgressStatus(t?.Status)) {
-      if (row.openTitles.length < 12) row.openTitles.push(title);
+      if (row.openTitles.length < 12) row.openTitles.push(taskTitle);
       row.inProgress += 1;
       totals.inProgress += 1;
       if (overdue) { row.inProgressOverdue += 1; totals.inProgressOverdue += 1; }
     } else if (isNotStartedStatus(t?.Status) || !t?.Status) {
-      if (row.openTitles.length < 12) row.openTitles.push(title);
+      if (row.openTitles.length < 12) row.openTitles.push(taskTitle);
       row.notStarted += 1;
       totals.notStarted += 1;
       if (overdue) { row.notStartedOverdue += 1; totals.notStartedOverdue += 1; }
