@@ -14,6 +14,7 @@ import PlayCircleOutlineRoundedIcon from "@mui/icons-material/PlayCircleOutlineR
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import {
   ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
+  ReferenceLine, ReferenceArea, Brush,
 } from "recharts";
 import { fetchDashboardData, summarizeTasks, ROLLING_DAYS } from "./dashboardData";
 
@@ -41,7 +42,7 @@ const METRICS = [
 
 function Metric({ label, value, color, big }) {
   return (
-    <Box sx={{ flex: 1, minWidth: 96, textAlign: "center" }}>
+    <Box sx={{ flex: "1 1 64px", minWidth: 0, textAlign: "center" }}>
       <Typography sx={{ fontSize: big ? 34 : 28, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
         {value}
       </Typography>
@@ -63,6 +64,8 @@ function ChartTip({ active, payload, label }) {
 export default function DashboardView({ office, onBack }) {
   const [state, setState] = useState({ loading: true, error: null, meta: null, tasks: [] });
   const [tick, setTick] = useState(0);
+  // Зум таймлайна: сколько последних часов показываем.
+  const [zoomHours, setZoomHours] = useState(ROLLING_DAYS * 24);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,18 +86,33 @@ export default function DashboardView({ office, onBack }) {
   const summary = useMemo(() => summarizeTasks(state.tasks), [state.tasks]);
   const refresh = useCallback(() => setTick((n) => n + 1), []);
 
-  // Подписи оси X — только границы суток, иначе 168 меток не читаются.
-  const chartData = useMemo(() => summary.timeline.map((p, i) => {
-    const prev = summary.timeline[i - 1];
-    return {
+  // Окно зума — последние zoomHours корзин.
+  const chartData = useMemo(
+    () => summary.timeline.slice(Math.max(0, summary.timeline.length - zoomHours)).map((p) => ({
       ...p,
-      tick: !prev || prev.dayKey !== p.dayKey ? `${p.dayLabel} ${p.day}` : (p.hour % 6 === 0 ? `${p.hour}:00` : ""),
-    };
-  }), [summary.timeline]);
+      t: `${p.dayKey}_${p.label}`,
+    })),
+    [summary.timeline, zoomHours],
+  );
+
+  // Разделители и подсветка суток внутри видимого окна.
+  const dayBands = useMemo(() => {
+    const out = [];
+    let cur = null;
+    for (const p of chartData) {
+      if (!cur || cur.dayKey !== p.dayKey) {
+        cur = { dayKey: p.dayKey, x1: p.t, x2: p.t, label: `${p.dayLabel} ${String(p.day).padStart(2, "0")}`, isToday: p.isToday };
+        out.push(cur);
+      } else {
+        cur.x2 = p.t;
+      }
+    }
+    return out.map((b, i) => ({ ...b, alt: i % 2 === 1 }));
+  }, [chartData]);
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#F3F5FB", pb: 8 }}>
-      <Box sx={{ maxWidth: 1440, mx: "auto", px: { xs: 2, md: 4 }, pt: { xs: 8, md: 4 } }}>
+      <Box sx={{ maxWidth: 1440, mx: "auto", px: { xs: 2, md: 4 }, pt: { xs: 8, md: 4 }, minWidth: 0, overflowX: "hidden" }}>
         <Box sx={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", mb: 3, flexWrap: "wrap", gap: 1.5 }}>
           <Box>
             <Typography sx={{ fontSize: { xs: 30, md: 40 }, fontWeight: 900, color: "#171C8F", lineHeight: 1.1 }}>
@@ -132,13 +150,13 @@ export default function DashboardView({ office, onBack }) {
 
         {!state.loading && !state.error && (
           <>
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" }, gap: 2.5, mb: 3.5 }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 2.5, mb: 3.5, minWidth: 0 }}>
               {HEROES.map((h) => {
                 const value = summary.totals[h.key] || 0;
                 const overdue = h.overdueKey ? summary.totals[h.overdueKey] || 0 : 0;
                 const Icon = h.Icon;
                 return (
-                  <Box key={h.key} sx={{ borderRadius: "26px", p: 3.5, backgroundImage: h.grad, color: "#fff", boxShadow: "0 14px 36px rgba(23,28,143,0.22)", position: "relative", overflow: "hidden" }}>
+                  <Box key={h.key} sx={{ borderRadius: "26px", p: { xs: 2.5, md: 3.5 }, minWidth: 0, backgroundImage: h.grad, color: "#fff", boxShadow: "0 14px 36px rgba(23,28,143,0.22)", position: "relative", overflow: "hidden" }}>
                     <Icon sx={{ position: "absolute", right: -14, bottom: -18, fontSize: 132, opacity: 0.14 }} />
                     <Typography sx={{ fontSize: 15, fontWeight: 700, opacity: 0.92 }}>{h.title}</Typography>
                     <Box sx={{ display: "flex", alignItems: "baseline", gap: 2, mt: 1 }}>
@@ -173,7 +191,7 @@ export default function DashboardView({ office, onBack }) {
                 </Typography>
               </Box>
             ) : (
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" }, gap: 2.5, mb: 3.5 }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 2.5, mb: 3.5, minWidth: 0 }}>
                 {summary.rows.map((row) => {
                   const open = row.notStarted + row.inProgress;
                   const hot = row.notStartedOverdue + row.inProgressOverdue;
@@ -187,7 +205,7 @@ export default function DashboardView({ office, onBack }) {
                           открыто {open}
                         </Box>
                       </Box>
-                      <Box sx={{ display: "flex", gap: 0.5 }}>
+                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                         {METRICS.map((m) => <Metric key={m.key} label={m.label} value={row[m.key]} color={m.color} />)}
                       </Box>
                     </Box>
@@ -196,7 +214,7 @@ export default function DashboardView({ office, onBack }) {
               </Box>
             )}
 
-            <Box sx={{ ...CARD_SX, display: "flex", gap: 1, mb: 3.5 }}>
+            <Box sx={{ ...CARD_SX, display: "flex", flexWrap: "wrap", gap: 1, mb: 3.5, minWidth: 0 }}>
               <Box sx={{ flex: 1, minWidth: 96, display: "flex", alignItems: "center" }}>
                 <Typography sx={{ fontWeight: 900, fontSize: 16, color: "#171C8F" }}>Итого</Typography>
               </Box>
@@ -212,7 +230,20 @@ export default function DashboardView({ office, onBack }) {
                   всего за окно: {summary.timeline.reduce((s, p) => s + p.count, 0)}
                 </Typography>
               </Box>
-              <Box sx={{ width: "100%", height: { xs: 260, md: 340 } }}>
+              <Box sx={{ display: "flex", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
+                {[24, 72, ROLLING_DAYS * 24].map((h) => (
+                  <Button
+                    key={h}
+                    size="small"
+                    variant={zoomHours === h ? "contained" : "outlined"}
+                    onClick={() => setZoomHours(h)}
+                    sx={{ borderRadius: "10px", textTransform: "none", fontWeight: 700, minWidth: 0, px: 1.5 }}
+                  >
+                    {h >= 24 ? `${h / 24} сут` : `${h} ч`}
+                  </Button>
+                ))}
+              </Box>
+              <Box sx={{ width: "100%", height: { xs: 300, md: 380 } }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
                     <defs>
@@ -222,10 +253,22 @@ export default function DashboardView({ office, onBack }) {
                       </linearGradient>
                     </defs>
                     <CartesianGrid stroke="rgba(23,28,143,0.08)" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={{ stroke: "rgba(23,28,143,0.12)" }} interval="preserveStartEnd" minTickGap={26} />
+                    {/* Подсветка суток — чередуем фон, чтобы дни читались без сетки */}
+                    {dayBands.map((b) => (
+                      <ReferenceArea key={`a_${b.dayKey}`} x1={b.x1} x2={b.x2} fill={b.isToday ? "rgba(90,103,216,0.09)" : (b.alt ? "rgba(90,103,216,0.04)" : "transparent")} fillOpacity={1} ifOverflow="extendDomain" />
+                    ))}
+                    {/* Пунктир на границе суток + подпись даты сверху */}
+                    {dayBands.map((b) => (
+                      <ReferenceLine key={`l_${b.dayKey}`} x={b.x1} stroke="#5A67D8" strokeDasharray="4 4" strokeOpacity={b.isToday ? 0.85 : 0.4}
+                        label={{ value: b.label, position: "top", fill: b.isToday ? "#5A67D8" : "#8A90A6", fontSize: 11, fontWeight: b.isToday ? 800 : 600 }} />
+                    ))}
+                    <XAxis dataKey="t" tickFormatter={(v) => (String(v).endsWith("_00:00") || String(v).endsWith("_06:00") || String(v).endsWith("_12:00") || String(v).endsWith("_18:00") ? String(v).slice(-5) : "")}
+                      tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={{ stroke: "rgba(23,28,143,0.12)" }} interval="preserveStartEnd" minTickGap={18} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={false} width={44} />
                     <RTooltip content={<ChartTip />} cursor={{ fill: "rgba(90,103,216,0.07)" }} />
                     <Bar dataKey="count" name="Завершено" fill="url(#dashBar)" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                    {/* Тонкий зум/панорама внутри выбранного окна */}
+                    <Brush dataKey="t" height={22} travellerWidth={8} stroke="#5A67D8" fill="#fff" tickFormatter={() => ""} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </Box>

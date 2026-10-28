@@ -124,9 +124,10 @@ export function summarizeTasks(tasks, opts = {}) {
   // Почасовой роллинг: rollingDays*24 корзин, последняя — текущий час.
   const timeline = [];
   const totalHours = rollingDays * 24;
-  const startHour = new Date(now);
-  startHour.setMinutes(0, 0, 0);
-  startHour.setTime(startHour.getTime() - (totalHours - 1) * 3600000);
+  // Роллинг начинается С НАЧАЛА СУТОК: окно — rollingDays полных дней, от 00:00
+  // дня (сегодня - rollingDays + 1) до 23:00 сегодняшнего. Иначе сутки на графике
+  // были бы разорваны и разделители дат не совпадали бы с краями окна.
+  const startHour = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - (rollingDays - 1), 0, 0, 0, 0);
   for (let i = 0; i < totalHours; i += 1) {
     const d = new Date(startHour.getTime() + i * 3600000);
     timeline.push({
@@ -136,7 +137,8 @@ export function summarizeTasks(tasks, opts = {}) {
       dayLabel: DAY_LABELS[d.getDay()],
       day: d.getDate(),
       dayKey: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-      isToday: i >= totalHours - nowD.getHours() - 1,
+      isToday: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` === todayKey,
+      isFuture: d.getTime() > now,
       count: 0,
     });
   }

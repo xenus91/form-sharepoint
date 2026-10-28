@@ -123,7 +123,12 @@ describe("Сводка", () => {
     ], { now: NOW });
 
     expect(timeline).toHaveLength(ROLLING_DAYS * 24);
-    expect(timeline[timeline.length - 3].count).toBe(2);   // 2 часа назад
+    // окно начинается с 00:00, поэтому ищем корзину по времени, а не по индексу
+    const at2hAgo = new Date(NOW - 2 * HOUR);
+    const key2hAgo = `${at2hAgo.getFullYear()}-${String(at2hAgo.getMonth() + 1).padStart(2, "0")}-${String(at2hAgo.getDate()).padStart(2, "0")}T${String(at2hAgo.getHours()).padStart(2, "0")}`;
+    expect(timeline.find((p) => p.key === key2hAgo).count).toBe(2);
+    expect(timeline[0].hour).toBe(0);            // роллинг с начала суток
+    expect(timeline[0].count).toBe(0);
     expect(timeline.reduce((s, p) => s + p.count, 0)).toBe(3);
     expect(days.length).toBeGreaterThanOrEqual(ROLLING_DAYS - 1);
   });
