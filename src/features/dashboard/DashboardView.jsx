@@ -1,6 +1,6 @@
 // src/features/dashboard/DashboardView.jsx
-// Сводный дашборд: плитки статусов, карточки по исполнителям и почасовой
-// роллинг-таймлайн завершённых на recharts (адаптивный, с тултипом).
+// Сводный дашборд: плитки статусов, лента карточек исполнителей (3 в ряд,
+// скролл колесом и перетаскиванием) и почасовой таймлайн на ApexCharts.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
@@ -12,10 +12,7 @@ import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
 import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded";
 import PlayCircleOutlineRoundedIcon from "@mui/icons-material/PlayCircleOutlineRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
-import {
-  ResponsiveContainer, ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
-  ReferenceLine, ReferenceArea, Brush,
-} from "recharts";
+import Chart from "react-apexcharts";
 import { fetchDashboardData, summarizeTasks, ROLLING_DAYS } from "./dashboardData";
 
 const CARD_SX = {
@@ -40,10 +37,10 @@ const METRICS = [
   { key: "completedToday", label: "За сегодня", color: "#F57C00" },
 ];
 
-function Metric({ label, value, color, big }) {
+function Metric({ label, value, color }) {
   return (
     <Box sx={{ flex: "1 1 0", minWidth: 0, textAlign: "center", whiteSpace: "nowrap" }}>
-      <Typography sx={{ fontSize: big ? 34 : 28, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
+      <Typography sx={{ fontSize: 28, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
         {value}
       </Typography>
       <Typography variant="caption" sx={{ color: "text.secondary", display: "block", fontSize: 12 }}>{label}</Typography>
@@ -51,29 +48,18 @@ function Metric({ label, value, color, big }) {
   );
 }
 
-// Двухуровневая подпись оси X: сверху часы, под ними — дата, к которой эти часы
-// относятся. Один XAxis с кастомным тиком: второй XAxis без привязанной серии
-// recharts не рисует, поэтому даты и не появлялись.
-function AxisTick(props) {
-  const v = String(props?.payload?.value ?? "");
-  const day = v.slice(0, 10);
-  const hour = v.slice(11);
-  const showHour = /^(00|06|12|18):00$/.test(hour);
-  const isMid = hour === "12:00";
+/** Сводка по названиям: «• Брак упаковки — 3», по убыванию количества. */
+function TitleSummary({ row }) {
+  const lines = (obj) => Object.entries(obj || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => <Box key={k}>• {k} — {n}</Box>);
+  const hasO = Object.keys(row.openCounts || {}).length > 0;
+  const hasD = Object.keys(row.doneCounts || {}).length > 0;
+  if (!hasO && !hasD) return row.title;
   return (
-    <g transform={`translate(${props.x},${props.y})`}>
-      {showHour && <text dy={14} textAnchor="middle" fontSize={11} fill="#7A8194">{hour}</text>}
-      {isMid && <text dy={30} textAnchor="middle" fontSize={12} fontWeight={700} fill="#5A67D8">{`${day.slice(8)}.${day.slice(5, 7)}`}</text>}
-    </g>
-  );
-}
-
-function ChartTip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <Box sx={{ bgcolor: "rgba(26,31,54,0.94)", color: "#fff", borderRadius: "10px", px: 1.25, py: 0.75, fontSize: 12 }}>
-      <Box sx={{ fontWeight: 800 }}>{label}</Box>
-      <Box>завершено: {payload[0].value}</Box>
+    <Box sx={{ fontSize: 12, maxWidth: 380 }}>
+      {hasO ? <><Box sx={{ fontWeight: 800, mb: 0.5 }}>Открытые:</Box>{lines(row.openCounts)}</> : null}
+      {hasD ? <><Box sx={{ fontWeight: 800, mt: 1, mb: 0.5 }}>Завершённые:</Box>{lines(row.doneCounts)}</> : null}
     </Box>
   );
 }
@@ -81,34 +67,8 @@ function ChartTip({ active, payload, label }) {
 export default function DashboardView({ office, onBack }) {
   const [state, setState] = useState({ loading: true, error: null, meta: null, tasks: [] });
   const [tick, setTick] = useState(0);
-  // Зум таймлайна: сколько последних часов показываем.
-  const [zoomHours, setZoomHours] = useState(ROLLING_DAYS * 24);
-  const chartRef = useRef(null);
   const railRef = useRef(null);
-
-  // Зум колесом прямо на таймлайне. Слушатель вешаем нативно и НЕ пассивно,
-  // иначе preventDefault не сработает и страница будет прокручиваться.
-  useEffect(() => {
-    const el = chartRef.current;
-    if (!el) return undefined;
-    const onWheel = (e) => {
-      e.preventDefault();
-      setZoomHours((h) => {
-        const next = Math.round(h * (e.deltaY > 0 ? 1.25 : 0.8));
-        return Math.min(ROLLING_DAYS * 24, Math.max(12, next));
-      });
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-    // ВАЖНО: график рендерится только после загрузки, поэтому эффект обязан
-    // перезапускаться при смене loading/error — иначе ref ещё null и слушатель
-    // не вешается вовсе (зум не работал).
-  }, [state.loading, state.error]);
-
-  const scrollRail = (dir) => {
-    const el = railRef.current;
-    if (el) el.scrollBy({ left: dir * Math.max(240, el.clientWidth * 0.8), behavior: "smooth" });
-  };
+  const dragRef = useRef({ active: false, x: 0, left: 0, moved: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -126,38 +86,103 @@ export default function DashboardView({ office, onBack }) {
     return () => { cancelled = true; };
   }, [office, tick]);
 
-  const summary = useMemo(() => summarizeTasks(state.tasks), [state.tasks]);
   const refresh = useCallback(() => setTick((n) => n + 1), []);
+  const summary = useMemo(() => summarizeTasks(state.tasks), [state.tasks]);
 
-  // Окно зума — последние zoomHours корзин.
-  const chartData = useMemo(
-    () => summary.timeline.slice(Math.max(0, summary.timeline.length - zoomHours)).map((p) => ({
-      ...p,
-      t: `${p.dayKey}_${p.label}`,
-    })),
-    [summary.timeline, zoomHours],
-  );
+  // Прокрутка ленты колесом мыши (вертикальное колесо → горизонтальный скролл).
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [state.loading, state.error, summary.rows.length]);
 
-  // Разделители и подсветка суток внутри видимого окна.
-  const dayBands = useMemo(() => {
-    const out = [];
-    let cur = null;
-    for (const p of chartData) {
-      if (!cur || cur.dayKey !== p.dayKey) {
-        cur = { dayKey: p.dayKey, x1: p.t, x2: p.t, label: `${p.dayLabel} ${String(p.day).padStart(2, "0")}`, isToday: p.isToday };
-        out.push(cur);
-      } else {
-        cur.x2 = p.t;
-      }
-    }
-    return out.map((b, i) => ({ ...b, alt: i % 2 === 1 }));
-  }, [chartData]);
+  // Прокрутка ленты нажатием и перетаскиванием.
+  const onPointerDown = (e) => {
+    const el = railRef.current;
+    if (!el) return;
+    dragRef.current = { active: true, x: e.clientX, left: el.scrollLeft, moved: false };
+    el.setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e) => {
+    const d = dragRef.current;
+    const el = railRef.current;
+    if (!d.active || !el) return;
+    const dx = e.clientX - d.x;
+    if (Math.abs(dx) > 4) d.moved = true;
+    el.scrollLeft = d.left - dx;
+  };
+  const onPointerUp = (e) => {
+    const el = railRef.current;
+    el?.releasePointerCapture?.(e.pointerId);
+    dragRef.current.active = false;
+  };
+
+  // ---- ApexCharts: почасовой роллинг-таймлайн ----
+  const { chartOptions, chartSeries, categories } = useMemo(() => {
+    const tl = summary.timeline;
+    const cats = tl.map((p) => `${p.dayKey} ${p.label}`);
+    const dayBounds = [];
+    tl.forEach((p, i) => {
+      if (p.hour === 0 && i > 0) dayBounds.push({ x: cats[i], borderColor: "#5A67D8", strokeDashArray: 4, label: { text: `${p.dayLabel} ${String(p.day).padStart(2, "0")}`, orientation: "horizontal", style: { color: "#5A67D8", fontSize: "11px", fontWeight: 700, background: "transparent" } } });
+    });
+    return {
+      categories: cats,
+      chartSeries: [{ name: "Завершено", data: tl.map((p) => p.count) }],
+      chartOptions: {
+        chart: {
+          type: "bar",
+          height: 380,
+          fontFamily: "inherit",
+          toolbar: { show: true, tools: { download: false, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true } },
+          // Зум колесом мыши и выделением рамки — штатная возможность ApexCharts.
+          zoom: { enabled: true, type: "x", autoScaleYaxis: true },
+          animations: { enabled: false },
+        },
+        plotOptions: { bar: { borderRadius: 3, columnWidth: "72%" } },
+        dataLabels: { enabled: false },
+        fill: { type: "gradient", gradient: { shade: "light", type: "vertical", shadeIntensity: 0.2, opacityFrom: 1, opacityTo: 0.6, stops: [0, 100] } },
+        colors: ["#5A67D8"],
+        grid: { borderColor: "rgba(23,28,143,0.08)", strokeDashArray: 0, yaxis: { lines: { show: true } }, xaxis: { lines: { show: false } } },
+        xaxis: {
+          categories: cats,
+          tickAmount: 28,
+          labels: {
+            rotate: 0,
+            hideOverlappingLabels: true,
+            style: { fontSize: "11px", colors: "#7A8194" },
+            // Двухуровневая подпись: час, а под ним дата тех часов, к которым он относится.
+            formatter: (val) => {
+              const s = String(val);
+              const day = s.slice(0, 10);
+              const hour = s.slice(11);
+              if (hour === "12:00") return [hour, `${day.slice(8)}.${day.slice(5, 7)}`];
+              return /^(00|06|18):00$/.test(hour) ? hour : "";
+            },
+          },
+          axisBorder: { show: true, color: "rgba(23,28,143,0.12)" },
+          axisTicks: { show: false },
+        },
+        yaxis: { allowDecimals: false, labels: { style: { fontSize: "11px", colors: "#7A8194" } } },
+        annotations: { xaxis: dayBounds },
+        tooltip: {
+          y: { title: { formatter: () => "Завершено" } },
+          x: { formatter: (val) => String(val).replace("_", " ").slice(0, 16) },
+        },
+      },
+    };
+  }, [summary.timeline]);
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#F3F5FB", pb: 8 }}>
-      <Box sx={{ maxWidth: 1440, mx: "auto", px: { xs: 2, md: 4 }, pt: { xs: 8, md: 4 }, minWidth: 0, overflowX: "hidden" }}>
+      <Box sx={{ maxWidth: "100%", px: { xs: 2, md: 4 }, pt: { xs: 8, md: 4 }, minWidth: 0, overflowX: "hidden" }}>
         <Box sx={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", mb: 3, flexWrap: "wrap", gap: 1.5 }}>
-          <Box>
+          <Box sx={{ minWidth: 0 }}>
             <Typography sx={{ fontSize: { xs: 30, md: 40 }, fontWeight: 900, color: "#171C8F", lineHeight: 1.1 }}>
               Дашборд задач
             </Typography>
@@ -202,10 +227,10 @@ export default function DashboardView({ office, onBack }) {
                   <Box key={h.key} sx={{ borderRadius: "26px", p: { xs: 2.5, md: 3.5 }, minWidth: 0, backgroundImage: h.grad, color: "#fff", boxShadow: "0 14px 36px rgba(23,28,143,0.22)", position: "relative", overflow: "hidden" }}>
                     <Icon sx={{ position: "absolute", right: -14, bottom: -18, fontSize: 132, opacity: 0.14 }} />
                     <Typography sx={{ fontSize: 15, fontWeight: 700, opacity: 0.92 }}>{h.title}</Typography>
-                    <Box sx={{ display: "flex", alignItems: "baseline", gap: 2, mt: 1 }}>
-                      <Typography sx={{ fontSize: 64, fontWeight: 900, lineHeight: 1 }}>{value}</Typography>
+                    <Box sx={{ display: "flex", alignItems: "baseline", gap: 2, mt: 1, flexWrap: "wrap" }}>
+                      <Typography sx={{ fontSize: { xs: 46, md: 64 }, fontWeight: 900, lineHeight: 1 }}>{value}</Typography>
                       {h.overdueKey && (
-                        <Box sx={{ px: 1.5, py: 0.5, borderRadius: "999px", bgcolor: "rgba(255,255,255,0.24)", fontSize: 13, fontWeight: 800 }}>
+                        <Box sx={{ px: 1.5, py: 0.5, borderRadius: "999px", bgcolor: "rgba(255,255,255,0.24)", fontSize: 13, fontWeight: 800, whiteSpace: "nowrap" }}>
                           просрочено {overdue}
                         </Box>
                       )}
@@ -215,12 +240,12 @@ export default function DashboardView({ office, onBack }) {
               })}
             </Box>
 
-            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5, gap: 1, flexWrap: "wrap" }}>
               <Typography sx={{ fontSize: 20, fontWeight: 900, color: "#171C8F" }}>
                 По исполнителям · {summary.rows.length}
               </Typography>
               <Typography sx={{ color: "text.secondary", fontSize: 13 }}>
-                всего задач в выборке: {state.meta?.totalTasks ?? state.tasks.length}
+                колесо мыши или перетаскивание — прокрутка · всего задач: {state.meta?.totalTasks ?? state.tasks.length}
               </Typography>
             </Box>
 
@@ -234,103 +259,67 @@ export default function DashboardView({ office, onBack }) {
                 </Typography>
               </Box>
             ) : (
-              <>
-              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 0.5, mb: 1 }}>
-                <Button size="small" onClick={() => scrollRail(-1)} sx={{ borderRadius: "10px", minWidth: 40 }}>←</Button>
-                <Button size="small" onClick={() => scrollRail(1)} sx={{ borderRadius: "10px", minWidth: 40 }}>→</Button>
-              </Box>
-              <Box ref={railRef} sx={{ display: "flex", gap: 2.5, mb: 3.5, minWidth: 0, overflowX: "auto", scrollSnapType: "x mandatory", pb: 1, "&::-webkit-scrollbar": { height: 8 }, "&::-webkit-scrollbar-thumb": { bgcolor: "rgba(90,103,216,0.35)", borderRadius: 4 } }}>
+              <Box
+                ref={railRef}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+                sx={{
+                  display: "flex",
+                  gap: 2.5,
+                  mb: 3.5,
+                  minWidth: 0,
+                  width: "100%",
+                  overflowX: "auto",
+                  pb: 1.5,
+                  cursor: "grab",
+                  "&:active": { cursor: "grabbing" },
+                  "&::-webkit-scrollbar": { height: 10 },
+                  "&::-webkit-scrollbar-thumb": { bgcolor: "rgba(90,103,216,0.35)", borderRadius: 5 },
+                }}
+              >
                 {summary.rows.map((row) => {
                   const open = row.notStarted + row.inProgress;
                   const hot = row.notStartedOverdue + row.inProgressOverdue;
                   return (
-                    <Tooltip key={row.key} title={(() => {
-                      const lines = (obj) => Object.entries(obj || {}).sort((a, b) => b[1] - a[1])
-                        .map(([k, n]) => <Box key={k}>• {k} — {n}</Box>);
-                      const hasO = Object.keys(row.openCounts || {}).length > 0;
-                      const hasD = Object.keys(row.doneCounts || {}).length > 0;
-                      if (!hasO && !hasD) return row.title;
-                      return (
-                        <Box sx={{ fontSize: 12, maxWidth: 360 }}>
-                          {hasO ? <><Box sx={{ fontWeight: 800, mb: 0.5 }}>Открытые:</Box>{lines(row.openCounts)}</> : null}
-                          {hasD ? <><Box sx={{ fontWeight: 800, mt: 1, mb: 0.5 }}>Завершённые:</Box>{lines(row.doneCounts)}</> : null}
-                        </Box>
-                      );
-                    })()} arrow>
-                    <Box sx={{ ...CARD_SX, flex: "0 0 min(480px, 94%)", scrollSnapAlign: "start", borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`, transition: "transform .15s, box-shadow .15s", "&:hover": { transform: "translateY(-3px)", boxShadow: "0 12px 36px rgba(23,28,143,0.16)" } }}>
-                      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 2 }}>
-                        <Tooltip title={row.email || row.title}>
+                    <Tooltip key={row.key} title={<TitleSummary row={row} />} arrow>
+                      <Box
+                        sx={{
+                          ...CARD_SX,
+                          // ровно три карточки на всю ширину области
+                          flex: "0 0 calc((100% - 2 * 20px) / 3)",
+                          minWidth: 260,
+                          borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`,
+                          userSelect: "none",
+                        }}
+                      >
+                        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 2 }}>
                           <Typography sx={{ fontWeight: 900, fontSize: 17, color: "#1A1F36" }} noWrap>{row.title}</Typography>
-                        </Tooltip>
-                        <Box sx={{ px: 1.25, py: 0.4, borderRadius: "999px", bgcolor: "rgba(90,103,216,0.1)", color: "#5A67D8", fontSize: 13, fontWeight: 900, whiteSpace: "nowrap" }}>
-                          открыто {open}
+                          <Box sx={{ px: 1.25, py: 0.4, borderRadius: "999px", bgcolor: "rgba(90,103,216,0.1)", color: "#5A67D8", fontSize: 13, fontWeight: 900, whiteSpace: "nowrap" }}>
+                            открыто {open}
+                          </Box>
+                        </Box>
+                        <Box sx={{ display: "flex", flexWrap: "nowrap", gap: 0.5 }}>
+                          {METRICS.map((m) => <Metric key={m.key} label={m.label} value={row[m.key]} color={m.color} />)}
                         </Box>
                       </Box>
-                      <Box sx={{ display: "flex", flexWrap: "nowrap", gap: 0.5 }}>
-                        {METRICS.map((m) => <Metric key={m.key} label={m.label} value={row[m.key]} color={m.color} />)}
-                      </Box>
-                    </Box>
                     </Tooltip>
                   );
                 })}
               </Box>
-              </>
             )}
 
-
-
             <Box sx={CARD_SX}>
-              <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", mb: 2 }}>
+              <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", mb: 1, flexWrap: "wrap", gap: 1 }}>
                 <Typography sx={{ fontWeight: 900, fontSize: 20, color: "#1A1F36" }}>
                   {`Завершено: ${ROLLING_DAYS} суток по часам`}
                 </Typography>
                 <Typography sx={{ color: "text.secondary", fontSize: 13 }}>
-                  всего за окно: {summary.timeline.reduce((s, p) => s + p.count, 0)}
+                  всего за окно: {summary.timeline.reduce((s, p) => s + p.count, 0)} · зум: колесо или рамка, тулбар справа
                 </Typography>
               </Box>
-              <Box sx={{ display: "flex", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
-                {[24, 72, ROLLING_DAYS * 24].map((h) => (
-                  <Button
-                    key={h}
-                    size="small"
-                    variant={zoomHours === h ? "contained" : "outlined"}
-                    onClick={() => setZoomHours(h)}
-                    sx={{ borderRadius: "10px", textTransform: "none", fontWeight: 700, minWidth: 0, px: 1.5 }}
-                  >
-                    {h >= 24 ? `${h / 24} сут` : `${h} ч`}
-                  </Button>
-                ))}
-              </Box>
-              <Typography sx={{ color: "text.secondary", fontSize: 12, mb: 1 }}>Колесо мыши над графиком — зум</Typography>
-              <Box ref={chartRef} sx={{ width: "100%", height: { xs: 300, md: 380 } }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="dashBar" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#7B84FF" />
-                        <stop offset="100%" stopColor="#5A67D8" stopOpacity={0.55} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid stroke="rgba(23,28,143,0.08)" vertical={false} />
-                    {/* Подсветка суток — чередуем фон, чтобы дни читались без сетки */}
-                    {dayBands.map((b) => (
-                      <ReferenceArea key={`a_${b.dayKey}`} x1={b.x1} x2={b.x2} fill={b.isToday ? "rgba(90,103,216,0.09)" : (b.alt ? "rgba(90,103,216,0.04)" : "transparent")} fillOpacity={1} ifOverflow="extendDomain" />
-                    ))}
-                    {/* Пунктир на границе суток + подпись даты сверху */}
-                    {dayBands.map((b) => (
-                      <ReferenceLine key={`l_${b.dayKey}`} x={b.x1} stroke="#5A67D8" strokeDasharray="4 4" strokeOpacity={b.isToday ? 0.85 : 0.4}
-                        />
-                    ))}
-                    <XAxis xAxisId="h" dataKey="t" tick={<AxisTick />} interval={0} height={44}
-                      tickLine={false} axisLine={{ stroke: "rgba(23,28,143,0.12)" }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#7A8194" }} tickLine={false} axisLine={false} width={44} />
-                    <RTooltip content={<ChartTip />} cursor={{ fill: "rgba(90,103,216,0.07)" }} />
-                    <Bar xAxisId="h" dataKey="count" name="Завершено" fill="url(#dashBar)" radius={[4, 4, 0, 0]} maxBarSize={26} />
-                    {/* Тонкий зум/панорама внутри выбранного окна */}
-                    <Brush xAxisId="h" dataKey="t" height={22} travellerWidth={8} stroke="#5A67D8" fill="#fff" tickFormatter={() => ""} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </Box>
+              <Chart options={chartOptions} series={chartSeries} type="bar" height={380} width="100%" />
             </Box>
           </>
         )}
