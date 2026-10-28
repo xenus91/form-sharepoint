@@ -14,18 +14,23 @@ import { isCompletedStatus, isInProgressStatus, isNotStartedStatus } from "../..
 
 /** Сколько дней в роллинг-окне таймлайна. */
 export const ROLLING_DAYS = 7;
-/** Сколько знаков справа отрезаем у DC Office, чтобы получить префикс DcEmail. */
+/** Сколько знаков СПРАВА берём у DC Office — это и есть префикс DcEmail. */
 export const OFFICE_SUFFIX_TRIM = 4;
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const DCEMAIL_LIST_TITLE = "DcEmail";
 const resultsOf = (resp) => resp?.data?.d?.results ?? [];
 
-/** «РЦ-8117» → «РЦ-». Короткие значения не режем в пустую строку. */
+/**
+ * «РЦ-8117» → «8117»: берём 4 знака СПРАВА, то есть номер РЦ, а не «РЦ-».
+ * OffDepKey в DcEmail начинается именно с номера («8117Группа отгрузки») — тот же
+ * suffix, который перебирает resolveDistributionViaDcEmail. Короткие значения
+ * возвращаем как есть, чтобы не получить пустой префикс.
+ */
 export function officeToPrefix(office) {
   const s = String(office ?? "").trim();
-  if (s.length <= OFFICE_SUFFIX_TRIM) return s;
-  return s.slice(0, s.length - OFFICE_SUFFIX_TRIM);
+  if (!s) return "";
+  return s.length <= OFFICE_SUFFIX_TRIM ? s : s.slice(-OFFICE_SUFFIX_TRIM);
 }
 
 /**

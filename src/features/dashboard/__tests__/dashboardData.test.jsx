@@ -31,10 +31,10 @@ const task = (o = {}) => ({
 });
 
 describe("DcEmail-отбор", () => {
-  it("DC Office → префикс: отрезаем 4 знака справа", () => {
-    expect(officeToPrefix("РЦ-8117")).toBe("РЦ-");
-    expect(officeToPrefix(" РЦ-8117 ")).toBe("РЦ-");
-    // короткое значение не превращается в пустую строку
+  it("DC Office → префикс: берём 4 знака справа (номер РЦ)", () => {
+    expect(officeToPrefix("РЦ-8117")).toBe("8117");
+    expect(officeToPrefix(" РЦ-8117 ")).toBe("8117");
+    // короткое значение возвращается как есть, пустого префикса не будет
     expect(officeToPrefix("РЦ-8")).toBe("РЦ-8");
     expect(officeToPrefix("")).toBe("");
   });
@@ -49,10 +49,10 @@ describe("DcEmail-отбор", () => {
   it("DcEmail запрашивается по startswith(OffDepKey) с полем SingleEmail", async () => {
     const api = await import("../../../api");
     const spy = vi.spyOn(api.default, "get").mockResolvedValue({ data: { d: { results: [{ Id: 1, OffDepKey: "РЦ-Группа отгрузки", SingleEmail: "a@b.c" }] } } });
-    const rows = await fetchDcEmailByPrefix("РЦ-");
+    const rows = await fetchDcEmailByPrefix("8117");
     const url = decodeURIComponent(spy.mock.calls[0][0]);
     expect(url).toContain("getbytitle('DcEmail')");
-    expect(url).toContain("startswith(OffDepKey,'РЦ-')");
+    expect(url).toContain("startswith(OffDepKey,'8117')");
     expect(url).toContain("SingleEmail");
     expect(url).not.toContain("Department");
     expect(rows).toHaveLength(1);
