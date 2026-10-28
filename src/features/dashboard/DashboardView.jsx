@@ -214,6 +214,7 @@ export default function DashboardView({ office, onBack }) {
                 </Typography>
               </Box>
             ) : (
+              <>
               <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 0.5, mb: 1 }}>
                 <Button size="small" onClick={() => scrollRail(-1)} sx={{ borderRadius: "10px", minWidth: 40 }}>←</Button>
                 <Button size="small" onClick={() => scrollRail(1)} sx={{ borderRadius: "10px", minWidth: 40 }}>→</Button>
@@ -246,6 +247,7 @@ export default function DashboardView({ office, onBack }) {
                   );
                 })}
               </Box>
+              </>
             )}
 
             <Box sx={{ ...CARD_SX, display: "flex", flexWrap: "wrap", gap: 1, mb: 3.5, minWidth: 0 }}>
