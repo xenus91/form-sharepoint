@@ -19,6 +19,7 @@ import PlayCircleOutlineRoundedIcon from "@mui/icons-material/PlayCircleOutlineR
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import Chart from "react-apexcharts";
 import { fetchDashboardData, summarizeTasks, ROLLING_DAYS } from "./dashboardData";
+import { formatTimelineXLabel } from "./timelineLabels";
 
 const CARD_SX = {
   borderRadius: "22px",
@@ -56,37 +57,6 @@ const METRICS = [
   { key: "completedToday", label: "Завершено", countsKey: "completedTodayCounts", color: "#0E9C86" },
 ];
 
-const HOUR_MS = 3600000;
-const DAY_MS = 86400000;
-
-function formatTimelineXLabel(value, timestamp, opts, compact = false) {
-  const time = Number(timestamp ?? value);
-  if (!Number.isFinite(time)) return "";
-  const rawDate = new Date(time);
-  if (Number.isNaN(rawDate.getTime())) return "";
-  const hourFloor = new Date(rawDate);
-  hourFloor.setMinutes(0, 0, 0);
-  const hourStart = hourFloor.getTime();
-  const roundedTime = time - hourStart <= HOUR_MS / 2 ? hourStart : hourStart + HOUR_MS;
-  const d = new Date(roundedTime);
-  const globals = opts?.w?.globals || {};
-  const span = Number(globals.maxX) - Number(globals.minX);
-  const tickAmount = Number(globals.xTickAmount);
-  const tickInterval = Number.isFinite(span) && tickAmount > 0 ? span / tickAmount : HOUR_MS;
-  // Datetime ticks can fall between whole hours after interactive zoom. Keep
-  // only ticks near an hour boundary and label that hour.
-  if (Math.abs(time - roundedTime) > Math.min(HOUR_MS / 2, tickInterval * 0.49)) return "";
-  const stepHours = compact
-    ? span > 5 * DAY_MS ? 24 : span > 2 * DAY_MS ? 6 : 1
-    : span > 5 * DAY_MS ? 6 : span > 2 * DAY_MS ? 3 : 1;
-  if (d.getHours() % stepHours !== 0) return "";
-  const hour = `${String(d.getHours()).padStart(2, "0")}:00`;
-  const dateHour = compact && span > 5 * DAY_MS ? 0 : 12;
-  if (d.getHours() === dateHour) {
-    return [hour, `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`];
-  }
-  return hour;
-}
 
 function Metric({
   label,
@@ -427,6 +397,10 @@ export default function DashboardView({ office, onBack }) {
             rotate: 0,
             hideOverlappingLabels: true,
             datetimeUTC: false,
+            // Reserve a second line for the date. Apex's default height estimate
+            // measures one formatter tick, which can otherwise clip multiline labels.
+            minHeight: 48,
+            maxHeight: 60,
             style: { fontSize: "11px", colors: "#7A8194" },
             formatter: (value, timestamp, opts) => formatTimelineXLabel(value, timestamp, opts),
           },
@@ -452,8 +426,10 @@ export default function DashboardView({ office, onBack }) {
               xaxis: {
                 tickAmount: 7,
                 labels: {
+                  minHeight: 48,
+                  maxHeight: 60,
                   style: { fontSize: "9px" },
-                  formatter: (value, timestamp, opts) => formatTimelineXLabel(value, timestamp, opts, true),
+                  formatter: (value, timestamp, opts) => formatTimelineXLabel(value, timestamp, opts),
                 },
               },
             },
