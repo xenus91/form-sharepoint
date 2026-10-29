@@ -128,27 +128,76 @@ export default function DashboardView({ office, onBack }) {
   };
 
   // ---- ApexCharts: почасовой роллинг-таймлайн ----
-  const { chartOptions, chartSeries, categories } = useMemo(() => {
+  const { chartOptions, chartSeries } = useMemo(() => {
     const tl = summary.timeline;
     const cats = tl.map((p) => `${p.dayKey} ${p.label}`);
+    const dayGroups = [];
+    for (const p of tl) {
+      let group = dayGroups[dayGroups.length - 1];
+      if (!group || group.dayKey !== p.dayKey) {
+        const date = `${String(p.day).padStart(2, "0")}.${p.dayKey.slice(5, 7)}`;
+        group = {
+          dayKey: p.dayKey,
+          title: `${p.dayLabel} · ${date}`,
+          compactTitle: date,
+          cols: 0,
+        };
+        dayGroups.push(group);
+      }
+      group.cols += 1;
+    }
+
+    // Тонкие вертикальные разделители совпадают с границами групп-подписей.
     const dayBounds = [];
     tl.forEach((p, i) => {
-      if (p.hour === 0 && i > 0) dayBounds.push({ x: cats[i], borderColor: "#5A67D8", strokeDashArray: 4, label: { text: `${p.dayLabel} ${String(p.day).padStart(2, "0")}`, orientation: "horizontal", style: { color: "#5A67D8", fontSize: "11px", fontWeight: 700, background: "transparent" } } });
+      if (p.hour === 0 && i > 0) {
+        dayBounds.push({
+          x: cats[i],
+          borderColor: "rgba(90,103,216,0.48)",
+          strokeDashArray: 4,
+        });
+      }
     });
+
     return {
-      categories: cats,
       chartSeries: [{ name: "Завершено", data: tl.map((p) => p.count) }],
       chartOptions: {
         chart: {
           type: "bar",
           height: 380,
           fontFamily: "inherit",
-          toolbar: { show: true, tools: { download: false, selection: true, zoom: true, zoomin: true, zoomout: true, pan: true, reset: true } },
-          // Зум колесом и рамкой. ВАЖНО: перетаскивание-зум в ApexCharts работает
-          // только при selection.enabled — по умолчанию он false, поэтому рамка
-          // и не срабатывала.
-          selection: { enabled: true, type: "x", fill: { color: "#5A67D8", opacity: 0.12 } },
-          zoom: { enabled: true, type: "x", autoScaleYaxis: true, allowMouseWheelZoom: true },
+          redrawOnWindowResize: true,
+          redrawOnParentResize: true,
+          toolbar: {
+            show: true,
+            autoSelected: "zoom",
+            tools: {
+              download: false,
+              // Режим selection — это выделение, а не зум; оставляем только
+              // однозначный zoom-инструмент, чтобы drag сразу приближал график.
+              selection: false,
+              zoom: true,
+              zoomin: true,
+              zoomout: true,
+              pan: true,
+              reset: true,
+            },
+          },
+          // Поведение как у ApexCharts timeline: перетаскивание по X — зум,
+          // колесо/тачпад — приближение у курсора, pinch — на сенсорных экранах.
+          zoom: {
+            enabled: true,
+            type: "x",
+            autoScaleYaxis: true,
+            allowMouseWheelZoom: true,
+            pinch: true,
+            resetControl: "auto",
+            zoomedArea: {
+              fill: { color: "#5A67D8", opacity: 0.16 },
+              stroke: { color: "#5A67D8", opacity: 0.55, width: 1 },
+            },
+          },
+          pan: { inertia: true, friction: 0.9 },
           animations: { enabled: false },
         },
         plotOptions: { bar: { borderRadius: 3, columnWidth: "72%" } },
@@ -157,18 +206,28 @@ export default function DashboardView({ office, onBack }) {
         colors: ["#5A67D8"],
         grid: { borderColor: "rgba(23,28,143,0.08)", strokeDashArray: 0, yaxis: { lines: { show: true } }, xaxis: { lines: { show: false } } },
         xaxis: {
+          type: "category",
           categories: cats,
+          // Нативные групповые подписи ApexCharts: часы остаются первым рядом,
+          // дата каждого дня — вторым, под своим блоком из 24 часов.
+          group: {
+            groups: dayGroups.map(({ title, cols }) => ({ title, cols })),
+            style: {
+              colors: "#343B55",
+              fontSize: "12px",
+              fontWeight: 800,
+              cssClass: "dashboard-day-group-label",
+            },
+          },
           labels: {
             rotate: 0,
             hideOverlappingLabels: true,
             style: { fontSize: "11px", colors: "#7A8194" },
-            // Двухуровневая подпись: час, а под ним дата тех часов, к которым он относится.
-            formatter: (val) => {
-              const s = String(val);
-              const day = s.slice(0, 10);
-              const hour = s.slice(11);
-              if (hour === "12:00") return [hour, `${day.slice(8)}.${day.slice(5, 7)}`];
-              return /^(00|06|18):00$/.test(hour) ? hour : "";
+            formatter: (value) => {
+              const hour = String(value).match(/(?:T|\s)(\d{2}):00$/)?.[1];
+              return hour && ["00", "06", "12", "18"].includes(hour)
+                ? `${hour}:00`
+                : "";
             },
           },
           axisBorder: { show: true, color: "rgba(23,28,143,0.12)" },
@@ -180,26 +239,26 @@ export default function DashboardView({ office, onBack }) {
           y: { title: { formatter: () => "Завершено" } },
           x: { formatter: (val) => String(val).replace("_", " ").slice(0, 16) },
         },
+        // На узких экранах дата короче, чтобы семь групп не слипались.
+        responsive: [{
+          breakpoint: 700,
+          options: {
+            xaxis: {
+              group: {
+                groups: dayGroups.map(({ compactTitle, cols }) => ({ title: compactTitle, cols })),
+                style: {
+                  colors: "#343B55",
+                  fontSize: "10px",
+                  fontWeight: 800,
+                  cssClass: "dashboard-day-group-label",
+                },
+              },
+              labels: { style: { fontSize: "9px" } },
+            },
+          },
+        }],
       },
     };
-  }, [summary.timeline]);
-
-  // Группировка часов по датам для нижней полосы: каждые сутки — свой сегмент
-  // с мини-столбиками часов внутри и подписью даты под ними.
-  const dayGroups = useMemo(() => {
-    const out = [];
-    let cur = null;
-    let max = 1;
-    for (const p of summary.timeline) {
-      if (!cur || cur.dayKey !== p.dayKey) {
-        cur = { dayKey: p.dayKey, label: `${p.dayLabel} ${String(p.day).padStart(2, "0")}`, month: p.dayKey.slice(5, 7), isToday: p.isToday, hours: [], total: 0 };
-        out.push(cur);
-      }
-      cur.hours.push(p);
-      cur.total += p.count;
-      if (p.count > max) max = p.count;
-    }
-    return { groups: out, max };
   }, [summary.timeline]);
 
   return (
@@ -346,56 +405,10 @@ export default function DashboardView({ office, onBack }) {
                   {`Завершено: ${ROLLING_DAYS} суток по часам`}
                 </Typography>
                 <Typography sx={{ color: "text.secondary", fontSize: 13 }}>
-                  всего за окно: {summary.timeline.reduce((s, p) => s + p.count, 0)} · зум: колесо или рамка, тулбар справа
+                  всего за окно: {summary.timeline.reduce((s, p) => s + p.count, 0)} · масштаб: колесо или выделение области; сброс — кнопка справа
                 </Typography>
               </Box>
               <Chart options={chartOptions} series={chartSeries} type="bar" height={380} width="100%" />
-
-              {/* Группировка времени по датам: часы внутри суток, дата — под ними.
-                  Сегменты резиновые (flex 1 1 0), поэтому полоса адаптируется под
-                  любую ширину и под любое окно зума. */}
-              <Box sx={{ mt: 2.5, pt: 2, borderTop: "1px solid rgba(23,28,143,0.08)", display: "flex", gap: 1, minWidth: 0 }}>
-                {dayGroups.groups.map((g) => (
-                  <Box
-                    key={g.dayKey}
-                    sx={{
-                      flex: "1 1 0",
-                      minWidth: 0,
-                      borderRadius: "14px",
-                      px: 1,
-                      pt: 1,
-                      pb: 0.75,
-                      bgcolor: g.isToday ? "rgba(90,103,216,0.09)" : "rgba(23,28,143,0.03)",
-                      border: `1px solid ${g.isToday ? "rgba(90,103,216,0.35)" : "rgba(23,28,143,0.07)"}`,
-                    }}
-                  >
-                    <Box sx={{ display: "flex", alignItems: "flex-end", gap: "2px", height: 34 }}>
-                      {g.hours.map((h) => (
-                        <Box
-                          key={h.key}
-                          title={`${h.label} — завершено ${h.count}`}
-                          sx={{
-                            flex: "1 1 0",
-                            minWidth: 1,
-                            borderRadius: "2px 2px 0 0",
-                            height: `${Math.max(6, (h.count / dayGroups.max) * 100)}%`,
-                            bgcolor: h.count > 0 ? "#5A67D8" : "rgba(23,28,143,0.13)",
-                            opacity: h.count > 0 ? 1 : 0.65,
-                          }}
-                        />
-                      ))}
-                    </Box>
-                    <Box sx={{ mt: 0.75, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden" }}>
-                      <Typography sx={{ fontSize: 13, fontWeight: 900, color: g.isToday ? "#5A67D8" : "#3B4257", lineHeight: 1.2 }}>
-                        {g.label}
-                      </Typography>
-                      <Typography sx={{ fontSize: 11, color: "text.secondary", lineHeight: 1.2 }}>
-                        {`${g.dayKey.slice(8)}.${g.month} · ${g.total}`}
-                      </Typography>
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
             </Box>
           </>
         )}

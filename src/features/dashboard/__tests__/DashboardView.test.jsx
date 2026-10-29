@@ -69,6 +69,12 @@ describe("DashboardView", () => {
     expect(text).toContain("По исполнителям · 2");
     // таймлайн
     expect(text).toContain("Завершено: 7 суток по часам");
+    // Временная ось сгруппирована штатными подписями ApexCharts: один нижний
+    // group-label на сутки; самодельной полосы мини-графиков под графиком нет.
+    const dayLabels = [...host.querySelectorAll(".apexcharts-xaxis-group-label")];
+    expect(dayLabels).toHaveLength(7);
+    expect(dayLabels.every((node) => /\d{2}\.\d{2}/.test(node.textContent))).toBe(true);
+    expect(host.querySelectorAll('[title*="— завершено"]').length).toBe(0);
     await act(async () => { root.unmount(); host.remove(); });
   });
 });
