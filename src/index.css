@@ -72,3 +72,6 @@ html, body, #root {
 html, body { overflow-x: hidden; }
 #root { overflow-x: hidden; }
 *, *::before, *::after { box-sizing: border-box; }
+
+/* Apex's second x-axis tspan is the thin spacer before the date/divider row. */
+.apexcharts-xaxis-label tspan:nth-child(2) { font-size: 4px; }

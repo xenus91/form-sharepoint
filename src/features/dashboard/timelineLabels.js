@@ -1,4 +1,6 @@
 const HOUR_MS = 60 * 60 * 1000;
+const DATE_LABEL_SPACER = "\u00a0";
+const DAY_SEPARATOR_MARK = "│";
 
 const pad = (value) => String(value).padStart(2, "0");
 
@@ -81,10 +83,20 @@ export function formatTimelineXLabel(value, timestamp, opts = {}) {
     && localDayKey(roundedTime) !== localDayKey(maxX - 1)
   ) return hourLabel;
 
+  const isExactMidnightTick = hasTickIndex
+    && Math.abs(time - roundedTime) < 1
+    && date.getHours() === 0
+    && date.getMinutes() === 0
+    && date.getSeconds() === 0
+    && date.getMilliseconds() === 0;
+  const hasVisibleDaySeparator = isExactMidnightTick
+    && Number.isFinite(minX)
+    && roundedTime > minX + 1;
+
   // During ApexCharts' layout measurement it calls the formatter without an
-  // index. Return two lines there too so the SVG reserves enough room below
-  // the hours before the chart is drawn.
-  if (!hasTickIndex) return [hourLabel, formatDay(roundedTime)];
+  // index. Return three lines, including a blank spacer, so the SVG reserves
+  // both the small gap and the date row before the chart is drawn.
+  if (!hasTickIndex) return [hourLabel, DATE_LABEL_SPACER, formatDay(roundedTime)];
 
   const dayKey = localDayKey(roundedTime);
   const dayTicks = ticks
@@ -114,7 +126,15 @@ export function formatTimelineXLabel(value, timestamp, opts = {}) {
     noonVisible ? noon : dayTicks[0].timestamp,
   );
 
-  if (dateAnchor?.tickIndex === index) return [hourLabel, formatDay(roundedTime)];
+  if (dateAnchor?.tickIndex === index) {
+    const dateLabel = formatDay(roundedTime);
+    return [
+      hourLabel,
+      DATE_LABEL_SPACER,
+      hasVisibleDaySeparator ? `${DAY_SEPARATOR_MARK} ${dateLabel}` : dateLabel,
+    ];
+  }
+  if (hasVisibleDaySeparator) return [hourLabel, DATE_LABEL_SPACER, DAY_SEPARATOR_MARK];
   return hourLabel;
 }
 

@@ -129,7 +129,7 @@ function Metric({
               {value}
             </Typography>
           </Box>
-          {overdueValue != null && (
+          {overdueValue > 0 && (
             <Box
               role="button"
               tabIndex={0}
@@ -380,6 +380,14 @@ export default function DashboardView({ office, onBack }) {
     const tl = summary.timeline;
     const firstTime = tl[0]?.timestamp;
     const endTime = (tl[tl.length - 1]?.timestamp ?? 0) + 3600000;
+    const dayBoundaryAnnotations = tl.slice(1)
+      .filter((point, index) => point.dayKey !== tl[index]?.dayKey)
+      .map((point) => ({
+        x: point.timestamp,
+        borderColor: "rgba(23,28,143,0.3)",
+        borderWidth: 1,
+        strokeDashArray: 0,
+      }));
 
     return {
       chartSeries: [{ name: "Завершено", data: tl.map((p) => ({ x: p.timestamp, y: p.count })) }],
@@ -425,6 +433,7 @@ export default function DashboardView({ office, onBack }) {
         fill: { type: "gradient", gradient: { shade: "light", type: "vertical", shadeIntensity: 0.2, opacityFrom: 1, opacityTo: 0.6, stops: [0, 100] } },
         colors: ["#5A67D8"],
         grid: { borderColor: "rgba(23,28,143,0.08)", strokeDashArray: 0, yaxis: { lines: { show: true } }, xaxis: { lines: { show: false } } },
+        annotations: { position: "back", xaxis: dayBoundaryAnnotations },
         xaxis: {
           type: "datetime",
           min: firstTime,
@@ -463,8 +472,9 @@ export default function DashboardView({ office, onBack }) {
               xaxis: {
                 tickAmount: 7,
                 labels: {
-                  minHeight: 48,
-                  maxHeight: 60,
+                  hideOverlappingLabels: false,
+                  minHeight: 60,
+                  maxHeight: 72,
                   style: { fontSize: "9px" },
                   formatter: (value, timestamp, opts) => formatTimelineXLabel(value, timestamp, opts),
                 },
@@ -545,7 +555,7 @@ export default function DashboardView({ office, onBack }) {
                     <Typography sx={{ fontSize: 15, fontWeight: 700, opacity: 0.92 }}>{h.title}</Typography>
                     <Box sx={{ display: "flex", alignItems: "baseline", gap: 2, mt: 1, flexWrap: "wrap" }}>
                       <Typography sx={{ fontSize: { xs: 46, md: 64 }, fontWeight: 900, lineHeight: 1 }}>{value}</Typography>
-                      {h.overdueKey && (
+                      {h.overdueKey && overdue > 0 && (
                         <Box sx={{ px: 1.5, py: 0.5, borderRadius: "999px", bgcolor: "rgba(255,255,255,0.24)", fontSize: 13, fontWeight: 800, whiteSpace: "nowrap" }}>
                           просрочено {overdue}
                         </Box>
@@ -703,7 +713,7 @@ export default function DashboardView({ office, onBack }) {
                 <Box key={m.key} sx={{ flex: "1 1 92px", minWidth: 92, textAlign: "center", borderRadius: "14px", pt: 1.5, pb: 1, bgcolor: "rgba(23,28,143,0.04)" }}>
                   <Box data-testid="dialog-metric-count-cluster" sx={{ minHeight: 32, display: "flex", alignItems: "flex-start", justifyContent: "center", gap: 0.5 }}>
                     <Typography sx={{ fontSize: 26, fontWeight: 900, lineHeight: 1.05, color: detail[m.key] > 0 ? m.color : "rgba(0,0,0,0.25)" }}>{detail[m.key]}</Typography>
-                    {m.overdueKey && (
+                    {m.overdueKey && detail[m.overdueKey] > 0 && (
                       <Box
                         component="span"
                         aria-label={`${m.overdueBreakdownTitle}: ${detail[m.overdueKey]}`}
