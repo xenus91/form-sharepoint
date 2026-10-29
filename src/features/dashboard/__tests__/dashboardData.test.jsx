@@ -113,6 +113,21 @@ describe("Сводка", () => {
     expect([rows[0].notStarted, rows[1].notStarted]).toEqual([2, 1]);
   });
 
+  it("строит разбивки названий по каждому статусу и для просрочки", () => {
+    const { rows } = summarizeTasks([
+      task({ id: 1, Title: "Брак упаковки", Status: "Не начата", DueDate: day(-1) }),
+      task({ id: 2, Title: "Брак упаковки", Status: "Не начата", DueDate: day(1) }),
+      task({ id: 3, Title: "Не работает терминал", Status: "В процессе выполнения", DueDate: day(-1) }),
+      task({ id: 4, Title: "Повреждена тара", Status: "Завершена", PercentComplete: 1, Modified: day(0) }),
+    ], { now: NOW });
+
+    expect(rows[0].notStartedCounts).toEqual({ "Брак упаковки": 2 });
+    expect(rows[0].notStartedOverdueCounts).toEqual({ "Брак упаковки": 1 });
+    expect(rows[0].inProgressCounts).toEqual({ "Не работает терминал": 1 });
+    expect(rows[0].inProgressOverdueCounts).toEqual({ "Не работает терминал": 1 });
+    expect(rows[0].completedTodayCounts).toEqual({ "Повреждена тара": 1 });
+  });
+
   it("таймлайн почасовой: 7 суток × 24, считает только завершённые", () => {
     const { timeline, days } = summarizeTasks([
       task({ id: 1, Status: "Завершена", PercentComplete: 1, Modified: at(-2 * HOUR) }),

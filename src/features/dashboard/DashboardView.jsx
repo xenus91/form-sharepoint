@@ -2,13 +2,15 @@
 // Сводный дашборд: плитки статусов, лента карточек исполнителей (3 в ряд,
 // скролл колесом и перетаскиванием) и почасовой таймлайн на ApexCharts.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PropTypes from "prop-types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import CircularProgress from "@mui/material/CircularProgress";
 import Button from "@mui/material/Button";
 import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
+import Popover from "@mui/material/Popover";
 import IconButton from "@mui/material/IconButton";
 import CloseRoundedIcon from "@mui/icons-material/CloseRounded";
 import RefreshRoundedIcon from "@mui/icons-material/RefreshRounded";
@@ -28,51 +30,254 @@ const CARD_SX = {
 
 const HEROES = [
   { key: "notStarted", title: "Не начато", overdueKey: "notStartedOverdue", Icon: PendingActionsRoundedIcon, grad: "linear-gradient(135deg,#8E97FF 0%,#5A67D8 100%)" },
-  { key: "inProgress", title: "В работе", overdueKey: "inProgressOverdue", Icon: PlayCircleOutlineRoundedIcon, grad: "linear-gradient(135deg,#2FD3B0 0%,#0E9C86 100%)" },
-  { key: "completedToday", title: "Завершено сегодня", overdueKey: null, Icon: TaskAltRoundedIcon, grad: "linear-gradient(135deg,#FFC46B 0%,#F57C00 100%)" },
+  { key: "inProgress", title: "В работе", overdueKey: "inProgressOverdue", Icon: PlayCircleOutlineRoundedIcon, grad: "linear-gradient(135deg,#FFC46B 0%,#F57C00 100%)" },
+  { key: "completedToday", title: "Завершено сегодня", overdueKey: null, Icon: TaskAltRoundedIcon, grad: "linear-gradient(135deg,#2FD3B0 0%,#0E9C86 100%)" },
 ];
 
 const METRICS = [
-  { key: "notStarted", label: "Не начато", color: "#5A67D8" },
-  { key: "notStartedOverdue", label: "Просрочено", color: "#E53935" },
-  { key: "inProgress", label: "В работе", color: "#0E9C86" },
-  { key: "inProgressOverdue", label: "Просрочено", color: "#E53935" },
-  { key: "completedToday", label: "За сегодня", color: "#F57C00" },
+  {
+    key: "notStarted",
+    label: "Не начато",
+    countsKey: "notStartedCounts",
+    overdueKey: "notStartedOverdue",
+    overdueCountsKey: "notStartedOverdueCounts",
+    overdueBreakdownTitle: "Просрочено · не начато",
+    color: "#5A67D8",
+  },
+  {
+    key: "inProgress",
+    label: "В работе",
+    countsKey: "inProgressCounts",
+    overdueKey: "inProgressOverdue",
+    overdueCountsKey: "inProgressOverdueCounts",
+    overdueBreakdownTitle: "Просрочено · в работе",
+    color: "#F57C00",
+  },
+  { key: "completedToday", label: "Завершено", countsKey: "completedTodayCounts", color: "#0E9C86" },
 ];
 
-function Metric({ label, value, color }) {
+const HOUR_MS = 3600000;
+const DAY_MS = 86400000;
+
+function formatTimelineXLabel(value, timestamp, opts, compact = false) {
+  const time = Number(timestamp ?? value);
+  if (!Number.isFinite(time)) return "";
+  const rawDate = new Date(time);
+  if (Number.isNaN(rawDate.getTime())) return "";
+  const hourFloor = new Date(rawDate);
+  hourFloor.setMinutes(0, 0, 0);
+  const hourStart = hourFloor.getTime();
+  const roundedTime = time - hourStart <= HOUR_MS / 2 ? hourStart : hourStart + HOUR_MS;
+  const d = new Date(roundedTime);
+  const globals = opts?.w?.globals || {};
+  const span = Number(globals.maxX) - Number(globals.minX);
+  const tickAmount = Number(globals.xTickAmount);
+  const tickInterval = Number.isFinite(span) && tickAmount > 0 ? span / tickAmount : HOUR_MS;
+  // Datetime ticks can fall between whole hours after interactive zoom. Keep
+  // only ticks near an hour boundary and label that hour.
+  if (Math.abs(time - roundedTime) > Math.min(HOUR_MS / 2, tickInterval * 0.49)) return "";
+  const stepHours = compact
+    ? span > 5 * DAY_MS ? 24 : span > 2 * DAY_MS ? 6 : 1
+    : span > 5 * DAY_MS ? 6 : span > 2 * DAY_MS ? 3 : 1;
+  if (d.getHours() % stepHours !== 0) return "";
+  const hour = `${String(d.getHours()).padStart(2, "0")}:00`;
+  const dateHour = compact && span > 5 * DAY_MS ? 0 : 12;
+  if (d.getHours() === dateHour) {
+    return [hour, `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`];
+  }
+  return hour;
+}
+
+function Metric({
+  label,
+  ariaLabel = label,
+  value,
+  color,
+  onClick,
+  overdueValue,
+  overdueAriaLabel = "Просрочено",
+  onOverdueClick,
+}) {
+  const handleKeyDown = (handler) => (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handler?.(event);
+    }
+  };
+
   return (
-    <Box sx={{ flex: "1 1 0", minWidth: 0, textAlign: "center", whiteSpace: "nowrap" }}>
-      <Typography sx={{ fontSize: 28, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
-        {value}
-      </Typography>
-      <Typography variant="caption" sx={{ color: "text.secondary", display: "block", fontSize: 12 }}>{label}</Typography>
+    <Box sx={{ flex: "1 1 64px", minWidth: 64, minHeight: 60, position: "relative" }}>
+      <Box
+        role="button"
+        tabIndex={0}
+        aria-label={`${ariaLabel}: ${value}; показать разбивку по названиям`}
+        onClick={onClick}
+        onKeyDown={handleKeyDown(onClick)}
+        sx={{
+          width: "100%",
+          textAlign: "center",
+          whiteSpace: "nowrap",
+          borderRadius: "12px",
+          pt: 1.5,
+          pb: 0.5,
+          cursor: "pointer",
+          transition: "background-color .15s, transform .15s",
+          "&:hover": { bgcolor: "rgba(90,103,216,0.07)", transform: "translateY(-1px)" },
+          "&:focus-visible": { outline: "2px solid #5A67D8", outlineOffset: 1 },
+        }}
+      >
+        <Typography sx={{ fontSize: 28, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
+          {value}
+        </Typography>
+        <Typography variant="caption" sx={{ color: "text.secondary", display: "block", fontSize: 12 }}>{label}</Typography>
+      </Box>
+      {overdueValue != null && (
+        <Box
+          role="button"
+          tabIndex={0}
+          aria-label={`${overdueAriaLabel}: ${overdueValue}; показать разбивку по названиям`}
+          onClick={onOverdueClick}
+          onKeyDown={handleKeyDown(onOverdueClick)}
+          sx={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            minWidth: 22,
+            height: 18,
+            px: 0.5,
+            borderRadius: "999px",
+            bgcolor: overdueValue > 0 ? "#FDE8E7" : "rgba(0,0,0,0.06)",
+            color: overdueValue > 0 ? "#C62828" : "#8A8F9C",
+            border: overdueValue > 0 ? "1px solid rgba(229,57,53,0.18)" : "1px solid transparent",
+            fontSize: 11,
+            fontWeight: 900,
+            lineHeight: "16px",
+            textAlign: "center",
+            cursor: "pointer",
+            "&:hover": { bgcolor: "#FAD7D5" },
+            "&:focus-visible": { outline: "2px solid #E53935", outlineOffset: 1 },
+          }}
+        >
+          {overdueValue}
+        </Box>
+      )}
     </Box>
   );
 }
+
+Metric.propTypes = {
+  label: PropTypes.string.isRequired,
+  ariaLabel: PropTypes.string,
+  value: PropTypes.number.isRequired,
+  color: PropTypes.string,
+  onClick: PropTypes.func,
+  overdueValue: PropTypes.number,
+  overdueAriaLabel: PropTypes.string,
+  onOverdueClick: PropTypes.func,
+};
+
+function TaskTitleBreakdown({ counts, emptyMessage = "Задач нет." }) {
+  const entries = Object.entries(counts || {})
+    .filter(([, count]) => Number(count) > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "ru"));
+  if (!entries.length) {
+    return <Typography sx={{ px: 0.5, py: 1, color: "text.secondary", fontSize: 13 }}>{emptyMessage}</Typography>;
+  }
+  return (
+    <Box sx={{ display: "grid", gap: 0.75, maxHeight: 310, overflowY: "auto", pr: 0.5 }}>
+      {entries.map(([title, count]) => (
+        <Box key={title} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, px: 1.25, py: 0.9, borderRadius: "12px", bgcolor: "#F6F7FC" }}>
+          <Typography sx={{ minWidth: 0, fontSize: 13, fontWeight: 650, color: "#27304A", overflowWrap: "anywhere" }}>{title}</Typography>
+          <Box sx={{ flex: "0 0 auto", minWidth: 30, px: 1, py: 0.25, borderRadius: "999px", bgcolor: "rgba(90,103,216,0.12)", color: "#4653C4", textAlign: "center", fontSize: 13, fontWeight: 900 }}>{count}</Box>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
+TaskTitleBreakdown.propTypes = {
+  counts: PropTypes.object,
+  emptyMessage: PropTypes.string,
+};
 
 /** Сводка по названиям: «• Брак упаковки — 3», по убыванию количества. */
 function TitleSummary({ row }) {
   const lines = (obj) => Object.entries(obj || {})
     .sort((a, b) => b[1] - a[1])
-    .map(([k, n]) => <Box key={k}>• {k} — {n}</Box>);
-  const hasO = Object.keys(row.openCounts || {}).length > 0;
-  const hasD = Object.keys(row.doneCounts || {}).length > 0;
-  if (!hasO && !hasD) return row.title;
+    .map(([title, count]) => <Box key={title}>• {title} — {count}</Box>);
+  const hasOpen = Object.keys(row.openCounts || {}).length > 0;
+  const hasDone = Object.keys(row.doneCounts || {}).length > 0;
+  if (!hasOpen && !hasDone) return row.title;
   return (
     <Box sx={{ fontSize: 12, maxWidth: 380 }}>
-      {hasO ? <><Box sx={{ fontWeight: 800, mb: 0.5 }}>Открытые:</Box>{lines(row.openCounts)}</> : null}
-      {hasD ? <><Box sx={{ fontWeight: 800, mt: 1, mb: 0.5 }}>Завершённые:</Box>{lines(row.doneCounts)}</> : null}
+      {hasOpen ? <><Box sx={{ fontWeight: 800, mb: 0.5 }}>Открытые:</Box>{lines(row.openCounts)}</> : null}
+      {hasDone ? <><Box sx={{ fontWeight: 800, mt: 1, mb: 0.5 }}>Завершённые:</Box>{lines(row.doneCounts)}</> : null}
     </Box>
   );
 }
+
+TitleSummary.propTypes = {
+  row: PropTypes.shape({
+    title: PropTypes.string,
+    openCounts: PropTypes.object,
+    doneCounts: PropTypes.object,
+  }).isRequired,
+};
+
+function TaskBreakdownPopover({ breakdown, onClose }) {
+  const category = breakdown?.metric?.breakdownTitle || breakdown?.metric?.label || "Задачи";
+  return (
+    <Popover
+      open={Boolean(breakdown)}
+      anchorEl={breakdown?.anchorEl || null}
+      onClose={onClose}
+      anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      transformOrigin={{ vertical: "top", horizontal: "center" }}
+      PaperProps={{ sx: { borderRadius: "18px", boxShadow: "0 18px 54px rgba(23,28,143,0.2)", border: "1px solid rgba(23,28,143,0.08)" } }}
+    >
+      {breakdown && (
+        <Box sx={{ width: { xs: "calc(100vw - 32px)", sm: 360 }, maxWidth: 380, maxHeight: "min(70vh, 480px)", overflowY: "auto", p: 2 }}>
+          <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1, mb: 1.5 }}>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography sx={{ color: "#69718A", fontSize: 10, fontWeight: 900, letterSpacing: 0.7, textTransform: "uppercase" }}>
+                Разбивка · {category}
+              </Typography>
+              <Typography sx={{ color: "#171C8F", fontSize: 17, fontWeight: 900, overflowWrap: "anywhere" }}>
+                {breakdown.row.title}
+              </Typography>
+            </Box>
+            <IconButton onClick={onClose} size="small" aria-label="Закрыть разбивку"><CloseRoundedIcon fontSize="small" /></IconButton>
+          </Box>
+          <TaskTitleBreakdown
+            counts={breakdown.row[breakdown.metric.countsKey]}
+            emptyMessage={`Нет задач в категории «${category.toLowerCase()}».`}
+          />
+        </Box>
+      )}
+    </Popover>
+  );
+}
+
+TaskBreakdownPopover.propTypes = {
+  breakdown: PropTypes.shape({
+    anchorEl: PropTypes.object,
+    row: PropTypes.object.isRequired,
+    metric: PropTypes.shape({
+      label: PropTypes.string,
+      breakdownTitle: PropTypes.string,
+      countsKey: PropTypes.string.isRequired,
+    }).isRequired,
+  }),
+  onClose: PropTypes.func.isRequired,
+};
 
 export default function DashboardView({ office, onBack }) {
   const [state, setState] = useState({ loading: true, error: null, meta: null, tasks: [] });
   const [tick, setTick] = useState(0);
   const railRef = useRef(null);
   const [detail, setDetail] = useState(null);
-  const dragRef = useRef({ active: false, x: 0, left: 0, moved: false });
+  const [breakdown, setBreakdown] = useState(null);
+  const dragRef = useRef({ active: false, x: 0, left: 0, moved: false, captureTarget: null, captured: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -109,58 +314,68 @@ export default function DashboardView({ office, onBack }) {
   // Прокрутка ленты нажатием и перетаскиванием.
   const onPointerDown = (e) => {
     const el = railRef.current;
-    if (!el) return;
-    dragRef.current = { active: true, x: e.clientX, left: el.scrollLeft, moved: false };
-    el.setPointerCapture?.(e.pointerId);
+    if (!el || (e.pointerType === "mouse" && e.button !== 0)) return;
+    // Do not capture on pointerdown: a normal click must keep its original
+    // target so card/count click handlers can open their detail/popover.
+    const target = e.target?.closest?.('[role="button"]') || el;
+    dragRef.current = {
+      active: true,
+      x: e.clientX,
+      left: el.scrollLeft,
+      moved: false,
+      captureTarget: target,
+      captured: false,
+    };
   };
   const onPointerMove = (e) => {
     const d = dragRef.current;
     const el = railRef.current;
     if (!d.active || !el) return;
     const dx = e.clientX - d.x;
-    if (Math.abs(dx) > 4) d.moved = true;
-    el.scrollLeft = d.left - dx;
+    if (Math.abs(dx) > 4) {
+      d.moved = true;
+      if (!d.captured) {
+        try {
+          d.captureTarget?.setPointerCapture?.(e.pointerId);
+          d.captured = true;
+        } catch {
+          // Browsers without Pointer Capture still scroll while the pointer is over the rail.
+        }
+      }
+      e.preventDefault();
+      el.scrollLeft = d.left - dx;
+    }
   };
   const onPointerUp = (e) => {
-    const el = railRef.current;
-    el?.releasePointerCapture?.(e.pointerId);
-    dragRef.current.active = false;
+    const d = dragRef.current;
+    try {
+      if (d.captured && d.captureTarget?.hasPointerCapture?.(e.pointerId)) {
+        d.captureTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Pointer may already have been released by the browser.
+    }
+    d.active = false;
+  };
+
+  const openBreakdown = (event, row, metric) => {
+    event.stopPropagation();
+    if (dragRef.current.moved) {
+      dragRef.current.moved = false;
+      event.preventDefault?.();
+      return;
+    }
+    setBreakdown({ anchorEl: event.currentTarget, row, metric });
   };
 
   // ---- ApexCharts: почасовой роллинг-таймлайн ----
   const { chartOptions, chartSeries } = useMemo(() => {
     const tl = summary.timeline;
-    const cats = tl.map((p) => `${p.dayKey} ${p.label}`);
-    const dayGroups = [];
-    for (const p of tl) {
-      let group = dayGroups[dayGroups.length - 1];
-      if (!group || group.dayKey !== p.dayKey) {
-        const date = `${String(p.day).padStart(2, "0")}.${p.dayKey.slice(5, 7)}`;
-        group = {
-          dayKey: p.dayKey,
-          title: `${p.dayLabel} · ${date}`,
-          compactTitle: date,
-          cols: 0,
-        };
-        dayGroups.push(group);
-      }
-      group.cols += 1;
-    }
-
-    // Тонкие вертикальные разделители совпадают с границами групп-подписей.
-    const dayBounds = [];
-    tl.forEach((p, i) => {
-      if (p.hour === 0 && i > 0) {
-        dayBounds.push({
-          x: cats[i],
-          borderColor: "rgba(90,103,216,0.48)",
-          strokeDashArray: 4,
-        });
-      }
-    });
+    const firstTime = tl[0]?.timestamp;
+    const endTime = (tl[tl.length - 1]?.timestamp ?? 0) + 3600000;
 
     return {
-      chartSeries: [{ name: "Завершено", data: tl.map((p) => p.count) }],
+      chartSeries: [{ name: "Завершено", data: tl.map((p) => ({ x: p.timestamp, y: p.count })) }],
       chartOptions: {
         chart: {
           type: "bar",
@@ -173,8 +388,6 @@ export default function DashboardView({ office, onBack }) {
             autoSelected: "zoom",
             tools: {
               download: false,
-              // Режим selection — это выделение, а не зум; оставляем только
-              // однозначный zoom-инструмент, чтобы drag сразу приближал график.
               selection: false,
               zoom: true,
               zoomin: true,
@@ -183,8 +396,8 @@ export default function DashboardView({ office, onBack }) {
               reset: true,
             },
           },
-          // Поведение как у ApexCharts timeline: перетаскивание по X — зум,
-          // колесо/тачпад — приближение у курсора, pinch — на сенсорных экранах.
+          // Реальная datetime-ось как в ApexCharts timeline demo: drag, колесо,
+          // pinch и zoom-кнопки работают на непрерывном временном диапазоне.
           zoom: {
             enabled: true,
             type: "x",
@@ -206,57 +419,46 @@ export default function DashboardView({ office, onBack }) {
         colors: ["#5A67D8"],
         grid: { borderColor: "rgba(23,28,143,0.08)", strokeDashArray: 0, yaxis: { lines: { show: true } }, xaxis: { lines: { show: false } } },
         xaxis: {
-          type: "category",
-          categories: cats,
-          // Нативные групповые подписи ApexCharts: часы остаются первым рядом,
-          // дата каждого дня — вторым, под своим блоком из 24 часов.
-          group: {
-            groups: dayGroups.map(({ title, cols }) => ({ title, cols })),
-            style: {
-              colors: "#343B55",
-              fontSize: "12px",
-              fontWeight: 800,
-              cssClass: "dashboard-day-group-label",
-            },
-          },
+          type: "datetime",
+          min: firstTime,
+          max: endTime,
+          tickAmount: 28,
           labels: {
             rotate: 0,
             hideOverlappingLabels: true,
+            datetimeUTC: false,
             style: { fontSize: "11px", colors: "#7A8194" },
-            formatter: (value) => {
-              const hour = String(value).match(/(?:T|\s)(\d{2}):00$/)?.[1];
-              return hour && ["00", "06", "12", "18"].includes(hour)
-                ? `${hour}:00`
-                : "";
-            },
+            formatter: (value, timestamp, opts) => formatTimelineXLabel(value, timestamp, opts),
           },
           axisBorder: { show: true, color: "rgba(23,28,143,0.12)" },
           axisTicks: { show: false },
         },
         yaxis: { allowDecimals: false, labels: { style: { fontSize: "11px", colors: "#7A8194" } } },
-        annotations: { xaxis: dayBounds },
         tooltip: {
           y: { title: { formatter: () => "Завершено" } },
-          x: { formatter: (val) => String(val).replace("_", " ").slice(0, 16) },
-        },
-        // На узких экранах дата короче, чтобы семь групп не слипались.
-        responsive: [{
-          breakpoint: 700,
-          options: {
-            xaxis: {
-              group: {
-                groups: dayGroups.map(({ compactTitle, cols }) => ({ title: compactTitle, cols })),
-                style: {
-                  colors: "#343B55",
-                  fontSize: "10px",
-                  fontWeight: 800,
-                  cssClass: "dashboard-day-group-label",
-                },
-              },
-              labels: { style: { fontSize: "9px" } },
+          x: {
+            formatter: (value) => {
+              const time = Number(value);
+              if (!Number.isFinite(time)) return String(value).replace("T", " ").slice(0, 16);
+              const d = new Date(time);
+              return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:00`;
             },
           },
-        }],
+        },
+        responsive: [
+          {
+            breakpoint: 700,
+            options: {
+              xaxis: {
+                tickAmount: 7,
+                labels: {
+                  style: { fontSize: "9px" },
+                  formatter: (value, timestamp, opts) => formatTimelineXLabel(value, timestamp, opts, true),
+                },
+              },
+            },
+          },
+        ],
       },
     };
   }, [summary.timeline]);
@@ -368,7 +570,14 @@ export default function DashboardView({ office, onBack }) {
                   return (
                     <Box
                       key={row.key}
-                      onClick={() => setDetail(row)}
+                      onClick={(event) => {
+                        if (dragRef.current.moved) {
+                          dragRef.current.moved = false;
+                          event.preventDefault();
+                          return;
+                        }
+                        setDetail(row);
+                      }}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDetail(row); }}
@@ -386,12 +595,38 @@ export default function DashboardView({ office, onBack }) {
                     >
                         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 2 }}>
                           <Typography sx={{ fontWeight: 900, fontSize: 17, color: "#1A1F36" }} noWrap>{row.title}</Typography>
-                          <Box sx={{ px: 1.25, py: 0.4, borderRadius: "999px", bgcolor: "rgba(90,103,216,0.1)", color: "#5A67D8", fontSize: 13, fontWeight: 900, whiteSpace: "nowrap" }}>
+                          <Box
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Открытые задачи: ${open}; показать разбивку по названиям`}
+                            onClick={(event) => openBreakdown(event, row, { label: "Открытые", countsKey: "openCounts", color: "#5A67D8" })}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                openBreakdown(event, row, { label: "Открытые", countsKey: "openCounts", color: "#5A67D8" });
+                              }
+                            }}
+                            sx={{ px: 1.25, py: 0.4, borderRadius: "999px", bgcolor: "rgba(90,103,216,0.1)", color: "#5A67D8", fontSize: 13, fontWeight: 900, whiteSpace: "nowrap", cursor: "pointer", "&:hover": { bgcolor: "rgba(90,103,216,0.17)" } }}
+                          >
                             открыто {open}
                           </Box>
                         </Box>
-                        <Box sx={{ display: "flex", flexWrap: "nowrap", gap: 0.5 }}>
-                          {METRICS.map((m) => <Metric key={m.key} label={m.label} value={row[m.key]} color={m.color} />)}
+                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                          {METRICS.map((m) => (
+                            <Metric
+                              key={m.key}
+                              label={m.label}
+                              ariaLabel={m.label}
+                              value={row[m.key]}
+                              color={m.color}
+                              onClick={(event) => openBreakdown(event, row, m)}
+                              overdueValue={m.overdueKey ? row[m.overdueKey] : undefined}
+                              overdueAriaLabel={m.overdueBreakdownTitle}
+                              onOverdueClick={m.overdueKey
+                                ? (event) => openBreakdown(event, row, { label: m.overdueBreakdownTitle, countsKey: m.overdueCountsKey })
+                                : undefined}
+                            />
+                          ))}
                         </Box>
                       </Box>
                   );
@@ -414,7 +649,10 @@ export default function DashboardView({ office, onBack }) {
         )}
       </Box>
 
-      {/* Сводка по названиям задач — карточка по клику, а не тултип */}
+      {/* Разбивка открывается прямо от нажатого числа, а не hover-tooltip. */}
+      <TaskBreakdownPopover breakdown={breakdown} onClose={() => setBreakdown(null)} />
+
+      {/* Полная сводка исполнителя по нажатию на карточку. */}
       <Dialog open={!!detail} onClose={() => setDetail(null)} maxWidth="sm" fullWidth
         PaperProps={{ sx: { borderRadius: "22px", p: 0.5 } }}>
         {detail && (
@@ -428,7 +666,29 @@ export default function DashboardView({ office, onBack }) {
             </Box>
             <Box sx={{ display: "flex", gap: 1, mb: 2.5, flexWrap: "wrap" }}>
               {METRICS.map((m) => (
-                <Box key={m.key} sx={{ flex: "1 1 92px", minWidth: 92, textAlign: "center", borderRadius: "14px", py: 1, bgcolor: "rgba(23,28,143,0.04)" }}>
+                <Box key={m.key} sx={{ flex: "1 1 92px", minWidth: 92, position: "relative", textAlign: "center", borderRadius: "14px", pt: 1.5, pb: 1, bgcolor: "rgba(23,28,143,0.04)" }}>
+                  {m.overdueKey && (
+                    <Box
+                      component="span"
+                      aria-label={`${m.overdueBreakdownTitle}: ${detail[m.overdueKey]}`}
+                      sx={{
+                        position: "absolute",
+                        top: 3,
+                        right: 5,
+                        minWidth: 22,
+                        height: 18,
+                        px: 0.5,
+                        borderRadius: "999px",
+                        bgcolor: detail[m.overdueKey] > 0 ? "#FDE8E7" : "rgba(0,0,0,0.06)",
+                        color: detail[m.overdueKey] > 0 ? "#C62828" : "#8A8F9C",
+                        fontSize: 11,
+                        fontWeight: 900,
+                        lineHeight: "18px",
+                      }}
+                    >
+                      {detail[m.overdueKey]}
+                    </Box>
+                  )}
                   <Typography sx={{ fontSize: 26, fontWeight: 900, color: detail[m.key] > 0 ? m.color : "rgba(0,0,0,0.25)" }}>{detail[m.key]}</Typography>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>{m.label}</Typography>
                 </Box>
@@ -441,3 +701,8 @@ export default function DashboardView({ office, onBack }) {
     </Box>
   );
 }
+
+DashboardView.propTypes = {
+  office: PropTypes.string,
+  onBack: PropTypes.func,
+};

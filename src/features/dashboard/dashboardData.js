@@ -93,6 +93,9 @@ export function summarizeTasks(tasks, opts = {}) {
         inProgress: 0, inProgressOverdue: 0,
         completedToday: 0,
         openCounts: {}, doneCounts: {},
+        notStartedCounts: {}, notStartedOverdueCounts: {},
+        inProgressCounts: {}, inProgressOverdueCounts: {},
+        completedTodayCounts: {},
       };
       byAssignee.set(key, row);
     }
@@ -106,18 +109,29 @@ export function summarizeTasks(tasks, opts = {}) {
       const m = t?.Modified ? new Date(t.Modified) : null;
       if (m && `${m.getFullYear()}-${pad(m.getMonth() + 1)}-${pad(m.getDate())}` === todayKey) {
         row.completedToday += 1;
+        row.completedTodayCounts[taskTitle] = (row.completedTodayCounts[taskTitle] || 0) + 1;
         totals.completedToday += 1;
       }
     } else if (isInProgressStatus(t?.Status)) {
       row.openCounts[taskTitle] = (row.openCounts[taskTitle] || 0) + 1;
+      row.inProgressCounts[taskTitle] = (row.inProgressCounts[taskTitle] || 0) + 1;
       row.inProgress += 1;
       totals.inProgress += 1;
-      if (overdue) { row.inProgressOverdue += 1; totals.inProgressOverdue += 1; }
+      if (overdue) {
+        row.inProgressOverdueCounts[taskTitle] = (row.inProgressOverdueCounts[taskTitle] || 0) + 1;
+        row.inProgressOverdue += 1;
+        totals.inProgressOverdue += 1;
+      }
     } else if (isNotStartedStatus(t?.Status) || !t?.Status) {
       row.openCounts[taskTitle] = (row.openCounts[taskTitle] || 0) + 1;
+      row.notStartedCounts[taskTitle] = (row.notStartedCounts[taskTitle] || 0) + 1;
       row.notStarted += 1;
       totals.notStarted += 1;
-      if (overdue) { row.notStartedOverdue += 1; totals.notStartedOverdue += 1; }
+      if (overdue) {
+        row.notStartedOverdueCounts[taskTitle] = (row.notStartedOverdueCounts[taskTitle] || 0) + 1;
+        row.notStartedOverdue += 1;
+        totals.notStartedOverdue += 1;
+      }
     }
   }
 
@@ -137,6 +151,7 @@ export function summarizeTasks(tasks, opts = {}) {
     const d = new Date(startHour.getTime() + i * 3600000);
     timeline.push({
       key: hourKey(d),
+      timestamp: d.getTime(),
       hour: d.getHours(),
       label: `${pad(d.getHours())}:00`,
       dayLabel: DAY_LABELS[d.getDay()],
