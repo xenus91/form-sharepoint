@@ -89,6 +89,11 @@ describe("DashboardView", () => {
     expect(completedCount).not.toBeNull();
     expect(notStartedOverdue).not.toBeNull();
     expect(inProgressOverdue).not.toBeNull();
+    const notStartedCluster = notStartedCount.closest('[data-testid="metric-count-cluster"]');
+    const inProgressCluster = inProgressCount.closest('[data-testid="metric-count-cluster"]');
+    expect(notStartedCluster).not.toBeNull();
+    expect(notStartedOverdue.closest('[data-testid="metric-count-cluster"]')).toBe(notStartedCluster);
+    expect(inProgressOverdue.closest('[data-testid="metric-count-cluster"]')).toBe(inProgressCluster);
     await act(async () => {
       notStartedCount.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 10 }));
       notStartedCount.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0, clientX: 10 }));
@@ -127,8 +132,13 @@ describe("DashboardView", () => {
       executorCard.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((r) => setTimeout(r, 60));
     });
-    expect(document.body.querySelector(".MuiDialog-root")).not.toBeNull();
-    expect(document.body.querySelector(".MuiDialog-root").textContent).toContain("Брак упаковки");
+    const executorDialog = document.body.querySelector(".MuiDialog-root");
+    expect(executorDialog).not.toBeNull();
+    expect(executorDialog.textContent).toContain("Брак упаковки");
+    const dialogOverdueBadge = executorDialog.querySelector('[aria-label="Просрочено · не начато: 1"]');
+    const dialogCountCluster = dialogOverdueBadge?.closest('[data-testid="dialog-metric-count-cluster"]');
+    expect(dialogCountCluster).not.toBeNull();
+    expect(dialogCountCluster.querySelector(".MuiTypography-root").textContent).toBe("1");
     await act(async () => { root.unmount(); host.remove(); });
   });
 });

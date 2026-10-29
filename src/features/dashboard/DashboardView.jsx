@@ -18,6 +18,7 @@ import PendingActionsRoundedIcon from "@mui/icons-material/PendingActionsRounded
 import PlayCircleOutlineRoundedIcon from "@mui/icons-material/PlayCircleOutlineRounded";
 import TaskAltRoundedIcon from "@mui/icons-material/TaskAltRounded";
 import Chart from "react-apexcharts";
+import { keyframes } from "@mui/system";
 import { fetchDashboardData, summarizeTasks, ROLLING_DAYS } from "./dashboardData";
 import { formatTimelineXLabel } from "./timelineLabels";
 
@@ -27,6 +28,25 @@ const CARD_SX = {
   bgcolor: "#fff",
   boxShadow: "0 6px 28px rgba(23,28,143,0.09)",
   border: "1px solid rgba(23,28,143,0.07)",
+};
+
+const dashboardRiseIn = keyframes`
+  from { opacity: 0; translate: 0 12px; }
+  to { opacity: 1; translate: 0 0; }
+`;
+
+const overdueBadgePopIn = keyframes`
+  0% { opacity: 0; scale: 0.72; translate: 4px -2px; }
+  72% { opacity: 1; scale: 1.08; translate: -1px 0; }
+  100% { opacity: 1; scale: 1; translate: 0 0; }
+`;
+
+const REDUCED_MOTION_SX = {
+  "@media (prefers-reduced-motion: reduce)": {
+    animation: "none !important",
+    transition: "none !important",
+    "&:hover": { transform: "none" },
+  },
 };
 
 const HEROES = [
@@ -74,63 +94,80 @@ function Metric({
       handler?.(event);
     }
   };
+  const digits = String(value).length;
+  const valueFontSize = digits >= 4
+    ? { xs: 18, sm: 24 }
+    : digits === 3
+      ? { xs: 20, sm: 26 }
+      : { xs: 22, sm: 28 };
 
   return (
-    <Box sx={{ flex: "1 1 64px", minWidth: 64, minHeight: 60, position: "relative" }}>
-      <Box
-        role="button"
-        tabIndex={0}
-        aria-label={`${ariaLabel}: ${value}; показать разбивку по названиям`}
-        onClick={onClick}
-        onKeyDown={handleKeyDown(onClick)}
-        sx={{
-          width: "100%",
-          textAlign: "center",
-          whiteSpace: "nowrap",
-          borderRadius: "12px",
-          pt: 1.5,
-          pb: 0.5,
-          cursor: "pointer",
-          transition: "background-color .15s, transform .15s",
-          "&:hover": { bgcolor: "rgba(90,103,216,0.07)", transform: "translateY(-1px)" },
-          "&:focus-visible": { outline: "2px solid #5A67D8", outlineOffset: 1 },
-        }}
-      >
-        <Typography sx={{ fontSize: 28, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
-          {value}
-        </Typography>
-        <Typography variant="caption" sx={{ color: "text.secondary", display: "block", fontSize: 12 }}>{label}</Typography>
-      </Box>
-      {overdueValue != null && (
-        <Box
-          role="button"
-          tabIndex={0}
-          aria-label={`${overdueAriaLabel}: ${overdueValue}; показать разбивку по названиям`}
-          onClick={onOverdueClick}
-          onKeyDown={handleKeyDown(onOverdueClick)}
-          sx={{
-            position: "absolute",
-            top: 0,
-            right: 0,
-            minWidth: 22,
-            height: 18,
-            px: 0.5,
-            borderRadius: "999px",
-            bgcolor: overdueValue > 0 ? "#FDE8E7" : "rgba(0,0,0,0.06)",
-            color: overdueValue > 0 ? "#C62828" : "#8A8F9C",
-            border: overdueValue > 0 ? "1px solid rgba(229,57,53,0.18)" : "1px solid transparent",
-            fontSize: 11,
-            fontWeight: 900,
-            lineHeight: "16px",
-            textAlign: "center",
-            cursor: "pointer",
-            "&:hover": { bgcolor: "#FAD7D5" },
-            "&:focus-visible": { outline: "2px solid #E53935", outlineOffset: 1 },
-          }}
-        >
-          {overdueValue}
+    <Box sx={{ flex: "1 1 64px", minWidth: 64, minHeight: 60, display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <Box sx={{ width: "100%", minHeight: 34, display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
+        <Box data-testid="metric-count-cluster" sx={{ position: "relative", display: "inline-flex", alignItems: "flex-start", justifyContent: "center" }}>
+          <Box
+            role="button"
+            tabIndex={0}
+            aria-label={`${ariaLabel}: ${value}; показать разбивку по названиям`}
+            onClick={onClick}
+            onKeyDown={handleKeyDown(onClick)}
+            sx={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              px: 0.25,
+              borderRadius: "10px",
+              cursor: "pointer",
+              transition: "background-color 180ms ease, transform 220ms cubic-bezier(.2,.8,.2,1)",
+              "&:hover": { bgcolor: "rgba(90,103,216,0.08)", transform: "translateY(-1px) scale(1.035)" },
+              "&:active": { transform: "translateY(0) scale(.97)" },
+              "&:focus-visible": { outline: "2px solid #5A67D8", outlineOffset: 1 },
+              ...REDUCED_MOTION_SX,
+            }}
+          >
+            <Typography sx={{ fontSize: valueFontSize, fontWeight: 800, lineHeight: 1.05, color: value > 0 ? color : "rgba(0,0,0,0.22)" }}>
+              {value}
+            </Typography>
+          </Box>
+          {overdueValue != null && (
+            <Box
+              role="button"
+              tabIndex={0}
+              aria-label={`${overdueAriaLabel}: ${overdueValue}; показать разбивку по названиям`}
+              onClick={onOverdueClick}
+              onKeyDown={handleKeyDown(onOverdueClick)}
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: "calc(100% + 4px)",
+                zIndex: 1,
+                boxSizing: "border-box",
+                minWidth: 24,
+                height: 18,
+                px: 0.25,
+                borderRadius: "999px",
+                bgcolor: overdueValue > 0 ? "#FDE8E7" : "rgba(0,0,0,0.06)",
+                color: overdueValue > 0 ? "#C62828" : "#8A8F9C",
+                border: overdueValue > 0 ? "1px solid rgba(229,57,53,0.18)" : "1px solid transparent",
+                fontSize: 10,
+                fontWeight: 900,
+                lineHeight: "16px",
+                textAlign: "center",
+                cursor: "pointer",
+                animation: `${overdueBadgePopIn} 420ms cubic-bezier(.2,.8,.2,1) both`,
+                transition: "background-color 180ms ease, transform 180ms cubic-bezier(.2,.8,.2,1)",
+                "&:hover": { bgcolor: "#FAD7D5", transform: "translateY(-1px) scale(1.06)" },
+                "&:active": { transform: "scale(.94)" },
+                "&:focus-visible": { outline: "2px solid #E53935", outlineOffset: 1 },
+                ...REDUCED_MOTION_SX,
+              }}
+            >
+              {overdueValue}
+            </Box>
+          )}
         </Box>
-      )}
+      </Box>
+      <Typography variant="caption" sx={{ color: "text.secondary", display: "block", fontSize: 12, whiteSpace: "nowrap" }}>{label}</Typography>
     </Box>
   );
 }
@@ -480,12 +517,30 @@ export default function DashboardView({ office, onBack }) {
         {!state.loading && !state.error && (
           <>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 2.5, mb: 3.5, minWidth: 0 }}>
-              {HEROES.map((h) => {
+              {HEROES.map((h, index) => {
                 const value = summary.totals[h.key] || 0;
                 const overdue = h.overdueKey ? summary.totals[h.overdueKey] || 0 : 0;
                 const Icon = h.Icon;
                 return (
-                  <Box key={h.key} sx={{ borderRadius: "26px", p: { xs: 2.5, md: 3.5 }, minWidth: 0, backgroundImage: h.grad, color: "#fff", boxShadow: "0 14px 36px rgba(23,28,143,0.22)", position: "relative", overflow: "hidden" }}>
+                  <Box
+                    key={h.key}
+                    sx={{
+                      borderRadius: "26px",
+                      p: { xs: 2.5, md: 3.5 },
+                      minWidth: 0,
+                      backgroundImage: h.grad,
+                      color: "#fff",
+                      boxShadow: "0 14px 36px rgba(23,28,143,0.22)",
+                      position: "relative",
+                      overflow: "hidden",
+                      animation: `${dashboardRiseIn} 560ms cubic-bezier(.2,.8,.2,1) both`,
+                      animationDelay: `${index * 75}ms`,
+                      transition: "transform 280ms cubic-bezier(.2,.8,.2,1), box-shadow 280ms cubic-bezier(.2,.8,.2,1)",
+                      "&:hover": { transform: "translateY(-4px)", boxShadow: "0 20px 46px rgba(23,28,143,0.28)" },
+                      "&:active": { transform: "translateY(-1px) scale(.998)" },
+                      ...REDUCED_MOTION_SX,
+                    }}
+                  >
                     <Icon sx={{ position: "absolute", right: -14, bottom: -18, fontSize: 132, opacity: 0.14 }} />
                     <Typography sx={{ fontSize: 15, fontWeight: 700, opacity: 0.92 }}>{h.title}</Typography>
                     <Box sx={{ display: "flex", alignItems: "baseline", gap: 2, mt: 1, flexWrap: "wrap" }}>
@@ -540,7 +595,7 @@ export default function DashboardView({ office, onBack }) {
                   "&::-webkit-scrollbar-thumb": { bgcolor: "rgba(90,103,216,0.35)", borderRadius: 5 },
                 }}
               >
-                {summary.rows.map((row) => {
+                {summary.rows.map((row, rowIndex) => {
                   const open = row.notStarted + row.inProgress;
                   const hot = row.notStartedOverdue + row.inProgressOverdue;
                   return (
@@ -565,8 +620,11 @@ export default function DashboardView({ office, onBack }) {
                         cursor: "pointer",
                         borderLeft: `5px solid ${hot > 0 ? "#E53935" : "#5A67D8"}`,
                         userSelect: "none",
-                        transition: "transform .15s, box-shadow .15s",
-                        "&:hover": { transform: "translateY(-3px)", boxShadow: "0 14px 40px rgba(23,28,143,0.18)" },
+                        animation: `${dashboardRiseIn} 520ms cubic-bezier(.2,.8,.2,1) both`,
+                        animationDelay: `${Math.min(rowIndex * 55, 385)}ms`,
+                        transition: "transform 280ms cubic-bezier(.2,.8,.2,1), box-shadow 280ms cubic-bezier(.2,.8,.2,1), border-color 220ms ease",
+                        "&:hover": { transform: "translateY(-5px) scale(1.006)", boxShadow: "0 18px 46px rgba(23,28,143,0.2)" },
+                        ...REDUCED_MOTION_SX,
                       }}
                     >
                         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, mb: 2 }}>
@@ -642,30 +700,31 @@ export default function DashboardView({ office, onBack }) {
             </Box>
             <Box sx={{ display: "flex", gap: 1, mb: 2.5, flexWrap: "wrap" }}>
               {METRICS.map((m) => (
-                <Box key={m.key} sx={{ flex: "1 1 92px", minWidth: 92, position: "relative", textAlign: "center", borderRadius: "14px", pt: 1.5, pb: 1, bgcolor: "rgba(23,28,143,0.04)" }}>
-                  {m.overdueKey && (
-                    <Box
-                      component="span"
-                      aria-label={`${m.overdueBreakdownTitle}: ${detail[m.overdueKey]}`}
-                      sx={{
-                        position: "absolute",
-                        top: 3,
-                        right: 5,
-                        minWidth: 22,
-                        height: 18,
-                        px: 0.5,
-                        borderRadius: "999px",
-                        bgcolor: detail[m.overdueKey] > 0 ? "#FDE8E7" : "rgba(0,0,0,0.06)",
-                        color: detail[m.overdueKey] > 0 ? "#C62828" : "#8A8F9C",
-                        fontSize: 11,
-                        fontWeight: 900,
-                        lineHeight: "18px",
-                      }}
-                    >
-                      {detail[m.overdueKey]}
-                    </Box>
-                  )}
-                  <Typography sx={{ fontSize: 26, fontWeight: 900, color: detail[m.key] > 0 ? m.color : "rgba(0,0,0,0.25)" }}>{detail[m.key]}</Typography>
+                <Box key={m.key} sx={{ flex: "1 1 92px", minWidth: 92, textAlign: "center", borderRadius: "14px", pt: 1.5, pb: 1, bgcolor: "rgba(23,28,143,0.04)" }}>
+                  <Box data-testid="dialog-metric-count-cluster" sx={{ minHeight: 32, display: "flex", alignItems: "flex-start", justifyContent: "center", gap: 0.5 }}>
+                    <Typography sx={{ fontSize: 26, fontWeight: 900, lineHeight: 1.05, color: detail[m.key] > 0 ? m.color : "rgba(0,0,0,0.25)" }}>{detail[m.key]}</Typography>
+                    {m.overdueKey && (
+                      <Box
+                        component="span"
+                        aria-label={`${m.overdueBreakdownTitle}: ${detail[m.overdueKey]}`}
+                        sx={{
+                          mt: 0.25,
+                          boxSizing: "border-box",
+                          minWidth: 24,
+                          height: 18,
+                          px: 0.25,
+                          borderRadius: "999px",
+                          bgcolor: detail[m.overdueKey] > 0 ? "#FDE8E7" : "rgba(0,0,0,0.06)",
+                          color: detail[m.overdueKey] > 0 ? "#C62828" : "#8A8F9C",
+                          fontSize: 11,
+                          fontWeight: 900,
+                          lineHeight: "18px",
+                        }}
+                      >
+                        {detail[m.overdueKey]}
+                      </Box>
+                    )}
+                  </Box>
                   <Typography variant="caption" sx={{ color: "text.secondary" }}>{m.label}</Typography>
                 </Box>
               ))}
