@@ -4,5 +4,100 @@ This template provides a minimal setup to get React working in Vite with HMR and
 
 Currently, two official plugins are available:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- [@vitejs/plugin-react](https://github.com/vitejs/plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.dev/) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://swc.rs/) uses [SWC]( for Fast Refresh
+
+## Переменные окружения
+
+Кладутся в `.env` (или `.env.local`) в корне проекта.
+
+| Переменная | Где читается | Зачем |
+| --- | --- | --- |
+| `VITE_AG_GRID_LICENSE_KEY` | `features/dob/components/DobGrid.jsx` | Ключ лицензии AG Grid **Enterprise** — включает группировку строк, Set-фильтры (выбор значений), панели «Колонки»/«Фильтры», меню колонки, буфер обмена и экспорт Excel в `#dob_requests`. Без ключа всё это работает в триальном режиме, но грид показывает водяной знак «License Key Not Found». |
+| `VITE_PROXY_BASE_URL` / `VITE_SP_SITE` / `VITE_SHAREPOINT_URL` | `vite.config.ts` | Адрес основного сайта SharePoint для dev-прокси `/api`. |
+| `VITE_DOB_SITE` | `vite.config.ts` | Адрес сайта ДОБ для dev-прокси `/dob-api`. |
+
+## Табличное представление удалено (2026-10-16)
+
+Задачи показываются **только карточками**. Табличного режима в `#tasks` больше
+нет, а таблица заявок `#dob_requests` ушла вместе с ДОБ-разделом, поэтому AG Grid
+из проекта вынесен полностью: удалены `TasksGrid.jsx`, `ViewModeToggle.jsx`,
+`taskTableColumns.js`, `taskRowStatus.js`, `rowActions.js`, `viewMode.js`,
+`useTasksTableData.js`, `useTasksSources.js`, `useTasksForSources.js`, их тесты,
+стили `.ag-*` из `index.css` и зависимости `ag-grid-community`,
+`ag-grid-enterprise`, `ag-grid-react`.
+
+Бандл стал меньше примерно на четверть: 3 936 → 2 927 kB JS
+(gzip 1 102 → 817 kB).
+
+
+## Конфигурация UI из SharePoint
+
+Список ниже управляется через два SharePoint-списка в tenant — без правки React-кода.
+
+### `TaskResultDefinitions` (план §14)
+
+Поля списка:
+
+| Поле | Тип | Назначение |
+|---|---|---|
+| Title | Text | Человеко-итаемое имя |
+| CType | Text (full `0x0108...`) | ContentTypeId |
+| ResultValue | Text | Нормализованный choice (lowercase) |
+| ShowAdditionalActions | Yes/No | Показывать AdditionalActionsField |
+| AdditionalsActionsRequired | Yes/No | Required для AdditionalActions (legacy `AdditionalActionsRequired` авто-резолвится) |
+| RequiresConfirmed | Yes/No | Показать confirm-модалку перед submit |
+| Color | Text | MUI color (`success`/`error`/`warning`/`primary`/`inherit`) |
+| Variant | Text | MUI variant (`contained`/`outlined`/`text`) |
+| Gradient | Text | CSS `linear-gradient(...)` |
+| SortOrder | Number | Порядок |
+| Enabled | Yes/No | Фильтр |
+
+Пример записи:
+
+| CType | ResultValue | ShowAdditionalActions | RequiresConfirmed | Color | Gradient |
+|---|---|---|---|---|---|
+| `0x0108...A` | Не найдена | Нет | Да | error | `linear-gradient(180deg, #e53935 0%, #b71c1c 100%)` |
+
+Graceful 404 → fallback на `src/tasks/resultConfig.js`. Banner при `?configWarn=1`.
+
+### `TaskPromptFields` (⭐ PR)
+
+Произвольный список полей для заполнения per `(CType × ResultValue)`. Позволяет без правки кода добавлять новые поля (Location1, Comment, ScanCode, любой site column).
+
+Поля списка:
+
+| Поле | Тип | Назначение |
+|---|---|---|
+| CType | Text (full `0x0108...`) | ContentTypeId. Пусто = global default |
+| ResultValue | Text | Нормализованный choice. `*` = wildcard |
+| FieldInternalName | Text | InternalName поля в списке Tasks (например `Location1`) |
+| FieldTitle | Text | Заголовок для UI |
+| FieldType | Text (`text` / `multiline`) | Default `text` |
+| Required | Yes/No | Обязательно ли поле |
+| SortOrder | Number | Порядок |
+| Enabled | Yes/No | Фильтр |
+
+Пример конфига для задачи «Поиск ЕО» (CT=A) с результатом «Найдена»:
+
+| CType | ResultValue | FieldInternalName | FieldTitle | FieldType | Required | SortOrder |
+|---|---|---|---|---|---|---|
+| `0x0108...A` | Найдена | `Location1` | Где найдена ЕО? | multiline | Да | 10 |
+| `0x0108...A` | Найдена | `Comment` | Комментарий | text | Нет | 20 |
+
+Без правки React: при выборе «Найдена» рендерит два inline-поля, валидирует Required, отправляет в MERGE-payload.
+
+**Приоритеты резолвера:** exact CT → prefix CT (родительский ContentType) → CT wildcard → global wildcard → global exact → `[]`. **Без substring-match.**
+
+Graceful 404 → fallback на `resultConfig.js` (одно legacy-поле Location1 для «найдена»).
+
+### Отладка
+
+- `?dbg=1` или `localStorage.setItem('dbg','1')` — extended console.log
+- `?configWarn=1` — показать `ConfigFallbackBanner` если оба SP-списка вернули 404
+- В консоли: `window.__debugTaskResultDefs()`, `window.__debugTaskPromptFields()` — диагностика полей и items
+
+### Out of scope
+
+- 3 action-кнопки («Взять в работу», «Сохранить», «ЕО не найдена») — хардкоженные градиенты в `TaskCard.jsx`
+- `TaskTypeConfiguration` (план §17) — DISABLED до аудита

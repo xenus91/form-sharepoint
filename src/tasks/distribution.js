@@ -1,0 +1,357 @@
+// src/tasks/distribution.js
+// Резолвинг distribution (DcEmail) + определение полей в Tasks list.
+// Раньше жили inline в TasksView.jsx на module-scope (~100 строк) —
+// вынесены в Tier 3 (Q11).
+
+import apiClient from "../api";
+import { TASKS_LIST_API } from "./config";
+
+export const DCEMAIL_LIST_TITLE = "DcEmail";
+
+/**
+ * Извлечь group IDs из dist.Email (поле Пользователь/Группа в DcEmail).
+ * Поле Email — множественный выбор (Allow Multiple = true), поэтому для одного
+ * OffDepKey может быть указано несколько групп. Поддерживаем все формы:
+ *  - Email: [{Id:1},{Id:2}] , {results:[{Id:1},{Id:2}]} , {Id:1} , 5
+ *  - EmailId: {results:[1,2]} , [1,2] , 5  (без expand)
+ *  - Email_x002e_Id и подобные encoded-имена
+ * @param {object|null|undefined} dist
+ * @returns {number[]}
+ */
+export function getGroupIdsFromDistribution(dist) {
+  if (!dist) return [];
+  const extractIds = (val) => {
+    if (val == null) return [];
+    if (Array.isArray(val)) {
+      return val.map((v) => (v != null && typeof v === "object" ? v.Id ?? v : v)).filter((v) => v != null && v !== "").map(Number).filter((n) => !Number.isNaN(n));
+    }
+    if (typeof val === "object") {
+      if (Array.isArray(val.results)) {
+        return val.results.map((v) => (v != null && typeof v === "object" ? v.Id ?? v : v)).filter((v) => v != null && v !== "").map(Number).filter((n) => !Number.isNaN(n));
+      }
+      if (val.Id != null) {
+        const n = Number(val.Id);
+        return Number.isNaN(n) ? [] : [n];
+      }
+      // Неexpanded deferred — нет данных
+      if (val.__deferred) return [];
+    }
+    if (typeof val === "number" || typeof val === "string") {
+      const n = Number(val);
+      return Number.isNaN(n) ? [] : [n];
+    }
+    return [];
+  };
+
+  // 1) Пробуем expanded Email
+  if (dist.Email != null) {
+    const ids = extractIds(dist.Email);
+    if (ids.length) return [...new Set(ids)];
+  }
+  // 2) Фолбэк на EmailId-колонки (без expand, множественный = {results:[…]})
+  for (const key of ["EmailId", "Email_x002e_Id", "Email_x0020_Id", "EMailId", "Email_X002e_Id"]) {
+    if (dist[key] != null) {
+      const ids = extractIds(dist[key]);
+      if (ids.length) return [...new Set(ids)];
+    }
+  }
+  // 3) На всякий — перебираем все ключи, содержащие Email + Id
+  for (const k of Object.keys(dist)) {
+    if (/email/i.test(k) && /id/i.test(k) && dist[k] != null) {
+      const ids = extractIds(dist[k]);
+      if (ids.length) return [...new Set(ids)];
+    }
+  }
+  return [];
+}
+
+/**
+ * Резолвить OffDepKey = Office + Department (слитно) через DcEmail list.
+ * Поддерживает локальную смену РЦ: пробует несколько вариантов ключа
+ * (full "РЦ-8117Группа…", suffix "8117Группа…", без дефиса и т.д.),
+ * чтобы задачи перепоискались при смене РЦ в модалке.
+ * Возвращает item из DcEmail или null.
+ *
+ * По умолчанию ходит на ОСНОВНОЙ сайт (задачи). Форма заявок ДОБ передаёт
+ * opts: свой клиент сайта ДОБ (`get`) и префикс базы (`listBase`), потому что
+ * список DcEmail лежит на сайте ДОБ рядом с Requests.
+ * @param {string} office
+ * @param {string} department
+ * @param {{get?:Function, listBase?:string}} [opts]
+ * @returns {Promise<object|null>}
+ */
+export async function resolveDistributionViaDcEmail(office, department, opts = {}) {
+  if (!office || !department) return null;
+  const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
+  const listBase = opts.listBase ?? "";
+  const officeStr = String(office).trim();
+  const deptStr = String(department).trim();
+  const full = `${officeStr}${deptStr}`;
+  const candidates = [full];
+  // Варианты для локального РЦ: suffix, "РЦ-XXXX…", без дефиса
+  const suffix = officeStr.includes("-") ? officeStr.split("-").pop().trim() : "";
+  if (suffix && suffix !== officeStr) {
+    const v1 = `${suffix}${deptStr}`;
+    if (!candidates.includes(v1)) candidates.push(v1);
+    const v2 = `РЦ-${suffix}${deptStr}`;
+    if (!candidates.includes(v2)) candidates.push(v2);
+    const v3 = officeStr.replace("-", "") + deptStr;
+    if (!candidates.includes(v3)) candidates.push(v3);
+  }
+  // Серверный фильтр — пробуем каждый кандидат по очереди ($top=1)
+  for (const offDepKey of candidates) {
+    const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+    try {
+      const { data } = await get(
+        `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id,Email/Title&$expand=Email&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const items = data?.d?.results || [];
+      if (items.length) {
+        if (offDepKey !== full) console.log(`[DcEmail] resolved via variant "${offDepKey}" (full "${full}")`);
+        return items[0];
+      }
+    } catch {
+      /* вариант ключа не подошёл — пробуем следующий */
+    }
+  }
+  // Фолбэк: ни один точный фильтр не нашёл — тянем 100 и ищем case-insensitive по всем кандидатам
+  try {
+    const { data: data2 } = await get(
+      `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,Email/Id,Email/Title&$expand=Email&$top=100`,
+      { headers: { Accept: "application/json;odata=verbose" } }
+    );
+    const items2 = data2?.d?.results || [];
+    for (const cand of candidates) {
+      const norm = cand.trim().toLowerCase();
+      const found = items2.find((it) => String(it.OffDepKey || "").trim().toLowerCase() === norm);
+      if (found) {
+        if (cand !== full) console.log(`[DcEmail] resolved via client fallback variant "${cand}"`);
+        return found;
+      }
+    }
+  } catch {
+    /* точный фильтр по вариантам не сработал — идём в фолбэк ниже */
+  }
+  // Fallback без expand если Email expand не поддерживается — тоже по кандидатам
+  for (const offDepKey of candidates) {
+    const offDepKeyEsc = offDepKey.replace(/'/g, "''");
+    try {
+      const { data } = await get(
+        `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=Id,OffDepKey,EmailId&$filter=OffDepKey eq '${offDepKeyEsc}'&$top=1`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const items = data?.d?.results || [];
+      if (items.length) return items[0];
+    } catch (e2) {
+      console.warn("DcEmail resolve failed", e2?.message);
+    }
+  }
+  return null;
+}
+
+// --- Single-flight cache for /fields (сливаем 3 параллельных запроса в один) ---
+let _fieldsCache = null;
+let _fieldsPromise = null;
+let _fieldsAt = 0;
+const _FIELDS_TTL_MS = 5 * 60 * 1000; // 5 минут — поля списка меняются редко, но кэш не должен протухать слишком долго
+
+async function fetchAllTasksFieldsRaw() {
+  const now = Date.now();
+  if (_fieldsCache && now - _fieldsAt < _FIELDS_TTL_MS) return _fieldsCache;
+  if (_fieldsPromise) return _fieldsPromise;
+  _fieldsPromise = (async () => {
+    try {
+      const { data } = await apiClient.get(
+        `${TASKS_LIST_API}/fields?$select=InternalName,Title,TypeAsString`,
+        { headers: { Accept: "application/json;odata=verbose" } }
+      );
+      const fields = data?.d?.results || [];
+      _fieldsCache = fields;
+      _fieldsAt = Date.now();
+      return fields;
+    } catch (e) {
+      // fallback to cached if available, else empty
+      if (_fieldsCache) return _fieldsCache;
+      throw e;
+    } finally {
+      _fieldsPromise = null;
+    }
+  })();
+  return _fieldsPromise;
+}
+
+function detectRecipientFromFields(fields) {
+  let f = fields.find((x) => x.InternalName === "Recipient");
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.Title && x.Title.toLowerCase().includes("получатель"));
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.InternalName.toLowerCase().includes("recipient"));
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.TypeAsString === "Lookup" && x.Title && x.Title.toLowerCase().includes("recipient"));
+  if (f) return f.InternalName;
+  return null;
+}
+
+function detectSCNumberFromFields(fields) {
+  const candidates = ["SCNumber","ScNumber","SC_x0020_Number","SCNumber_x0020_","OrderNumber","ТК","SCNo"];
+  for (const c of candidates) {
+    const f = fields.find((x) => x.InternalName === c || x.InternalName.toLowerCase() === c.toLowerCase());
+    if (f) return f.InternalName;
+  }
+  let f = fields.find((x) => x.Title && /\bSC\b/i.test(x.Title) && x.Title.toLowerCase().includes("number"));
+  if (f) return f.InternalName;
+  f = fields.find((x) => x.InternalName.toLowerCase().includes("sc") && x.InternalName.toLowerCase().includes("number"));
+  if (f) return f.InternalName;
+  return null;
+}
+
+/**
+ * Одним запросом получить всё: fieldNames + recipientField + scNumberField.
+ * Критично для трафика: раньше TasksView делал 3 параллельных GET на один и тот же /fields.
+ * @returns {Promise<{ fieldNames:string[], recipientField:string|null, scNumberField:string|null, fields:any[] }>}
+ */
+export async function getTasksListFieldsOverview() {
+  try {
+    const fields = await fetchAllTasksFieldsRaw();
+    const fieldNames = fields.map((f) => f.InternalName).filter((n) => n.toLowerCase() !== "endjob");
+    const recipientField = detectRecipientFromFields(fields);
+    const scNumberField = detectSCNumberFromFields(fields);
+    // Если Recipient снова появился, сбрасываем флаг "missing" чтобы будущие запросы снова пробовали его
+    if (recipientField) {
+      try { if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("sp:recipientMissing"); } catch (_e) { void _e; }
+      try { if (typeof sessionStorage !== "undefined" && sessionStorage.getItem("sp:recipientMissing") === "1") sessionStorage.removeItem("sp:recipientMissing"); } catch (_e) { void _e; }
+    }
+    return { fieldNames, recipientField, scNumberField, fields };
+  } catch {
+    return { fieldNames: [], recipientField: null, scNumberField: null, fields: [] };
+  }
+}
+
+// Экспорт для тестов/отладки: разбор Email-принципалов DcEmail.
+export { _flattenEmailPrincipals as flattenEmailPrincipals };
+
+export function clearTasksFieldsCache() {
+  _fieldsCache = null;
+  _fieldsPromise = null;
+  _fieldsAt = 0;
+}
+
+/**
+ * Нормализация массива значений Email из DcEmail-записи в плоский список принципалов.
+ * Email — множественный выбор (AllowMultiple=true): {results:[{Id,Title,LoginName,EMail}, …]}
+ * Поддерживает также одиночный объект {Id,…} или массив [{Id,…}].
+ * @param {any} rawEmail
+ * @returns {Array<{id:number,title:string|null,loginName:string|null,email:string|null}>}
+ */
+function _flattenEmailPrincipals(rawEmail) {
+  const out = [];
+  if (rawEmail == null) return out;
+  let arr = null;
+  if (Array.isArray(rawEmail)) arr = rawEmail;
+  else if (Array.isArray(rawEmail.results)) arr = rawEmail.results;
+  else if (typeof rawEmail === "object" && rawEmail.Id != null) arr = [rawEmail];
+  if (!arr) return out;
+  for (const it of arr) {
+    if (it == null) continue;
+    if (typeof it === "number" || typeof it === "string") {
+      const n = Number(it);
+      if (!Number.isNaN(n)) out.push({ id: n, title: null, loginName: null, email: null });
+      continue;
+    }
+    const id = Number(it.Id);
+    if (Number.isNaN(id)) continue;
+    const emailRaw = typeof it.EMail === "string" ? it.EMail : typeof it.Email === "string" ? it.Email : null;
+    out.push({
+      id,
+      title: typeof it.Title === "string" ? it.Title : null,
+      loginName: typeof it.LoginName === "string" ? it.LoginName : null,
+      email: emailRaw,
+      // kindHint проставляет principalDetails.enrichDistribution (getuserbyid/getbyid):
+      // без него принципал без Title/EMail классифицируется как "unknown" и
+      // молча выпадал из AssignedToId-фильтра.
+      kindHint: it.kindHint === "user" || it.kindHint === "group" ? it.kindHint : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Эвристика классификации принципала: user или group.
+ * Правила (см. ADR docs/decisions/dob-task-sources.md):
+ *  - есть SMTP-email (содержит "@") → user
+ *  - loginName содержит claim-префикс (`i:0#.f|membership|`, `i:0#.w|`) → user
+ *  - loginName содержит `@` или `\` → user
+ *  - иначе → group
+ *  @param {{title?:string|null,loginName?:string|null,email?:string|null}} p
+ *  @returns {"user"|"group"|"unknown"}
+ */
+export function classifyPrincipal(p) {
+  if (!p) return "unknown";
+  // Явный тип из principalDetails (getuserbyid/getbyid) — самый надёжный источник.
+  if (p.kindHint === "user" || p.kindHint === "group") return p.kindHint;
+  const email = (p.email || "").trim();
+  const login = (p.loginName || "").trim();
+  const title = (p.title || "").trim();
+  if (email && email.includes("@")) return "user";
+  if (/i:0#\.[a-z]+\|/i.test(login)) return "user";
+  if (login.includes("@") || login.includes("\\")) return "user";
+  if (title) return "group";
+  return "unknown";
+}
+
+/**
+ * Список принципалов (users + groups) из DcEmail-записи.
+ * Аддитивная функция — НЕ ломает getGroupIdsFromDistribution.
+ * @param {object|null} dist
+ * @returns {Array<{id:number,title:string|null,loginName:string|null,email:string|null,isUser:boolean,kind:"user"|"group"|"unknown"}>}
+ */
+export function listDistributionPrincipals(dist) {
+  if (!dist) return [];
+  return _flattenEmailPrincipals(dist.Email).map((p) => {
+    const kind = classifyPrincipal(p);
+    return { ...p, isUser: kind === "user", kind, kindHint: p.kindHint || (kind === "unknown" ? null : kind) };
+  });
+}
+
+/**
+ * Получить InternalName всех полей в Tasks list (для динамического определения
+ * какие поля доступны — RelatedItems, OffDepKey и т.д. (Recipient/WorkflowItemId выпилены).
+ * @returns {Promise<string[]>}
+ */
+export async function getTaskFieldNames() {
+  try {
+    const fields = await fetchAllTasksFieldsRaw();
+    return fields.map((f) => f.InternalName);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Определить InternalName поля Recipient в Tasks list.
+ * Ищет: "Recipient" → title "получатель" → InternalName "recipient" → Lookup "recipient".
+ * @returns {Promise<string|null>}
+ */
+export async function detectRecipientField() {
+  try {
+    const fields = await fetchAllTasksFieldsRaw();
+    return detectRecipientFromFields(fields);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Определить InternalName поля SCNumber (ТК номер) в Tasks list.
+ * Ищет по списку кандидатов + по title содержащему SC + number.
+ * @returns {Promise<string|null>}
+ */
+export async function detectSCNumberField() {
+  try {
+    const fields = await fetchAllTasksFieldsRaw();
+    return detectSCNumberFromFields(fields);
+  } catch {
+    return null;
+  }
+}
