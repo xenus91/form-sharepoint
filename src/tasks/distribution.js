@@ -9,6 +9,59 @@ import { TASKS_LIST_API } from "./config";
 export const DCEMAIL_LIST_TITLE = "DcEmail";
 
 /**
+ * Ключи DcEmail начинаются с офиса либо с его кода без префикса «РЦ-».
+ * Список вариантов должен совпадать с теми, которые пробует резолвер ниже.
+ */
+export function getDistributionOfficePrefixes(office) {
+  const officeStr = String(office ?? "").trim();
+  if (!officeStr) return [];
+  const prefixes = [officeStr];
+  const suffix = officeStr.includes("-") ? officeStr.split("-").pop().trim() : "";
+  if (suffix && suffix !== officeStr) {
+    prefixes.push(suffix, `РЦ-${suffix}`, officeStr.replace("-", ""));
+  }
+  return [...new Set(prefixes.filter(Boolean))];
+}
+
+/** Выделить Department из OffDepKey, который имеет вид Office + Department. */
+export function extractDepartmentFromOffDepKey(offDepKey, office) {
+  const key = String(offDepKey ?? "").trim();
+  const prefixes = getDistributionOfficePrefixes(office)
+    .sort((a, b) => b.length - a.length);
+  const normalizedKey = key.toLocaleLowerCase("ru-RU");
+  const prefix = prefixes.find((candidate) =>
+    normalizedKey.startsWith(candidate.toLocaleLowerCase("ru-RU"))
+  );
+  return prefix ? key.slice(prefix.length).trim() : "";
+}
+
+/**
+ * Получить подразделения из строк DcEmail для указанного офиса.
+ * Используется только для выбора контекста просмотра задач; запрос остаётся
+ * на основном сайте приложения, как и остальные обращения к DcEmail.
+ */
+export async function fetchDistributionDepartments(office, opts = {}) {
+  const prefixes = getDistributionOfficePrefixes(office);
+  if (!prefixes.length) return [];
+
+  const get = opts.get || ((url, config) => apiClient.get(url, config));
+  const listBase = opts.listBase ?? "";
+  const startsWithFilters = prefixes.map((prefix) => {
+    const escaped = prefix.replace(/'/g, "''");
+    return `startswith(OffDepKey,'${escaped}')`;
+  });
+  const filter = encodeURIComponent(startsWithFilters.join(" or "));
+  const { data } = await get(
+    `${listBase}/web/lists/getbytitle('${DCEMAIL_LIST_TITLE}')/items?$select=OffDepKey&$filter=${filter}&$top=5000`,
+    { headers: { Accept: "application/json;odata=verbose" } },
+  );
+  const departments = (data?.d?.results || [])
+    .map((item) => extractDepartmentFromOffDepKey(item?.OffDepKey, office))
+    .filter(Boolean);
+  return [...new Set(departments)].sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+/**
  * Извлечь group IDs из dist.Email (поле Пользователь/Группа в DcEmail).
  * Поле Email — множественный выбор (Allow Multiple = true), поэтому для одного
  * OffDepKey может быть указано несколько групп. Поддерживаем все формы:

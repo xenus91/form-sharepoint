@@ -61,6 +61,8 @@ import useActiveTasksCount from "./features/tasks/hooks/useActiveTasksCount";
 import useTasksListSyncOnBadgeChange from "./features/tasks/hooks/useTasksListSync";
 import { useNotifications } from './NotificationsProvider';
 import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
+import { fetchDistributionDepartments } from "./tasks/distribution";
+import { canSwitchTaskDepartment } from "./features/navigation/taskDepartmentAccess";
 import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM, isEoMissingRoute } from "./features/form/lib/eoMissingRoute";
 import {
   OTHER_PROBLEM_DIALOG_TITLE,
@@ -544,6 +546,10 @@ const App = () => {
   const [dcThuDraft, setDcThuDraft] = useState("");
   const [dcThuDuration, setDcThuDuration] = useState("8h");
   const [dcThuNow, setDcThuNow] = useState(Date.now());
+  const [taskDepartmentOverride, setTaskDepartmentOverride] = useState("");
+  const [taskDepartmentOptions, setTaskDepartmentOptions] = useState([]);
+  const [taskDepartmentOptionsLoading, setTaskDepartmentOptionsLoading] = useState(false);
+  const [taskDepartmentOptionsError, setTaskDepartmentOptionsError] = useState("");
   const initialOperationDateCacheRef = useRef(readOperationDateCache());
   const [operationDateIso, setOperationDateIso] = useState(
     initialOperationDateCacheRef.current.value
@@ -680,6 +686,7 @@ const App = () => {
   useEffect(() => {
     if (!dcThuExpiresAt || !dcThuOverride) return;
     if (Date.now() >= dcThuExpiresAt) {
+      setTaskDepartmentOverride("");
       setDcThuOverride("");
       setDcThuExpiresAt(null);
     }
@@ -690,6 +697,7 @@ const App = () => {
     const remaining = dcThuExpiresAt - Date.now();
     if (remaining <= 0) return;
     const timeoutId = setTimeout(() => {
+      setTaskDepartmentOverride("");
       setDcThuOverride("");
       setDcThuExpiresAt(null);
     }, remaining);
@@ -986,12 +994,71 @@ const App = () => {
   const effectiveOfficeForTasks = isDcThuActive && normalizeDcThu(dcThuOverride)
     ? `РЦ-${normalizeDcThu(dcThuOverride)}`
     : userProfile.userOffice;
+  const canChangeTaskDepartment = canSwitchTaskDepartment(userProfile.userDisplayName);
+  const effectiveDepartmentForTasks = canChangeTaskDepartment && taskDepartmentOverride
+    ? taskDepartmentOverride
+    : userProfile.userDepartment;
   const effectiveUserProfileForTasks = React.useMemo(() => {
-    if (isDcThuActive && effectiveOfficeForTasks) {
-      return { ...userProfile, userOffice: effectiveOfficeForTasks };
+    if (
+      effectiveOfficeForTasks === userProfile.userOffice
+      && effectiveDepartmentForTasks === userProfile.userDepartment
+    ) {
+      return userProfile;
     }
-    return userProfile;
-  }, [userProfile, isDcThuActive, effectiveOfficeForTasks]);
+    return {
+      ...userProfile,
+      userOffice: effectiveOfficeForTasks,
+      userDepartment: effectiveDepartmentForTasks,
+    };
+  }, [userProfile, effectiveOfficeForTasks, effectiveDepartmentForTasks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const homeDepartment = String(userProfile.userDepartment || "").trim();
+    const homeOptions = homeDepartment && homeDepartment.toLocaleLowerCase("ru-RU") !== "не указано"
+      ? [homeDepartment]
+      : [];
+
+    if (!canChangeTaskDepartment) {
+      setTaskDepartmentOptions([]);
+      setTaskDepartmentOptionsLoading(false);
+      setTaskDepartmentOptionsError("");
+      return undefined;
+    }
+    if (!effectiveOfficeForTasks) {
+      setTaskDepartmentOptions(homeOptions);
+      setTaskDepartmentOptionsLoading(false);
+      setTaskDepartmentOptionsError("Не удалось определить РЦ пользователя");
+      return undefined;
+    }
+
+    setTaskDepartmentOptions(homeOptions);
+    setTaskDepartmentOptionsLoading(true);
+    setTaskDepartmentOptionsError("");
+    fetchDistributionDepartments(effectiveOfficeForTasks)
+      .then((departments) => {
+        if (cancelled) return;
+        const unique = new Map();
+        [...homeOptions, ...departments].forEach((department) => {
+          const label = String(department || "").trim();
+          if (label && !unique.has(label.toLocaleLowerCase("ru-RU"))) {
+            unique.set(label.toLocaleLowerCase("ru-RU"), label);
+          }
+        });
+        setTaskDepartmentOptions([...unique.values()]);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Не удалось загрузить подразделения из DcEmail:", error);
+        setTaskDepartmentOptions(homeOptions);
+        setTaskDepartmentOptionsError("Не удалось загрузить список подразделений");
+      })
+      .finally(() => {
+        if (!cancelled) setTaskDepartmentOptionsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [canChangeTaskDepartment, effectiveOfficeForTasks, userProfile.userDepartment]);
 
   const operationDate = operationDateIso ? new Date(operationDateIso) : null;
   const { today: todayShiftDate, yesterday: yesterdayShiftDate } =
@@ -1021,6 +1088,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   };
 
   const handleSaveDcThu = () => {
+    setTaskDepartmentOverride("");
     const normalized = normalizeDcThu(dcThuDraft);
     const selectedOption = DC_THU_DURATION_OPTIONS.find(
       (option) => option.value === dcThuDuration
@@ -1037,10 +1105,19 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   };
 
   const handleClearDcThu = () => {
+    setTaskDepartmentOverride("");
     setDcThuOverride("");
     setDcThuExpiresAt(null);
     setDcThuDraft(getOfficeSuffix(userProfile.userOffice));
     setDcThuModalOpen(false);
+  };
+
+  const handleTaskDepartmentChange = (department) => {
+    if (!canChangeTaskDepartment) return;
+    const next = String(department || "").trim();
+    const home = String(userProfile.userDepartment || "").trim();
+    const normalize = (value) => value.toLocaleLowerCase("ru-RU");
+    setTaskDepartmentOverride(next && normalize(next) !== normalize(home) ? next : "");
   };
 
   const getDcThuRemainingMs = () => {
@@ -1832,7 +1909,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     let cancelled = false;
     (async () => {
       const officeForTasks = effectiveOfficeForTasks || userProfile.userOffice;
-      const deptForTasks = userProfile.userDepartment;
+      const deptForTasks = effectiveDepartmentForTasks;
       if (!officeForTasks && !deptForTasks) return;
       const dist = await resolveDistributionViaDcEmailApp(officeForTasks, deptForTasks);
       if (!cancelled) {
@@ -1845,7 +1922,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [userProfile.userOffice, userProfile.userDepartment, effectiveOfficeForTasks, isDcThuActive]);
+  }, [userProfile.userOffice, userProfile.userDepartment, effectiveOfficeForTasks, effectiveDepartmentForTasks, isDcThuActive]);
 
   // Уведомление при локальной смене РЦ — задачи перепоискаются автоматически
   const prevOfficeRef = useRef(effectiveOfficeForTasks);
@@ -1893,6 +1970,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           userName={userProfile.userDisplayName}
           userTitle={userProfile.userTitle}
           userOffice={userProfile.userOffice}
+          canSwitchDepartment={canChangeTaskDepartment}
+          departmentOptions={taskDepartmentOptions}
+          selectedDepartment={effectiveDepartmentForTasks}
+          homeDepartment={userProfile.userDepartment}
+          departmentLoading={taskDepartmentOptionsLoading}
+          departmentError={taskDepartmentOptionsError}
+          onDepartmentChange={handleTaskDepartmentChange}
         />
         <DashboardView office={effectiveOfficeForTasks} onBack={handleOpenForm} />
       </ThemeProvider>
@@ -1952,6 +2036,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           userName={userProfile.userDisplayName}
           userTitle={userProfile.userTitle}
           userOffice={userProfile.userOffice}
+          canSwitchDepartment={canChangeTaskDepartment}
+          departmentOptions={taskDepartmentOptions}
+          selectedDepartment={effectiveDepartmentForTasks}
+          homeDepartment={userProfile.userDepartment}
+          departmentLoading={taskDepartmentOptionsLoading}
+          departmentError={taskDepartmentOptionsError}
+          onDepartmentChange={handleTaskDepartmentChange}
         />
         {/* Tasks view — без верхнего отступа, TasksView сам управляет высотой и шапкой */}
         <Box sx={{ pt: 0, width: "100%", maxWidth: "none", minWidth: 0, mx: 0, boxSizing: "border-box", display: "block", overflowX: 'hidden' }}>
@@ -2003,6 +2094,13 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         userName={userProfile.userDisplayName}
         userTitle={userProfile.userTitle}
         userOffice={userProfile.userOffice}
+        canSwitchDepartment={canChangeTaskDepartment}
+        departmentOptions={taskDepartmentOptions}
+        selectedDepartment={effectiveDepartmentForTasks}
+        homeDepartment={userProfile.userDepartment}
+        departmentLoading={taskDepartmentOptionsLoading}
+        departmentError={taskDepartmentOptionsError}
+        onDepartmentChange={handleTaskDepartmentChange}
         rcLabel={getEffectiveDcThu() || ""}
         onOpenRcModal={handleOpenDcThuModal}
       />

@@ -22,12 +22,17 @@ import {
   Button,
   Divider,
   Drawer,
+  FormControl,
+  FormHelperText,
   IconButton,
+  InputLabel,
   List,
   ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  MenuItem,
+  Select,
   Typography,
 } from "@mui/material";
 import DashboardRoundedIcon from "@mui/icons-material/DashboardRounded";
@@ -60,8 +65,24 @@ export default function AppMenuDrawer({
   userOffice = "",
   rcLabel = null,
   onOpenRcModal = null,
+  canSwitchDepartment = false,
+  departmentOptions = [],
+  selectedDepartment = "",
+  homeDepartment = "",
+  departmentLoading = false,
+  departmentError = "",
+  onDepartmentChange = null,
 }) {
   const count = Number(tasksCount);
+  const showDepartmentSwitcher = canSwitchDepartment && typeof onDepartmentChange === "function";
+  const visibleDepartmentOptions = [...new Set([
+    selectedDepartment,
+    homeDepartment,
+    ...departmentOptions,
+  ].filter((option) => {
+    const value = String(option || "").trim();
+    return value && value.toLocaleLowerCase("ru-RU") !== "не указано";
+  }))];
   return (
     <Drawer anchor="left" open={open} onClose={onClose} PaperProps={{ sx: PAPER_SX }}>
       <Box sx={{ p: 2, display: "flex", alignItems: "center", gap: 1 }}>
@@ -114,6 +135,39 @@ export default function AppMenuDrawer({
         <Typography variant="caption" color="text.secondary">
           {`${userName || ""} • ${userTitle || ""}${userOffice ? ` — ${userOffice}` : ""}`}
         </Typography>
+        {showDepartmentSwitcher && (
+          <Box sx={{ mt: 1.5 }} data-testid="task-department-switcher">
+            <FormControl
+              fullWidth
+              size="small"
+              disabled={departmentLoading || visibleDepartmentOptions.length < 2}
+              error={Boolean(departmentError)}
+            >
+              <InputLabel id="task-department-label">Подразделение задач</InputLabel>
+              <Select
+                labelId="task-department-label"
+                label="Подразделение задач"
+                value={visibleDepartmentOptions.includes(selectedDepartment) ? selectedDepartment : ""}
+                onChange={(event) => onDepartmentChange(event.target.value)}
+                inputProps={{ "aria-label": "Подразделение задач" }}
+                data-testid="task-department-select"
+              >
+                {visibleDepartmentOptions.map((department) => (
+                  <MenuItem key={department} value={department}>
+                    {department}{department === homeDepartment ? " · моё" : ""}
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>
+                {departmentError || (departmentLoading
+                  ? "Загружаем подразделения…"
+                  : visibleDepartmentOptions.length < 2
+                    ? "Нет других подразделений для выбранного РЦ"
+                    : "Задачи от имени выбранного подразделения")}
+              </FormHelperText>
+            </FormControl>
+          </Box>
+        )}
         {rcLabel !== null && onOpenRcModal && (
           <Box sx={{ mt: 1 }}>
             <Button size="small" variant="outlined" onClick={onOpenRcModal} sx={{ borderRadius: 2, fontSize: 12 }}>
@@ -137,10 +191,19 @@ AppMenuDrawer.propTypes = {
   onOpenForm: PropTypes.func,
   onOpenTasks: PropTypes.func,
   onOpenManagerPreview: PropTypes.func,
+  onOpenDashboard: PropTypes.func,
   userName: PropTypes.string,
   userTitle: PropTypes.string,
   userOffice: PropTypes.string,
   /** Подпись кнопки РЦ; null — кнопку не показываем */
   rcLabel: PropTypes.string,
   onOpenRcModal: PropTypes.func,
+  /** Переключатель подразделения задач показывается только разрешённым пользователям. */
+  canSwitchDepartment: PropTypes.bool,
+  departmentOptions: PropTypes.arrayOf(PropTypes.string),
+  selectedDepartment: PropTypes.string,
+  homeDepartment: PropTypes.string,
+  departmentLoading: PropTypes.bool,
+  departmentError: PropTypes.string,
+  onDepartmentChange: PropTypes.func,
 };

@@ -110,6 +110,38 @@ describe("AppMenuDrawer", () => {
     expect(scope().querySelector('[data-testid="menu-item-form"]').className).not.toContain("Mui-selected");
   });
 
+  it("переключатель подразделения есть только при явном разрешении и меняет выбор", async () => {
+    await renderMenu({});
+    expect(scope().querySelector('[data-testid="task-department-switcher"]')).toBeNull();
+
+    await act(async () => root.unmount());
+    root = null;
+    document.body.innerHTML = "";
+
+    const onDepartmentChange = vi.fn();
+    await renderMenu({
+      canSwitchDepartment: true,
+      departmentOptions: ["Отдел обеспечения бизнеса", "Группа отгрузки РЦ"],
+      selectedDepartment: "Отдел обеспечения бизнеса",
+      homeDepartment: "Отдел обеспечения бизнеса",
+      onDepartmentChange,
+    });
+    expect(scope().querySelector('[data-testid="task-department-switcher"]')).toBeTruthy();
+
+    const select = scope().querySelector('[data-testid="task-department-select"] [role="combobox"]');
+    await act(async () => {
+      select.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    const otherDepartment = Array.from(scope().querySelectorAll('[role="option"]'))
+      .find((option) => option.textContent.includes("Группа отгрузки РЦ"));
+    expect(otherDepartment).toBeTruthy();
+    await act(async () => {
+      otherDepartment.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+    });
+    expect(onDepartmentChange).toHaveBeenCalledWith("Группа отгрузки РЦ");
+  });
+
   it("кнопка РЦ показывается только если передана подпись и обработчик", async () => {
     const withRc = await renderMenu({ rcLabel: "РЦ-8114", onOpenRcModal: vi.fn() });
     expect(document.body.textContent).toContain("РЦ: РЦ-8114");
