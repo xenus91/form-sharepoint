@@ -9,11 +9,17 @@
 //     её рядом с именем в подсказке/выборе;
 //   • кэширует и результаты поиска, и должности (sessionStorage + память).
 //
-// Все запросы идут через apiClient ОСНОВНОГО сайта: /web/siteusers и
-// /SP.UserProfiles.PeopleManager/*. Если серверный фильтр не поддерживается —
-// есть фолбэк: один раз вычитываем страницу siteusers и фильтруем локально.
+// Запросы идут через apiClient текущего SharePoint-сайта: /web/siteusers,
+// People Picker и /SP.UserProfiles.PeopleManager/*. Для siteusers предусмотрен
+// локальный фолбэк по странице списка.
 
 import apiClient from "../api";
+import {
+  isDistributionListPrincipalType,
+  isGroupPrincipalType,
+  normalizePrincipalType,
+  PRINCIPAL_TYPE_MASK,
+} from "./principalTypes";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const POSITION_STORAGE_PREFIX = "sp:userOrg:v3:"; // v3: должность + департамент + офис (JSON)
@@ -182,8 +188,8 @@ async function fetchUsersPage(get, base = "", limit = USERS_PAGE_LIMIT) {
  * Поиск пользователей и групп по запросу.
  * @param {string} query — учётная запись (можно с `_`), ФИО, название или e-mail
  * @param {{ limit?: number, get?: Function, groupsOnly?: boolean, distributionListsOnly?: boolean, base?: string }} [opts]
- *   groupsOnly — вернуть группы любого типа (`PrincipalType !== 1`);
- *   distributionListsOnly — вернуть только списки рассылки (`PrincipalType === 2`);
+ *   groupsOnly — вернуть группы SharePoint (PrincipalType 2, 4 или 8);
+ *   distributionListsOnly — вернуть только почтовые рассылки (PrincipalType 2);
  *   base — префикс базы другого сайта.
  * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string,PrincipalType?:number}>>}
  */
@@ -201,8 +207,10 @@ export async function searchSiteUsers(query, opts = {}) {
   const needsPrincipalType = groupsOnly || distributionListsOnly;
   const select = `Id,Title,LoginName,Email,IsHiddenInUI${needsPrincipalType ? ",PrincipalType" : ""}`;
   const filterPrincipalType = (users) => {
-    if (distributionListsOnly) return users.filter((u) => Number(u.PrincipalType) === 2);
-    if (groupsOnly) return users.filter((u) => Number(u.PrincipalType) !== 1);
+    if (distributionListsOnly) {
+      return users.filter((u) => normalizePrincipalType(u.PrincipalType) === PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST);
+    }
+    if (groupsOnly) return users.filter((u) => isGroupPrincipalType(u.PrincipalType));
     return users;
   };
 
@@ -238,6 +246,103 @@ export async function searchSiteUsers(query, opts = {}) {
     }
   }
   return users.slice(0, limit);
+}
+
+function peoplePickerResults(response) {
+  const body = response?.data?.d ?? response?.data ?? {};
+  let value = body?.ClientPeoplePickerSearchUser ?? body?.results ?? body?.value ?? body;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.results)) return value.results;
+  if (Array.isArray(value?.value)) return value.value;
+  return [];
+}
+
+function mapPeoplePickerDistributionList(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw.EntityData || raw.entityData || {};
+  const returnedType = normalizePrincipalType(data.PrincipalType ?? raw.PrincipalType);
+  // People Picker запрашивается только с PrincipalType=2. Если ответ явно
+  // размечен как пользователь, security group или SharePoint group — отсекаем.
+  if (returnedType !== null && !isDistributionListPrincipalType(returnedType)) return null;
+
+  const id = [data.SPUserID, data.UserId, data.Id, raw.Id]
+    .map((candidate) => Number(candidate))
+    .find((candidate) => Number.isSafeInteger(candidate) && candidate > 0);
+  if (!id) return null;
+
+  const loginName = String(
+    raw.Key || data.AccountName || data.LoginName || data.Key || "",
+  ).trim();
+  const email = String(data.Email || raw.Email || raw.EMail || "").trim();
+  const title = String(raw.DisplayText || raw.Title || data.Title || "").trim()
+    || accountLocalPart(loginName)
+    || email;
+  if (!title) return null;
+
+  return {
+    Id: id,
+    Title: title,
+    LoginName: loginName,
+    Email: email,
+    // Некоторые версии People Picker не возвращают PrincipalType; запрос уже
+    // ограничен рассылками, поэтому отсутствие типа безопасно нормализуем в 2.
+    PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
+  };
+}
+
+/**
+ * Поиск почтовых рассылок для поля AssignedTo.
+ * People Picker — основной источник: он находит рассылки, которых может ещё
+ * не быть в User Information List. REST siteusers используется как fallback.
+ * @param {string} query
+ * @param {{limit?:number, get?:Function, post?:Function}} [opts]
+ * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string,PrincipalType:2}>>}
+ */
+export async function searchDistributionLists(query, opts = {}) {
+  const queryString = String(query ?? "").trim();
+  if (queryString.length < 2) return [];
+
+  const limit = Math.max(1, Number(opts.limit) || 20);
+  const get = opts.get || ((url, config) => apiClient.get(url, config));
+  const post = opts.post || ((url, body, config) => apiClient.post(url, body, config));
+  let peoplePickerLists = [];
+  try {
+    const response = await post(
+      "/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.ClientPeoplePickerSearchUser",
+      {
+        queryParams: {
+          __metadata: { type: "SP.UI.ApplicationPages.ClientPeoplePickerQueryParameters" },
+          AllowEmailAddresses: true,
+          AllowMultipleEntities: true,
+          AllUrlZones: false,
+          MaximumEntitySuggestions: limit,
+          PrincipalSource: 15,
+          PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
+          QueryString: queryString,
+        },
+      },
+      ACCEPT,
+    );
+    peoplePickerLists = peoplePickerResults(response)
+      .map(mapPeoplePickerDistributionList)
+      .filter(Boolean);
+  } catch (error) {
+    if (error?.response?.status && ![400, 403, 404].includes(error.response.status)) {
+      console.warn("[userSearch] distribution list People Picker search failed", error.response.status);
+    }
+  }
+
+  if (peoplePickerLists.length > 0) return dedupeUsers(peoplePickerLists).slice(0, limit);
+
+  // Резервный источник — рассылки, уже добавленные в User Information List.
+  return searchSiteUsers(queryString, { limit, get, distributionListsOnly: true });
 }
 
 /**

@@ -1,7 +1,7 @@
 /* eslint-disable react/prop-types */
-// Поиск и выбор списка рассылки для поля AssignedTo задачи.
-// Поиск строго ограничен SharePoint PrincipalType = 2 (DistributionList) и
-// использует только REST API текущего сайта.
+// Поиск и выбор почтовой рассылки для поля AssignedTo задачи.
+// People Picker ограничивается PrincipalType=2 и работает только через REST API
+// текущего SharePoint-сайта.
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -16,13 +16,10 @@ import {
 } from "@mui/material";
 import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
 import { parseAssignees } from "../lib/assignees";
-import { searchSiteUsers } from "../../../tasks/userSearch";
+import { isDistributionListPrincipalType } from "../../../tasks/principalTypes";
+import { searchDistributionLists } from "../../../tasks/userSearch";
 
 const NO_GROUP_POSITIONS = async () => ({});
-const searchDistributionLists = (query, options = {}) => searchSiteUsers(query, {
-  ...options,
-  distributionListsOnly: true,
-});
 
 export default function AssignedToEditDialog({
   open = false,
@@ -41,7 +38,7 @@ export default function AssignedToEditDialog({
     && Number(currentAssignees[0].id) === Number(selected?.Id);
   const canSave = Number.isFinite(Number(selected?.Id))
     && Number(selected?.Id) > 0
-    && Number(selected?.PrincipalType) === 2
+    && isDistributionListPrincipalType(selected?.PrincipalType)
     && !sameSingleAssignee;
 
   useEffect(() => {
@@ -95,7 +92,7 @@ export default function AssignedToEditDialog({
             getPositions={NO_GROUP_POSITIONS}
           />
           <Typography variant="caption" color="text.secondary">
-            В поиске показываются только списки рассылки этого SharePoint-сайта.
+            В поиске показываются почтовые рассылки; пользователи и другие типы групп не предлагаются.
           </Typography>
         </Stack>
       </DialogContent>

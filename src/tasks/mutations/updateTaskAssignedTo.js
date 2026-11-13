@@ -4,6 +4,7 @@
 
 import apiClient from "../../api";
 import { TASKS_LIST_API, TASKS_LIST_GUID } from "../config";
+import { isDistributionListPrincipalType } from "../principalTypes";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const CONTENT_TYPE = "application/json;odata=verbose";
@@ -92,7 +93,7 @@ export async function updateTaskAssignedTo(task, assignee, deps = {}) {
   assertMainTask(task);
   const taskId = positiveInteger(task?.Id ?? task?.ID, "Id задачи");
   const assigneeId = positiveInteger(assignee?.Id, "Id рассылки");
-  if (Number(assignee?.PrincipalType) !== 2) {
+  if (!isDistributionListPrincipalType(assignee?.PrincipalType)) {
     throw new Error("В поле AssignedTo можно выбрать только список рассылки.");
   }
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Проверяем сценарий исправления AssignedTo: открыть поиск, выбрать рассылку и сохранить.
+// Диалог ищет только почтовые рассылки и передаёт выбранный principal на сохранение.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
@@ -14,33 +14,19 @@ const MAILING = {
   PrincipalType: 2,
 };
 
-vi.mock("../lib/assignees", async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    resolveAssigneeCached: vi.fn(async (_task, person) => ({
-      id: person?.id ?? null,
-      kind: "group",
-      title: person?.title || "Текущая рассылка",
-      loginName: null,
-      email: null,
-    })),
-  };
-});
-
 vi.mock("../../../tasks/userSearch", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    searchSiteUsers: vi.fn(async (query) => (
+    searchDistributionLists: vi.fn(async (query) => (
       String(query).toLowerCase().includes("отгрузка") ? [MAILING] : []
     )),
     getUserPositions: vi.fn(async () => ({})),
   };
 });
 
-const { default: AssignedToButtons } = await import("../components/AssignedToButtons");
-const { searchSiteUsers } = await import("../../../tasks/userSearch");
+const { default: AssignedToEditDialog } = await import("../components/AssignedToEditDialog");
+const { searchDistributionLists } = await import("../../../tasks/userSearch");
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 class RO { observe() {} unobserve() {} disconnect() {} }
@@ -64,43 +50,41 @@ const typeInto = (element, value) => {
 };
 
 let roots = [];
-function render(task, onChangeAssignedTo = vi.fn(async () => true)) {
+function render(task, onSave = vi.fn(async () => true)) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
   roots.push(root);
+  const onClose = vi.fn();
   act(() => {
     root.render(
       <ThemeProvider theme={createTheme()}>
-        <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
+        <AssignedToEditDialog open task={task} onClose={onClose} onSave={onSave} />
       </ThemeProvider>,
     );
   });
-  return { host, onChangeAssignedTo };
+  return { host, onSave, onClose };
 }
 
-describe("AssignedToButtons — смена рассылки", () => {
+describe("AssignedToEditDialog — поиск рассылки", () => {
   beforeEach(() => {
     for (const root of roots.splice(0)) act(() => root.unmount());
     document.body.innerHTML = "";
     vi.clearAllMocks();
   });
 
-  it("открывает поиск только рассылок и сохраняет выбранный principal", async () => {
+  it("ищет и сохраняет выбранную рассылку", async () => {
     const task = { Id: 42, AssignedTo: "Неверная рассылка", AssignedToId: 7 };
-    const { host, onChangeAssignedTo } = render(task);
+    const { onSave, onClose } = render(task);
 
-    const editButton = host.querySelector('[data-testid="assigned-to-edit-button"]');
-    expect(editButton).toBeTruthy();
-    await act(async () => { click(editButton); await settle(); });
     expect(document.body.textContent).toContain("Неверная рассылка");
-    expect(document.body.querySelector('[data-testid="assigned-to-edit-dialog"]')).toBeTruthy();
-
-    const input = document.body.querySelector('[data-testid="assigned-to-edit-dialog"] input');
+    const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
+    expect(dialog).toBeTruthy();
+    const input = dialog.querySelector("input");
     expect(input).toBeTruthy();
+
     await act(async () => { typeInto(input, "Отгрузка"); await settle(350); });
-    expect(searchSiteUsers).toHaveBeenCalled();
-    expect(searchSiteUsers.mock.calls.some((call) => call[1]?.distributionListsOnly === true)).toBe(true);
+    expect(searchDistributionLists).toHaveBeenCalledWith("Отгрузка", { limit: 20 });
 
     const option = [...document.body.querySelectorAll('[role="option"]')]
       .find((element) => element.textContent.includes(MAILING.Title));
@@ -110,19 +94,15 @@ describe("AssignedToButtons — смена рассылки", () => {
     const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
     expect(saveButton.disabled).toBe(false);
     await act(async () => { click(saveButton); await settle(260); });
-    expect(onChangeAssignedTo).toHaveBeenCalledTimes(1);
-    expect(onChangeAssignedTo).toHaveBeenCalledWith(task, MAILING);
-    // В jsdom exit-transition MUI оставляет закрытый Portal в DOM; save handler
-    // получает выбранный principal и завершает успешный сценарий.
-    await settle(250);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith(MAILING);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("позволяет открыть редактор, даже если текущее AssignedTo пустое", async () => {
-    const { host } = render({ Id: 43, AssignedTo: "", AssignedToId: null });
-    const editButton = host.querySelector('[data-testid="assigned-to-edit-button"]');
-    expect(editButton).toBeTruthy();
-    await act(async () => { click(editButton); await settle(); });
-    expect(document.body.querySelector('[data-testid="assigned-to-edit-dialog"]')).toBeTruthy();
-    expect(document.body.textContent).toContain("Сейчас назначено: не назначена");
+  it("не позволяет сохранить назначение до выбора рассылки", () => {
+    render({ Id: 43, AssignedTo: "", AssignedToId: null });
+    const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
+    expect(saveButton).toBeTruthy();
+    expect(saveButton.disabled).toBe(true);
   });
 });
