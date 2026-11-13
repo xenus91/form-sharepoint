@@ -8,7 +8,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FolderIcon from "@mui/icons-material/Folder";
 import TaskCard from "./TaskCard";
 import ExternalTaskCard from "./ExternalTaskCard";
-import { isDobLikeTask } from "../lib/cardTasks";
+import { isDobLikeTask, isExternalTask } from "../lib/cardTasks";
 import { isCompletedStatus } from "../../../tasks/status";
 import { extractTKNumberFromTask } from "../../../tasks/formatters";
 
@@ -43,6 +43,8 @@ const TaskList = React.memo(function TaskList({
   onResultClick,
   onTakeInWork,
   onComplete,
+  // eslint-disable-next-line react/prop-types
+  onChangeAssignedTo,
   currentUserId = null,
   currentUserTitle = "",
   onRetry,
@@ -63,6 +65,7 @@ const TaskList = React.memo(function TaskList({
           task={task}
           onOpen={onOpenExternalTask}
           onTake={onTakeExternalTask}
+          onChangeAssignedTo={!isExternalTask(task) ? onChangeAssignedTo : null}
           taking={externalTakingId != null && externalTakingId === (task.compositeId || `${task.sourceId}:${task.Id}`)}
           // Id текущего пользователя НА САЙТЕ ИСТОЧНИКА; для main/без источника —
           // Id основного сайта. Плюс ФИО: по нему определяем «свою» задачу, когда
@@ -89,6 +92,7 @@ const TaskList = React.memo(function TaskList({
           onResultClick={onResultClick}
           onTakeInWork={onTakeInWork}
           onComplete={onComplete}
+          onChangeAssignedTo={onChangeAssignedTo}
           currentUserId={currentUserId}
           currentUserTitle={currentUserTitle}
           relatedAttachmentCount={typeof relatedAttachmentCountOf === "function" ? relatedAttachmentCountOf(task) : 0}

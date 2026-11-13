@@ -293,6 +293,38 @@ describe("userSearch — поиск людей по учётной записи"
     expect(fallback.map((u) => u.Id)).toEqual([8]);
   });
 
+  it("поиск рассылок ограничивает PrincipalType значением 2 и фильтрует ответ/fallback", async () => {
+    const calls = [];
+    const get = async (url) => {
+      calls.push(url);
+      if (url.includes("substringof")) {
+        if (url.includes("Отгрузка")) {
+          return { data: { d: { results: [
+            { Id: 33, Title: "Рассылка РЦ Отгрузка", LoginName: "mailing-rc", PrincipalType: 2 },
+            { Id: 34, Title: "Группа безопасности Отгрузка", LoginName: "security-rc", PrincipalType: 4 },
+            { Id: 35, Title: "Сотрудник Отгрузка", LoginName: "user-rc", PrincipalType: 1 },
+          ] } } };
+        }
+        return { data: { d: { results: [] } } };
+      }
+      if (url.includes("/web/siteusers?")) {
+        return { data: { d: { results: [
+          { Id: 36, Title: "Рассылка резерв", LoginName: "mailing-reserve", PrincipalType: 2 },
+          { Id: 37, Title: "Security резерв", LoginName: "security-reserve", PrincipalType: 4 },
+        ] } } };
+      }
+      return { data: { d: { results: [] } } };
+    };
+
+    const serverResults = await searchSiteUsers("Отгрузка", { get, distributionListsOnly: true });
+    expect(serverResults.map((user) => user.Id)).toEqual([33]);
+    expect(calls[0]).toContain("PrincipalType eq 2");
+    expect(calls[0]).toContain("PrincipalType&");
+
+    const fallback = await searchSiteUsers("резерв", { get, distributionListsOnly: true, base: "/other-list-test" });
+    expect(fallback.map((user) => user.Id)).toEqual([36]);
+  });
+
   it("подписи: имя, а с должностью — «Имя — Должность»", () => {
     const user = { Id: 7, Title: "Иванов Иван", LoginName: "i:0#.f|membership|ivanov.ii@lenta.com" };
     expect(personDisplayName(user)).toBe("Иванов Иван");

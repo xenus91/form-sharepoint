@@ -29,6 +29,8 @@ export default function TaskElementDialog({
   onResultClick,
   onTakeInWork,
   onComplete,
+  // eslint-disable-next-line react/prop-types
+  onChangeAssignedTo,
   currentUserId,
   currentUserTitle,
   onClearElementHash,
@@ -96,7 +98,7 @@ export default function TaskElementDialog({
                           {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
                           <TakerButtons task={elementTaskMatch} />
                           <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • Кому назначено: "}</Box>
-                          <AssignedToButtons task={elementTaskMatch} />
+                          <AssignedToButtons task={elementTaskMatch} onChangeAssignedTo={onChangeAssignedTo} />
                           <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • "}{elementTaskMatch.Modified ? new Date(elementTaskMatch.Modified).toLocaleString("ru-RU") : "—"}{elementTaskMatch.ResultSearchTHU ? ` • ${elementTaskMatch.ResultSearchTHU}` : ""}</Box>
                         </Box></Typography>
                     </Box>
@@ -118,6 +120,7 @@ export default function TaskElementDialog({
                   onResultClick={onResultClick}
                   onTakeInWork={onTakeInWork}
                   onComplete={onComplete}
+                  onChangeAssignedTo={onChangeAssignedTo}
                   currentUserId={currentUserId}
                   currentUserTitle={currentUserTitle}
                   initialAction={elementActionParam}

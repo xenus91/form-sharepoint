@@ -495,7 +495,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
     });
   }, [tasksData, tasks, cardTasks, onTasksChanged]);
 
-  const { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask } = useTaskMutations({
+  const { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask, changeTaskAssignee } = useTaskMutations({
     entityType,
     completedStatusValue,
     inProgressStatusValue,
@@ -1012,6 +1012,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             onResultClick={handleResultClick}
             onTakeInWork={handleTakeInWork}
             onComplete={completeTask}
+            onChangeAssignedTo={changeTaskAssignee}
             currentUserId={currentUserId}
             currentUserTitle={currentUserTitle}
             onClearElementHash={onClearElementHash}
@@ -1063,6 +1064,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onResultClick={handleResultClick}
         onTakeInWork={handleTakeInWork}
         onComplete={completeTask}
+        onChangeAssignedTo={changeTaskAssignee}
         currentUserId={currentUserId}
         currentUserTitle={currentUserTitle}
         onRetry={loadTasks}
@@ -1165,6 +1167,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onResultClick={handleResultClick}
         onTakeInWork={handleTakeInWork}
         onComplete={completeTask}
+        onChangeAssignedTo={changeTaskAssignee}
         currentUserId={currentUserId}
         currentUserTitle={currentUserTitle}
         onClearElementHash={onClearElementHash}

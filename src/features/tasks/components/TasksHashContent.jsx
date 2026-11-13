@@ -29,6 +29,7 @@ export default function TasksHashContent({
   onResultClick,
   onTakeInWork,
   onComplete,
+  onChangeAssignedTo,
   currentUserId,
   currentUserTitle,
   onClearElementHash,
@@ -82,6 +83,7 @@ export default function TasksHashContent({
           onResultClick={onResultClick}
           onTakeInWork={onTakeInWork}
           onComplete={onComplete}
+          onChangeAssignedTo={onChangeAssignedTo}
           currentUserId={currentUserId}
           currentUserTitle={currentUserTitle}
           initialAction={elementActionParam}

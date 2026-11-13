@@ -3,7 +3,6 @@
 // Регрессия: задача из внешнего источника (dob) должна отрисовываться карточкой
 // в списке #tasks, а не теряться (раньше карточки строились только из main).
 
-import React from "react";
 import { describe, it, expect } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
@@ -193,6 +192,23 @@ describe("TaskList — карточки из нескольких источни
     const actions = [...card.querySelectorAll("button")]
       .filter((b) => !b.closest("[data-principal-button]"));
     expect(actions).toHaveLength(0);
+  });
+
+  it("не показывает смену AssignedTo для задачи внешнего сайта", () => {
+    const tasks = [DOB_TASK];
+    const host = render(
+      <TaskList
+        tasks={tasks}
+        tab={0}
+        groupedTasks={[["Все", tasks]]}
+        filteredTasks={tasks}
+        groupingEnabled={false}
+        onChangeAssignedTo={() => {}}
+      />
+    );
+    const card = host.querySelector('[data-testid="external-task-card"]');
+    expect(card).toBeTruthy();
+    expect(card.querySelector('[data-testid="assigned-to-edit-button"]')).toBeNull();
   });
 
   it("без внешних задач карточек внешнего источника нет", () => {

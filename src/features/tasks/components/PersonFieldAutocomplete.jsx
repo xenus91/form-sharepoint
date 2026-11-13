@@ -46,12 +46,13 @@ export default function PersonFieldAutocomplete({
   // заявки передаёт описание поля (Description).
   placeholder = "Учётная запись, ФИО или e-mail",
   // Поиск принципалов. По умолчанию — пользователи/группы основного сайта;
-  // форма заявки ДОБ передаёт поиск по сайту ДОБ, диалог рассылки — тот же
-  // поиск с фильтром «только группы».
+  // вызывающий код может задать поиск на своём сайте и ограничить тип принципала.
   search = searchSiteUsers,
   // Сведения о людях (должность/департамент/офис). По умолчанию — основной сайт;
-  // форма заявки ДОБ передаёт вариант для сайта ДОБ, чтобы не ходить на чужой.
+  // для групп без профиля сотрудника вызывающий код может передать пустую функцию.
   getPositions = getUserPositions,
+  minimumQueryText = "Введите минимум 2 символа учётной записи или фамилии",
+  noOptionsText = "Никого не найдено",
 }) {
   // В ref: колбэк может быть inline-функцией, а эффект поиска сведений не должен
   // перезапускаться на каждый рендер.
@@ -173,8 +174,8 @@ export default function PersonFieldAutocomplete({
         getOptionLabel={(user) => personDisplayName(user) || ""}
         isOptionEqualToValue={(a, b) => userKey(a) === userKey(b)}
         noOptionsText={String(inputValue || "").trim().length < MIN_QUERY_LENGTH
-          ? "Введите минимум 2 символа учётной записи или фамилии"
-          : "Никого не найдено"}
+          ? minimumQueryText
+          : noOptionsText}
         onChange={(_e, next) => {
           const list = Array.isArray(next) ? next.filter(Boolean) : (next ? [next] : []);
           const unique = [];

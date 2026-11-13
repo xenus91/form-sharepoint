@@ -179,28 +179,37 @@ async function fetchUsersPage(get, base = "", limit = USERS_PAGE_LIMIT) {
 }
 
 /**
- * Поиск пользователей по запросу.
- * @param {string} query — учётная запись (можно с `_`), ФИО или e-mail
- * @param {{ limit?: number, get?: Function, groupsOnly?: boolean, base?: string }} [opts]
- *   groupsOnly — вернуть ТОЛЬКО группы: добавляем обязательный фильтр
- *   `PrincipalType ne 1` (SP.PrincipalType: 1 — пользователь, 2/4/8 — группы);
- *   base — префикс базы другого сайта (например, сайта ДОБ).
+ * Поиск пользователей и групп по запросу.
+ * @param {string} query — учётная запись (можно с `_`), ФИО, название или e-mail
+ * @param {{ limit?: number, get?: Function, groupsOnly?: boolean, distributionListsOnly?: boolean, base?: string }} [opts]
+ *   groupsOnly — вернуть группы любого типа (`PrincipalType !== 1`);
+ *   distributionListsOnly — вернуть только списки рассылки (`PrincipalType === 2`);
+ *   base — префикс базы другого сайта.
  * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string,PrincipalType?:number}>>}
  */
 export async function searchSiteUsers(query, opts = {}) {
-  const { limit = 20, groupsOnly = false, base = "" } = opts;
+  const { limit = 20, groupsOnly = false, distributionListsOnly = false, base = "" } = opts;
   const get = opts.get || ((url, cfg) => apiClient.get(url, cfg));
   const variants = accountQueryVariants(query);
   if (variants.length === 0) return [];
 
-  // Обязательный фильтр «не пользователь»: только принципалы-группы.
-  const groupFilter = groupsOnly ? " and PrincipalType ne 1" : "";
-  const select = `Id,Title,LoginName,Email,IsHiddenInUI${groupsOnly ? ",PrincipalType" : ""}`;
+  const principalTypeFilter = distributionListsOnly
+    ? " and PrincipalType eq 2"
+    : groupsOnly
+      ? " and PrincipalType ne 1"
+      : "";
+  const needsPrincipalType = groupsOnly || distributionListsOnly;
+  const select = `Id,Title,LoginName,Email,IsHiddenInUI${needsPrincipalType ? ",PrincipalType" : ""}`;
+  const filterPrincipalType = (users) => {
+    if (distributionListsOnly) return users.filter((u) => Number(u.PrincipalType) === 2);
+    if (groupsOnly) return users.filter((u) => Number(u.PrincipalType) !== 1);
+    return users;
+  };
 
   const collected = [];
   for (const variant of variants) {
     const q = escapeODataString(variant);
-    const url = `${base}/web/siteusers?$filter=(substringof('${q}',LoginName) or substringof('${q}',Title) or substringof('${q}',Email))${groupFilter}`
+    const url = `${base}/web/siteusers?$filter=(substringof('${q}',LoginName) or substringof('${q}',Title) or substringof('${q}',Email))${principalTypeFilter}`
       + `&$select=${select}&$top=${limit}`;
     try {
       const resp = await get(url, ACCEPT);
@@ -215,22 +224,17 @@ export async function searchSiteUsers(query, opts = {}) {
     if (collected.length >= limit) break;
   }
 
-  let users = dedupeUsers(collected);
-  if (groupsOnly) users = users.filter((u) => Number(u.PrincipalType) !== 1);
+  let users = filterPrincipalType(dedupeUsers(collected));
   if (users.length === 0) {
     // Фолбэк: страница siteusers + локальная фильтрация (учитывает `_` → `.`)
     const all = await fetchUsersPage(get, base);
-    users = all.filter((u) => matchesUser(u, query));
-    if (groupsOnly) users = users.filter((u) => Number(u.PrincipalType) !== 1);
-  } else if (variants.length > 1 || groupsOnly) {
-    // сервер вернул только точное совпадение — добавим совпадения с точками из
-    // фолбэка, если он уже загружен. Для групп делаем это всегда: серверный
-    // substringof может соблюдать регистр, а matchesUser() — нет, так что
-    // «_рц 8117 отгрузка» найдёт «_РЦ 8117 Отгрузка».
+    users = filterPrincipalType(all.filter((u) => matchesUser(u, query)));
+  } else if (variants.length > 1 || needsPrincipalType) {
+    // Сервер мог вернуть только точное совпадение; добавляем другие совпадения
+    // из уже загруженной страницы siteusers. Фильтр типа сохраняем и здесь.
     const all = _allUsers.get(base);
     if (all?.loaded) {
-      users = dedupeUsers([...users, ...all.list.filter((u) => matchesUser(u, query))]);
-      if (groupsOnly) users = users.filter((u) => Number(u.PrincipalType) !== 1);
+      users = filterPrincipalType(dedupeUsers([...users, ...all.list.filter((u) => matchesUser(u, query))]));
     }
   }
   return users.slice(0, limit);

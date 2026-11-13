@@ -11,10 +11,12 @@
 // выяснен: сначала человек, группа — после ответа.
 
 import { useEffect, useMemo, useState } from "react";
-import { Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography } from "@mui/material";
+import { Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Typography } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import GroupsIcon from "@mui/icons-material/Groups";
+import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import { parseAssignees, parseEditors, resolveAssigneeCached } from "../lib/assignees";
+import AssignedToEditDialog from "./AssignedToEditDialog";
 
 const KIND_LABEL = { user: "Пользователь", group: "Группа", unknown: "Тип не определён" };
 
@@ -102,6 +104,7 @@ export function PrincipalButtons({
   sx = null,
   emptyText = "—",
   onOpenPrincipal = null,
+  onEdit = null,
 }) {
   const assignees = people;
   // Уточнённые данные принципала по Id: { [id]: { kind, title } }.
@@ -128,11 +131,47 @@ export function PrincipalButtons({
     return () => { alive = false; };
   }, [assignees, task]);
 
-  if (assignees.length === 0) {
+  const editButton = onEdit ? (
+    <IconButton
+      size="small"
+      aria-label="Изменить рассылку"
+      title="Изменить назначенную рассылку"
+      data-testid="assigned-to-edit-button"
+      onClickCapture={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onEdit();
+      }}
+      sx={{
+        width: 22,
+        height: 22,
+        p: 0.25,
+        ml: 0.25,
+        color: "rgba(23,28,143,0.62)",
+        verticalAlign: "middle",
+        "&:hover": { color: "#171c8f", bgcolor: "rgba(23,28,143,0.08)" },
+        "& svg": { fontSize: 14 },
+      }}
+    >
+      <EditOutlinedIcon />
+    </IconButton>
+  ) : null;
+
+  if (assignees.length === 0 && !onEdit) {
     return (
       <Typography component="span" variant="caption" color="text.secondary" data-testid={emptyTestId}>
         {emptyText}
       </Typography>
+    );
+  }
+  if (assignees.length === 0) {
+    return (
+      <Box sx={{ display: "inline-flex", alignItems: "center", minWidth: 0 }}>
+        <Typography component="span" variant="caption" color="text.secondary" data-testid={emptyTestId}>
+          {emptyText}
+        </Typography>
+        {editButton}
+      </Box>
     );
   }
 
@@ -207,6 +246,7 @@ export function PrincipalButtons({
           </Button>
         );
       })}
+      {editButton}
       <PrincipalInfoDialog
         open={!!open}
         task={task}
@@ -221,9 +261,29 @@ export function PrincipalButtons({
  * Кнопки «Кому назначено» (AssignedTo). Обычно принципал один, но колонка может
  * быть многозначной — тогда кнопка на каждого.
  */
-export default function AssignedToButtons({ task = null, ...rest }) {
+export default function AssignedToButtons({ task = null, onChangeAssignedTo = null, ...rest }) {
   const people = useMemo(() => parseAssignees(task), [task]);
-  return <PrincipalButtons task={task} people={people} {...rest} />;
+  const [editOpen, setEditOpen] = useState(false);
+  const handleSave = (assignee) => onChangeAssignedTo?.(task, assignee);
+
+  return (
+    <>
+      <PrincipalButtons
+        task={task}
+        people={people}
+        {...rest}
+        onEdit={onChangeAssignedTo ? () => setEditOpen(true) : null}
+      />
+      {onChangeAssignedTo ? (
+        <AssignedToEditDialog
+          open={editOpen}
+          task={task}
+          onClose={() => setEditOpen(false)}
+          onSave={handleSave}
+        />
+      ) : null}
+    </>
+  );
 }
 
 /**

@@ -14,6 +14,7 @@ import { isTakeoverAvailable, TAKEOVER_AFTER_MINUTES } from "../../../tasks/take
 // SharePoint (odata=verbose) принимает ТОЛЬКО объектом-коллекцией, а строка
 // «a;#b» даёт 400 «unexpected 'PrimitiveValue' … 'StartObject' expected».
 import { toVerbosePayload } from "../../../tasks/verbosePayload";
+import { buildTaskAssignedToPatch, updateTaskAssignedTo } from "../../../tasks/mutations/updateTaskAssignedTo";
 
 // Минимальное время, которое карточка проводит в состоянии «Сохранение...» (мс).
 // Иначе при быстром ответе сервера оверлей мелькает и кажется, что карточка пропала мгновенно.
@@ -102,12 +103,12 @@ async function resolveEntityType(known) {
   try {
     const { data } = await apiClient.get(`${TASKS_LIST_API}?$select=ListItemEntityTypeFullName`, accept);
     if (data?.d?.ListItemEntityTypeFullName) return data.d.ListItemEntityTypeFullName;
-  } catch {}
+  } catch (_e) { void _e; }
   try {
     const { data } = await apiClient.get(`${TASKS_LIST_API}/items?$top=1&$select=Id`, accept);
     const t = data?.d?.results?.[0]?.__metadata?.type;
     if (t) return t;
-  } catch {}
+  } catch (_e) { void _e; }
   return "SP.Data.ListListItem";
 }
 
@@ -117,8 +118,6 @@ export function useTaskMutations({
   inProgressStatusValue,
   resultFieldsMeta,
   ctResultMap,
-  taskConfiguration,
-  fieldDefaultActions, // not directly used but kept for dep array parity
   currentUserId,
   currentUserTitle,
   distribution,
@@ -134,10 +133,14 @@ export function useTaskMutations({
 }) {
   const [updatingId, setUpdatingId] = useState(null);
   const [updatingAction, setUpdatingAction] = useState(null); // take | found | notFound
+  const distributionKey = distribution?.Id ?? distribution?.OffDepKey ?? null;
 
   // Взял ли задачу текущий пользователь — Id ИЛИ ФИО (Editor мог прийти строкой,
   // а Id на разных сайтах не совпадают).
-  const takenByMe = (fields = {}) => isTaskTakenByCurrentUser({ ...fields }, { currentUserId, currentUserTitle });
+  const takenByMe = useCallback(
+    (fields = {}) => isTaskTakenByCurrentUser({ ...fields }, { currentUserId, currentUserTitle }),
+    [currentUserId, currentUserTitle],
+  );
 
   const handleTakeInWork = useCallback(async (task) => {
     setUpdatingId(task.Id);
@@ -177,7 +180,7 @@ export function useTaskMutations({
           }
           const _freshOpt = { Status: freshStatus, Modified: freshModified, EditorTitle: freshEditor, Editor: freshEditor, EditorId: freshEditorId };
           queryClient.setQueryData(
-            ["tasks", currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
+            ["tasks", currentUserId ?? null, distributionKey, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
             (prev) => (Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._freshOpt } : t)) : prev)
           );
           // fallback: also try distribution-based key if param not used downstream (preserve both shapes)
@@ -239,19 +242,15 @@ export function useTaskMutations({
               notify(`Задача #${task.Id} уже взята пользователем ${ed} (${s}). Возьмите другую задачу.`, { severity: "warning" });
             }
             queryClient.setQueryData(
-              ["tasks", currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
+              ["tasks", currentUserId ?? null, distributionKey, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
               (prev) => (Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, Status: s, EditorTitle: ed, Editor: ed, EditorId: edId } : t)) : prev)
             );
-          } catch {}
+          } catch (_e) { void _e; }
           await loadTasks();
           return;
         }
         if (etag !== "*") {
-          try {
-            await apiClient.post(`${TASKS_LIST_API}/items(${task.Id})`, payload, { headers: { ...headers, "IF-MATCH": "*" } });
-          } catch (e2) {
-            throw e2;
-          }
+          await apiClient.post(`${TASKS_LIST_API}/items(${task.Id})`, payload, { headers: { ...headers, "IF-MATCH": "*" } });
         } else {
           throw e;
         }
@@ -275,7 +274,7 @@ export function useTaskMutations({
       }
       const _takeOpt = { Status: targetInProgress, Modified: new Date().toISOString(), EditorTitle: takenEditorTitle, Editor: takenEditorTitle, EditorId: takenEditorId };
       queryClient.setQueryData(
-        ["tasks", currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
+        ["tasks", currentUserId ?? null, distributionKey, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")],
         (prev) => (Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._takeOpt } : t)) : prev)
       );
       setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._takeOpt } : prev));
@@ -289,7 +288,7 @@ export function useTaskMutations({
       setUpdatingId(null);
       setUpdatingAction(null);
     }
-  }, [entityType, inProgressStatusValue, currentUserId, currentUserTitle, notify, loadTasks, queryClient, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, setElementTaskMatch]);
+  }, [entityType, inProgressStatusValue, currentUserId, currentUserTitle, takenByMe, distributionKey, notify, loadTasks, queryClient, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, setElementTaskMatch]);
 
   const completeTask = useCallback(async (task, resultValue, promptFieldValues, additionalRequired, additionalActions) => {
     // Backward compat: legacy string → { Location1: string }
@@ -335,7 +334,7 @@ export function useTaskMutations({
       Modified: new Date().toISOString(),
     };
     // For queryKey parity we use distribution-agnostic key; TasksView also uses distribution Id variant — optimistic will still appear via invalidate
-    const qkBase = ["tasks", currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")];
+    const qkBase = ["tasks", currentUserId ?? null, distributionKey, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")];
     queryClient.setQueryData(qkBase, (prev) => (Array.isArray(prev) ? prev.map((t) => (t.Id === task.Id ? { ...t, ..._optimistic } : t)) : prev));
     setElementTaskMatch?.((prev) => (prev && prev.Id === task.Id ? { ...prev, ..._optimistic } : prev));
     // Патч «задача закрыта» для карточки #tasks/<ID>: Status/PercentComplete
@@ -448,7 +447,7 @@ export function useTaskMutations({
             const curStatus = check?.data?.d?.Status;
             const curPc = check?.data?.d?.PercentComplete;
             if (!isCompletedStatus(curStatus, curPc)) await postUpdateSafe({ __metadata: { type: et }, Status: targetStatus, PercentComplete: 1 }, "*");
-          } catch {}
+          } catch (_e) { void _e; }
         } catch (eNoStatus) {
           console.warn("NotFound without Status failed, trying with Status", eNoStatus?.response?.data);
           payloadWithStatus.Status = targetStatus;
@@ -504,7 +503,49 @@ export function useTaskMutations({
       setUpdatingId(null);
       setUpdatingAction(null);
     }
-  }, [entityType, completedStatusValue, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult]);
+  }, [entityType, completedStatusValue, resultFieldsMeta, ctResultMap, currentUserId, currentUserTitle, distributionKey, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, loadTasks, notify, setElementTaskMatch, pendingResult]);
 
-  return { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask };
+  const changeTaskAssignee = useCallback(async (task, assignee) => {
+    if (!task?.Id || !assignee?.Id) return false;
+    setUpdatingId(task.Id);
+    setUpdatingAction("assignedTo");
+    try {
+      const saved = await updateTaskAssignedTo(task, assignee, { entityType });
+      const assignedPatch = buildTaskAssignedToPatch(task, assignee, { isMultiple: saved.isMultiple });
+      const qkBase = ["tasks", currentUserId ?? null, distributionKey, (taskFieldNames || []).join(","), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(",")];
+      const applyPatch = (row) => (Number(row?.Id) === Number(task.Id) ? { ...row, ...assignedPatch } : row);
+
+      queryClient.setQueryData(qkBase, (prev) => (
+        Array.isArray(prev) ? prev.map(applyPatch) : prev
+      ));
+      setElementTaskMatch?.((prev) => (
+        prev && Number(prev.Id) === Number(task.Id) ? { ...prev, ...assignedPatch } : prev
+      ));
+      notify(`Для задачи #${task.Id} назначена рассылка «${assignedPatch.AssignedTo}».`, { severity: "success" });
+
+      // Повторно загружаем активные и завершённые задачи: после смены рассылки
+      // задача может перестать входить в персональный список пользователя.
+      try {
+        await loadTasks({ silent: true });
+      } catch (refreshError) {
+        console.warn("[changeTaskAssignee] назначение сохранено, но список не обновился", refreshError);
+      }
+      return true;
+    } catch (e) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error?.message?.value || e?.message || "Ошибка обновления задачи";
+      if (status === 412) {
+        notify(`Задача #${task.Id} уже изменена другим пользователем. Список обновлён — проверьте назначение и попробуйте снова.`, { severity: "warning" });
+        try { await loadTasks({ silent: true }); } catch (_refreshError) { void _refreshError; }
+      } else {
+        notify(`Не удалось изменить рассылку задачи #${task.Id}: ${msg}`, { severity: "error" });
+      }
+      return false;
+    } finally {
+      setUpdatingId(null);
+      setUpdatingAction(null);
+    }
+  }, [entityType, currentUserId, distributionKey, taskFieldNames, recipientField, scNumberField, resultFieldInternalNames, queryClient, setElementTaskMatch, notify, loadTasks]);
+
+  return { updatingId, setUpdatingId, updatingAction, setUpdatingAction, handleTakeInWork, completeTask, changeTaskAssignee };
 }

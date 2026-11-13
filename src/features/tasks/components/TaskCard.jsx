@@ -157,7 +157,29 @@ function readTaskValue(task, path) {
   return "";
 }
 
-const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fieldDefaultActions, choices, updatingId, updatingAction, onResultClick, onTakeInWork, onComplete, currentUserId, currentUserTitle, initialAction, resultFieldsMeta: propResultFieldsMeta, ctResultMap: propCtResultMap, taskConfig, pendingAnimation = null, relatedAttachmentCount = 0, onOpenRelatedAttachments = null }) {
+const TaskCard = React.memo(function TaskCard({
+  task,
+  isCompleted,
+  isOverdue,
+  fieldDefaultActions,
+  choices,
+  updatingId,
+  updatingAction,
+  onResultClick,
+  onTakeInWork,
+  onComplete,
+  // eslint-disable-next-line react/prop-types
+  onChangeAssignedTo,
+  currentUserId,
+  currentUserTitle,
+  initialAction,
+  resultFieldsMeta: propResultFieldsMeta,
+  ctResultMap: propCtResultMap,
+  taskConfig,
+  pendingAnimation = null,
+  relatedAttachmentCount = 0,
+  onOpenRelatedAttachments = null,
+}) {
   // ⭐ v8: defaults-принцип. getUiConfig объявлен НИЖЕ getBehaviourRuleForChoice/getButtonSx
   // (зависимости ниже в файле). Реорганизация — поведение из TaskBehaviour,
   // никаких legacy-фолбэков на TaskResultDefinitions/TaskPromptFields.
@@ -740,11 +762,18 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
         // Никаких текстов под конкретные результаты: оверлей одинаковый для любого действия.
         const action = updatingAction || (isTaking ? "take" : null);
         const isCompleteAction = action === "complete";
+        const isAssignedToAction = action === "assignedTo";
         const overlayBg = "rgba(255,255,255,0.82)";
         const spinnerColor = "#5A67D8";
         const titleColor = "#171c8f";
-        const titleText = isTaking ? "Беру в работу..." : isCompleteAction ? "Сохранение..." : "Сохранение...";
-        const subText = isTaking ? "Подождите, идёт проверка блокировки" : isCompleteAction ? "Отправляю результат и закрываю задачу..." : "Подождите...";
+        const titleText = isTaking ? "Беру в работу..." : isAssignedToAction ? "Сохраняю назначение..." : "Сохранение...";
+        const subText = isTaking
+          ? "Подождите, идёт проверка блокировки"
+          : isCompleteAction
+            ? "Отправляю результат и закрываю задачу..."
+            : isAssignedToAction
+              ? "Обновляю рассылку, назначенную на задачу..."
+              : "Подождите...";
         return (
           <Box
             sx={{
@@ -1121,7 +1150,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       (требование 2026-10-10): иконка человек/группа, клик — карточка. */}
                   <TakerButtons task={task} />
                   <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
-                  <AssignedToButtons task={task} />
+                  <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
                   <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • "}{task.Modified ? new Date(task.Modified).toLocaleString("ru-RU") : "—"}{task.ResultSearchTHU ? ` • ${task.ResultSearchTHU}` : ""}{task.Location1 ? ` • ${task.Location1}` : ""}</Box>
                 </Box>
               </Typography>
@@ -1246,7 +1275,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
                         <TakerButtons task={task} />
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
-                        <AssignedToButtons task={task} />
+                        <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                       </Box>
                     </Typography>
@@ -1290,7 +1319,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{"Исполнитель: "}</Box>
                           <TakerButtons task={task} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
-                          <AssignedToButtons task={task} />
+                          <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                         </Box>
                       </Typography>
@@ -1315,7 +1344,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
                           <TakerButtons task={task} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
-                          <AssignedToButtons task={task} />
+                          <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                         </Box>
                       </Typography>
@@ -1588,7 +1617,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                           {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
                           <TakerButtons task={task} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
-                          <AssignedToButtons task={task} />
+                          <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
                           <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                         </Box>
                       </Typography>
@@ -1759,7 +1788,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                         {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
                         <TakerButtons task={task} />
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
-                        <AssignedToButtons task={task} />
+                        <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
                         <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                       </Box>
                     </Typography>
@@ -1804,7 +1833,7 @@ const TaskCard = React.memo(function TaskCard({ task, isCompleted, isOverdue, fi
                       {/* Исполнитель — кнопка принципала, как «Кому назначено» (2026-10-10). */}
                       <TakerButtons task={task} />
                       <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Кому назначено: "}</Box>
-                      <AssignedToButtons task={task} />
+                      <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
                       <Box component="span" sx={CARD_FOOTER_TEXT_SX}>{" • Статус: "}{task.Status || "—"}</Box>
                     </Box>
                   </Typography>
