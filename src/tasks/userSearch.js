@@ -297,6 +297,15 @@ function mapPeoplePickerDistributionList(raw) {
   };
 }
 
+function distributionListQueryVariants(query) {
+  const raw = String(query ?? "").trim();
+  const withoutLeadingUnderscore = raw.replace(/^_+/, "").trim();
+  const variants = withoutLeadingUnderscore !== raw
+    ? [raw, ...accountQueryVariants(withoutLeadingUnderscore)]
+    : accountQueryVariants(raw);
+  return [...new Set(variants.map((value) => String(value).trim()).filter((value) => value.length >= 2))];
+}
+
 /**
  * Поиск почтовых рассылок для поля AssignedTo.
  * People Picker — основной источник: он находит рассылки, которых может ещё
@@ -307,42 +316,59 @@ function mapPeoplePickerDistributionList(raw) {
  */
 export async function searchDistributionLists(query, opts = {}) {
   const queryString = String(query ?? "").trim();
-  if (queryString.length < 2) return [];
+  const queryVariants = distributionListQueryVariants(queryString);
+  if (queryVariants.length === 0) return [];
 
   const limit = Math.max(1, Number(opts.limit) || 20);
   const get = opts.get || ((url, config) => apiClient.get(url, config));
   const post = opts.post || ((url, body, config) => apiClient.post(url, body, config));
-  let peoplePickerLists = [];
-  try {
-    const response = await post(
-      "/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.ClientPeoplePickerSearchUser",
-      {
-        queryParams: {
-          __metadata: { type: "SP.UI.ApplicationPages.ClientPeoplePickerQueryParameters" },
-          AllowEmailAddresses: true,
-          AllowMultipleEntities: true,
-          AllUrlZones: false,
-          MaximumEntitySuggestions: limit,
-          PrincipalSource: 15,
-          PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
-          QueryString: queryString,
+  const peoplePickerLists = [];
+  for (const searchTerm of queryVariants) {
+    try {
+      const response = await post(
+        "/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.ClientPeoplePickerSearchUser",
+        {
+          queryParams: {
+            __metadata: { type: "SP.UI.ApplicationPages.ClientPeoplePickerQueryParameters" },
+            AllowEmailAddresses: true,
+            AllowMultipleEntities: true,
+            AllUrlZones: false,
+            MaximumEntitySuggestions: limit,
+            PrincipalSource: 15,
+            PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
+            QueryString: searchTerm,
+          },
         },
-      },
-      ACCEPT,
-    );
-    peoplePickerLists = peoplePickerResults(response)
-      .map(mapPeoplePickerDistributionList)
-      .filter(Boolean);
-  } catch (error) {
-    if (error?.response?.status && ![400, 403, 404].includes(error.response.status)) {
-      console.warn("[userSearch] distribution list People Picker search failed", error.response.status);
+        ACCEPT,
+      );
+      peoplePickerLists.push(...peoplePickerResults(response)
+        .map(mapPeoplePickerDistributionList)
+        .filter(Boolean));
+    } catch (error) {
+      if (error?.response?.status && ![400, 403, 404].includes(error.response.status)) {
+        console.warn("[userSearch] distribution list People Picker search failed", error.response.status);
+      }
     }
+    if (dedupeUsers(peoplePickerLists).length >= limit) break;
   }
 
-  if (peoplePickerLists.length > 0) return dedupeUsers(peoplePickerLists).slice(0, limit);
+  const foundByPeoplePicker = dedupeUsers(peoplePickerLists);
+  if (foundByPeoplePicker.length > 0) return foundByPeoplePicker.slice(0, limit);
 
-  // Резервный источник — рассылки, уже добавленные в User Information List.
-  return searchSiteUsers(queryString, { limit, get, distributionListsOnly: true });
+  // Fallback покрывает рассылки в User Information List. Запускаем его по тем
+  // же вариантам, включая поисковый термин без начального `_` (например, `_РЦ` → `РЦ`).
+  const siteUserLists = [];
+  for (const searchTerm of queryVariants) {
+    const remaining = limit - dedupeUsers(siteUserLists).length;
+    if (remaining <= 0) break;
+    const matches = await searchSiteUsers(searchTerm, {
+      limit: remaining,
+      get,
+      distributionListsOnly: true,
+    });
+    siteUserLists.push(...matches);
+  }
+  return dedupeUsers(siteUserLists).slice(0, limit);
 }
 
 /**

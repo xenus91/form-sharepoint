@@ -64,6 +64,25 @@ describe("поиск почтовых рассылок для AssignedTo", () =>
     expect(get).not.toHaveBeenCalled();
   });
 
+  it("повторяет поиск People Picker без начального подчёркивания (например, _рц → рц)", async () => {
+    const post = vi.fn(async (_url, body) => (
+      body.queryParams.QueryString === "рц"
+        ? pickerResponse([{
+          Key: "i:0#.f|membership|mailing-rc@lenta.com",
+          DisplayText: "Рассылка РЦ Отгрузка",
+          EntityData: { SPUserID: "60", Email: "mailing-rc@lenta.com", PrincipalType: "DistributionList" },
+        }])
+        : pickerResponse([])
+    ));
+    const get = vi.fn();
+
+    const results = await searchDistributionLists("_рц", { get, post });
+
+    expect(post.mock.calls.map(([, body]) => body.queryParams.QueryString)).toEqual(["_рц", "рц"]);
+    expect(results.map((mailing) => mailing.Id)).toEqual([60]);
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("переходит к siteusers, если People Picker не дал результатов, фильтруя только тип 2", async () => {
     const post = vi.fn(async () => pickerResponse([]));
     const calls = [];
@@ -88,6 +107,26 @@ describe("поиск почтовых рассылок для AssignedTo", () =>
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("PrincipalType eq 2");
     expect(calls[0]).toContain("$select=Id,Title,LoginName,Email,IsHiddenInUI,PrincipalType");
+  });
+
+  it("повторяет fallback siteusers без начального подчёркивания", async () => {
+    const post = vi.fn(async () => pickerResponse([]));
+    const calls = [];
+    const get = vi.fn(async (url) => {
+      calls.push(url);
+      if (url.includes("substringof('рц'")) {
+        return { data: { d: { results: [
+          { Id: 55, Title: "Рассылка РЦ Приёмка", LoginName: "mailing-rc", PrincipalType: 2 },
+        ] } } };
+      }
+      return { data: { d: { results: [] } } };
+    });
+
+    const results = await searchDistributionLists("_рц", { get, post });
+
+    expect(results.map((mailing) => mailing.Id)).toEqual([55]);
+    expect(calls.some((url) => url.includes("substringof('_рц'"))).toBe(true);
+    expect(calls.some((url) => url.includes("substringof('рц'"))).toBe(true);
   });
 
   it("использует siteusers, если People Picker завершился ошибкой", async () => {
