@@ -9,6 +9,28 @@ const pickerResponse = (entries) => ({
   },
 });
 
+const globalSearchResponse = (entries) => ({
+  data: {
+    d: {
+      query: {
+        PrimaryQueryResult: {
+          RelevantResults: {
+            Table: {
+              Rows: {
+                results: entries.map((entry) => ({
+                  Cells: {
+                    results: Object.entries(entry).map(([Key, Value]) => ({ Key, Value })),
+                  },
+                })),
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+});
+
 beforeEach(() => clearUserSearchCache());
 
 describe("поиск почтовых рассылок для AssignedTo", () => {
@@ -127,6 +149,61 @@ describe("поиск почтовых рассылок для AssignedTo", () =>
     expect(results.map((mailing) => mailing.Id)).toEqual([55]);
     expect(calls.some((url) => url.includes("substringof('_рц'"))).toBe(true);
     expect(calls.some((url) => url.includes("substringof('рц'"))).toBe(true);
+  });
+
+  it("ищет через глобальный SharePoint Search и разрешает только PrincipalType=2", async () => {
+    const post = vi.fn(async (url, body) => {
+      if (url.includes("ClientPeoplePicker")) return pickerResponse([]);
+      if (url === "/web/ensureuser") {
+        const loginName = body.logonName;
+        const isMailing = loginName.includes("mailing-rc");
+        return {
+          data: { d: {
+            Id: isMailing ? 61 : 62,
+            Title: isMailing ? "Рассылка РЦ Отгрузка" : "Обычный пользователь РЦ",
+            LoginName: loginName,
+            Email: isMailing ? "mailing-rc@lenta.com" : "person-rc@lenta.com",
+            PrincipalType: isMailing ? 2 : 1,
+          } },
+        };
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
+    const get = vi.fn(async (url) => {
+      if (url.startsWith("/search/query?")) {
+        return globalSearchResponse([
+          {
+            Title: "Обычный пользователь РЦ",
+            AccountName: "i:0#.f|membership|person-rc@lenta.com",
+            WorkEmail: "person-rc@lenta.com",
+            PrincipalType: "User",
+          },
+          {
+            Title: "Рассылка РЦ Отгрузка",
+            AccountName: "i:0#.f|membership|mailing-rc@lenta.com",
+            WorkEmail: "mailing-rc@lenta.com",
+          },
+          {
+            Title: "Не рассылка РЦ",
+            AccountName: "i:0#.f|membership|person-untyped@lenta.com",
+            WorkEmail: "person-untyped@lenta.com",
+          },
+        ]);
+      }
+      return { data: { d: { results: [] } } };
+    });
+
+    const results = await searchDistributionLists("_рц", { get, post });
+
+    expect(results.map((mailing) => [mailing.Id, mailing.PrincipalType])).toEqual([[61, 2]]);
+    const searchUrls = get.mock.calls.map(([url]) => url).filter((url) => url.startsWith("/search/query?"));
+    expect(searchUrls).toHaveLength(2);
+    expect(searchUrls.map(decodeURIComponent).some((url) => url.includes("querytext='рц*'"))).toBe(true);
+    expect(searchUrls.map(decodeURIComponent).some((url) => url.includes("sourceid='B09A7990-05EA-4AF9-81EF-EDFAB16C4E31'"))).toBe(true);
+    expect(post.mock.calls.filter(([url]) => url === "/web/ensureuser").map(([, body]) => body.logonName)).toEqual([
+      "i:0#.f|membership|mailing-rc@lenta.com",
+      "i:0#.f|membership|person-untyped@lenta.com",
+    ]);
   });
 
   it("использует siteusers, если People Picker завершился ошибкой", async () => {
