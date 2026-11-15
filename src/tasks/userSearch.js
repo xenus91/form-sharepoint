@@ -274,25 +274,24 @@ function mapPeoplePickerDistributionList(raw) {
 
   const id = [data.SPUserID, data.UserId, data.Id, raw.Id]
     .map((candidate) => Number(candidate))
-    .find((candidate) => Number.isSafeInteger(candidate) && candidate > 0);
-  if (!id) return null;
+    .find((candidate) => Number.isSafeInteger(candidate) && candidate > 0) || null;
 
-  const loginName = String(
-    raw.Key || data.AccountName || data.LoginName || data.Key || "",
-  ).trim();
   const email = String(data.Email || raw.Email || raw.EMail || "").trim();
+  const loginName = String(
+    raw.Key || data.AccountName || data.LoginName || data.Key || email,
+  ).trim();
   const title = String(raw.DisplayText || raw.Title || data.Title || "").trim()
     || accountLocalPart(loginName)
     || email;
-  if (!title) return null;
+  if (!title || (!id && !loginName)) return null;
 
   return {
     Id: id,
     Title: title,
     LoginName: loginName,
     Email: email,
-    // Некоторые версии People Picker не возвращают PrincipalType; запрос уже
-    // ограничен рассылками, поэтому отсутствие типа безопасно нормализуем в 2.
+    // People Picker запрошен с PrincipalType=2. Если локального SPUserID ещё
+    // нет, ниже разрешаем Key через ensureuser и перепроверяем фактический тип.
     PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
   };
 }
@@ -379,6 +378,39 @@ function mapEnsuredDistributionList(response, candidate) {
   return { Id: id, Title: title, LoginName: loginName, Email: email, PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST };
 }
 
+function ensureUserUrl(loginName) {
+  const escapedLogin = escapeODataString(loginName);
+  return `/web/ensureuser?logonName='${encodeURIComponent(escapedLogin)}'`;
+}
+
+async function ensureDistributionList(candidate, post) {
+  const id = Number(candidate?.Id);
+  if (Number.isSafeInteger(id) && id > 0) return { ...candidate, Id: id };
+  const loginName = String(candidate?.LoginName || candidate?.loginName || "").trim();
+  if (!loginName) return null;
+  const response = await post(ensureUserUrl(loginName), {}, ACCEPT);
+  return mapEnsuredDistributionList(response, { ...candidate, loginName });
+}
+
+async function resolvePeoplePickerDistributionLists(candidates, post, limit) {
+  const resolved = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const key = String(candidate.LoginName || candidate.Id || "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    try {
+      const mailing = await ensureDistributionList(candidate, post);
+      if (mailing) resolved.push(mailing);
+    } catch (error) {
+      const status = error?.response?.status;
+      console.warn("[userSearch] distribution-list ensureuser failed", status || error?.message);
+    }
+    if (dedupeUsers(resolved).length >= limit) break;
+  }
+  return dedupeUsers(resolved).slice(0, limit);
+}
+
 async function searchGlobalDistributionLists(queryVariants, { get, post, limit }) {
   const candidates = new Map();
   const searchedUrls = new Set();
@@ -411,8 +443,7 @@ async function searchGlobalDistributionLists(queryVariants, { get, post, limit }
       // ensureuser возвращает именно principal ID локального сайта, необходимый
       // для AssignedToId. Проверяем PrincipalType=2 после разрешения — Search
       // индекс может также содержать пользователей и security groups.
-      const response = await post("/web/ensureuser", { logonName: candidate.loginName }, ACCEPT);
-      const mailing = mapEnsuredDistributionList(response, candidate);
+      const mailing = await ensureDistributionList(candidate, post);
       if (mailing) resolved.push(mailing);
     } catch (error) {
       if (!resolutionFailureLogged) {
@@ -444,7 +475,7 @@ export async function searchDistributionLists(query, opts = {}) {
   const limit = Math.max(1, Number(opts.limit) || 20);
   const get = opts.get || ((url, config) => apiClient.get(url, config));
   const post = opts.post || ((url, body, config) => apiClient.post(url, body, config));
-  const peoplePickerLists = [];
+  const peoplePickerCandidates = new Map();
   for (const searchTerm of queryVariants) {
     try {
       const response = await post(
@@ -463,19 +494,24 @@ export async function searchDistributionLists(query, opts = {}) {
         },
         ACCEPT,
       );
-      peoplePickerLists.push(...peoplePickerResults(response)
-        .map(mapPeoplePickerDistributionList)
-        .filter(Boolean));
+      for (const candidate of peoplePickerResults(response).map(mapPeoplePickerDistributionList).filter(Boolean)) {
+        const key = String(candidate.LoginName || candidate.Id || "").toLowerCase();
+        if (key && !peoplePickerCandidates.has(key)) peoplePickerCandidates.set(key, candidate);
+      }
     } catch (error) {
       if (error?.response?.status && ![400, 403, 404].includes(error.response.status)) {
         console.warn("[userSearch] distribution list People Picker search failed", error.response.status);
       }
     }
-    if (dedupeUsers(peoplePickerLists).length >= limit) break;
+    if (peoplePickerCandidates.size >= limit) break;
   }
 
-  const foundByPeoplePicker = dedupeUsers(peoplePickerLists);
-  if (foundByPeoplePicker.length > 0) return foundByPeoplePicker.slice(0, limit);
+  const foundByPeoplePicker = await resolvePeoplePickerDistributionLists(
+    [...peoplePickerCandidates.values()],
+    post,
+    limit,
+  );
+  if (foundByPeoplePicker.length > 0) return foundByPeoplePicker;
 
   // Fallback покрывает рассылки в User Information List. Запускаем его по тем
   // же вариантам, включая поисковый термин без начального `_` (например, `_РЦ` → `РЦ`).
