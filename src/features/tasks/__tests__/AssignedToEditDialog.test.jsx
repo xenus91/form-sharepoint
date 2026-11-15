@@ -196,6 +196,33 @@ describe("AssignedToEditDialog — поиск группы", () => {
     expect(onSave).toHaveBeenCalledWith(SHIFT_GROUP);
   });
 
+  it("исключает текущее назначение и из предзагрузки, и из результатов поиска", async () => {
+    const onSave = vi.fn(async () => true);
+    render({
+      Id: 46,
+      AssignedTo: SECURITY_GROUP.Title,
+      AssignedToId: SECURITY_GROUP.Id,
+    }, onSave, "РЦ-8117");
+    const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
+    const input = dialog.querySelector("input");
+    await settle(60);
+
+    const popupButton = dialog.querySelector(".MuiAutocomplete-popupIndicator");
+    await act(async () => { click(popupButton); await settle(); });
+    const optionsBeforeTyping = [...document.body.querySelectorAll('[role="option"]')];
+    expect(optionsBeforeTyping.some((option) => option.textContent.includes(SECURITY_GROUP.Title))).toBe(false);
+    expect(optionsBeforeTyping.some((option) => option.textContent.includes(SHIFT_GROUP.Title))).toBe(true);
+
+    await act(async () => { typeInto(input, "Группа"); await settle(350); });
+    expect(searchAssignedToGroups).toHaveBeenCalledWith("Группа", { limit: 20 });
+    const optionsAfterTyping = [...document.body.querySelectorAll('[role="option"]')];
+    expect(optionsAfterTyping.some((option) => option.textContent.includes(SECURITY_GROUP.Title))).toBe(false);
+    expect(optionsAfterTyping.some((option) => option.textContent.includes(OTHER_RC_GROUP.Title))).toBe(false);
+    const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
+    expect(saveButton.disabled).toBe(true);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it("не показывает сотрудника, даже если поиск ошибочно его вернул", async () => {
     render({ Id: 45, AssignedTo: "", AssignedToId: null });
     const input = document.body.querySelector("input");

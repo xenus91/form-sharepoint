@@ -22,6 +22,7 @@ const NO_GROUP_POSITIONS = async () => ({});
 const PROFILE_ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const OFFICE_GROUPS_LIMIT = 100;
 const EMPTY_GROUPS = Object.freeze([]);
+const EMPTY_IDS = new Set();
 
 function normalizeOfficeSearchTerm(value) {
   const office = String(value ?? "").trim();
@@ -54,9 +55,11 @@ function groupMatchesQuery(group, query) {
     .some((value) => normalizeForOfficeMatch(value).includes(normalizedQuery));
 }
 
-function groupsForOffice(groups, office) {
+function groupsForOffice(groups, office, excludedIds = EMPTY_IDS) {
   const unique = new Map();
   for (const group of Array.isArray(groups) ? groups : []) {
+    const id = Number(group?.Id);
+    if (Number.isSafeInteger(id) && excludedIds.has(id)) continue;
     if (!isGroupPrincipalType(group?.PrincipalType) || !groupMatchesOffice(group, office)) continue;
     const key = String(group.Id ?? group.LoginName ?? group.Title ?? "").trim().toLowerCase();
     if (key && !unique.has(key)) unique.set(key, group);
@@ -96,18 +99,21 @@ export default function AssignedToEditDialog({
   const [officeGroups, setOfficeGroups] = useState(EMPTY_GROUPS);
   const [officeGroupsLoading, setOfficeGroupsLoading] = useState(false);
   const currentAssignees = useMemo(() => parseAssignees(task), [task]);
+  const currentAssigneeIds = useMemo(() => new Set(
+    currentAssignees
+      .map((person) => Number(person?.id))
+      .filter((id) => Number.isSafeInteger(id) && id > 0),
+  ), [currentAssignees]);
   const currentLabel = currentAssignees
     .map((person) => person.title || (person.id ? `Id ${person.id}` : ""))
     .filter(Boolean)
     .join(", ") || "не назначена";
-  const sameSingleAssignee = currentAssignees.length === 1
-    && Number(currentAssignees[0].id) === Number(selected?.Id);
   const canSave = Number.isFinite(Number(selected?.Id))
     && Number(selected?.Id) > 0
     && officeStatus === "ready"
     && groupMatchesOffice(selected, officeSearchTerm)
     && isGroupPrincipalType(selected?.PrincipalType)
-    && !sameSingleAssignee;
+    && !currentAssigneeIds.has(Number(selected?.Id));
 
   useEffect(() => {
     if (!open) return undefined;
@@ -151,7 +157,7 @@ export default function AssignedToEditDialog({
     setOfficeGroupsLoading(true);
     searchAssignedToGroups(officeSearchTerm, { limit: OFFICE_GROUPS_LIMIT })
       .then((results) => {
-        if (alive) setOfficeGroups(groupsForOffice(results, officeSearchTerm));
+        if (alive) setOfficeGroups(groupsForOffice(results, officeSearchTerm, currentAssigneeIds));
       })
       .catch(() => {
         if (alive) setOfficeGroups(EMPTY_GROUPS);
@@ -160,7 +166,7 @@ export default function AssignedToEditDialog({
         if (alive) setOfficeGroupsLoading(false);
       });
     return () => { alive = false; };
-  }, [open, officeSearchTerm, officeStatus]);
+  }, [open, officeSearchTerm, officeStatus, currentAssigneeIds]);
 
   const searchOfficeGroups = useCallback(async (query, options) => {
     if (officeStatus !== "ready" || !officeSearchTerm) return [];
@@ -175,10 +181,10 @@ export default function AssignedToEditDialog({
       // При недоступности People Picker сохраняем локальный поиск по уже загруженным группам.
       void _e;
     }
-    const remoteMatches = groupsForOffice(searchedGroups, officeSearchTerm)
+    const remoteMatches = groupsForOffice(searchedGroups, officeSearchTerm, currentAssigneeIds)
       .filter((group) => groupMatchesQuery(group, queryText));
-    return groupsForOffice([...localMatches, ...remoteMatches], officeSearchTerm);
-  }, [officeGroups, officeSearchTerm, officeStatus]);
+    return groupsForOffice([...localMatches, ...remoteMatches], officeSearchTerm, currentAssigneeIds);
+  }, [currentAssigneeIds, officeGroups, officeSearchTerm, officeStatus]);
 
   const close = () => {
     if (!saving) onClose?.();
