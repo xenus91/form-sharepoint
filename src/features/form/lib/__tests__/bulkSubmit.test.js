@@ -53,6 +53,50 @@ describe("createBulkProblemsPalletItems", () => {
     expect(statusUpdates[0][2].headers["X-HTTP-Method"]).toBe("MERGE");
   });
 
+  it("держит не больше четырёх строк в отправке одновременно и возвращает результат в исходном порядке", async () => {
+    const rows = Array.from({ length: 5 }, (_, index) => ({
+      id: `row-${index + 1}`,
+      eoNumber: `80811700402204736${index + 1}`,
+      recipientId: 17 + index,
+    }));
+    let nextId = 100;
+    let activeCreates = 0;
+    let maxActiveCreates = 0;
+    const createReleases = [];
+    const client = {
+      post: vi.fn((url) => {
+        if (url === "/contextinfo") return Promise.resolve(digestResponse);
+        if (url.endsWith("/items")) {
+          activeCreates += 1;
+          maxActiveCreates = Math.max(maxActiveCreates, activeCreates);
+          return new Promise((resolve) => {
+            createReleases.push(() => {
+              activeCreates -= 1;
+              resolve({ data: { d: { Id: nextId++ } } });
+            });
+          });
+        }
+        return Promise.resolve({ data: {} });
+      }),
+    };
+
+    const submission = createBulkProblemsPalletItems({ ...common, rows, client });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(createReleases).toHaveLength(4);
+    expect(maxActiveCreates).toBe(4);
+
+    createReleases[0]();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(createReleases).toHaveLength(5);
+    for (const release of createReleases.slice(1)) release();
+
+    const results = await submission;
+    expect(results.map((result) => result.rowId)).toEqual(rows.map((row) => row.id));
+    expect(results.map((result) => result.itemId)).toEqual([100, 101, 102, 103, 104]);
+    expect(results.every((result) => result.status === "success")).toBe(true);
+    expect(maxActiveCreates).toBe(4);
+  });
+
   it("возвращает результат по каждой строке, а не прерывает всю пачку при ошибке", async () => {
     let createCount = 0;
     const client = {

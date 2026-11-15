@@ -222,6 +222,29 @@ describe("BulkEoMissingDialog", () => {
     expect(document.body.textContent).toContain("Не сопоставлен получатель 02941.");
   });
 
+  it("проверяет конфликты нескольких ЕО параллельно перед отправкой", async () => {
+    const checkResolvers = [];
+    const onCheckEoConflict = vi.fn(() => new Promise((resolve) => checkResolvers.push(resolve)));
+    await render({ onCheckEoConflict });
+
+    const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
+    await pasteSource(
+      source,
+      "0294\n808117004022047365\n0295\n808117004022002852\n0294\n808117004022002853\n0295\n808117004022002854",
+    );
+    await clickButton("Отправить 4 заявки");
+
+    expect(onCheckEoConflict).toHaveBeenCalledTimes(4);
+    expect(mocks.createBulkProblemsPalletItems).not.toHaveBeenCalled();
+    await act(async () => {
+      checkResolvers.forEach((resolve) => resolve(null));
+      await wait(20);
+    });
+
+    expect(mocks.createBulkProblemsPalletItems).toHaveBeenCalledTimes(1);
+    expect(onCreated).toHaveBeenCalledWith(4);
+  });
+
   it("перед отправкой предупреждает о конфликтующей заявке и требует явного подтверждения", async () => {
     const onCheckEoConflict = vi.fn().mockResolvedValue({
       THU: "808117004022047365",

@@ -1,5 +1,6 @@
 import apiClient from "../../../api";
 import { buildProblemsPalletTitle, PROBLEMS_LIST_TITLE } from "../../../tasks/problemsPallet";
+import { BULK_EO_CONCURRENCY_LIMIT, mapWithConcurrency } from "./bulkConcurrency";
 
 const ITEM_METADATA_TYPE = "SP.Data.ProblemsPalletListItem";
 
@@ -23,10 +24,9 @@ const getItemUrl = (itemId) =>
   `/web/lists/getbytitle('${encodeURIComponent(PROBLEMS_LIST_TITLE)}')/items(${itemId})`;
 
 /**
- * Создаёт элементы ProblemsPallet по одному, как обычная форма.
- * Каждый результат сообщается по мере завершения — при частичной ошибке уже
- * созданные элементы не отправляются повторно, а повторная попытка касается
- * только тех строк, которые безопасно можно отправить ещё раз.
+ * Создаёт отдельный элемент ProblemsPallet для каждой строки, ограничивая
+ * параллелизм четырьмя строками. Каждый результат сообщается по завершении;
+ * частичные результаты и безопасный повтор строк сохраняются.
  */
 export async function createBulkProblemsPalletItems({
   rows,
@@ -38,12 +38,13 @@ export async function createBulkProblemsPalletItems({
   client = apiClient,
   onRowResult,
 }) {
-  const digest = await getRequestDigest(client);
-  const results = [];
+  if (!Array.isArray(rows) || rows.length === 0) return [];
 
-  for (const row of rows) {
+  const digest = await getRequestDigest(client);
+  const createUrl = `/web/lists/getbytitle('${encodeURIComponent(PROBLEMS_LIST_TITLE)}')/items`;
+
+  const createOne = async (row) => {
     let itemId = null;
-    let result;
     const payload = {
       __metadata: { type: ITEM_METADATA_TYPE },
       Title: buildProblemsPalletTitle(dcThu, row.eoNumber),
@@ -62,7 +63,7 @@ export async function createBulkProblemsPalletItems({
 
     try {
       const createResponse = await client.post(
-        `/web/lists/getbytitle('${encodeURIComponent(PROBLEMS_LIST_TITLE)}')/items`,
+        createUrl,
         payload,
         {
           headers: {
@@ -75,62 +76,62 @@ export async function createBulkProblemsPalletItems({
       itemId = createResponse?.data?.d?.Id;
 
       if (!itemId) {
-        result = {
+        return {
           rowId: row.id,
           status: "uncertain",
           itemId: null,
           retryable: false,
           message: "SharePoint не вернул Id. Проверьте список перед повторной отправкой.",
         };
-      } else {
+      }
+
+      try {
+        await client.post(
+          getItemUrl(itemId),
+          {
+            __metadata: { type: ITEM_METADATA_TYPE },
+            Status: "Выполнено",
+          },
+          {
+            headers: {
+              Accept: "application/json;odata=verbose",
+              "Content-Type": "application/json;odata=verbose",
+              "X-RequestDigest": digest,
+              "IF-MATCH": "*",
+              "X-HTTP-Method": "MERGE",
+            },
+          },
+        );
+        return { rowId: row.id, status: "success", itemId, retryable: false, message: "" };
+      } catch (statusError) {
+        // Совпадаем с обычной формой: статус выставляется после создания.
+        // Если обновить его не удалось, удаляем элемент, чтобы повторная
+        // отправка не создала незаметный дубликат.
         try {
-          await client.post(
-            getItemUrl(itemId),
-            {
-              __metadata: { type: ITEM_METADATA_TYPE },
-              Status: "Выполнено",
+          await client.post(getItemUrl(itemId), null, {
+            headers: {
+              "IF-MATCH": "*",
+              "X-HTTP-Method": "DELETE",
+              "X-RequestDigest": digest,
+              "Content-Type": undefined,
             },
-            {
-              headers: {
-                Accept: "application/json;odata=verbose",
-                "Content-Type": "application/json;odata=verbose",
-                "X-RequestDigest": digest,
-                "IF-MATCH": "*",
-                "X-HTTP-Method": "MERGE",
-              },
-            },
-          );
-          result = { rowId: row.id, status: "success", itemId, retryable: false, message: "" };
-        } catch (statusError) {
-          // Совпадаем с обычной формой: статус выставляется после создания.
-          // Если обновить его не удалось, удаляем элемент, чтобы повторная
-          // отправка не создала незаметный дубликат.
-          try {
-            await client.post(getItemUrl(itemId), null, {
-              headers: {
-                "IF-MATCH": "*",
-                "X-HTTP-Method": "DELETE",
-                "X-RequestDigest": digest,
-                "Content-Type": undefined,
-              },
-              transformRequest: [(data) => data],
-            });
-            result = {
-              rowId: row.id,
-              status: "failed",
-              itemId,
-              retryable: true,
-              message: `Не удалось установить статус; созданный элемент удалён. ${getErrorMessage(statusError)}`,
-            };
-          } catch (rollbackError) {
-            result = {
-              rowId: row.id,
-              status: "uncertain",
-              itemId,
-              retryable: false,
-              message: `Элемент #${itemId} создан, но статус не установлен, а удалить его не удалось. Проверьте SharePoint. ${getErrorMessage(rollbackError)}`,
-            };
-          }
+            transformRequest: [(data) => data],
+          });
+          return {
+            rowId: row.id,
+            status: "failed",
+            itemId,
+            retryable: true,
+            message: `Не удалось установить статус; созданный элемент удалён. ${getErrorMessage(statusError)}`,
+          };
+        } catch (rollbackError) {
+          return {
+            rowId: row.id,
+            status: "uncertain",
+            itemId,
+            retryable: false,
+            message: `Элемент #${itemId} создан, но статус не установлен, а удалить его не удалось. Проверьте SharePoint. ${getErrorMessage(rollbackError)}`,
+          };
         }
       }
     } catch (createError) {
@@ -138,7 +139,7 @@ export async function createBulkProblemsPalletItems({
       // 4xx означает отказ SharePoint до создания элемента. Для сетевой ошибки
       // или 5xx нельзя исключить, что сервер успел сохранить запись до обрыва.
       const retryable = statusCode >= 400 && statusCode < 500;
-      result = {
+      return {
         rowId: row.id,
         status: retryable ? "failed" : "uncertain",
         itemId: null,
@@ -148,10 +149,11 @@ export async function createBulkProblemsPalletItems({
           : `Не удалось подтвердить результат запроса. Проверьте список перед повторной отправкой. ${getErrorMessage(createError)}`,
       };
     }
+  };
 
-    results.push(result);
+  return mapWithConcurrency(rows, BULK_EO_CONCURRENCY_LIMIT, async (row) => {
+    const result = await createOne(row);
     if (typeof onRowResult === "function") onRowResult(result);
-  }
-
-  return results;
+    return result;
+  });
 }

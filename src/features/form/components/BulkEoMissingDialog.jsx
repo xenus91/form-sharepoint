@@ -35,6 +35,7 @@ import {
 } from "../lib/bulkEoParser";
 import { fetchBulkRecipientOptions, recipientOptionLabel } from "../lib/bulkRecipientLookup";
 import { createBulkProblemsPalletItems } from "../lib/bulkSubmit";
+import { BULK_EO_CONCURRENCY_LIMIT, mapWithConcurrency } from "../lib/bulkConcurrency";
 import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM } from "../lib/eoMissingRoute";
 
 const formatOperationDate = (value) => {
@@ -347,11 +348,16 @@ export default function BulkEoMissingDialog({
     try {
       if (typeof onCheckEoConflict === "function" && !conflictReviewForCurrent) {
         setIsCheckingConflicts(true);
-        const conflicts = [];
-        for (const row of readyToSendRows) {
-          const existing = await onCheckEoConflict(row.eoNumber);
-          if (existing) conflicts.push({ rowId: row.id, eoNumber: row.eoNumber, existing });
-        }
+        const checkedRows = await mapWithConcurrency(
+          readyToSendRows,
+          BULK_EO_CONCURRENCY_LIMIT,
+          async (row) => ({
+            rowId: row.id,
+            eoNumber: row.eoNumber,
+            existing: await onCheckEoConflict(row.eoNumber),
+          }),
+        );
+        const conflicts = checkedRows.filter((row) => row.existing);
         setConflictReview({ signature: conflictSignature, conflicts });
         setIsCheckingConflicts(false);
         if (conflicts.length > 0) return;
