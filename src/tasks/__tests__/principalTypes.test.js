@@ -13,7 +13,7 @@ describe("тип Principal SharePoint", () => {
     expect(isDistributionListPrincipalType(2)).toBe(true);
   });
 
-  it("для AssignedTo не принимает пользователей и другие группы", () => {
+  it("отличает рассылку от пользователей и других видов групп", () => {
     expect(isDistributionListPrincipalType(1)).toBe(false);
     expect(isDistributionListPrincipalType(4)).toBe(false);
     expect(isDistributionListPrincipalType(8)).toBe(false);
@@ -26,6 +26,7 @@ describe("тип Principal SharePoint", () => {
     expect(isGroupPrincipalType(4)).toBe(true);
     expect(isGroupPrincipalType(8)).toBe(true);
     expect(isGroupPrincipalType(1)).toBe(false);
+    expect(isGroupPrincipalType(13)).toBe(false);
     expect(isGroupPrincipalType(15)).toBe(false);
   });
 });

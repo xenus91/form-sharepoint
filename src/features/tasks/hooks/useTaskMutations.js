@@ -521,9 +521,9 @@ export function useTaskMutations({
       setElementTaskMatch?.((prev) => (
         prev && Number(prev.Id) === Number(task.Id) ? { ...prev, ...assignedPatch } : prev
       ));
-      notify(`Для задачи #${task.Id} назначена рассылка «${assignedPatch.AssignedTo}».`, { severity: "success" });
+      notify(`Для задачи #${task.Id} назначена группа «${assignedPatch.AssignedTo}».`, { severity: "success" });
 
-      // Повторно загружаем активные и завершённые задачи: после смены рассылки
+      // Повторно загружаем активные и завершённые задачи: после смены группы
       // задача может перестать входить в персональный список пользователя.
       try {
         await loadTasks({ silent: true });
@@ -538,7 +538,7 @@ export function useTaskMutations({
         notify(`Задача #${task.Id} уже изменена другим пользователем. Список обновлён — проверьте назначение и попробуйте снова.`, { severity: "warning" });
         try { await loadTasks({ silent: true }); } catch (_refreshError) { void _refreshError; }
       } else {
-        notify(`Не удалось изменить рассылку задачи #${task.Id}: ${msg}`, { severity: "error" });
+        notify(`Не удалось изменить группу задачи #${task.Id}: ${msg}`, { severity: "error" });
       }
       return false;
     } finally {

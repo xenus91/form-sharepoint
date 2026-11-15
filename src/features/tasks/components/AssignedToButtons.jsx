@@ -134,8 +134,8 @@ export function PrincipalButtons({
   const editButton = onEdit ? (
     <IconButton
       size="small"
-      aria-label="Изменить рассылку"
-      title="Изменить назначенную рассылку"
+      aria-label="Изменить группу"
+      title="Изменить назначенную группу"
       data-testid="assigned-to-edit-button"
       onClickCapture={(e) => {
         e.stopPropagation();

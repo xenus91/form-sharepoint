@@ -8,6 +8,7 @@ const BUILD_ID = BUILD_TIME.slice(0, 16).replace(/[-:T]/g, ""); // ГГГГММ�
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const mainTarget = env.VITE_PROXY_BASE_URL || env.VITE_SP_SITE || env.VITE_SHAREPOINT_URL || ''
+  const processQueryTarget = mainTarget.replace(/\/_api\/?$/i, '')
   console.log('🔹 Vite режим:', mode)
   console.log('🔹 Proxy target:', mainTarget)
 
@@ -23,6 +24,14 @@ export default defineConfig(({ command, mode }) => {
     server: command === 'serve'
       ? {
           proxy: {
+            // ProcessQuery находится в /_vti_bin, не под /_api. Более
+            // специфичный маршрут должен идти раньше общего /api.
+            '/api/_vti_bin': {
+              target: processQueryTarget,
+              changeOrigin: true,
+              secure: false,
+              rewrite: (path) => path.replace(/^\/api/, ''),
+            },
             '/api': {
               target: mainTarget,
               changeOrigin: true,

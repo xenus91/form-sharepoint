@@ -1,6 +1,6 @@
 // src/tasks/userSearch.js
-// Поиск пользователей по УЧЁТНОЙ ЗАПИСИ для полей «Пользователь или группа»
-// (Guilty, UserFail, AssignedTo…): автокомплит с многократным выбором.
+// Поиск пользователей и групп по УЧЁТНОЙ ЗАПИСИ для полей «Пользователь или группа».
+// Для AssignedTo ниже используется отдельный поиск, который возвращает только группы.
 //
 // Что умеет:
 //   • ищет по учётной записи (LoginName), ФИО (Title) и e-mail;
@@ -14,8 +14,8 @@
 // локальный фолбэк по странице списка.
 
 import apiClient from "../api";
+import { API_BASE_URL } from "../../config";
 import {
-  isDistributionListPrincipalType,
   isGroupPrincipalType,
   normalizePrincipalType,
   PRINCIPAL_TYPE_MASK,
@@ -248,29 +248,141 @@ export async function searchSiteUsers(query, opts = {}) {
   return users.slice(0, limit);
 }
 
-function peoplePickerResults(response) {
-  const body = response?.data?.d ?? response?.data ?? {};
-  let value = body?.ClientPeoplePickerSearchUser ?? body?.results ?? body?.value ?? body;
+function isPeoplePickerEntity(value) {
+  return Boolean(value && typeof value === "object" && (
+    typeof value.Key === "string"
+    || typeof value.DisplayText === "string"
+    || value.EntityData
+  ));
+}
+
+function parsePeoplePickerPayload(value, depth = 0) {
+  if (depth > 8 || value == null) return [];
   if (typeof value === "string") {
     try {
-      value = JSON.parse(value);
+      return parsePeoplePickerPayload(JSON.parse(value), depth + 1);
     } catch {
       return [];
     }
   }
-  if (Array.isArray(value)) return value;
-  if (Array.isArray(value?.results)) return value.results;
-  if (Array.isArray(value?.value)) return value.value;
+  if (Array.isArray(value)) {
+    const entities = value.filter(isPeoplePickerEntity);
+    if (entities.length > 0) return entities;
+    for (let index = value.length - 1; index >= 0; index -= 1) {
+      const nested = parsePeoplePickerPayload(value[index], depth + 1);
+      if (nested.length > 0) return nested;
+    }
+    return [];
+  }
+  if (typeof value !== "object") return [];
+  if (isPeoplePickerEntity(value)) return [value];
+
+  const preferredKeys = [
+    "ClientPeoplePickerSearchUser", "results", "value", "Value", "Result", "result", "d",
+  ];
+  for (const key of preferredKeys) {
+    if (value[key] === undefined) continue;
+    const nested = parsePeoplePickerPayload(value[key], depth + 1);
+    if (nested.length > 0) return nested;
+  }
+  for (const nestedValue of Object.values(value)) {
+    const nested = parsePeoplePickerPayload(nestedValue, depth + 1);
+    if (nested.length > 0) return nested;
+  }
   return [];
 }
 
-function mapPeoplePickerDistributionList(raw) {
+function peoplePickerResults(response) {
+  return parsePeoplePickerPayload(response?.data?.d ?? response?.data ?? response);
+}
+
+function xmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function xmlProperty(name, type, value) {
+  if (type === "Null") return `<Property Name="${name}" Type="Null" />`;
+  return `<Property Name="${name}" Type="${type}">${xmlEscape(value)}</Property>`;
+}
+
+const PEOPLE_PICKER_MAX_SUGGESTIONS = 30;
+const PEOPLE_PICKER_PRINCIPAL_TYPE = PRINCIPAL_TYPE_MASK.USER
+  | PRINCIPAL_TYPE_MASK.SECURITY_GROUP
+  | PRINCIPAL_TYPE_MASK.SHAREPOINT_GROUP;
+
+function buildPeoplePickerProcessQuery(query) {
+  const properties = [
+    xmlProperty("AllowEmailAddresses", "Boolean", false),
+    xmlProperty("AllowMultipleEntities", "Boolean", true),
+    xmlProperty("AllowOnlyEmailAddresses", "Boolean", false),
+    xmlProperty("AllUrlZones", "Boolean", false),
+    xmlProperty("EnabledClaimProviders", "String", ""),
+    xmlProperty("ForceClaims", "Boolean", false),
+    xmlProperty("MaximumEntitySuggestions", "Number", PEOPLE_PICKER_MAX_SUGGESTIONS),
+    xmlProperty("PrincipalSource", "Number", 15),
+    // Как в стандартном People Picker: User + SecurityGroup + SharePointGroup.
+    // Полученные сущности ниже всё равно проверяются по фактическому типу.
+    xmlProperty("PrincipalType", "Number", PEOPLE_PICKER_PRINCIPAL_TYPE),
+    xmlProperty("QuerySettings", "Null"),
+    xmlProperty("QueryString", "String", query),
+    xmlProperty("Required", "Boolean", false),
+    xmlProperty("SharePointGroupID", "Number", 0),
+    xmlProperty("UrlZone", "Number", 0),
+    xmlProperty("UrlZoneSpecified", "Boolean", false),
+    xmlProperty("Web", "Null"),
+    xmlProperty("WebApplicationID", "String", "{00000000-0000-0000-0000-000000000000}"),
+  ].join("");
+  return `<Request xmlns="http://schemas.microsoft.com/sharepoint/clientquery/2009" SchemaVersion="15.0.0.0" LibraryVersion="16.0.0.0" ApplicationName="Javascript Library"><Actions><StaticMethod TypeId="{de2db963-8bab-4fb4-8a58-611aebc5254b}" Name="ClientPeoplePickerSearchUser" Id="1"><Parameters><Parameter TypeId="{ac9358c6-e9b1-4514-bf6e-106acbfb19ce}">${properties}</Parameter></Parameters></StaticMethod></Actions><ObjectPaths /></Request>`;
+}
+
+function processQueryUrl() {
+  const apiBase = String(API_BASE_URL || "").replace(/\/+$/, "");
+  const processQueryPath = "/_vti_bin/client.svc/ProcessQuery";
+  if (/^\/api(?:\/|$)/i.test(apiBase)) {
+    // Браузеру задаём абсолютный same-origin URL, чтобы не удваивать baseURL
+    // Axios; без window (например, при SSR) достаточно пути относительно /api.
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return `${window.location.origin}${apiBase}${processQueryPath}`;
+    }
+    return processQueryPath;
+  }
+  return `${apiBase.replace(/\/_api$/i, "")}${processQueryPath}`;
+}
+
+function peoplePickerEntityPrincipalType(raw, data) {
+  const candidates = [
+    data?.PrincipalType,
+    raw?.PrincipalType,
+    data?.EntityType,
+    raw?.EntityType,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizePrincipalType(candidate);
+    if (normalized !== null) return normalized;
+
+    const entityType = lower(candidate).replace(/[^a-z]/g, "");
+    if (["secgroup", "securitygroup"].includes(entityType)) {
+      return PRINCIPAL_TYPE_MASK.SECURITY_GROUP;
+    }
+    if (["spgroup", "sharepointgroup", "sitegroup"].includes(entityType)) {
+      return PRINCIPAL_TYPE_MASK.SHAREPOINT_GROUP;
+    }
+  }
+  return null;
+}
+
+function mapPeoplePickerGroup(raw) {
   if (!raw || typeof raw !== "object") return null;
   const data = raw.EntityData || raw.entityData || {};
-  const returnedType = normalizePrincipalType(data.PrincipalType ?? raw.PrincipalType);
-  // People Picker запрашивается только с PrincipalType=2. Если ответ явно
-  // размечен как пользователь, security group или SharePoint group — отсекаем.
-  if (returnedType !== null && !isDistributionListPrincipalType(returnedType)) return null;
+  const principalType = peoplePickerEntityPrincipalType(raw, data);
+  // PrincipalType=13 допускает пользователей. Принимаем только явно распознанную
+  // группу (2/4/8), а сущности без типа не отправляем по одной в ensureuser.
+  if (!isGroupPrincipalType(principalType)) return null;
 
   const id = [data.SPUserID, data.UserId, data.Id, raw.Id]
     .map((candidate) => Number(candidate))
@@ -285,18 +397,10 @@ function mapPeoplePickerDistributionList(raw) {
     || email;
   if (!title || (!id && !loginName)) return null;
 
-  return {
-    // Если SharePoint не прислал PrincipalType, не доверяем одному SPUserID:
-    // разрешаем Key через ensureuser и проверяем фактический тип.
-    Id: returnedType === PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST ? id : null,
-    Title: title,
-    LoginName: loginName,
-    Email: email,
-    PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
-  };
+  return { Id: id, Title: title, LoginName: loginName, Email: email, PrincipalType: principalType };
 }
 
-function distributionListQueryVariants(query) {
+function assignedToGroupQueryVariants(query) {
   const raw = String(query ?? "").trim();
   const withoutLeadingUnderscore = raw.replace(/^_+/, "").trim();
   const variants = withoutLeadingUnderscore !== raw
@@ -305,10 +409,13 @@ function distributionListQueryVariants(query) {
   return [...new Set(variants.map((value) => String(value).trim()).filter((value) => value.length >= 2))];
 }
 
-function mapEnsuredDistributionList(response, candidate) {
+function mapEnsuredGroup(response, candidate) {
   const body = response?.data?.d ?? response?.data ?? {};
   const user = body?.EnsureUser ?? body?.user ?? body;
-  if (normalizePrincipalType(user?.PrincipalType) !== PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST) return null;
+  const returnedType = normalizePrincipalType(user?.PrincipalType);
+  if (returnedType !== null && !isGroupPrincipalType(returnedType)) return null;
+  const principalType = returnedType ?? normalizePrincipalType(candidate?.PrincipalType);
+  if (!isGroupPrincipalType(principalType)) return null;
 
   const id = Number(user?.Id ?? user?.ID);
   if (!Number.isSafeInteger(id) || id <= 0) return null;
@@ -316,7 +423,7 @@ function mapEnsuredDistributionList(response, candidate) {
   const email = String(user?.Email || candidate.email || "").trim();
   const title = String(user?.Title || candidate.title || accountLocalPart(loginName) || email).trim();
   if (!title) return null;
-  return { Id: id, Title: title, LoginName: loginName, Email: email, PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST };
+  return { Id: id, Title: title, LoginName: loginName, Email: email, PrincipalType: principalType };
 }
 
 function ensureUserUrl(loginName) {
@@ -324,16 +431,17 @@ function ensureUserUrl(loginName) {
   return `/web/ensureuser?logonName='${encodeURIComponent(escapedLogin)}'`;
 }
 
-async function ensureDistributionList(candidate, post) {
+async function ensureAssignedToGroup(candidate, post) {
+  if (!isGroupPrincipalType(candidate?.PrincipalType)) return null;
   const id = Number(candidate?.Id);
   if (Number.isSafeInteger(id) && id > 0) return { ...candidate, Id: id };
   const loginName = String(candidate?.LoginName || candidate?.loginName || "").trim();
   if (!loginName) return null;
   const response = await post(ensureUserUrl(loginName), {}, ACCEPT);
-  return mapEnsuredDistributionList(response, { ...candidate, loginName });
+  return mapEnsuredGroup(response, { ...candidate, loginName });
 }
 
-async function resolvePeoplePickerDistributionLists(candidates, post, limit) {
+async function resolvePeoplePickerGroups(candidates, post, limit) {
   const resolved = [];
   const seen = new Set();
   for (const candidate of candidates) {
@@ -341,12 +449,11 @@ async function resolvePeoplePickerDistributionLists(candidates, post, limit) {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     try {
-      const mailing = await ensureDistributionList(candidate, post);
-      if (mailing) resolved.push(mailing);
-      else if (!candidate.Id) break; // unknown type: don't enumerate later people
+      const group = await ensureAssignedToGroup(candidate, post);
+      if (group) resolved.push(group);
     } catch (error) {
       const status = error?.response?.status;
-      console.warn("[userSearch] distribution-list ensureuser failed", status || error?.message);
+      console.warn("[userSearch] AssignedTo group ensureuser failed", status || error?.message);
       // 5xx/network failure is usually common to all candidates; don't flood the
       // proxy with one identical failing ensureuser request per suggestion.
       if (!status || status >= 500) break;
@@ -357,17 +464,19 @@ async function resolvePeoplePickerDistributionLists(candidates, post, limit) {
 }
 
 /**
- * Поиск почтовых рассылок для поля AssignedTo.
- * People Picker — основной источник. Затем проверяется User Information List
- * текущего сайта. Глобальный People Picker запрашивает PrincipalType=2, а
- * результаты без SPUserID разрешаются через ensureuser.
+ * Поиск групп для поля AssignedTo через CSOM People Picker.
+ * Запрос стандартного интерфейса допускает User + SecurityGroup + SharePointGroup
+ * (PrincipalType=13), поэтому в ответе принимаем только сущности, явно размеченные
+ * как группа (2/4/8). Неизвестный тип не отправляется в ensureuser.
+ * Если глобальный People Picker не дал групп, проверяется User Information List
+ * текущего сайта с тем же фильтром типов.
  * @param {string} query
  * @param {{limit?:number, get?:Function, post?:Function}} [opts]
- * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string,PrincipalType:2}>>}
+ * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string,PrincipalType:number}>>}
  */
-export async function searchDistributionLists(query, opts = {}) {
+export async function searchAssignedToGroups(query, opts = {}) {
   const queryString = String(query ?? "").trim();
-  const queryVariants = distributionListQueryVariants(queryString);
+  const queryVariants = assignedToGroupQueryVariants(queryString);
   if (queryVariants.length === 0) return [];
 
   const limit = Math.max(1, Number(opts.limit) || 20);
@@ -377,60 +486,52 @@ export async function searchDistributionLists(query, opts = {}) {
   for (const searchTerm of queryVariants) {
     try {
       const response = await post(
-        "/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.ClientPeoplePickerSearchUser",
-        {
-          queryParams: {
-            __metadata: { type: "SP.UI.ApplicationPages.ClientPeoplePickerQueryParameters" },
-            AllowEmailAddresses: true,
-            AllowMultipleEntities: false,
-            AllUrlZones: false,
-            MaximumEntitySuggestions: limit,
-            PrincipalSource: 15,
-            PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
-            QueryString: searchTerm,
-          },
-        },
-        ACCEPT,
+        processQueryUrl(),
+        buildPeoplePickerProcessQuery(searchTerm),
+        { headers: { Accept: "application/json", "Content-Type": "text/xml; charset=utf-8" } },
       );
-      for (const candidate of peoplePickerResults(response).map(mapPeoplePickerDistributionList).filter(Boolean)) {
+      for (const candidate of peoplePickerResults(response).map(mapPeoplePickerGroup).filter(Boolean)) {
         const key = String(candidate.LoginName || candidate.Id || "").toLowerCase();
         if (key && !peoplePickerCandidates.has(key)) peoplePickerCandidates.set(key, candidate);
       }
     } catch (error) {
       const status = error?.response?.status;
-      console.warn("[userSearch] distribution list People Picker search failed", status || error?.message);
+      console.warn("[userSearch] AssignedTo group People Picker search failed", status || error?.message);
     }
     if (peoplePickerCandidates.size >= limit) break;
   }
 
-  const foundByPeoplePicker = await resolvePeoplePickerDistributionLists(
+  const foundByPeoplePicker = await resolvePeoplePickerGroups(
     [...peoplePickerCandidates.values()],
     post,
     limit,
   );
   if (foundByPeoplePicker.length > 0) return foundByPeoplePicker;
 
-  // Fallback покрывает рассылки в User Information List. Запускаем его по тем
-  // же вариантам, включая поисковый термин без начального `_` (например, `_РЦ` → `РЦ`).
-  const siteUserLists = [];
+  // Fallback покрывает группы в User Information List. Учитываем варианты с
+  // исходным подчёркиванием и без него (например, «_РЦ» → «РЦ»).
+  const siteUserGroups = [];
   for (const searchTerm of queryVariants) {
-    const remaining = limit - dedupeUsers(siteUserLists).length;
+    const remaining = limit - dedupeUsers(siteUserGroups).length;
     if (remaining <= 0) break;
     const matches = await searchSiteUsers(searchTerm, {
       limit: remaining,
       get,
-      distributionListsOnly: true,
+      groupsOnly: true,
     });
-    siteUserLists.push(...matches);
+    siteUserGroups.push(...matches);
   }
-  const foundBySiteUsers = dedupeUsers(siteUserLists).slice(0, limit);
+  const foundBySiteUsers = dedupeUsers(siteUserGroups).slice(0, limit);
   if (foundBySiteUsers.length > 0) return foundBySiteUsers;
 
-  // Глобальный People Picker уже был проверен выше с PrincipalType=2. Не
-  // используем общий Search REST: он возвращает сотрудников и не подходит
-  // для выбора почтовой рассылки.
+  // Не используем общий Search REST: он возвращает сотрудников и не подходит
+  // для поля AssignedTo, где разрешены только группы.
   return [];
 }
+
+// Совместимость с прежним именем экспорта: поиск больше не ограничен только
+// рассылками, но по-прежнему никогда не возвращает пользователей.
+export const searchDistributionLists = searchAssignedToGroups;
 
 /**
  * Подпись «Должность · Департамент · Офис» (что доступно).

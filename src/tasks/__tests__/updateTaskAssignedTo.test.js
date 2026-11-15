@@ -115,13 +115,21 @@ describe("updateTaskAssignedTo — точечная запись в Tasks", () =
     expect(deps.post.mock.calls[0][2].headers["IF-MATCH"]).toBe('W/"7"');
   });
 
-  it("отклоняет пользователей и группы другого типа, сохраняя только рассылки", async () => {
-    for (const principalType of [1, 4, 8, 15]) {
+  it("отклоняет пользователей и смешанный тип PrincipalType=13", async () => {
+    for (const principalType of [1, 13, 15]) {
       const deps = makeDeps();
       await expect(updateTaskAssignedTo(TASK, { ...MAILING, PrincipalType: principalType }, deps))
-        .rejects.toThrow("только список рассылки");
+        .rejects.toThrow("только группу, не пользователя");
       expect(deps.get).not.toHaveBeenCalled();
       expect(deps.post).not.toHaveBeenCalled();
+    }
+  });
+
+  it("разрешает только фактические типы групп и рассылок: 2, 4 и 8", async () => {
+    for (const principalType of [2, 4, 8]) {
+      const deps = makeDeps();
+      await updateTaskAssignedTo(TASK, { ...MAILING, PrincipalType: principalType }, deps);
+      expect(deps.post).toHaveBeenCalledTimes(1);
     }
   });
 

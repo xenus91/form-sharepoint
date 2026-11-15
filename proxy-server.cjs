@@ -33,8 +33,12 @@ console.log("🔹 Домен NTLM:", config.domain);
 // Вспомогательные
 // ──────────────────────────────────────────────────────────────────────────────
 function ensureApiUrl(originalUrl = "") {
-  // на входе: /api/..., на выходе: https://.../_api/...
-  const fixed = sharepointBaseUrl + originalUrl.replace(/^\/api/, "");
+  // Обычные SharePoint REST вызовы идут под /_api. CSOM ProcessQuery находится
+  // в /_vti_bin рядом с _api, поэтому для него снимаем суффикс _api с базы.
+  const relativeUrl = originalUrl.replace(/^\/api/, "");
+  const isProcessQuery = /^\/_vti_bin\/client\.svc\/ProcessQuery(?:[?#]|$)/i.test(relativeUrl);
+  const baseUrl = isProcessQuery ? sharepointBaseUrl.replace(/\/_api\/?$/i, "") : sharepointBaseUrl;
+  const fixed = baseUrl + relativeUrl;
   console.log(`🔹 Проксируем в: ${fixed}`);
   return fixed;
 }
@@ -104,6 +108,7 @@ function getOverride(req) {
 // ──────────────────────────────────────────────────────────────────────────────
 app.use("/api/*", async (req, res) => {
   const spUrl = ensureApiUrl(req.originalUrl);
+  const isProcessQuery = /\/_vti_bin\/client\.svc\/ProcessQuery(?:[?#]|$)/i.test(spUrl);
   const method = req.method.toUpperCase();
   const override = getOverride(req);
 
@@ -213,8 +218,11 @@ app.use("/api/*", async (req, res) => {
     bodyToSend = "";
     console.log("🔹 DELETE override: пустое тело");
   } else {
-    // Обычный JSON POST/MERGE (тело пришло как Buffer из raw-парсера)
-    headers["Content-Type"] = "application/json;odata=verbose";
+    // ProcessQuery принимает XML; остальные REST POST/MERGE — JSON.
+    headers["Content-Type"] = isProcessQuery
+      ? (req.headers["content-type"] || "text/xml; charset=utf-8")
+      : "application/json;odata=verbose";
+    if (isProcessQuery && req.headers.accept) headers.Accept = req.headers.accept;
     if (Buffer.isBuffer(req.body)) {
       const str = req.body.toString("utf8") || "";
       bodyToSend = str || "{}";
@@ -225,7 +233,7 @@ app.use("/api/*", async (req, res) => {
     } else {
       bodyToSend = "{}";
     }
-    console.log(`🔹 JSON POST, длина: ${bodyToSend.length}`);
+    console.log(`${isProcessQuery ? "🔹 ProcessQuery XML POST" : "🔹 JSON POST"}, длина: ${bodyToSend.length}`);
   }
 
   requestOptions.body = bodyToSend;

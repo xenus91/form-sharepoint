@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Диалог ищет только почтовые рассылки и передаёт выбранный principal на сохранение.
+// Диалог ищет группы, исключает пользователей и передаёт выбранный principal на сохранение.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
@@ -13,20 +13,35 @@ const MAILING = {
   Email: "rc-shipping@example.test",
   PrincipalType: 2,
 };
+const SECURITY_GROUP = {
+  Id: 34,
+  Title: "Группа РЦ Отгрузка",
+  LoginName: "RETAIL\\rc-group",
+  PrincipalType: 4,
+};
+const EMPLOYEE = {
+  Id: 35,
+  Title: "Сотрудник Отгрузка",
+  LoginName: "i:0#.f|membership|employee@example.test",
+  PrincipalType: 1,
+};
 
 vi.mock("../../../tasks/userSearch", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    searchDistributionLists: vi.fn(async (query) => (
-      String(query).toLowerCase().includes("отгрузка") ? [MAILING] : []
-    )),
+    searchAssignedToGroups: vi.fn(async (query) => {
+      const value = String(query).toLowerCase();
+      if (value.includes("группа")) return [SECURITY_GROUP];
+      if (value.includes("сотрудник")) return [EMPLOYEE];
+      return value.includes("отгрузка") ? [MAILING] : [];
+    }),
     getUserPositions: vi.fn(async () => ({})),
   };
 });
 
 const { default: AssignedToEditDialog } = await import("../components/AssignedToEditDialog");
-const { searchDistributionLists } = await import("../../../tasks/userSearch");
+const { searchAssignedToGroups } = await import("../../../tasks/userSearch");
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 class RO { observe() {} unobserve() {} disconnect() {} }
@@ -66,7 +81,7 @@ function render(task, onSave = vi.fn(async () => true)) {
   return { host, onSave, onClose };
 }
 
-describe("AssignedToEditDialog — поиск рассылки", () => {
+describe("AssignedToEditDialog — поиск группы", () => {
   beforeEach(() => {
     for (const root of roots.splice(0)) act(() => root.unmount());
     document.body.innerHTML = "";
@@ -84,7 +99,7 @@ describe("AssignedToEditDialog — поиск рассылки", () => {
     expect(input).toBeTruthy();
 
     await act(async () => { typeInto(input, "Отгрузка"); await settle(350); });
-    expect(searchDistributionLists).toHaveBeenCalledWith("Отгрузка", { limit: 20 });
+    expect(searchAssignedToGroups).toHaveBeenCalledWith("Отгрузка", { limit: 20 });
 
     const option = [...document.body.querySelectorAll('[role="option"]')]
       .find((element) => element.textContent.includes(MAILING.Title));
@@ -99,7 +114,39 @@ describe("AssignedToEditDialog — поиск рассылки", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("не позволяет сохранить назначение до выбора рассылки", () => {
+  it("разрешает сохранить security-группу с PrincipalType=4", async () => {
+    const onSave = vi.fn(async () => true);
+    render({ Id: 44, AssignedTo: "", AssignedToId: null }, onSave);
+    const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
+    const input = dialog.querySelector("input");
+
+    await act(async () => { typeInto(input, "Группа"); await settle(350); });
+    const option = [...document.body.querySelectorAll('[role="option"]')]
+      .find((element) => element.textContent.includes(SECURITY_GROUP.Title));
+    expect(option).toBeTruthy();
+    await act(async () => { click(option); await settle(); });
+
+    const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
+    expect(saveButton.disabled).toBe(false);
+    await act(async () => { click(saveButton); await settle(260); });
+    expect(onSave).toHaveBeenCalledWith(SECURITY_GROUP);
+  });
+
+  it("блокирует сохранение, если ответ ошибочно содержит пользователя", async () => {
+    render({ Id: 45, AssignedTo: "", AssignedToId: null });
+    const input = document.body.querySelector("input");
+
+    await act(async () => { typeInto(input, "Сотрудник"); await settle(350); });
+    const option = [...document.body.querySelectorAll('[role="option"]')]
+      .find((element) => element.textContent.includes(EMPLOYEE.Title));
+    expect(option).toBeTruthy();
+    await act(async () => { click(option); await settle(); });
+
+    const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
+    expect(saveButton.disabled).toBe(true);
+  });
+
+  it("не позволяет сохранить назначение до выбора группы", () => {
     render({ Id: 43, AssignedTo: "", AssignedToId: null });
     const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
     expect(saveButton).toBeTruthy();

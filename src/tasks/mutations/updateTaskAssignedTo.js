@@ -4,7 +4,7 @@
 
 import apiClient from "../../api";
 import { TASKS_LIST_API, TASKS_LIST_GUID } from "../config";
-import { isDistributionListPrincipalType } from "../principalTypes";
+import { isGroupPrincipalType } from "../principalTypes";
 
 const ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
 const CONTENT_TYPE = "application/json;odata=verbose";
@@ -27,7 +27,7 @@ function assertMainTask(task) {
   const sourceId = String(task?.sourceId || "").trim();
   const guid = listGuidOf(task);
   if ((sourceId && sourceId !== "main") || (guid && guid !== TASKS_LIST_GUID.toUpperCase())) {
-    throw new Error("Менять рассылку можно только у задачи основного списка Tasks.");
+    throw new Error("Менять группу можно только у задачи основного списка Tasks.");
   }
 }
 
@@ -82,7 +82,7 @@ async function resolveItemEntityType(get, listApi, item, fallbackEntityType) {
 }
 
 /**
- * Записывает одну выбранную рассылку в AssignedTo.
+ * Записывает одну выбранную группу или рассылку в AssignedTo.
  *
  * @param {object} task — задача из основного списка Tasks
  * @param {{Id:number, Title:string, LoginName?:string, Email?:string, PrincipalType:number}} assignee
@@ -92,9 +92,9 @@ async function resolveItemEntityType(get, listApi, item, fallbackEntityType) {
 export async function updateTaskAssignedTo(task, assignee, deps = {}) {
   assertMainTask(task);
   const taskId = positiveInteger(task?.Id ?? task?.ID, "Id задачи");
-  const assigneeId = positiveInteger(assignee?.Id, "Id рассылки");
-  if (!isDistributionListPrincipalType(assignee?.PrincipalType)) {
-    throw new Error("В поле AssignedTo можно выбрать только список рассылки.");
+  const assigneeId = positiveInteger(assignee?.Id, "Id группы");
+  if (!isGroupPrincipalType(assignee?.PrincipalType)) {
+    throw new Error("В поле AssignedTo можно выбрать только группу, не пользователя.");
   }
 
   const get = deps.get || ((url, config) => apiClient.get(url, config));
@@ -157,7 +157,7 @@ export async function updateTaskAssignedTo(task, assignee, deps = {}) {
 
 /** Локальный shape карточки после подтверждённой записи в SharePoint. */
 export function buildTaskAssignedToPatch(task, assignee, { isMultiple = false, modified = new Date().toISOString() } = {}) {
-  const id = positiveInteger(assignee?.Id, "Id рассылки");
+  const id = positiveInteger(assignee?.Id, "Id группы");
   const title = String(assignee?.Title || assignee?.LoginName || `Id ${id}`).trim();
   const person = {
     Id: id,
