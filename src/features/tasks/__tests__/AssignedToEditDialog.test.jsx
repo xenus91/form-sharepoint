@@ -128,7 +128,8 @@ describe("AssignedToEditDialog — поиск группы", () => {
     const input = dialog.querySelector("input");
     expect(input).toBeTruthy();
     await settle(30);
-    expect(input.value).toBe("РЦ 8117");
+    expect(input.value).toBe("");
+    expect(dialog.textContent).toContain("Фильтр Office (не изменяется): РЦ 8117");
     expect(apiState.get).toHaveBeenCalledWith(
       "/SP.UserProfiles.PeopleManager/GetMyProperties",
       { headers: { Accept: "application/json;odata=verbose" } },
@@ -153,13 +154,14 @@ describe("AssignedToEditDialog — поиск группы", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("передаёт Office из TasksView и ограничивает группы этим РЦ", async () => {
+  it("не показывает Office в поле поиска и сохраняет его как фиксированный фильтр", async () => {
     const onSave = vi.fn(async () => true);
     render({ Id: 44, AssignedTo: "", AssignedToId: null }, onSave, "РЦ-8117");
     const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
     const input = dialog.querySelector("input");
     await settle(30);
-    expect(input.value).toBe("РЦ 8117");
+    expect(input.value).toBe("");
+    expect(dialog.textContent).toContain("Фильтр Office (не изменяется): РЦ 8117");
     expect(apiState.get).not.toHaveBeenCalled();
 
     await act(async () => { typeInto(input, "Группа"); await settle(350); });
@@ -180,7 +182,7 @@ describe("AssignedToEditDialog — поиск группы", () => {
     render({ Id: 45, AssignedTo: "", AssignedToId: null });
     const input = document.body.querySelector("input");
     await settle(30);
-    expect(input.value).toBe("РЦ 8117");
+    expect(input.value).toBe("");
 
     await act(async () => { typeInto(input, "Сотрудник"); await settle(350); });
     const option = [...document.body.querySelectorAll('[role="option"]')]

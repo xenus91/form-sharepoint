@@ -110,7 +110,7 @@ describe("AssignedToButtons — «Кому назначено» кнопкой",
     expect(host.querySelector('[data-testid="assigned-to-empty"]')).toBeTruthy();
   });
 
-  it("передаёт Office в диалог смены AssignedTo", async () => {
+  it("передаёт скрытый фиксированный Office-фильтр в диалог AssignedTo", async () => {
     const { host } = await render(
       { AssignedTo: "", AssignedToId: null },
       { currentUserOffice: "РЦ-8117", onChangeAssignedTo: vi.fn() },
@@ -123,7 +123,8 @@ describe("AssignedToButtons — «Кому назначено» кнопкой",
     });
     const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
     expect(dialog).toBeTruthy();
-    expect(dialog.querySelector("input").value).toBe("РЦ 8117");
+    expect(dialog.querySelector("input").value).toBe("");
+    expect(dialog.textContent).toContain("Фильтр Office (не изменяется): РЦ 8117");
   });
 
   it("имени в задаче нет (пришёл только Id) — показываем ФИО из SharePoint, а не «Id 5»", async () => {

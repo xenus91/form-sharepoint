@@ -51,9 +51,6 @@ export default function PersonFieldAutocomplete({
   // Сведения о людях (должность/департамент/офис). По умолчанию — основной сайт;
   // для групп без профиля сотрудника вызывающий код может передать пустую функцию.
   getPositions = getUserPositions,
-  // Опциональное управление строкой поиска извне (например, предзаполненный Office).
-  inputValue: controlledInputValue,
-  onInputValueChange,
   minimumQueryText = "Введите минимум 2 символа учётной записи или фамилии",
   noOptionsText = "Никого не найдено",
 }) {
@@ -66,14 +63,7 @@ export default function PersonFieldAutocomplete({
     [value],
   );
   const [options, setOptions] = React.useState([]);
-  const [internalInputValue, setInternalInputValue] = React.useState("");
-  const inputValue = controlledInputValue === undefined
-    ? internalInputValue
-    : String(controlledInputValue ?? "");
-  const updateInputValue = (next) => {
-    if (typeof onInputValueChange === "function") onInputValueChange(next);
-    else setInternalInputValue(next);
-  };
+  const [inputValue, setInputValue] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [positions, setPositions] = React.useState({});
   // Раскрытые свойства выбранного человека: клик по чипу показывает то, что
@@ -175,7 +165,7 @@ export default function PersonFieldAutocomplete({
         inputValue={inputValue}
         onInputChange={(_e, next, reason) => {
           if (reason === "reset") return;
-          updateInputValue(next);
+          setInputValue(next);
         }}
         options={options}
         loading={loading}

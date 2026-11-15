@@ -69,7 +69,6 @@ export default function AssignedToEditDialog({
   const [saving, setSaving] = useState(false);
   const [officeSearchTerm, setOfficeSearchTerm] = useState("");
   const [officeStatus, setOfficeStatus] = useState("idle");
-  const [searchInput, setSearchInput] = useState("");
   const currentAssignees = useMemo(() => parseAssignees(task), [task]);
   const currentLabel = currentAssignees
     .map((person) => person.title || (person.id ? `Id ${person.id}` : ""))
@@ -90,12 +89,10 @@ export default function AssignedToEditDialog({
     const providedOffice = normalizeOfficeSearchTerm(currentUserOffice);
     setSelected(null);
     setOfficeSearchTerm("");
-    setSearchInput("");
     setOfficeStatus(providedOffice ? "ready" : "loading");
 
     if (providedOffice) {
       setOfficeSearchTerm(providedOffice);
-      setSearchInput(providedOffice);
       return () => { alive = false; };
     }
 
@@ -104,13 +101,11 @@ export default function AssignedToEditDialog({
         if (!alive) return;
         const office = readOfficeFromProfile(response);
         setOfficeSearchTerm(office);
-        setSearchInput(office);
         setOfficeStatus(office ? "ready" : "missing");
       })
       .catch(() => {
         if (!alive) return;
         setOfficeSearchTerm("");
-        setSearchInput("");
         setOfficeStatus("error");
       });
 
@@ -175,13 +170,11 @@ export default function AssignedToEditDialog({
             multiple={false}
             disabled={saving || officeStatus !== "ready"}
             search={searchOfficeGroups}
-            inputValue={searchInput}
-            onInputValueChange={setSearchInput}
             getPositions={NO_GROUP_POSITIONS}
           />
           <Typography variant="caption" color="text.secondary">
             {officeStatus === "ready"
-              ? `Показываются только группы, содержащие Office сотрудника: ${officeSearchTerm}.`
+              ? `Фильтр Office (не изменяется): ${officeSearchTerm}. Показываются только группы этого офиса.`
               : officeStatus === "loading"
                 ? "Определяю Office сотрудника для ограничения списка групп…"
                 : officeStatus === "missing"
