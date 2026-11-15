@@ -42,6 +42,13 @@ const OFFICE_PREFIX_GROUP = {
   LoginName: "RETAIL\\rc-81170-group",
   PrincipalType: 4,
 };
+const SHIFT_GROUP = {
+  Id: 38,
+  Title: "_РЦ 8117 Нач.смены В",
+  LoginName: "mailing_rc-8117-shift-v",
+  Email: "rc-8117-shift-v@example.test",
+  PrincipalType: 2,
+};
 
 vi.mock("../../../tasks/userSearch", async (importOriginal) => {
   const actual = await importOriginal();
@@ -51,9 +58,10 @@ vi.mock("../../../tasks/userSearch", async (importOriginal) => {
       const value = String(query).toLowerCase();
       if (value.includes("сотрудник")) return [EMPLOYEE];
       if (value.includes("группа")) return [SECURITY_GROUP, OTHER_RC_GROUP, OFFICE_PREFIX_GROUP];
-      if (value.includes("отгрузка") || value.includes("рц 8117")) {
-        return [MAILING, SECURITY_GROUP, OTHER_RC_GROUP, OFFICE_PREFIX_GROUP];
+      if (value.includes("рц 8117")) {
+        return [MAILING, SECURITY_GROUP, SHIFT_GROUP, OTHER_RC_GROUP, OFFICE_PREFIX_GROUP];
       }
+      if (value.includes("отгрузка")) return [MAILING, SECURITY_GROUP, OTHER_RC_GROUP, OFFICE_PREFIX_GROUP];
       return [];
     }),
     getUserPositions: vi.fn(async () => ({})),
@@ -154,28 +162,38 @@ describe("AssignedToEditDialog — поиск группы", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("не показывает Office в поле поиска и сохраняет его как фиксированный фильтр", async () => {
+  it("показывает заранее отфильтрованные группы и локально сужает по «Нач»", async () => {
     const onSave = vi.fn(async () => true);
     render({ Id: 44, AssignedTo: "", AssignedToId: null }, onSave, "РЦ-8117");
     const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
     const input = dialog.querySelector("input");
-    await settle(30);
+    await settle(60);
     expect(input.value).toBe("");
     expect(dialog.textContent).toContain("Фильтр Office (не изменяется): РЦ 8117");
     expect(apiState.get).not.toHaveBeenCalled();
+    expect(searchAssignedToGroups).toHaveBeenCalledWith("РЦ 8117", { limit: 100 });
 
-    await act(async () => { typeInto(input, "Группа"); await settle(350); });
-    const option = [...document.body.querySelectorAll('[role="option"]')]
-      .find((element) => element.textContent.includes(SECURITY_GROUP.Title));
-    expect(option).toBeTruthy();
+    const popupButton = dialog.querySelector(".MuiAutocomplete-popupIndicator");
+    expect(popupButton).toBeTruthy();
+    await act(async () => { click(popupButton); await settle(); });
+    const prefetchedOptions = [...document.body.querySelectorAll('[role="option"]')];
+    expect(prefetchedOptions.some((option) => option.textContent.includes(SHIFT_GROUP.Title))).toBe(true);
+    expect(prefetchedOptions.some((option) => option.textContent.includes(MAILING.Title))).toBe(true);
     expect(document.body.textContent).not.toContain(OTHER_RC_GROUP.Title);
     expect(document.body.textContent).not.toContain(OFFICE_PREFIX_GROUP.Title);
-    await act(async () => { click(option); await settle(); });
+
+    await act(async () => { typeInto(input, "Нач"); await settle(350); });
+    expect(searchAssignedToGroups).toHaveBeenCalledWith("Нач", { limit: 20 });
+    const shiftOption = [...document.body.querySelectorAll('[role="option"]')]
+      .find((element) => element.textContent.includes(SHIFT_GROUP.Title));
+    expect(shiftOption).toBeTruthy();
+    expect(document.body.textContent).not.toContain(OTHER_RC_GROUP.Title);
+    await act(async () => { click(shiftOption); await settle(); });
 
     const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
     expect(saveButton.disabled).toBe(false);
     await act(async () => { click(saveButton); await settle(260); });
-    expect(onSave).toHaveBeenCalledWith(SECURITY_GROUP);
+    expect(onSave).toHaveBeenCalledWith(SHIFT_GROUP);
   });
 
   it("не показывает сотрудника, даже если поиск ошибочно его вернул", async () => {

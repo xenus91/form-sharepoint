@@ -19,6 +19,8 @@ import {
 
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_QUERY_LENGTH = 2;
+const EMPTY_OPTIONS = Object.freeze([]);
+const PASS_THROUGH_FILTER = (list) => list;
 
 function userKey(user) {
   return user?.Id != null ? String(user.Id) : String(user?.LoginName || "");
@@ -51,6 +53,10 @@ export default function PersonFieldAutocomplete({
   // Сведения о людях (должность/департамент/офис). По умолчанию — основной сайт;
   // для групп без профиля сотрудника вызывающий код может передать пустую функцию.
   getPositions = getUserPositions,
+  initialOptions = EMPTY_OPTIONS,
+  externalLoading = false,
+  loadingText = "Загружаю…",
+  filterOptions = PASS_THROUGH_FILTER,
   minimumQueryText = "Введите минимум 2 символа учётной записи или фамилии",
   noOptionsText = "Никого не найдено",
 }) {
@@ -63,6 +69,21 @@ export default function PersonFieldAutocomplete({
     [value],
   );
   const [options, setOptions] = React.useState([]);
+  const availableOptions = React.useMemo(() => {
+    const unique = [];
+    const seen = new Set();
+    const candidates = [
+      ...(Array.isArray(initialOptions) ? initialOptions : []),
+      ...(Array.isArray(options) ? options : []),
+    ];
+    for (const option of candidates) {
+      const key = userKey(option);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(option);
+    }
+    return unique;
+  }, [initialOptions, options]);
   const [inputValue, setInputValue] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [positions, setPositions] = React.useState({});
@@ -97,7 +118,7 @@ export default function PersonFieldAutocomplete({
 
   // Сведения (должность/департамент/офис) для подсказок и для уже выбранных.
   React.useEffect(() => {
-    const list = [...selected, ...options];
+    const list = [...selected, ...availableOptions];
     if (list.length === 0) return undefined;
     let cancelled = false;
     (async () => {
@@ -109,7 +130,7 @@ export default function PersonFieldAutocomplete({
       } catch (_e) { void _e; }
     })();
     return () => { cancelled = true; };
-  }, [selected, options]);
+  }, [selected, availableOptions]);
 
   // Клик по чипу: свойства открываются, повторный клик — закрываются.
   // Popover закрывается и сам (клик «снаружи»), поэтому помним, кого и когда
@@ -167,10 +188,11 @@ export default function PersonFieldAutocomplete({
           if (reason === "reset") return;
           setInputValue(next);
         }}
-        options={options}
-        loading={loading}
-        // поиск серверный: не фильтруем найденных по введённой строке (учётная запись ≠ ФИО)
-        filterOptions={(list) => list}
+        options={availableOptions}
+        loading={loading || externalLoading}
+        loadingText={loadingText}
+        // По умолчанию сохраняем серверный поиск; локальный список может передать свой фильтр.
+        filterOptions={filterOptions}
         getOptionLabel={(user) => personDisplayName(user) || ""}
         isOptionEqualToValue={(a, b) => userKey(a) === userKey(b)}
         noOptionsText={String(inputValue || "").trim().length < MIN_QUERY_LENGTH

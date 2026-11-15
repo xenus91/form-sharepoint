@@ -20,6 +20,8 @@ import { searchAssignedToGroups } from "../../../tasks/userSearch";
 
 const NO_GROUP_POSITIONS = async () => ({});
 const PROFILE_ACCEPT = { headers: { Accept: "application/json;odata=verbose" } };
+const OFFICE_GROUPS_LIMIT = 100;
+const EMPTY_GROUPS = Object.freeze([]);
 
 function normalizeOfficeSearchTerm(value) {
   const office = String(value ?? "").trim();
@@ -43,6 +45,28 @@ function groupMatchesOffice(group, officeValue) {
     const searchableText = normalizeForOfficeMatch(value);
     return ` ${searchableText} `.includes(` ${office} `);
   });
+}
+
+function groupMatchesQuery(group, query) {
+  const normalizedQuery = normalizeForOfficeMatch(query);
+  if (!normalizedQuery || !group) return true;
+  return [group.Title, group.LoginName, group.Email]
+    .some((value) => normalizeForOfficeMatch(value).includes(normalizedQuery));
+}
+
+function groupsForOffice(groups, office) {
+  const unique = new Map();
+  for (const group of Array.isArray(groups) ? groups : []) {
+    if (!isGroupPrincipalType(group?.PrincipalType) || !groupMatchesOffice(group, office)) continue;
+    const key = String(group.Id ?? group.LoginName ?? group.Title ?? "").trim().toLowerCase();
+    if (key && !unique.has(key)) unique.set(key, group);
+  }
+  return [...unique.values()];
+}
+
+function filterOfficeGroupOptions(groups, state) {
+  const query = String(state?.inputValue || "").trim();
+  return groups.filter((group) => groupMatchesQuery(group, query));
 }
 
 function readOfficeFromProfile(response) {
@@ -69,6 +93,8 @@ export default function AssignedToEditDialog({
   const [saving, setSaving] = useState(false);
   const [officeSearchTerm, setOfficeSearchTerm] = useState("");
   const [officeStatus, setOfficeStatus] = useState("idle");
+  const [officeGroups, setOfficeGroups] = useState(EMPTY_GROUPS);
+  const [officeGroupsLoading, setOfficeGroupsLoading] = useState(false);
   const currentAssignees = useMemo(() => parseAssignees(task), [task]);
   const currentLabel = currentAssignees
     .map((person) => person.title || (person.id ? `Id ${person.id}` : ""))
@@ -89,6 +115,8 @@ export default function AssignedToEditDialog({
     const providedOffice = normalizeOfficeSearchTerm(currentUserOffice);
     setSelected(null);
     setOfficeSearchTerm("");
+    setOfficeGroups(EMPTY_GROUPS);
+    setOfficeGroupsLoading(false);
     setOfficeStatus(providedOffice ? "ready" : "loading");
 
     if (providedOffice) {
@@ -112,13 +140,45 @@ export default function AssignedToEditDialog({
     return () => { alive = false; };
   }, [open, task?.Id, currentUserOffice]);
 
+  useEffect(() => {
+    if (!open || officeStatus !== "ready" || !officeSearchTerm) {
+      setOfficeGroups(EMPTY_GROUPS);
+      setOfficeGroupsLoading(false);
+      return undefined;
+    }
+    let alive = true;
+    setOfficeGroups(EMPTY_GROUPS);
+    setOfficeGroupsLoading(true);
+    searchAssignedToGroups(officeSearchTerm, { limit: OFFICE_GROUPS_LIMIT })
+      .then((results) => {
+        if (alive) setOfficeGroups(groupsForOffice(results, officeSearchTerm));
+      })
+      .catch(() => {
+        if (alive) setOfficeGroups(EMPTY_GROUPS);
+      })
+      .finally(() => {
+        if (alive) setOfficeGroupsLoading(false);
+      });
+    return () => { alive = false; };
+  }, [open, officeSearchTerm, officeStatus]);
+
   const searchOfficeGroups = useCallback(async (query, options) => {
     if (officeStatus !== "ready" || !officeSearchTerm) return [];
-    const results = await searchAssignedToGroups(query, options);
-    return (Array.isArray(results) ? results : [])
-      .filter((group) => isGroupPrincipalType(group?.PrincipalType)
-        && groupMatchesOffice(group, officeSearchTerm));
-  }, [officeSearchTerm, officeStatus]);
+    const queryText = String(query ?? "").trim();
+    if (!queryText) return officeGroups;
+
+    const localMatches = officeGroups.filter((group) => groupMatchesQuery(group, queryText));
+    let searchedGroups = [];
+    try {
+      searchedGroups = await searchAssignedToGroups(queryText, options);
+    } catch (_e) {
+      // При недоступности People Picker сохраняем локальный поиск по уже загруженным группам.
+      void _e;
+    }
+    const remoteMatches = groupsForOffice(searchedGroups, officeSearchTerm)
+      .filter((group) => groupMatchesQuery(group, queryText));
+    return groupsForOffice([...localMatches, ...remoteMatches], officeSearchTerm);
+  }, [officeGroups, officeSearchTerm, officeStatus]);
 
   const close = () => {
     if (!saving) onClose?.();
@@ -163,13 +223,21 @@ export default function AssignedToEditDialog({
                 ? "Не удалось загрузить офис сотрудника"
                 : officeStatus === "missing"
                   ? "В профиле сотрудника не заполнен Office"
-                  : "Введите минимум 2 символа названия или учётной записи"}
+                  : officeGroupsLoading
+                    ? `Загружаю группы офиса ${officeSearchTerm}…`
+                    : officeGroups.length === 0
+                      ? `Для офиса ${officeSearchTerm} группы не найдены`
+                      : "Введите минимум 2 символа, чтобы сузить список групп"}
             noOptionsText={officeSearchTerm ? `Группы офиса ${officeSearchTerm} не найдены` : "Поиск недоступен без Office"}
             value={selected}
             onChange={setSelected}
             multiple={false}
             disabled={saving || officeStatus !== "ready"}
             search={searchOfficeGroups}
+            initialOptions={officeGroups}
+            externalLoading={officeGroupsLoading}
+            loadingText={`Загружаю группы офиса ${officeSearchTerm}…`}
+            filterOptions={filterOfficeGroupOptions}
             getPositions={NO_GROUP_POSITIONS}
           />
           <Typography variant="caption" color="text.secondary">
