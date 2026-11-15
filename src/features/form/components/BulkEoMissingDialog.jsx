@@ -123,6 +123,7 @@ export default function BulkEoMissingDialog({
 }) {
   const [sourceText, setSourceText] = useState("");
   const [rows, setRows] = useState([]);
+  const [editingEoRowId, setEditingEoRowId] = useState(null);
   const [isParsing, setIsParsing] = useState(false);
   const [parseWarnings, setParseWarnings] = useState([]);
   const [parseError, setParseError] = useState("");
@@ -163,6 +164,7 @@ export default function BulkEoMissingDialog({
     const incomingProblems = Array.isArray(initial.initialProblems) ? initial.initialProblems : [];
     setSourceText("");
     setRows([]);
+    setEditingEoRowId(null);
     setIsParsing(false);
     setParseWarnings([]);
     setParseError("");
@@ -261,6 +263,7 @@ export default function BulkEoMissingDialog({
     const value = event.target.value;
     setSourceText(value);
     setRows([]);
+    setEditingEoRowId(null);
     setIsParsing(Boolean(value.trim()));
     setParseWarnings([]);
     setParseError("");
@@ -293,6 +296,7 @@ export default function BulkEoMissingDialog({
 
   const handleRemoveRow = (rowId) => {
     setRows((previous) => previous.filter((row) => row.id !== rowId));
+    setEditingEoRowId((previous) => (previous === rowId ? null : previous));
     setBatchSummary(null);
     setConflictReview(null);
   };
@@ -401,39 +405,89 @@ export default function BulkEoMissingDialog({
       </DialogTitle>
       <DialogContent dividers sx={{ overflowX: "hidden", minWidth: 0, px: { xs: 2, sm: 3 } }}>
         <Stack spacing={2} sx={{ minWidth: 0, width: "100%" }}>
-          <Typography variant="body2" color="text.secondary">
-            Вставьте пары «код получателя → номер ЕО». Подойдут отдельные строки и копирование двух колонок из Excel; пустые строки и ячейки пропускаются.
-          </Typography>
-          <TextField
-            multiline
-            minRows={7}
-            maxRows={13}
-            fullWidth
-            autoFocus
-            label="Данные из ТСД или Excel"
-            helperText="Распознаются код получателя до 6 цифр и ЕО из 17–18 цифр. Если Excel показывает ЕО в научной записи, задайте столбцу формат «Текст»."
-            placeholder={'0294\n808117004022047365\n\n0294\n808117004022002852'}
-            value={sourceText}
-            onChange={handleSourceChange}
-            disabled={isSending || isCheckingConflicts}
-            inputProps={{
-              "data-testid": "bulk-eo-source",
-              wrap: "soft",
-              style: {
-                width: "100%",
-                boxSizing: "border-box",
-                whiteSpace: "pre-wrap",
-                overflowWrap: "anywhere",
-                overflowX: "hidden",
+          <Paper
+            data-testid="bulk-eo-composer"
+            variant="outlined"
+            sx={{
+              p: { xs: 1.25, sm: 1.5 },
+              minWidth: 0,
+              borderRadius: 3,
+              bgcolor: "background.paper",
+              boxShadow: 1,
+              transition: "border-color 120ms ease, box-shadow 120ms ease",
+              "&:focus-within": {
+                borderColor: "primary.main",
+                boxShadow: "0 0 0 2px rgba(25, 118, 210, 0.12)",
               },
             }}
-            sx={{
-              width: "100%",
-              minWidth: 0,
-              "& .MuiInputBase-root": { width: "100%", minWidth: 0, alignItems: "flex-start" },
-              "& textarea": { whiteSpace: "pre-wrap", overflowWrap: "anywhere", overflowX: "hidden" },
-            }}
-          />
+          >
+            <Stack spacing={0.75} sx={{ minWidth: 0 }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+                <Typography component="label" htmlFor="bulk-eo-source" variant="subtitle2" fontWeight={700}>
+                  Данные из ТСД или Excel
+                </Typography>
+                <Chip size="small" variant="outlined" label="Автораспознавание" sx={{ flexShrink: 0, height: 22 }} />
+              </Stack>
+              <TextField
+                id="bulk-eo-source"
+                variant="standard"
+                multiline
+                minRows={5}
+                maxRows={10}
+                fullWidth
+                autoFocus
+                placeholder={'0294    808117004022047365\n0295    808117004022002852'}
+                value={sourceText}
+                onChange={handleSourceChange}
+                disabled={isSending || isCheckingConflicts}
+                InputProps={{ disableUnderline: true }}
+                inputProps={{
+                  "data-testid": "bulk-eo-source",
+                  wrap: "soft",
+                  style: {
+                    width: "100%",
+                    maxWidth: "100%",
+                    minWidth: 0,
+                    boxSizing: "border-box",
+                    fontSize: "12px",
+                    lineHeight: 1.45,
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-all",
+                    overflowX: "hidden",
+                    resize: "vertical",
+                  },
+                }}
+                sx={{
+                  width: "100%",
+                  minWidth: 0,
+                  "& .MuiInputBase-root": { width: "100%", minWidth: 0, alignItems: "flex-start", p: 0 },
+                  "& textarea": {
+                    width: "100%",
+                    maxWidth: "100%",
+                    minWidth: 0,
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-all",
+                    overflowX: "hidden",
+                    fontSize: "12px",
+                    lineHeight: 1.45,
+                    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                  },
+                }}
+              />
+              <Divider />
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={0.25}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>
+                  Вставьте код получателя и номер ЕО; можно копировать столбцы из Excel.
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: 11 }}>
+                  ЕО: 17–18 цифр · Код: до 6 цифр
+                </Typography>
+              </Stack>
+            </Stack>
+          </Paper>
 
           <Stack spacing={1}>
             {recipientLoadStatus === "loading" && (
@@ -459,7 +513,7 @@ export default function BulkEoMissingDialog({
             )}
             {!isParsing && rows.length > 0 && (
               <Alert severity="success">
-                Автоматически распознано пар: <strong>{rows.length}</strong>. Проверьте строки ниже; нераспознанные поля можно исправить.
+                Автоматически распознано ЕО: <strong>{rows.length}</strong>. Получателя выберите справа; чтобы исправить номер, нажмите на его чип.
               </Alert>
             )}
             {!isParsing && parseError && <Alert severity="warning">{parseError}</Alert>}
@@ -472,9 +526,11 @@ export default function BulkEoMissingDialog({
             <Box
               sx={{
                 display: "flex",
-                flexDirection: "column",
-                gap: 1.25,
-                maxHeight: "32vh",
+                flexWrap: "wrap",
+                alignContent: "flex-start",
+                alignItems: "flex-start",
+                gap: 0.75,
+                maxHeight: "38vh",
                 overflowY: "auto",
                 overflowX: "hidden",
                 minWidth: 0,
@@ -486,75 +542,132 @@ export default function BulkEoMissingDialog({
                 const rowIssues = getRowIssues(row, duplicateMessages.get(row.id));
                 const selectedRecipient = recipientOptions.find((option) => String(recipientOptionId(option)) === String(row.recipientId)) || null;
                 const locked = isSending || isCheckingConflicts || ["success", "uncertain"].includes(row.requestStatus);
+                const isEditingEo = editingEoRowId === row.id && !locked;
+                const eoIsValid = EO_NUMBER_PATTERN.test(String(row.eoNumber ?? "").trim());
+                const recipientTitle = row.recipientId
+                  ? row.recipientMatchStatus === "matched" ? "Сопоставлен автоматически" : "Получатель выбран вручную"
+                  : row.recipientMatchStatus === "ambiguous" ? "Найдено несколько получателей — выберите нужного" : "Выберите получателя";
                 return (
-                  <Paper key={row.id} variant="outlined" sx={{ p: 1.5, borderRadius: 1.5, minWidth: 0 }} data-testid={`bulk-eo-row-${index + 1}`}>
-                    <Stack spacing={1.25} sx={{ minWidth: 0 }}>
-                      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
-                        <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap">
-                          <Typography variant="subtitle2" fontWeight={800}>#{index + 1}</Typography>
-                          {row.sourceLine ? <Typography variant="caption" color="text.secondary">строка {row.sourceLine}</Typography> : null}
-                          {row.recipientCode ? <Chip size="small" variant="outlined" label={`Код ${row.recipientCode}`} /> : <Chip size="small" color="warning" label="Код не распознан" />}
-                          {row.requestStatus === "success" && <Chip size="small" color="success" label={`Создано #${row.itemId}`} />}
-                          {row.requestStatus === "uncertain" && <Chip size="small" color="warning" label="Проверьте в SharePoint" />}
-                        </Stack>
-                        <IconButton
-                          aria-label={`Удалить строку ${index + 1}`}
-                          size="small"
-                          disabled={locked}
-                          onClick={() => handleRemoveRow(row.id)}
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </Stack>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} sx={{ minWidth: 0 }}>
+                  <Box key={row.id} data-testid={`bulk-eo-row-${index + 1}`} sx={{ flex: "1 1 340px", minWidth: 0, maxWidth: "100%" }}>
+                    <Paper
+                      variant="outlined"
+                      sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 0.5,
+                        p: 0.5,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        borderRadius: 999,
+                        bgcolor: "background.paper",
+                      }}
+                    >
+                      {isEditingEo ? (
                         <TextField
-                          label="Номер ЕО"
+                          autoFocus
                           size="small"
-                          fullWidth
-                          sx={{ minWidth: 0, flex: 1 }}
                           value={row.eoNumber}
-                          disabled={locked}
-                          error={!EO_NUMBER_PATTERN.test(String(row.eoNumber ?? "").trim())}
                           onChange={(event) => updateRow(row.id, { eoNumber: event.target.value.replace(/\D/g, "") })}
+                          onBlur={() => setEditingEoRowId(null)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") event.preventDefault();
+                            if (event.key === "Enter" || event.key === "Escape") setEditingEoRowId(null);
+                          }}
                           inputProps={{ inputMode: "numeric", "aria-label": `Номер ЕО, строка ${index + 1}` }}
+                          sx={{
+                            flex: "0 1 180px",
+                            width: 180,
+                            minWidth: 90,
+                            "& .MuiInputBase-root": { height: 30, fontSize: 12 },
+                            "& input": { py: 0.5, px: 0.75, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" },
+                          }}
                         />
-                        <Autocomplete
-                          options={recipientOptions}
-                          value={selectedRecipient}
-                          disabled={locked || recipientLoadStatus !== "loaded"}
-                          onChange={(_, recipient) => handleRecipientChange(row, recipient)}
-                          isOptionEqualToValue={(option, value) => String(recipientOptionId(option)) === String(recipientOptionId(value))}
-                          getOptionLabel={recipientOptionLabel}
-                          filterSelectedOptions
-                          fullWidth
-                          sx={{ minWidth: 0, flex: 1 }}
-                          renderInput={(params) => (
-                            <TextField
-                              {...params}
-                              label="Получатель"
-                              size="small"
-                              error={!row.recipientId}
-                              helperText={row.recipientId
-                                ? row.recipientMatchStatus === "matched" ? "Сопоставлен автоматически" : "Проверьте получателя"
-                                : row.recipientMatchStatus === "ambiguous"
-                                  ? `Код ${row.recipientCode} найден у нескольких получателей — выберите нужного`
-                                  : row.recipientCode ? `Код ${row.recipientCode} не найден — выберите получателя` : "Выберите получателя"}
-                            />
-                          )}
+                      ) : (
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          label={row.eoNumber || "ЕО не распознана"}
+                          color={eoIsValid ? "default" : "error"}
+                          clickable={!locked}
+                          onClick={locked ? undefined : () => setEditingEoRowId(row.id)}
+                          title={locked ? undefined : "Нажмите, чтобы исправить номер ЕО"}
+                          aria-label={`Номер ЕО, строка ${index + 1}`}
+                          data-testid={`bulk-eo-number-${index + 1}`}
+                          sx={{
+                            flexShrink: 0,
+                            maxWidth: { xs: 150, sm: 190 },
+                            height: 28,
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                            "& .MuiChip-label": { px: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                          }}
                         />
-                      </Stack>
-                      {rowIssues.length > 0 && (
-                        <Typography variant="caption" color="error.main">
-                          {rowIssues.join(" ")}{row.parseWarning ? ` ${row.parseWarning}` : ""}
-                        </Typography>
                       )}
-                      {row.requestMessage && (
-                        <Alert severity={row.requestStatus === "uncertain" ? "warning" : "error"} sx={{ py: 0 }}>
-                          {row.requestMessage}
-                        </Alert>
+                      <Autocomplete
+                        options={recipientOptions}
+                        value={selectedRecipient}
+                        disabled={locked || recipientLoadStatus !== "loaded"}
+                        onChange={(_, recipient) => handleRecipientChange(row, recipient)}
+                        isOptionEqualToValue={(option, value) => String(recipientOptionId(option)) === String(recipientOptionId(value))}
+                        getOptionLabel={recipientOptionLabel}
+                        filterSelectedOptions
+                        size="small"
+                        sx={{
+                          flex: "1 1 150px",
+                          minWidth: 0,
+                          maxWidth: "100%",
+                          "& .MuiInputBase-root": { minWidth: 0, height: 32, pr: "30px !important" },
+                          "& .MuiInputBase-input": { minWidth: 0, py: "4px !important", px: "6px !important", fontSize: 12, textOverflow: "ellipsis" },
+                          "& .MuiAutocomplete-endAdornment": { right: 4 },
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            placeholder={row.recipientId ? "" : "Получатель"}
+                            size="small"
+                            error={!row.recipientId}
+                            inputProps={{
+                              ...params.inputProps,
+                              "aria-label": `Получатель, строка ${index + 1}`,
+                              title: recipientTitle,
+                            }}
+                          />
+                        )}
+                      />
+                      {row.requestStatus === "success" && (
+                        <Chip size="small" color="success" label={`#${row.itemId}`} sx={{ flexShrink: 0, height: 22, fontSize: 10 }} />
                       )}
-                    </Stack>
-                  </Paper>
+                      {row.requestStatus === "uncertain" && (
+                        <Chip size="small" color="warning" label="Проверить" sx={{ flexShrink: 0, height: 22, fontSize: 10 }} />
+                      )}
+                      <IconButton
+                        aria-label={`Удалить строку ${index + 1}`}
+                        data-testid={`bulk-eo-delete-${index + 1}`}
+                        size="small"
+                        color="error"
+                        disabled={locked}
+                        onClick={() => handleRemoveRow(row.id)}
+                        sx={{
+                          flexShrink: 0,
+                          width: 30,
+                          height: 30,
+                          color: "error.main",
+                          "&:hover": { bgcolor: "error.light", color: "error.dark" },
+                        }}
+                      >
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Paper>
+                    {rowIssues.length > 0 && (
+                      <Typography variant="caption" color="error.main" sx={{ display: "block", px: 1, pt: 0.25, fontSize: 11 }}>
+                        {rowIssues.join(" ")}{row.parseWarning ? ` ${row.parseWarning}` : ""}
+                      </Typography>
+                    )}
+                    {row.requestMessage && (
+                      <Alert severity={row.requestStatus === "uncertain" ? "warning" : "error"} sx={{ mt: 0.5, py: 0 }}>
+                        {row.requestMessage}
+                      </Alert>
+                    )}
+                  </Box>
                 );
               })}
             </Box>

@@ -123,16 +123,22 @@ describe("BulkEoMissingDialog", () => {
     expect(source).not.toBeNull();
     await pasteSource(source, "0294\n808117004022047365\n\n0295\n808117004022002852");
 
-    expect(document.body.textContent).toContain("Автоматически распознано пар:");
-    expect(document.body.querySelector('[aria-label="Номер ЕО, строка 1"]').value).toBe("808117004022047365");
-    expect(document.body.querySelector('[aria-label="Номер ЕО, строка 2"]').value).toBe("808117004022002852");
-    expect(document.body.textContent).toContain("Сопоставлен автоматически");
+    expect(document.body.textContent).toContain("Автоматически распознано ЕО:");
+    expect(document.body.querySelector('[data-testid="bulk-eo-number-1"]').textContent).toBe("808117004022047365");
+    expect(document.body.querySelector('[data-testid="bulk-eo-number-2"]').textContent).toBe("808117004022002852");
+    expect(document.body.querySelector('[aria-label="Получатель, строка 1"]').value).toContain("0294");
+    expect(document.body.querySelector('[aria-label="Получатель, строка 2"]').value).toContain("0295");
+    expect(document.body.querySelector('[aria-label="Получатель, строка 1"]').title).toBe("Сопоставлен автоматически");
+    expect(document.body.querySelector('[data-testid="bulk-eo-delete-1"]')).not.toBeNull();
     expect(findButton("Распознать")).toBeUndefined();
     expect(findButton("ОК, выбрать проблемы")).toBeUndefined();
     expect(document.body.textContent).toContain("Проблемы для всех заявок");
     expect(document.body.textContent).toContain("Не найдена");
     expect(document.body.querySelector('[data-testid="bulk-eo-location"]').value).toBe("Не найдена в зоне отгрузки");
+    expect(document.body.querySelector('[data-testid="bulk-eo-composer"]')).not.toBeNull();
+    expect(source.tagName).toBe("TEXTAREA");
     expect(source.getAttribute("wrap")).toBe("soft");
+    expect(source.style.fontSize).toBe("12px");
     expect(source.style.overflowX).toBe("hidden");
 
     await clickButton("Отправить 2 заявки");
@@ -148,6 +154,41 @@ describe("BulkEoMissingDialog", () => {
     expect(options.location).toBe("Не найдена в зоне отгрузки");
     expect(onCreated).toHaveBeenCalledWith(2);
     expect(document.body.textContent).toContain("Все заявки созданы");
+  });
+
+  it("позволяет исправить номер нажатием на чип и удалить пару красной кнопкой", async () => {
+    await render();
+    const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
+    await pasteSource(source, "0294\n808117004022047365\n\n0295\n808117004022002852");
+
+    const eoChip = document.body.querySelector('[data-testid="bulk-eo-number-1"]');
+    await act(async () => {
+      eoChip.click();
+      await wait(5);
+    });
+    const eoInput = document.body.querySelector('[aria-label="Номер ЕО, строка 1"]');
+    expect(eoInput.value).toBe("808117004022047365");
+
+    const setInputValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+      setInputValue.call(eoInput, "808117004022047366");
+      eoInput.dispatchEvent(new window.Event("input", { bubbles: true }));
+      await wait(5);
+    });
+    await act(async () => {
+      eoInput.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await wait(5);
+    });
+    expect(document.body.querySelector('[data-testid="bulk-eo-number-1"]').textContent).toBe("808117004022047366");
+
+    const deleteButton = document.body.querySelector('[data-testid="bulk-eo-delete-1"]');
+    expect(deleteButton).not.toBeNull();
+    await act(async () => {
+      deleteButton.click();
+      await wait(5);
+    });
+    expect(document.body.querySelectorAll('[data-testid^="bulk-eo-row-"]')).toHaveLength(1);
+    expect(document.body.querySelector('[data-testid="bulk-eo-number-1"]').textContent).toBe("808117004022002852");
   });
 
   it("перед отправкой предупреждает о конфликтующей заявке и требует явного подтверждения", async () => {
