@@ -57,6 +57,7 @@ async function clickButton(text) {
 async function pasteSource(source, text) {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
   await act(async () => {
+    source.dispatchEvent(new window.Event("paste", { bubbles: true }));
     setter.call(source, text);
     source.dispatchEvent(new window.Event("input", { bubbles: true }));
     await wait(320);
@@ -135,7 +136,8 @@ describe("BulkEoMissingDialog", () => {
     expect(document.body.textContent).toContain("Проблемы для всех заявок");
     expect(document.body.textContent).toContain("Не найдена");
     expect(document.body.querySelector('[data-testid="bulk-eo-location"]').value).toBe("Не найдена в зоне отгрузки");
-    expect(document.body.querySelector('[data-testid="bulk-eo-composer"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="bulk-eo-collapsed-preview"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="bulk-eo-source"]')).toBeNull();
     expect(source.tagName).toBe("TEXTAREA");
     expect(source.getAttribute("wrap")).toBe("soft");
     expect(source.style.fontSize).toBe("12px");
@@ -160,6 +162,19 @@ describe("BulkEoMissingDialog", () => {
     await render();
     const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
     await pasteSource(source, "0294\n808117004022047365\n\n0295\n808117004022002852");
+
+    const expandSourceButton = document.body.querySelector('[aria-label="Изменить вставленные данные"]');
+    expect(expandSourceButton).not.toBeNull();
+    await act(async () => {
+      expandSourceButton.click();
+      await wait(5);
+    });
+    expect(document.body.querySelector('[data-testid="bulk-eo-source"]').value).toContain("808117004022047365");
+    await act(async () => {
+      document.body.querySelector('[aria-label="Свернуть данные"]').click();
+      await wait(5);
+    });
+    expect(document.body.querySelector('[data-testid="bulk-eo-collapsed-preview"]')).not.toBeNull();
 
     const eoChip = document.body.querySelector('[data-testid="bulk-eo-number-1"]');
     await act(async () => {
@@ -189,6 +204,17 @@ describe("BulkEoMissingDialog", () => {
     });
     expect(document.body.querySelectorAll('[data-testid^="bulk-eo-row-"]')).toHaveLength(1);
     expect(document.body.querySelector('[data-testid="bulk-eo-number-1"]').textContent).toBe("808117004022002852");
+  });
+
+  it("отключает отправку и показывает серую кнопку, пока есть ошибки валидации", async () => {
+    await render();
+    const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
+    await pasteSource(source, "02941\n808117004022047365");
+
+    const sendButton = document.body.querySelector('[data-testid="bulk-eo-send"]');
+    expect(sendButton.disabled).toBe(true);
+    expect(sendButton.className).toContain("Mui-disabled");
+    expect(document.body.textContent).toContain("Не сопоставлен получатель 02941.");
   });
 
   it("перед отправкой предупреждает о конфликтующей заявке и требует явного подтверждения", async () => {

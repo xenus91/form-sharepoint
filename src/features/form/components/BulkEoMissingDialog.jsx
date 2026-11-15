@@ -124,6 +124,9 @@ export default function BulkEoMissingDialog({
   const [sourceText, setSourceText] = useState("");
   const [rows, setRows] = useState([]);
   const [editingEoRowId, setEditingEoRowId] = useState(null);
+  const [isSourceCollapsed, setIsSourceCollapsed] = useState(false);
+  const pastePendingRef = useRef(false);
+  const collapseAfterPasteRef = useRef(false);
   const [isParsing, setIsParsing] = useState(false);
   const [parseWarnings, setParseWarnings] = useState([]);
   const [parseError, setParseError] = useState("");
@@ -165,6 +168,9 @@ export default function BulkEoMissingDialog({
     setSourceText("");
     setRows([]);
     setEditingEoRowId(null);
+    setIsSourceCollapsed(false);
+    pastePendingRef.current = false;
+    collapseAfterPasteRef.current = false;
     setIsParsing(false);
     setParseWarnings([]);
     setParseError("");
@@ -188,9 +194,12 @@ export default function BulkEoMissingDialog({
     if (!open) return undefined;
     if (!sourceText.trim()) {
       setRows([]);
+      setIsSourceCollapsed(false);
       setParseWarnings([]);
       setParseError("");
       setIsParsing(false);
+      pastePendingRef.current = false;
+      collapseAfterPasteRef.current = false;
       return undefined;
     }
 
@@ -216,6 +225,10 @@ export default function BulkEoMissingDialog({
         };
       });
       setRows(mappedRows);
+      if (collapseAfterPasteRef.current) {
+        setIsSourceCollapsed(result.rows.length > 0);
+        collapseAfterPasteRef.current = false;
+      }
       setBatchSummary(null);
       setSendError("");
       setConflictReview(null);
@@ -258,12 +271,28 @@ export default function BulkEoMissingDialog({
     (isTransportationRequired && !String(shipment || "").trim()) ||
     !String(dcThu || "").trim() ||
     !operationDateIso;
+  const normalizedSourcePreview = sourceText.trim().replace(/\s+/g, " ");
+  const compactSourcePreview = normalizedSourcePreview.length > 96
+    ? `${normalizedSourcePreview.slice(0, 96)}…`
+    : normalizedSourcePreview;
+
+  const handleSourcePaste = () => {
+    pastePendingRef.current = true;
+    window.setTimeout(() => {
+      pastePendingRef.current = false;
+    }, 0);
+  };
 
   const handleSourceChange = (event) => {
     const value = event.target.value;
+    if (pastePendingRef.current) {
+      collapseAfterPasteRef.current = true;
+      pastePendingRef.current = false;
+    }
     setSourceText(value);
     setRows([]);
     setEditingEoRowId(null);
+    setIsSourceCollapsed(false);
     setIsParsing(Boolean(value.trim()));
     setParseWarnings([]);
     setParseError("");
@@ -405,13 +434,57 @@ export default function BulkEoMissingDialog({
       </DialogTitle>
       <DialogContent dividers sx={{ overflowX: "hidden", minWidth: 0, px: { xs: 2, sm: 3 } }}>
         <Stack spacing={2} sx={{ minWidth: 0, width: "100%" }}>
+          {isSourceCollapsed && sourceText.trim() && rows.length > 0 ? (
+            <Paper
+              data-testid="bulk-eo-collapsed-preview"
+              variant="outlined"
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                p: 1,
+                minWidth: 0,
+                borderRadius: "12px",
+                bgcolor: "rgba(23,28,143,0.025)",
+                borderColor: "rgba(23,28,143,0.14)",
+              }}
+            >
+              <Chip
+                size="small"
+                variant="outlined"
+                color="primary"
+                label={`${rows.length} ЕО`}
+                sx={{ flexShrink: 0, height: 22, borderRadius: "11px", "& .MuiChip-label": { px: 0.75, fontSize: 10 } }}
+              />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="caption" fontWeight={700} sx={{ display: "block", lineHeight: 1.2 }}>
+                  Вставленные данные
+                </Typography>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace", fontSize: 10.5 }}
+                >
+                  {compactSourcePreview}
+                </Typography>
+              </Box>
+              <Button
+                aria-label="Изменить вставленные данные"
+                size="small"
+                onClick={() => setIsSourceCollapsed(false)}
+                sx={{ flexShrink: 0, minWidth: "auto", px: 1, borderRadius: "8px", fontSize: 11 }}
+              >
+                Изменить
+              </Button>
+            </Paper>
+          ) : (
           <Paper
             data-testid="bulk-eo-composer"
             variant="outlined"
             sx={{
               p: { xs: 1.25, sm: 1.5 },
               minWidth: 0,
-              borderRadius: 3,
+              borderRadius: "12px",
               bgcolor: "background.paper",
               boxShadow: 1,
               transition: "border-color 120ms ease, box-shadow 120ms ease",
@@ -422,18 +495,30 @@ export default function BulkEoMissingDialog({
             }}
           >
             <Stack spacing={0.75} sx={{ minWidth: 0 }}>
-              <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
                 <Typography component="label" htmlFor="bulk-eo-source" variant="subtitle2" fontWeight={700}>
                   Данные из ТСД или Excel
                 </Typography>
-                <Chip size="small" variant="outlined" label="Автораспознавание" sx={{ flexShrink: 0, height: 22 }} />
+                <Stack direction="row" alignItems="center" gap={0.5}>
+                  {rows.length > 0 && (
+                    <Button
+                      aria-label="Свернуть данные"
+                      size="small"
+                      onClick={() => setIsSourceCollapsed(true)}
+                      sx={{ minWidth: "auto", px: 1, py: 0.25, borderRadius: "8px", fontSize: 11 }}
+                    >
+                      Свернуть
+                    </Button>
+                  )}
+                  <Chip size="small" variant="outlined" label="Автораспознавание" sx={{ flexShrink: 0, height: 22, borderRadius: "11px" }} />
+                </Stack>
               </Stack>
               <TextField
                 id="bulk-eo-source"
                 variant="standard"
                 multiline
-                minRows={5}
-                maxRows={10}
+                minRows={3}
+                maxRows={8}
                 fullWidth
                 autoFocus
                 placeholder={'0294    808117004022047365\n0295    808117004022002852'}
@@ -444,6 +529,7 @@ export default function BulkEoMissingDialog({
                 inputProps={{
                   "data-testid": "bulk-eo-source",
                   wrap: "soft",
+                  onPaste: handleSourcePaste,
                   style: {
                     width: "100%",
                     maxWidth: "100%",
@@ -488,6 +574,7 @@ export default function BulkEoMissingDialog({
               </Stack>
             </Stack>
           </Paper>
+          )}
 
           <Stack spacing={1}>
             {recipientLoadStatus === "loading" && (
@@ -595,10 +682,11 @@ export default function BulkEoMissingDialog({
                           data-testid={`bulk-eo-number-${index + 1}`}
                           sx={{
                             flexShrink: 0,
-                            maxWidth: { xs: 150, sm: 190 },
-                            height: 28,
+                            maxWidth: { xs: 132, sm: 150 },
+                            height: 22,
+                            borderRadius: "11px",
                             fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                            "& .MuiChip-label": { px: 1, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                            "& .MuiChip-label": { px: 0.65, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
                           }}
                         />
                       )}
@@ -803,7 +891,17 @@ export default function BulkEoMissingDialog({
             variant="contained"
             onClick={handleSend}
             disabled={sendDisabled}
+            data-testid="bulk-eo-send"
             startIcon={isSending ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
+            sx={{
+              borderRadius: "10px",
+              "&.Mui-disabled": {
+                color: "#858585",
+                backgroundColor: "#e0e0e0",
+                backgroundImage: "none",
+                boxShadow: "none",
+              },
+            }}
           >
             {isCheckingConflicts
               ? "Проверка…"
