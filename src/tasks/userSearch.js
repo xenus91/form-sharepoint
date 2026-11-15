@@ -286,12 +286,12 @@ function mapPeoplePickerDistributionList(raw) {
   if (!title || (!id && !loginName)) return null;
 
   return {
-    Id: id,
+    // Если SharePoint не прислал PrincipalType, не доверяем одному SPUserID:
+    // разрешаем Key через ensureuser и проверяем фактический тип.
+    Id: returnedType === PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST ? id : null,
     Title: title,
     LoginName: loginName,
     Email: email,
-    // People Picker запрошен с PrincipalType=2. Если локального SPUserID ещё
-    // нет, ниже разрешаем Key через ensureuser и перепроверяем фактический тип.
     PrincipalType: PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST,
   };
 }
@@ -303,65 +303,6 @@ function distributionListQueryVariants(query) {
     ? [raw, ...accountQueryVariants(withoutLeadingUnderscore)]
     : accountQueryVariants(raw);
   return [...new Set(variants.map((value) => String(value).trim()).filter((value) => value.length >= 2))];
-}
-
-const PEOPLE_RESULTS_SOURCE_ID = "B09A7990-05EA-4AF9-81EF-EDFAB16C4E31";
-const GLOBAL_SEARCH_ROW_LIMIT = 50;
-const GLOBAL_SEARCH_MAX_PRINCIPALS = 20;
-
-function globalSearchQueryUrl(query, peopleOnly) {
-  // KQL принимает префиксный wildcard. Убираем управляющую KQL/REST пунктуацию
-  // из пользовательского текста, чтобы имя не стало частью произвольного запроса.
-  const term = String(query ?? "")
-    .replace(/^[\s_]+/, "")
-    .replace(/[^\p{L}\p{N}@._ -]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (term.length < 2) return null;
-
-  const params = new URLSearchParams();
-  params.set("querytext", `'${term}*'`);
-  params.set("rowlimit", String(GLOBAL_SEARCH_ROW_LIMIT));
-  params.set("trimduplicates", "false");
-  params.set("selectproperties", "'Title,Path,AccountName,PreferredName,WorkEmail,ContentClass'");
-  if (peopleOnly) params.set("sourceid", `'${PEOPLE_RESULTS_SOURCE_ID}'`);
-  return `/search/query?${params.toString()}`;
-}
-
-function globalSearchRows(response) {
-  const body = response?.data?.d ?? response?.data ?? {};
-  const query = body?.query ?? body;
-  const rows = query?.PrimaryQueryResult?.RelevantResults?.Table?.Rows;
-  const list = Array.isArray(rows) ? rows : (Array.isArray(rows?.results) ? rows.results : []);
-  return list.map((row) => {
-    const cells = row?.Cells?.results ?? row?.Cells ?? [];
-    if (!Array.isArray(cells)) return row;
-    return Object.fromEntries(cells
-      .filter((cell) => cell?.Key)
-      .map((cell) => [String(cell.Key), cell.Value]));
-  });
-}
-
-function searchProperty(row, ...names) {
-  const wanted = new Set(names.map((name) => String(name).toLowerCase()));
-  const entry = Object.entries(row || {}).find(([key]) => wanted.has(String(key).toLowerCase()));
-  return entry?.[1];
-}
-
-function globalSearchPrincipalCandidates(response) {
-  return globalSearchRows(response).map((row) => {
-    const loginName = String(searchProperty(row, "AccountName", "LoginName", "UserName") || "").trim();
-    if (!loginName) return null;
-
-    const returnedType = normalizePrincipalType(searchProperty(row, "PrincipalType"));
-    if (returnedType !== null && returnedType !== PRINCIPAL_TYPE_MASK.DISTRIBUTION_LIST) return null;
-
-    return {
-      loginName,
-      title: String(searchProperty(row, "PreferredName", "Title", "DisplayName") || "").trim(),
-      email: String(searchProperty(row, "WorkEmail", "Email") || "").trim(),
-    };
-  }).filter(Boolean);
 }
 
 function mapEnsuredDistributionList(response, candidate) {
@@ -402,67 +343,24 @@ async function resolvePeoplePickerDistributionLists(candidates, post, limit) {
     try {
       const mailing = await ensureDistributionList(candidate, post);
       if (mailing) resolved.push(mailing);
+      else if (!candidate.Id) break; // unknown type: don't enumerate later people
     } catch (error) {
       const status = error?.response?.status;
       console.warn("[userSearch] distribution-list ensureuser failed", status || error?.message);
+      // 5xx/network failure is usually common to all candidates; don't flood the
+      // proxy with one identical failing ensureuser request per suggestion.
+      if (!status || status >= 500) break;
     }
     if (dedupeUsers(resolved).length >= limit) break;
   }
-  return dedupeUsers(resolved).slice(0, limit);
-}
-
-async function searchGlobalDistributionLists(queryVariants, { get, post, limit }) {
-  const candidates = new Map();
-  const searchedUrls = new Set();
-
-  // SharePoint Search смотрит в индекс всего доступного портала, а не только в
-  // User Information List текущего сайта. People source пробуем вместе с общим
-  // индексом: рассылки в разных тенантах индексируются разными источниками.
-  for (const searchTerm of queryVariants) {
-    for (const peopleOnly of [true, false]) {
-      const url = globalSearchQueryUrl(searchTerm, peopleOnly);
-      if (!url || searchedUrls.has(url)) continue;
-      searchedUrls.add(url);
-      try {
-        const response = await get(url, ACCEPT);
-        for (const candidate of globalSearchPrincipalCandidates(response)) {
-          const key = candidate.loginName.toLowerCase();
-          if (!candidates.has(key)) candidates.set(key, candidate);
-        }
-      } catch (error) {
-        const status = error?.response?.status;
-        console.warn("[userSearch] global SharePoint Search request failed", status || error?.message);
-      }
-    }
-  }
-
-  const resolved = [];
-  let resolutionFailureLogged = false;
-  for (const candidate of [...candidates.values()].slice(0, GLOBAL_SEARCH_MAX_PRINCIPALS)) {
-    try {
-      // ensureuser возвращает именно principal ID локального сайта, необходимый
-      // для AssignedToId. Проверяем PrincipalType=2 после разрешения — Search
-      // индекс может также содержать пользователей и security groups.
-      const mailing = await ensureDistributionList(candidate, post);
-      if (mailing) resolved.push(mailing);
-    } catch (error) {
-      if (!resolutionFailureLogged) {
-        const status = error?.response?.status;
-        console.warn("[userSearch] global distribution-list resolution failed", status || error?.message);
-        resolutionFailureLogged = true;
-      }
-    }
-    if (dedupeUsers(resolved).length >= limit) break;
-  }
-
   return dedupeUsers(resolved).slice(0, limit);
 }
 
 /**
  * Поиск почтовых рассылок для поля AssignedTo.
  * People Picker — основной источник. Затем проверяется User Information List
- * текущего сайта, а при отсутствии совпадений — глобальный SharePoint Search;
- * результаты разрешаются в локальный SharePoint Id и фильтруются по PrincipalType=2.
+ * текущего сайта. Глобальный People Picker запрашивает PrincipalType=2, а
+ * результаты без SPUserID разрешаются через ensureuser.
  * @param {string} query
  * @param {{limit?:number, get?:Function, post?:Function}} [opts]
  * @returns {Promise<Array<{Id:number,Title:string,LoginName:string,Email:string,PrincipalType:2}>>}
@@ -484,7 +382,7 @@ export async function searchDistributionLists(query, opts = {}) {
           queryParams: {
             __metadata: { type: "SP.UI.ApplicationPages.ClientPeoplePickerQueryParameters" },
             AllowEmailAddresses: true,
-            AllowMultipleEntities: true,
+            AllowMultipleEntities: false,
             AllUrlZones: false,
             MaximumEntitySuggestions: limit,
             PrincipalSource: 15,
@@ -499,9 +397,8 @@ export async function searchDistributionLists(query, opts = {}) {
         if (key && !peoplePickerCandidates.has(key)) peoplePickerCandidates.set(key, candidate);
       }
     } catch (error) {
-      if (error?.response?.status && ![400, 403, 404].includes(error.response.status)) {
-        console.warn("[userSearch] distribution list People Picker search failed", error.response.status);
-      }
+      const status = error?.response?.status;
+      console.warn("[userSearch] distribution list People Picker search failed", status || error?.message);
     }
     if (peoplePickerCandidates.size >= limit) break;
   }
@@ -529,10 +426,10 @@ export async function searchDistributionLists(query, opts = {}) {
   const foundBySiteUsers = dedupeUsers(siteUserLists).slice(0, limit);
   if (foundBySiteUsers.length > 0) return foundBySiteUsers;
 
-  // siteusers перечисляет только пользователей, уже известных текущему сайту.
-  // Последний fallback — глобальный Search REST, затем ensureuser для получения
-  // локального SharePoint Id; в результат пропускаем только PrincipalType=2.
-  return searchGlobalDistributionLists(queryVariants, { get, post, limit });
+  // Глобальный People Picker уже был проверен выше с PrincipalType=2. Не
+  // используем общий Search REST: он возвращает сотрудников и не подходит
+  // для выбора почтовой рассылки.
+  return [];
 }
 
 /**

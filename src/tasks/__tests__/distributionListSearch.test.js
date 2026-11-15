@@ -9,33 +9,11 @@ const pickerResponse = (entries) => ({
   },
 });
 
-const globalSearchResponse = (entries) => ({
-  data: {
-    d: {
-      query: {
-        PrimaryQueryResult: {
-          RelevantResults: {
-            Table: {
-              Rows: {
-                results: entries.map((entry) => ({
-                  Cells: {
-                    results: Object.entries(entry).map(([Key, Value]) => ({ Key, Value })),
-                  },
-                })),
-              },
-            },
-          },
-        },
-      },
-    },
-  },
-});
-
 beforeEach(() => clearUserSearchCache());
 
 describe("поиск почтовых рассылок для AssignedTo", () => {
   it("ищет рассылки через People Picker и исключает другие PrincipalType", async () => {
-    const post = vi.fn(async () => pickerResponse([
+    const pickerEntries = [
       {
         Key: "i:0#.f|membership|shipping@lenta.com",
         DisplayText: "Рассылка РЦ Отгрузка",
@@ -63,12 +41,25 @@ describe("поиск почтовых рассылок для AssignedTo", () =>
         DisplayText: "Рассылка Отгрузка без типа в ответе",
         EntityData: { SPUserID: "36", Email: "dispatch@lenta.com" },
       },
-    ]));
+    ];
+    const post = vi.fn(async (url) => {
+      if (url.includes("ClientPeoplePicker")) return pickerResponse(pickerEntries);
+      if (url.startsWith("/web/ensureuser")) {
+        return { data: { d: {
+          Id: 36,
+          Title: "Рассылка Отгрузка без типа в ответе",
+          LoginName: "i:0#.f|membership|dispatch@lenta.com",
+          Email: "dispatch@lenta.com",
+          PrincipalType: 2,
+        } } };
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
     const get = vi.fn();
 
     const results = await searchDistributionLists("Отгрузка", { get, post });
 
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(2);
     const [url, body, config] = post.mock.calls[0];
     expect(url).toBe("/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.ClientPeoplePickerSearchUser");
     expect(body.queryParams).toMatchObject({
@@ -147,6 +138,28 @@ describe("поиск почтовых рассылок для AssignedTo", () =>
     expect(get).not.toHaveBeenCalled();
   });
 
+  it("останавливает перебор групп, если ensureuser отвечает 5xx", async () => {
+    const entries = ["one", "two", "three"].map((name) => ({
+      Key: `RETAIL\\${name}`,
+      DisplayText: `Рассылка ${name}`,
+      EntityData: { Email: `${name}@lenta.com`, PrincipalType: "DistributionList" },
+    }));
+    const post = vi.fn(async (url) => {
+      if (url.includes("ClientPeoplePicker")) return pickerResponse(entries);
+      throw Object.assign(new Error("SharePoint ensureuser failed"), { response: { status: 500 } });
+    });
+    const get = vi.fn(async () => ({ data: { d: { results: [] } } }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const results = await searchDistributionLists("рассылка", { get, post });
+      expect(results).toEqual([]);
+      expect(post.mock.calls.filter(([url]) => url.includes("/web/ensureuser")).length).toBe(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("переходит к siteusers, если People Picker не дал результатов, фильтруя только тип 2", async () => {
     const post = vi.fn(async () => pickerResponse([]));
     const calls = [];
@@ -193,63 +206,16 @@ describe("поиск почтовых рассылок для AssignedTo", () =>
     expect(calls.some((url) => url.includes("substringof('рц'"))).toBe(true);
   });
 
-  it("ищет через глобальный SharePoint Search и разрешает только PrincipalType=2", async () => {
-    const post = vi.fn(async (url) => {
-      if (url.includes("ClientPeoplePicker")) return pickerResponse([]);
-      if (url.startsWith("/web/ensureuser?logonName='")) {
-        const loginName = decodeURIComponent(url).split("logonName='")[1].replace(/'$/, "");
-        const isMailing = loginName.includes("mailing-rc");
-        return {
-          data: { d: {
-            Id: isMailing ? 61 : 62,
-            Title: isMailing ? "Рассылка РЦ Отгрузка" : "Обычный пользователь РЦ",
-            LoginName: loginName,
-            Email: isMailing ? "mailing-rc@lenta.com" : "person-rc@lenta.com",
-            PrincipalType: isMailing ? 2 : 1,
-          } },
-        };
-      }
-      throw new Error(`Unexpected POST ${url}`);
-    });
-    const get = vi.fn(async (url) => {
-      if (url.startsWith("/search/query?")) {
-        return globalSearchResponse([
-          {
-            Title: "Обычный пользователь РЦ",
-            AccountName: "i:0#.f|membership|person-rc@lenta.com",
-            WorkEmail: "person-rc@lenta.com",
-            PrincipalType: "User",
-          },
-          {
-            Title: "Рассылка РЦ Отгрузка",
-            AccountName: "i:0#.f|membership|mailing-rc@lenta.com",
-            WorkEmail: "mailing-rc@lenta.com",
-          },
-          {
-            Title: "Не рассылка РЦ",
-            AccountName: "i:0#.f|membership|person-untyped@lenta.com",
-            WorkEmail: "person-untyped@lenta.com",
-          },
-        ]);
-      }
-      return { data: { d: { results: [] } } };
-    });
+  it("не подменяет поиск групп общим поиском сотрудников и запрашивает PrincipalType=2", async () => {
+    const post = vi.fn(async () => pickerResponse([]));
+    const get = vi.fn(async () => ({ data: { d: { results: [] } } }));
 
     const results = await searchDistributionLists("_рц", { get, post });
 
-    expect(results.map((mailing) => [mailing.Id, mailing.PrincipalType])).toEqual([[61, 2]]);
-    const searchUrls = get.mock.calls.map(([url]) => url).filter((url) => url.startsWith("/search/query?"));
-    expect(searchUrls).toHaveLength(2);
-    expect(searchUrls.map(decodeURIComponent).some((url) => url.includes("querytext='рц*'"))).toBe(true);
-    expect(searchUrls.map(decodeURIComponent).some((url) => url.includes("sourceid='B09A7990-05EA-4AF9-81EF-EDFAB16C4E31'"))).toBe(true);
-    const ensuredLogins = post.mock.calls
-      .map(([url]) => decodeURIComponent(url))
-      .filter((url) => url.startsWith("/web/ensureuser?logonName='"))
-      .map((url) => url.split("logonName='")[1].replace(/'$/, ""));
-    expect(ensuredLogins).toEqual([
-      "i:0#.f|membership|mailing-rc@lenta.com",
-      "i:0#.f|membership|person-untyped@lenta.com",
-    ]);
+    expect(results).toEqual([]);
+    expect(get.mock.calls.some(([url]) => url.includes("/search/query"))).toBe(false);
+    expect(post.mock.calls.some(([url]) => url.includes("/web/ensureuser"))).toBe(false);
+    expect(post.mock.calls.every(([, body]) => body.queryParams.PrincipalType === 2)).toBe(true);
   });
 
   it("использует siteusers, если People Picker завершился ошибкой", async () => {
