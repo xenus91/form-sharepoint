@@ -412,7 +412,7 @@ export default function BulkEoMissingDialog({
       aria-labelledby="bulk-eo-dialog-title"
       PaperProps={{
         sx: {
-          borderRadius: 2,
+          borderRadius: "16px",
           width: "min(1280px, calc(100vw - 32px))",
           maxWidth: "calc(100vw - 32px)",
           m: { xs: 1, sm: 2 },
@@ -497,7 +497,7 @@ export default function BulkEoMissingDialog({
             <Stack spacing={0.75} sx={{ minWidth: 0 }}>
               <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
                 <Typography component="label" htmlFor="bulk-eo-source" variant="subtitle2" fontWeight={700}>
-                  Данные из ТСД или Excel
+                  Вставьте данные
                 </Typography>
                 <Stack direction="row" alignItems="center" gap={0.5}>
                   {rows.length > 0 && (
@@ -611,11 +611,16 @@ export default function BulkEoMissingDialog({
 
           {rows.length > 0 && (
             <Box
+              data-testid="bulk-eo-rows"
               sx={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignContent: "flex-start",
-                alignItems: "flex-start",
+                display: "grid",
+                gridTemplateColumns: {
+                  xs: "minmax(0, 1fr)",
+                  sm: "repeat(2, minmax(0, 1fr))",
+                  md: "repeat(3, minmax(0, 1fr))",
+                  lg: "repeat(4, minmax(0, 1fr))",
+                },
+                alignItems: "start",
                 gap: 0.75,
                 maxHeight: "38vh",
                 overflowY: "auto",
@@ -635,7 +640,7 @@ export default function BulkEoMissingDialog({
                   ? row.recipientMatchStatus === "matched" ? "Сопоставлен автоматически" : "Получатель выбран вручную"
                   : row.recipientMatchStatus === "ambiguous" ? "Найдено несколько получателей — выберите нужного" : "Выберите получателя";
                 return (
-                  <Box key={row.id} data-testid={`bulk-eo-row-${index + 1}`} sx={{ flex: "1 1 340px", minWidth: 0, maxWidth: "100%" }}>
+                  <Box key={row.id} data-testid={`bulk-eo-row-${index + 1}`} sx={{ width: "100%", minWidth: 0, maxWidth: "100%" }}>
                     <Paper
                       variant="outlined"
                       sx={{
@@ -700,12 +705,15 @@ export default function BulkEoMissingDialog({
                         filterSelectedOptions
                         size="small"
                         sx={{
-                          flex: "1 1 150px",
+                          flex: "1 1 80px",
                           minWidth: 0,
                           maxWidth: "100%",
-                          "& .MuiInputBase-root": { minWidth: 0, height: 32, pr: "30px !important" },
-                          "& .MuiInputBase-input": { minWidth: 0, py: "4px !important", px: "6px !important", fontSize: 12, textOverflow: "ellipsis" },
-                          "& .MuiAutocomplete-endAdornment": { right: 4 },
+                          "& .MuiInputBase-root": { minWidth: 0, height: 30, pr: "48px !important" },
+                          "& .MuiInputBase-input": { minWidth: 0, py: "4px !important", px: "3px !important", fontSize: 10.5, textOverflow: "ellipsis" },
+                          "& .MuiAutocomplete-endAdornment": {
+                            right: 2,
+                            "& .MuiIconButton-root": { width: 22, height: 22, p: 0.25 },
+                          },
                         }}
                         renderInput={(params) => (
                           <TextField
@@ -763,40 +771,53 @@ export default function BulkEoMissingDialog({
 
           <Divider />
           <Typography variant="subtitle1" fontWeight={800}>Общие параметры для всех ЕО</Typography>
-          <FormControl fullWidth required>
-            <InputLabel id="bulk-problems-label">Проблемы для всех заявок</InputLabel>
-            <Select
-              labelId="bulk-problems-label"
-              multiple
-              value={selectedProblems}
-              onChange={handleProblemsChange}
-              label="Проблемы для всех заявок"
-              renderValue={(selected) => (
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                  {selected.map((value) => <Chip key={value} size="small" label={value} />)}
-                </Box>
-              )}
-            >
-              {problemOptions.map((choice) => (
-                <MenuItem key={choice} value={choice} disabled={choice === EO_MISSING_PROBLEM}>
-                  <Checkbox checked={selectedProblems.includes(choice)} />
-                  <ListItemText primary={choice} />
-                </MenuItem>
-              ))}
-            </Select>
-            <FormHelperText>«Не найдена» выбрана автоматически и обязательна для массовой отправки.</FormHelperText>
-          </FormControl>
-          <TextField
-            label="Местоположение для всех заявок"
-            value={location}
-            onChange={(event) => setLocation(event.target.value)}
-            required
-            fullWidth
-            disabled={isSending || isCheckingConflicts}
-            error={!String(location || "").trim()}
-            inputProps={{ "data-testid": "bulk-eo-location" }}
-          />
-          {!String(location || "").trim() && <Alert severity="error">Укажите общее местоположение.</Alert>}
+          <Box
+            data-testid="bulk-eo-problem-location"
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" },
+              alignItems: "start",
+              gap: 1.5,
+              minWidth: 0,
+            }}
+          >
+            <FormControl data-testid="bulk-eo-problems" fullWidth required sx={{ minWidth: 0 }}>
+              <InputLabel id="bulk-problems-label">Проблемы для всех заявок</InputLabel>
+              <Select
+                labelId="bulk-problems-label"
+                multiple
+                value={selectedProblems}
+                onChange={handleProblemsChange}
+                label="Проблемы для всех заявок"
+                renderValue={(selected) => (
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                    {selected.map((value) => <Chip key={value} size="small" label={value} />)}
+                  </Box>
+                )}
+              >
+                {problemOptions.map((choice) => (
+                  <MenuItem key={choice} value={choice} disabled={choice === EO_MISSING_PROBLEM}>
+                    <Checkbox checked={selectedProblems.includes(choice)} />
+                    <ListItemText primary={choice} />
+                  </MenuItem>
+                ))}
+              </Select>
+              <FormHelperText>«Не найдена» выбрана автоматически и обязательна для массовой отправки.</FormHelperText>
+            </FormControl>
+            <Box sx={{ minWidth: 0 }}>
+              <TextField
+                label="Местоположение для всех заявок"
+                value={location}
+                onChange={(event) => setLocation(event.target.value)}
+                required
+                fullWidth
+                disabled={isSending || isCheckingConflicts}
+                error={!String(location || "").trim()}
+                inputProps={{ "data-testid": "bulk-eo-location" }}
+              />
+              {!String(location || "").trim() && <Alert severity="error" sx={{ mt: 1 }}>Укажите общее местоположение.</Alert>}
+            </Box>
+          </Box>
           {isTransportationRequired && (
             <>
               <TextField

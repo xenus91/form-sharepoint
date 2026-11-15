@@ -122,8 +122,13 @@ describe("BulkEoMissingDialog", () => {
 
     const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
     expect(source).not.toBeNull();
+    expect(document.body.textContent).toContain("Вставьте данные");
+    const sharedSettingsRow = document.body.querySelector('[data-testid="bulk-eo-problem-location"]');
+    expect(sharedSettingsRow.querySelector('[data-testid="bulk-eo-problems"]')).not.toBeNull();
+    expect(sharedSettingsRow.querySelector('[data-testid="bulk-eo-location"]')).not.toBeNull();
     await pasteSource(source, "0294\n808117004022047365\n\n0295\n808117004022002852");
 
+    expect(document.body.querySelector('[data-testid="bulk-eo-rows"]')).not.toBeNull();
     expect(document.body.textContent).toContain("Автоматически распознано ЕО:");
     expect(document.body.querySelector('[data-testid="bulk-eo-number-1"]').textContent).toBe("808117004022047365");
     expect(document.body.querySelector('[data-testid="bulk-eo-number-2"]').textContent).toBe("808117004022002852");
