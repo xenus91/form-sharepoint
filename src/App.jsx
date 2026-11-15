@@ -40,6 +40,7 @@ import CameraIcon from "@mui/icons-material/Camera";
 import LoopIcon from "@mui/icons-material/Loop";
 import { Html5QrcodeScanner } from "html5-qrcode";
 import CloseIcon from "@mui/icons-material/Close";
+import PlaylistAddRoundedIcon from "@mui/icons-material/PlaylistAddRounded";
 import { Swiper, SwiperSlide } from "swiper/react";
 import CheckIcon from "@mui/icons-material/Check";
 import "swiper/swiper-bundle.css";
@@ -64,6 +65,7 @@ import { buildProblemsPalletTitle } from "./tasks/problemsPallet";
 import { fetchDistributionDepartments } from "./tasks/distribution";
 import { canSwitchTaskDepartment } from "./features/navigation/taskDepartmentAccess";
 import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM, isEoMissingRoute } from "./features/form/lib/eoMissingRoute";
+import BulkEoMissingDialog from "./features/form/components/BulkEoMissingDialog";
 import {
   OTHER_PROBLEM_DIALOG_TITLE,
   eoCheckKindForProblems,
@@ -1699,6 +1701,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
     String(userProfile.userDepartment || "").toLowerCase().includes("группа отгрузки");
 
   const [managerPreviewOpen, setManagerPreviewOpen] = useState(false);
+  const [bulkEoDialogOpen, setBulkEoDialogOpen] = useState(false);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   // hash-роут: #tasks / #/tasks / #manager / #form (+ #tasks/id=10, #tasks/10, #tasks?id=10)
@@ -1763,6 +1766,10 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
   const [hashElementKind, setHashElementKind] = useState(() => parseHash().elementKind || "auto");
   // Роут #eoismissing: открыть форму с выбранной проблемой «Не найдена».
   const [hashEoMissing, setHashEoMissing] = useState(() => parseHash().eoMissing === true);
+  const isEoMissingScreen = isEoMissingRoute(window.location.hash || "", window.location.pathname || "");
+  useEffect(() => {
+    if (!isEoMissingScreen) setBulkEoDialogOpen(false);
+  }, [isEoMissingScreen]);
   const [taskDistribution, setTaskDistribution] = useState(null);
   const [taskFieldsApp, setTaskFieldsApp] = useState([]);
 
@@ -2141,6 +2148,19 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         <Typography variant="h5" gutterBottom sx={{ textAlign: "center", my: 2 }}>
           Проблемные ЕО
         </Typography>
+        {isEoMissingScreen && (
+          <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
+            <Button
+              variant="outlined"
+              startIcon={<PlaylistAddRoundedIcon />}
+              onClick={() => setBulkEoDialogOpen(true)}
+              disabled={loading}
+              sx={{ borderRadius: 1, fontWeight: 700 }}
+            >
+              Массовая отправка
+            </Button>
+          </Box>
+        )}
         {/* Меню просмотра менеджерами теперь в бургер-меню слева вверху */}
         {/* canOpenManagerPreview hidden button moved to drawer */}
         <Box sx={{ display: "flex", justifyContent: "center", mb: 2 }}>
@@ -2571,6 +2591,21 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
           </form>
         </Box>
       </Container>
+
+      <BulkEoMissingDialog
+        open={bulkEoDialogOpen && isEoMissingScreen}
+        onClose={() => setBulkEoDialogOpen(false)}
+        choices={choices}
+        initialProblems={problems}
+        initialLocation={location}
+        dcThu={getEffectiveDcThu()}
+        operationDateIso={operationDateIso}
+        onCheckEoConflict={(eo) => findOtherProblemForEo(eo)}
+        onCreated={(count) => {
+          monthlyCounterRef.current?.refresh?.();
+          notify(`Создано ${count} заявок массовой отправкой`, { severity: "success" });
+        }}
+      />
 
       {/* камера */}
       <Modal open={cameraOpen} onClose={closeCameraModal}>

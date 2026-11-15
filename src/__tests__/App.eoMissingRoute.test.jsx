@@ -104,7 +104,16 @@ describe("роут #eoismissing", () => {
     expect(app.values()).toContain("Не найдена в зоне отгрузки");
     // Сама проблема выбрана: MUI Select multiple держит значения в hidden input.
     expect(app.values().some((v) => v.split(",").includes("Не найдена"))).toBe(true);
+    expect(app.host.textContent).toContain("Массовая отправка");
 
+    await app.close();
+  }, 30000);
+
+  it("не показывает массовую отправку на обычной главной форме", async () => {
+    window.history.replaceState(null, "", "/#form");
+    const app = await mountApp();
+
+    expect(app.host.textContent).not.toContain("Массовая отправка");
     await app.close();
   }, 30000);
 
