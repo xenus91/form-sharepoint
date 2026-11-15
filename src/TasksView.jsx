@@ -43,6 +43,8 @@ import TasksHeader from "./features/tasks/components/TasksHeader";
 import TasksTabs from "./features/tasks/components/TasksTabs";
 import TasksGroupingToggle from "./features/tasks/components/TasksGroupingToggle";
 import MyTasksToggle from "./features/tasks/components/MyTasksToggle";
+import EONumberSearch from "./features/tasks/components/EONumberSearch";
+import { normalizeEONumberQuery, searchOpenTasksByEO } from "./features/tasks/lib/eoSearch";
 import { useRelatedAttachments } from "./features/tasks/hooks/useRelatedAttachments";
 import { openRelatedItem, relatedItemIdOf } from "./tasks/relatedAttachments";
 
@@ -533,6 +535,26 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
 
 // ── Тумблер «Я исполнитель» ─────────────────────────────────────────────────
   const [onlyMine, setOnlyMine] = useState(false);
+  const [eoSearchValue, setEoSearchValue] = useState("");
+  const eoSearchActive = String(eoSearchValue || "").trim().length > 0;
+  const eoSearchTerm = normalizeEONumberQuery(eoSearchValue);
+  const eoSearchResults = useMemo(
+    () => searchOpenTasksByEO(cardTasks, eoSearchValue),
+    [cardTasks, eoSearchValue],
+  );
+  const handleEoSearchChange = useCallback((value) => {
+    setEoSearchValue(value);
+    if (String(value || "").trim() && tab !== 0) setTab(0);
+  }, [setTab, tab]);
+  const handleEoSearchSubmit = useCallback((value) => {
+    const trimmed = String(value || "").trim();
+    setEoSearchValue(trimmed);
+    if (trimmed && tab !== 0) setTab(0);
+  }, [setTab, tab]);
+  useEffect(() => {
+    if (isHashMode) setEoSearchValue("");
+  }, [isHashMode]);
+
   // Фильтр имеет смысл, только когда текущий пользователь опознан: известен его
   // Id ИЛИ ФИО (Editor в задачах часто приходит только строкой — тогда сверяем
   // по ФИО).
@@ -615,6 +637,20 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
       return a[0].localeCompare(b[0], "ru");
     });
   }, [visibleCompletedTasks, groupingEnabled]);
+
+  const listTab = eoSearchActive ? 0 : tab;
+  const listFilteredTasks = eoSearchActive
+    ? eoSearchResults
+    : tab === 1 ? visibleCompletedTasks : filteredTasks;
+  const listGroupedTasks = eoSearchActive
+    ? (eoSearchResults.length ? [["Все", eoSearchResults]] : [])
+    : tab === 1 ? completedGrouped : groupedTasks;
+  const listEmptyTitle = eoSearchActive
+    ? eoSearchTerm ? `По ЕО ${eoSearchTerm} активные задачи не найдены` : "Введите номер ЕО"
+    : null;
+  const listEmptyDescription = eoSearchActive
+    ? eoSearchTerm ? "Проверьте штрихкод или обновите список задач." : "Штрихкод ЕО должен содержать цифры."
+    : null;
 
   const useVirtual = false;
   const flatVirtualizer = useVirtualizer({
@@ -974,7 +1010,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         {!isHashMode && (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 0 }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
-              <TasksTabs tab={tab} onChange={(v)=> startTabTransition(()=> setTab(v))} activeCount={activeCount} archivedCount={completedTotal} completedCount={completedTotal} hashMode={isHashMode} isTabPending={isTabPending} />
+              <TasksTabs tab={tab} onChange={(v) => {
+                if (v === 1) setEoSearchValue("");
+                startTabTransition(() => setTab(v));
+              }} activeCount={activeCount} archivedCount={completedTotal} completedCount={completedTotal} hashMode={isHashMode} isTabPending={isTabPending} />
             </Box>
             {/* Одна строка, элементы по РАЗНЫЕ стороны: переключатель группировки
                 слева, кнопка «Я исполнитель» справа (space-between). На вкладке
@@ -982,6 +1021,15 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5, mb: 1, minHeight: 32, flexWrap: "wrap" }}>
               <TasksGroupingToggle groupingEnabled={groupingEnabled} onToggle={setGroupingEnabled} countGroups={groupedTasks.length} isHashMode={isHashMode} tab={tab} />
               <MyTasksToggle enabled={onlyMine} onToggle={setOnlyMine} count={myCount} disabled={!meKnown} isHashMode={isHashMode} />
+            </Box>
+            <Box sx={{ mb: 0.5 }}>
+              <EONumberSearch
+                value={eoSearchValue}
+                onChange={handleEoSearchChange}
+                onSubmit={handleEoSearchSubmit}
+                resultCount={eoSearchActive ? eoSearchResults.length : null}
+                queryValid={!!eoSearchTerm}
+              />
             </Box>
           </Box>
         )}
@@ -1039,11 +1087,13 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         "&::-webkit-scrollbar-thumb:hover": { bgcolor: "rgba(23,28,143,0.6)" },
       }}>
       <TaskList
-        tasks={tab === 1 ? visibleCompletedTasks : tasks}
-        tab={tab}
-        groupedTasks={tab === 1 ? completedGrouped : groupedTasks}
-        filteredTasks={tab === 1 ? visibleCompletedTasks : filteredTasks}
-        groupingEnabled={groupingEnabled}
+        tasks={listTab === 1 ? visibleCompletedTasks : tasks}
+        tab={listTab}
+        groupedTasks={listGroupedTasks}
+        filteredTasks={listFilteredTasks}
+        emptyTitle={listEmptyTitle}
+        emptyDescription={listEmptyDescription}
+        groupingEnabled={eoSearchActive ? false : groupingEnabled}
         expandedGroups={expandedGroups}
         toggleGroup={toggleGroup}
         relatedAttachmentCountOf={relatedAttachments.countOf}
@@ -1051,10 +1101,10 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         useVirtual={useVirtual}
         flatVirtualizer={flatVirtualizer}
         isTabPending={isTabPending}
-        loading={tab === 1 ? completedLoading : loading}
-        error={tab === 1 ? completed.error : error}
-        errorDetail={tab === 1 ? completed.errorDetail : ""}
-        isBackgroundFetching={tab === 1 ? false : isBackgroundFetching}
+        loading={listTab === 1 ? completedLoading : loading}
+        error={listTab === 1 ? completed.error : error}
+        errorDetail={listTab === 1 ? completed.errorDetail : ""}
+        isBackgroundFetching={listTab === 1 ? false : isBackgroundFetching}
         taskConfig={taskConfiguration.data}
         resultFieldsMeta={resultFieldsMeta}
         ctResultMap={ctResultMap}

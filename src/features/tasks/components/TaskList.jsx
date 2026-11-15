@@ -18,6 +18,8 @@ const TaskList = React.memo(function TaskList({
   tab = 0,
   groupedTasks = [],
   filteredTasks = [],
+  emptyTitle = null,
+  emptyDescription = null,
   groupingEnabled = false,
   expandedGroups = new Set(),
   toggleGroup,
@@ -138,10 +140,10 @@ const TaskList = React.memo(function TaskList({
       <Box sx={{ py: 4, textAlign: "center", minHeight: 120, display: "grid", placeItems: "center", width: "100%" }}>
         <Box>
           <Typography sx={{ color: "text.secondary", fontWeight: 700, fontSize: "0.95rem", lineHeight: 1.2 }}>
-            {tab === 0 ? "Нет активных задач" : "Нет завершенных задач"}
+            {emptyTitle || (tab === 0 ? "Нет активных задач" : "Нет завершенных задач")}
           </Typography>
           <Typography variant="caption" sx={{ color: "text.secondary", fontSize: "0.8rem", lineHeight: 1.2, display: "block", mt: 0.5 }}>
-            {tab === 0 ? "Все задачи выполнены или не назначены на вас." : "Завершенные задачи появятся здесь."}
+            {emptyDescription || (tab === 0 ? "Все задачи выполнены или не назначены на вас." : "Завершенные задачи появятся здесь.")}
           </Typography>
         </Box>
       </Box>

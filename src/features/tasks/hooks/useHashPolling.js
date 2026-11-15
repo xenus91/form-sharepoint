@@ -1,30 +1,64 @@
 // src/features/tasks/hooks/useHashPolling.js
 // PR2 — polling для hash-режима и фокус-инвалидация вынесены из TasksView
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import apiClient from "../../../api";
 import { createAdaptivePolling } from "../../../utils/polling";
 import { mapRawTask } from "../../../tasks/mapping";
 import { TASKS_LIST_API, HASH_POLL_SELECT, HASH_POLL_EXPAND } from "../../../tasks/config";
 /**
- * Polling запрашивает короткий набор полей (HASH_POLL_SELECT), поэтому маппинг
- * «теряет» признаки задачи (ContentTypeId, raw). Раньше объект задачи в state
- * ЗАМЕНЯЛСЯ на такой урезанный — и задача ДОБ после первого же опроса переставала
- * опознаваться (её открывало обычной формой). Здесь признаки переносятся из
- * предыдущего объекта.
+ * Polling запрашивает короткий набор полей (HASH_POLL_SELECT). Его ответ надо
+ * слить с уже открытой задачей как patch: mapRawTask иначе превращает незапрошенные
+ * Title/Body/AssignedTo и прочие поля в пустые значения, из-за чего карточка
+ * сбрасывалась до «Без текста». ContentTypeId и raw также сохраняем.
  */
-function mergePolledTask(prev, mapped, raw) {
+const POLLED_FIELDS = [
+  ["Status", "Status"],
+  ["PercentComplete", "PercentComplete"],
+  ["Modified", "Modified"],
+  ["ResultSearchTHU", "ResultSearchTHU"],
+  ["ResultValue", "ResultSearchTHU"],
+  ["Location1", "Location1"],
+];
+
+function hasOwn(value, key) {
+  return Object.prototype.hasOwnProperty.call(value || {}, key);
+}
+
+/**
+ * HASH_POLL_SELECT intentionally omits the body/title and assignment fields.
+ * Treat the poll response as a patch, not a replacement: mapRawTask fills
+ * omitted fields with empty defaults, which used to erase the visible card.
+ */
+export function mergePolledTask(prev, mapped, raw) {
   if (!prev) return mapped;
-  return {
-    ...mapped,
-    ContentTypeId: mapped.ContentTypeId || prev.ContentTypeId || null,
-    isDobTask: mapped.isDobTask === true || prev.isDobTask === true,
-    raw: { ...(prev.raw || {}), ...(raw || {}) },
-  };
+  const next = { ...prev };
+  for (const [taskField, rawField] of POLLED_FIELDS) {
+    if (hasOwn(raw, rawField)) next[taskField] = mapped[taskField];
+  }
+  next.ContentTypeId = mapped.ContentTypeId || prev.ContentTypeId || null;
+  next.isDobTask = mapped.isDobTask === true || prev.isDobTask === true;
+  next.raw = { ...(prev.raw || {}), ...(raw || {}) };
+  return next;
+}
+
+function hasSamePolledFields(prev, mapped, raw) {
+  if (!prev) return false;
+  return POLLED_FIELDS.every(([taskField, rawField]) => {
+    if (!hasOwn(raw, rawField)) return true;
+    if (taskField === "PercentComplete") {
+      return String(prev[taskField]) === String(mapped[taskField]);
+    }
+    return prev[taskField] === mapped[taskField];
+  });
 }
 
 export function useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMatch, setIsHashTaskRefreshing, recipientField, scNumberField, currentUserId, distribution, taskFieldNames, resultFieldInternalNames, queryClient, lastHashFocusRef }) {
+  const elementTaskId = elementTaskMatch?.Id;
+  const taskFieldNamesKey = (taskFieldNames || []).join(",");
+  const resultFieldNamesKey = (resultFieldInternalNames || []).join(",");
+
   useEffect(() => {
-    if (!isHashMode || !elementTaskMatch) return;
+    if (!isHashMode || elementTaskId == null) return;
     let cancelled = false;
     const refreshHashTask = async () => {
       if (cancelled) return;
@@ -36,36 +70,40 @@ export function useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMat
         const _finalHashSelect = _cleanHashSelect.trim() ? _cleanHashSelect : "Id,Modified";
         let _hashData = null;
         try {
-          const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=${_finalHashSelect}${_hashExpand}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
+          const { data } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskId})?$select=${_finalHashSelect}${_hashExpand}`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
           _hashData = data;
         } catch (eHash) {
           const _m = String(eHash?.response?.data?.error?.message?.value || eHash?.message || "").toLowerCase();
           if (_m.includes("endjob")) {
             try {
-              const { data: _retry } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskMatch.Id})?$select=Id,Modified,Status,PercentComplete`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
+              const { data: _retry } = await apiClient.get(`${TASKS_LIST_API}/items(${elementTaskId})?$select=Id,Modified,Status,PercentComplete`, { headers: { Accept: "application/json;odata=verbose" }, __noCache: true });
               _hashData = _retry;
-            } catch {}
+            } catch (retryError) {
+              void retryError;
+            }
           }
           if (!_hashData) throw eHash;
         }
         const data = _hashData;
         const raw = data?.d;
         if (!raw || cancelled) return;
-        const mapped = mergePolledTask(elementTaskMatch, mapRawTask(raw, { recipientField, scNumberField }), raw);
+        const mapped = mapRawTask(raw, { recipientField, scNumberField });
         setElementTaskMatch((prev) => {
-          if (prev && prev.Modified === mapped.Modified && prev.Status === mapped.Status && prev.ResultSearchTHU === mapped.ResultSearchTHU && String(prev.PercentComplete) === String(mapped.PercentComplete) && prev.Location1 === mapped.Location1) return prev;
-          return mapped;
+          if (hasSamePolledFields(prev, mapped, raw)) return prev;
+          return mergePolledTask(prev, mapped, raw);
         });
-        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, (taskFieldNames||[]).join(','), recipientField ?? null, scNumberField ?? null, resultFieldInternalNames.join(',')], (prev) => {
+        queryClient.setQueryData(['tasks', currentUserId ?? null, distribution?.Id ?? distribution?.OffDepKey ?? null, taskFieldNamesKey, recipientField ?? null, scNumberField ?? null, resultFieldNamesKey], (prev) => {
           if (!Array.isArray(prev)) return prev;
-          const ex = prev.find((t) => t.Id === mapped.Id);
-          if (ex && ex.Modified === mapped.Modified && ex.Status === mapped.Status && ex.ResultSearchTHU === mapped.ResultSearchTHU && String(ex.PercentComplete) === String(mapped.PercentComplete) && ex.Location1 === mapped.Location1) return prev;
-          return prev.map((t) => t.Id === mapped.Id ? mapped : t);
+          const existing = prev.find((task) => task.Id === mapped.Id);
+          if (!existing || hasSamePolledFields(existing, mapped, raw)) return prev;
+          return prev.map((task) => task.Id === mapped.Id
+            ? mergePolledTask(task, mapped, raw)
+            : task);
         });
       } catch {
         // Поля AdditionalsActionsRequired/AdditionalActions из select убраны,
         // поэтому отдельный ретрай «без них» больше не нужен.
-            } finally {
+      } finally {
         if (!cancelled) setIsHashTaskRefreshing(false);
       }
     };
@@ -78,7 +116,21 @@ export function useHashPolling({ isHashMode, elementTaskMatch, setElementTaskMat
     };
     window.addEventListener("focus", onFocus);
     return () => { cancelled = true; stop(); window.removeEventListener("focus", onFocus); };
-  }, [isHashMode, elementTaskMatch?.Id]);
+  }, [
+    currentUserId,
+    distribution?.Id,
+    distribution?.OffDepKey,
+    elementTaskId,
+    isHashMode,
+    lastHashFocusRef,
+    queryClient,
+    recipientField,
+    resultFieldNamesKey,
+    scNumberField,
+    setElementTaskMatch,
+    setIsHashTaskRefreshing,
+    taskFieldNamesKey,
+  ]);
 }
 
 export function useTasksFocusPolling({ currentUserId, isHashMode, queryClient, lastFocusLoadRef }) {
