@@ -36,7 +36,7 @@ function stripHtml(html) {
  * @param {{task:any, isCompleted?:boolean, isOverdue?:boolean, onOpen?:(task:any)=>void,
  *          onTake?:(task:any)=>void, taking?:boolean, currentUserId?:number|null}} props
  */
-function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, onChangeAssignedTo = null, taking = false, currentUserId = null, currentUserTitle = "", currentUserIdBySource = null }) {
+function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, onChangeAssignedTo = null, currentUserOffice = "", taking = false, currentUserId = null, currentUserTitle = "", currentUserIdBySource = null }) {
   if (!task) return null;
   const title = stripHtml(task.Title) || stripHtml(task.Body).split("\n")[0] || "Без названия";
   const bodyRaw = stripHtml(task.Body);
@@ -240,7 +240,7 @@ function ExternalTaskCard({ task, isCompleted, isOverdue, onOpen, onTake, onChan
               лесенкой». */}
           <Box component="span" sx={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
             <Box component="span" sx={{ whiteSpace: "nowrap" }}>{"Кому назначено: "}</Box>
-            <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} />
+            <AssignedToButtons task={task} onChangeAssignedTo={onChangeAssignedTo} currentUserOffice={currentUserOffice} />
             {/* «Исполнитель» — такая же кнопка принципала, как «Кому назначено»
                 (требование 2026-10-10): иконка человек/группа, клик — карточка. */}
             <Box component="span" sx={{ whiteSpace: "nowrap" }}>{" • Исполнитель: "}</Box>

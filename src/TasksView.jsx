@@ -1013,6 +1013,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
             onTakeInWork={handleTakeInWork}
             onComplete={completeTask}
             onChangeAssignedTo={changeTaskAssignee}
+            currentUserOffice={userOfficeDept?.office || ""}
             currentUserId={currentUserId}
             currentUserTitle={currentUserTitle}
             onClearElementHash={onClearElementHash}
@@ -1065,6 +1066,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onTakeInWork={handleTakeInWork}
         onComplete={completeTask}
         onChangeAssignedTo={changeTaskAssignee}
+        currentUserOffice={userOfficeDept?.office || ""}
         currentUserId={currentUserId}
         currentUserTitle={currentUserTitle}
         onRetry={loadTasks}
@@ -1168,6 +1170,7 @@ export default function TasksView({ userProfile: propUserProfile, currentUserId:
         onTakeInWork={handleTakeInWork}
         onComplete={completeTask}
         onChangeAssignedTo={changeTaskAssignee}
+        currentUserOffice={userOfficeDept?.office || ""}
         currentUserId={currentUserId}
         currentUserTitle={currentUserTitle}
         onClearElementHash={onClearElementHash}

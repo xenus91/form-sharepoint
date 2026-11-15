@@ -6,24 +6,41 @@ import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { ThemeProvider, createTheme } from "@mui/material";
 
+const apiState = vi.hoisted(() => ({ get: vi.fn() }));
+vi.mock("../../../api", () => ({
+  default: { get: (...args) => apiState.get(...args) },
+}));
+
 const MAILING = {
   Id: 33,
-  Title: "Рассылка РЦ Отгрузка",
+  Title: "Рассылка РЦ 8117 Отгрузка",
   LoginName: "mailing-rc-shipping",
   Email: "rc-shipping@example.test",
   PrincipalType: 2,
 };
 const SECURITY_GROUP = {
   Id: 34,
-  Title: "Группа РЦ Отгрузка",
+  Title: "Группа РЦ 8117 Отгрузка",
   LoginName: "RETAIL\\rc-group",
   PrincipalType: 4,
 };
 const EMPLOYEE = {
   Id: 35,
-  Title: "Сотрудник Отгрузка",
+  Title: "Сотрудник РЦ 8117 Отгрузка",
   LoginName: "i:0#.f|membership|employee@example.test",
   PrincipalType: 1,
+};
+const OTHER_RC_GROUP = {
+  Id: 36,
+  Title: "Группа РЦ 9120 Отгрузка",
+  LoginName: "RETAIL\\rc-9120-group",
+  PrincipalType: 4,
+};
+const OFFICE_PREFIX_GROUP = {
+  Id: 37,
+  Title: "Группа РЦ 81170 Отгрузка",
+  LoginName: "RETAIL\\rc-81170-group",
+  PrincipalType: 4,
 };
 
 vi.mock("../../../tasks/userSearch", async (importOriginal) => {
@@ -32,9 +49,12 @@ vi.mock("../../../tasks/userSearch", async (importOriginal) => {
     ...actual,
     searchAssignedToGroups: vi.fn(async (query) => {
       const value = String(query).toLowerCase();
-      if (value.includes("группа")) return [SECURITY_GROUP];
       if (value.includes("сотрудник")) return [EMPLOYEE];
-      return value.includes("отгрузка") ? [MAILING] : [];
+      if (value.includes("группа")) return [SECURITY_GROUP, OTHER_RC_GROUP, OFFICE_PREFIX_GROUP];
+      if (value.includes("отгрузка") || value.includes("рц 8117")) {
+        return [MAILING, SECURITY_GROUP, OTHER_RC_GROUP, OFFICE_PREFIX_GROUP];
+      }
+      return [];
     }),
     getUserPositions: vi.fn(async () => ({})),
   };
@@ -65,7 +85,7 @@ const typeInto = (element, value) => {
 };
 
 let roots = [];
-function render(task, onSave = vi.fn(async () => true)) {
+function render(task, onSave = vi.fn(async () => true), currentUserOffice = "") {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
@@ -74,7 +94,13 @@ function render(task, onSave = vi.fn(async () => true)) {
   act(() => {
     root.render(
       <ThemeProvider theme={createTheme()}>
-        <AssignedToEditDialog open task={task} onClose={onClose} onSave={onSave} />
+        <AssignedToEditDialog
+          open
+          task={task}
+          currentUserOffice={currentUserOffice}
+          onClose={onClose}
+          onSave={onSave}
+        />
       </ThemeProvider>,
     );
   });
@@ -86,6 +112,10 @@ describe("AssignedToEditDialog — поиск группы", () => {
     for (const root of roots.splice(0)) act(() => root.unmount());
     document.body.innerHTML = "";
     vi.clearAllMocks();
+    apiState.get.mockReset();
+    apiState.get.mockResolvedValue({ data: { d: {
+      UserProfileProperties: { results: [{ Key: "Office", Value: "РЦ-8117" }] },
+    } } });
   });
 
   it("ищет и сохраняет выбранную рассылку", async () => {
@@ -97,6 +127,12 @@ describe("AssignedToEditDialog — поиск группы", () => {
     expect(dialog).toBeTruthy();
     const input = dialog.querySelector("input");
     expect(input).toBeTruthy();
+    await settle(30);
+    expect(input.value).toBe("РЦ 8117");
+    expect(apiState.get).toHaveBeenCalledWith(
+      "/SP.UserProfiles.PeopleManager/GetMyProperties",
+      { headers: { Accept: "application/json;odata=verbose" } },
+    );
 
     await act(async () => { typeInto(input, "Отгрузка"); await settle(350); });
     expect(searchAssignedToGroups).toHaveBeenCalledWith("Отгрузка", { limit: 20 });
@@ -104,26 +140,34 @@ describe("AssignedToEditDialog — поиск группы", () => {
     const option = [...document.body.querySelectorAll('[role="option"]')]
       .find((element) => element.textContent.includes(MAILING.Title));
     expect(option).toBeTruthy();
+    expect(document.body.textContent).not.toContain(OTHER_RC_GROUP.Title);
+    expect(document.body.textContent).not.toContain(OFFICE_PREFIX_GROUP.Title);
     await act(async () => { click(option); await settle(); });
 
     const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
     expect(saveButton.disabled).toBe(false);
+    expect(window.getComputedStyle(saveButton).color).toBe("rgb(255, 255, 255)");
     await act(async () => { click(saveButton); await settle(260); });
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave).toHaveBeenCalledWith(MAILING);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("разрешает сохранить security-группу с PrincipalType=4", async () => {
+  it("передаёт Office из TasksView и ограничивает группы этим РЦ", async () => {
     const onSave = vi.fn(async () => true);
-    render({ Id: 44, AssignedTo: "", AssignedToId: null }, onSave);
+    render({ Id: 44, AssignedTo: "", AssignedToId: null }, onSave, "РЦ-8117");
     const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
     const input = dialog.querySelector("input");
+    await settle(30);
+    expect(input.value).toBe("РЦ 8117");
+    expect(apiState.get).not.toHaveBeenCalled();
 
     await act(async () => { typeInto(input, "Группа"); await settle(350); });
     const option = [...document.body.querySelectorAll('[role="option"]')]
       .find((element) => element.textContent.includes(SECURITY_GROUP.Title));
     expect(option).toBeTruthy();
+    expect(document.body.textContent).not.toContain(OTHER_RC_GROUP.Title);
+    expect(document.body.textContent).not.toContain(OFFICE_PREFIX_GROUP.Title);
     await act(async () => { click(option); await settle(); });
 
     const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
@@ -132,22 +176,24 @@ describe("AssignedToEditDialog — поиск группы", () => {
     expect(onSave).toHaveBeenCalledWith(SECURITY_GROUP);
   });
 
-  it("блокирует сохранение, если ответ ошибочно содержит пользователя", async () => {
+  it("не показывает сотрудника, даже если поиск ошибочно его вернул", async () => {
     render({ Id: 45, AssignedTo: "", AssignedToId: null });
     const input = document.body.querySelector("input");
+    await settle(30);
+    expect(input.value).toBe("РЦ 8117");
 
     await act(async () => { typeInto(input, "Сотрудник"); await settle(350); });
     const option = [...document.body.querySelectorAll('[role="option"]')]
       .find((element) => element.textContent.includes(EMPLOYEE.Title));
-    expect(option).toBeTruthy();
-    await act(async () => { click(option); await settle(); });
+    expect(option).toBeFalsy();
 
     const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
     expect(saveButton.disabled).toBe(true);
   });
 
-  it("не позволяет сохранить назначение до выбора группы", () => {
+  it("не позволяет сохранить назначение до выбора группы", async () => {
     render({ Id: 43, AssignedTo: "", AssignedToId: null });
+    await settle(30);
     const saveButton = document.body.querySelector('[data-testid="assigned-to-save"]');
     expect(saveButton).toBeTruthy();
     expect(saveButton.disabled).toBe(true);

@@ -39,14 +39,14 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const click = (el) => el.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
 
-async function render(task) {
+async function render(task, props = {}) {
   const host = document.createElement("div");
   document.body.appendChild(host);
   const root = createRoot(host);
   await act(async () => {
     root.render(
       <ThemeProvider theme={createTheme()}>
-        <AssignedToButtons task={task} />
+        <AssignedToButtons task={task} {...props} />
       </ThemeProvider>,
     );
     await new Promise((r) => setTimeout(r, 20));
@@ -108,6 +108,22 @@ describe("AssignedToButtons — «Кому назначено» кнопкой",
     const { host } = await render({ AssignedTo: "", AssignedToId: null });
     expect(host.querySelector('[data-testid="assigned-to-button"]')).toBeNull();
     expect(host.querySelector('[data-testid="assigned-to-empty"]')).toBeTruthy();
+  });
+
+  it("передаёт Office в диалог смены AssignedTo", async () => {
+    const { host } = await render(
+      { AssignedTo: "", AssignedToId: null },
+      { currentUserOffice: "РЦ-8117", onChangeAssignedTo: vi.fn() },
+    );
+    const editButton = host.querySelector('[data-testid="assigned-to-edit-button"]');
+    expect(editButton).toBeTruthy();
+    await act(async () => {
+      click(editButton);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+    const dialog = document.body.querySelector('[data-testid="assigned-to-edit-dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(dialog.querySelector("input").value).toBe("РЦ 8117");
   });
 
   it("имени в задаче нет (пришёл только Id) — показываем ФИО из SharePoint, а не «Id 5»", async () => {

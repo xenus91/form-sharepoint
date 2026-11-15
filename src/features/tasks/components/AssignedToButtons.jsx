@@ -261,7 +261,12 @@ export function PrincipalButtons({
  * Кнопки «Кому назначено» (AssignedTo). Обычно принципал один, но колонка может
  * быть многозначной — тогда кнопка на каждого.
  */
-export default function AssignedToButtons({ task = null, onChangeAssignedTo = null, ...rest }) {
+export default function AssignedToButtons({
+  task = null,
+  onChangeAssignedTo = null,
+  currentUserOffice = "",
+  ...rest
+}) {
   const people = useMemo(() => parseAssignees(task), [task]);
   const [editOpen, setEditOpen] = useState(false);
   const handleSave = (assignee) => onChangeAssignedTo?.(task, assignee);
@@ -278,6 +283,7 @@ export default function AssignedToButtons({ task = null, onChangeAssignedTo = nu
         <AssignedToEditDialog
           open={editOpen}
           task={task}
+          currentUserOffice={currentUserOffice}
           onClose={() => setEditOpen(false)}
           onSave={handleSave}
         />

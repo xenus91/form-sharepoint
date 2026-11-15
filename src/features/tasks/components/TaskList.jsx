@@ -45,6 +45,8 @@ const TaskList = React.memo(function TaskList({
   onComplete,
   // eslint-disable-next-line react/prop-types
   onChangeAssignedTo,
+  // eslint-disable-next-line react/prop-types
+  currentUserOffice = "",
   currentUserId = null,
   currentUserTitle = "",
   onRetry,
@@ -66,6 +68,7 @@ const TaskList = React.memo(function TaskList({
           onOpen={onOpenExternalTask}
           onTake={onTakeExternalTask}
           onChangeAssignedTo={!isExternalTask(task) ? onChangeAssignedTo : null}
+          currentUserOffice={currentUserOffice}
           taking={externalTakingId != null && externalTakingId === (task.compositeId || `${task.sourceId}:${task.Id}`)}
           // Id текущего пользователя НА САЙТЕ ИСТОЧНИКА; для main/без источника —
           // Id основного сайта. Плюс ФИО: по нему определяем «свою» задачу, когда
@@ -93,6 +96,7 @@ const TaskList = React.memo(function TaskList({
           onTakeInWork={onTakeInWork}
           onComplete={onComplete}
           onChangeAssignedTo={onChangeAssignedTo}
+          currentUserOffice={currentUserOffice}
           currentUserId={currentUserId}
           currentUserTitle={currentUserTitle}
           relatedAttachmentCount={typeof relatedAttachmentCountOf === "function" ? relatedAttachmentCountOf(task) : 0}
