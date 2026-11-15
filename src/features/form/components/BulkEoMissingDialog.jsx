@@ -12,6 +12,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   FormHelperText,
   IconButton,
@@ -26,8 +27,6 @@ import {
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import SendIcon from "@mui/icons-material/Send";
 import {
   EO_NUMBER_PATTERN,
@@ -107,8 +106,9 @@ const getRowIssues = (row, duplicateMessage = "") => {
 const recipientOptionId = (recipient) => recipient?.id ?? recipient?.ID ?? recipient?.Id;
 
 /**
- * Диалог массовой отправки заявок «Не найдена».
- * Поток: вставка → проверка/сопоставление получателей → общие параметры → отправка.
+ * Один диалог массовой отправки: текст, live-разбор, общие параметры и отправка.
+ * Вставка автоматически разбирается с небольшой паузой; отдельного шага
+ * «Распознать / ОК» нет.
  */
 export default function BulkEoMissingDialog({
   open,
@@ -121,9 +121,9 @@ export default function BulkEoMissingDialog({
   onCheckEoConflict,
   onCreated,
 }) {
-  const [step, setStep] = useState("input");
   const [sourceText, setSourceText] = useState("");
   const [rows, setRows] = useState([]);
+  const [isParsing, setIsParsing] = useState(false);
   const [parseWarnings, setParseWarnings] = useState([]);
   const [parseError, setParseError] = useState("");
   const [recipientOptions, setRecipientOptions] = useState([]);
@@ -161,9 +161,9 @@ export default function BulkEoMissingDialog({
     if (!open) return;
     const initial = latestInitialValues.current;
     const incomingProblems = Array.isArray(initial.initialProblems) ? initial.initialProblems : [];
-    setStep("input");
     setSourceText("");
     setRows([]);
+    setIsParsing(false);
     setParseWarnings([]);
     setParseError("");
     setSelectedProblems([...new Set([EO_MISSING_PROBLEM, ...incomingProblems].filter(Boolean))]);
@@ -179,6 +179,49 @@ export default function BulkEoMissingDialog({
     setConflictReview(null);
     setBatchSummary(null);
   }, [open]);
+
+  // Автоматически распознаём текст после вставки/редактирования. Таймер не
+  // дёргает разбор на каждом символе во время быстрого ввода.
+  useEffect(() => {
+    if (!open) return undefined;
+    if (!sourceText.trim()) {
+      setRows([]);
+      setParseWarnings([]);
+      setParseError("");
+      setIsParsing(false);
+      return undefined;
+    }
+
+    setIsParsing(true);
+    const timer = setTimeout(() => {
+      const result = parseBulkEoInput(sourceText);
+      setParseWarnings(result.warnings);
+      setParseError(result.rows.length === 0
+        ? result.warnings[0] || "Не удалось распознать ни одной пары."
+        : "");
+
+      const batchKey = Date.now();
+      const mappedRows = result.rows.map((row, index) => {
+        const match = matchRecipientCode(row.recipientCode, recipientOptions);
+        return {
+          ...row,
+          id: `${batchKey}-${index + 1}`,
+          recipientId: match.recipient ? recipientOptionId(match.recipient) : "",
+          recipientMatchStatus: match.status,
+          requestStatus: "ready",
+          requestMessage: "",
+          itemId: null,
+        };
+      });
+      setRows(mappedRows);
+      setBatchSummary(null);
+      setSendError("");
+      setConflictReview(null);
+      setIsParsing(false);
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [open, sourceText, recipientOptions, recipientLoadStatus]);
 
   const problemOptions = useMemo(() => {
     return [...new Set([
@@ -202,8 +245,10 @@ export default function BulkEoMissingDialog({
   const conflictReviewForCurrent = conflictReview?.signature === conflictSignature ? conflictReview : null;
   const isTransportationRequired = /отгружен/i.test(String(location));
   const sendDisabled =
+    isParsing ||
     isSending ||
     isCheckingConflicts ||
+    rows.length === 0 ||
     readyToSendRows.length === 0 ||
     readyToSendRows.length !== pendingRows.length ||
     !selectedProblems.includes(EO_MISSING_PROBLEM) ||
@@ -212,31 +257,15 @@ export default function BulkEoMissingDialog({
     !String(dcThu || "").trim() ||
     !operationDateIso;
 
-  const handleParse = () => {
-    const result = parseBulkEoInput(sourceText);
-    setParseWarnings(result.warnings);
+  const handleSourceChange = (event) => {
+    const value = event.target.value;
+    setSourceText(value);
+    setRows([]);
+    setIsParsing(Boolean(value.trim()));
+    setParseWarnings([]);
     setParseError("");
-    if (result.rows.length === 0) {
-      setParseError(result.warnings[0] || "Не удалось распознать ни одной пары.");
-      return;
-    }
-
-    const batchKey = Date.now();
-    const mappedRows = result.rows.map((row, index) => {
-      const match = matchRecipientCode(row.recipientCode, recipientOptions);
-      return {
-        ...row,
-        id: `${batchKey}-${index + 1}`,
-        recipientId: match.recipient ? recipientOptionId(match.recipient) : "",
-        recipientMatchStatus: match.status,
-        requestStatus: "ready",
-        requestMessage: "",
-        itemId: null,
-      };
-    });
-    setRows(mappedRows);
-    setStep("review");
     setBatchSummary(null);
+    setConflictReview(null);
     setSendError("");
   };
 
@@ -265,6 +294,7 @@ export default function BulkEoMissingDialog({
   const handleRemoveRow = (rowId) => {
     setRows((previous) => previous.filter((row) => row.id !== rowId));
     setBatchSummary(null);
+    setConflictReview(null);
   };
 
   const handleProblemsChange = (event) => {
@@ -339,55 +369,73 @@ export default function BulkEoMissingDialog({
   const requestRowsToSend = readyToSendRows.length;
   const hasAttemptedRows = rows.some((row) => row.requestStatus !== "ready");
   const allRowsFinished = rows.length > 0 && pendingRows.length === 0;
-  const title = step === "input"
-    ? "Массовая отправка потерянных ЕО"
-    : step === "review"
-      ? "Проверьте распознанные пары"
-      : "Параметры для всех заявок";
 
   return (
     <Dialog
       open={open}
       onClose={handleClose}
       fullWidth
-      maxWidth="md"
+      maxWidth={false}
       aria-labelledby="bulk-eo-dialog-title"
-      PaperProps={{ sx: { borderRadius: 2, maxHeight: "calc(100% - 32px)" } }}
+      PaperProps={{
+        sx: {
+          borderRadius: 2,
+          width: "min(1280px, calc(100vw - 32px))",
+          maxWidth: "calc(100vw - 32px)",
+          m: { xs: 1, sm: 2 },
+          maxHeight: "calc(100vh - 24px)",
+          overflowX: "hidden",
+        },
+      }}
     >
       <DialogTitle id="bulk-eo-dialog-title" sx={{ pr: 6, fontWeight: 800 }}>
-        {title}
+        Массовая отправка потерянных ЕО
         <IconButton
           aria-label="Закрыть массовую отправку"
           onClick={handleClose}
-          disabled={isSending}
+          disabled={isSending || isCheckingConflicts}
           sx={{ position: "absolute", right: 12, top: 12 }}
         >
           <CloseIcon />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers>
-        {step === "input" && (
-          <Stack spacing={2}>
-            <Typography variant="body2" color="text.secondary">
-              Вставьте пары «код получателя → номер ЕО». Подойдут отдельные строки и копирование двух колонок из Excel; пустые строки и ячейки пропускаются.
-            </Typography>
-            <TextField
-              multiline
-              minRows={8}
-              maxRows={14}
-              fullWidth
-              autoFocus
-              label="Данные из ТСД или Excel"
-              helperText="Распознаются код получателя до 6 цифр и ЕО из 17–18 цифр. Если Excel показывает ЕО в научной записи, задайте столбцу формат «Текст»."
-              placeholder={'0294\n808117004022047365\n\n0294\n808117004022002852'}
-              value={sourceText}
-              onChange={(event) => {
-                setSourceText(event.target.value);
-                setParseError("");
-              }}
-              disabled={isSending}
-              inputProps={{ "data-testid": "bulk-eo-source" }}
-            />
+      <DialogContent dividers sx={{ overflowX: "hidden", minWidth: 0, px: { xs: 2, sm: 3 } }}>
+        <Stack spacing={2} sx={{ minWidth: 0, width: "100%" }}>
+          <Typography variant="body2" color="text.secondary">
+            Вставьте пары «код получателя → номер ЕО». Подойдут отдельные строки и копирование двух колонок из Excel; пустые строки и ячейки пропускаются.
+          </Typography>
+          <TextField
+            multiline
+            minRows={7}
+            maxRows={13}
+            fullWidth
+            autoFocus
+            label="Данные из ТСД или Excel"
+            helperText="Распознаются код получателя до 6 цифр и ЕО из 17–18 цифр. Если Excel показывает ЕО в научной записи, задайте столбцу формат «Текст»."
+            placeholder={'0294\n808117004022047365\n\n0294\n808117004022002852'}
+            value={sourceText}
+            onChange={handleSourceChange}
+            disabled={isSending || isCheckingConflicts}
+            inputProps={{
+              "data-testid": "bulk-eo-source",
+              wrap: "soft",
+              style: {
+                width: "100%",
+                boxSizing: "border-box",
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+                overflowX: "hidden",
+              },
+            }}
+            sx={{
+              width: "100%",
+              minWidth: 0,
+              "& .MuiInputBase-root": { width: "100%", minWidth: 0, alignItems: "flex-start" },
+              "& textarea": { whiteSpace: "pre-wrap", overflowWrap: "anywhere", overflowX: "hidden" },
+            }}
+          />
+
+          <Stack spacing={1}>
             {recipientLoadStatus === "loading" && (
               <Alert icon={<CircularProgress size={18} />} severity="info">
                 Загружаем получателей для автоматического сопоставления…
@@ -404,26 +452,43 @@ export default function BulkEoMissingDialog({
             {recipientLoadStatus === "loaded" && recipientOptions.length === 0 && (
               <Alert severity="warning">В SCList нет получателей для сопоставления.</Alert>
             )}
-            {parseError && <Alert severity="warning">{parseError}</Alert>}
-          </Stack>
-        )}
-
-        {step === "review" && (
-          <Stack spacing={1.5}>
-            <Alert severity="info">
-              Найдено пар: <strong>{rows.length}</strong>. Проверьте номер ЕО и сопоставление каждого получателя; неоднозначные коды выберите вручную.
-            </Alert>
-            {parseWarnings.map((warning, index) => (
+            {isParsing && (
+              <Alert icon={<CircularProgress size={18} />} severity="info">
+                Распознаём пары и получателей…
+              </Alert>
+            )}
+            {!isParsing && rows.length > 0 && (
+              <Alert severity="success">
+                Автоматически распознано пар: <strong>{rows.length}</strong>. Проверьте строки ниже; нераспознанные поля можно исправить.
+              </Alert>
+            )}
+            {!isParsing && parseError && <Alert severity="warning">{parseError}</Alert>}
+            {!isParsing && parseWarnings.map((warning, index) => (
               <Alert key={`${warning}-${index}`} severity="warning">{warning}</Alert>
             ))}
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, maxHeight: "48vh", overflowY: "auto", pr: 0.5 }}>
+          </Stack>
+
+          {rows.length > 0 && (
+            <Box
+              sx={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 1.25,
+                maxHeight: "32vh",
+                overflowY: "auto",
+                overflowX: "hidden",
+                minWidth: 0,
+                pr: 0.5,
+              }}
+              aria-label="Распознанные пары ЕО и получателей"
+            >
               {rows.map((row, index) => {
                 const rowIssues = getRowIssues(row, duplicateMessages.get(row.id));
                 const selectedRecipient = recipientOptions.find((option) => String(recipientOptionId(option)) === String(row.recipientId)) || null;
-                const locked = isSending || ["success", "uncertain"].includes(row.requestStatus);
+                const locked = isSending || isCheckingConflicts || ["success", "uncertain"].includes(row.requestStatus);
                 return (
-                  <Paper key={row.id} variant="outlined" sx={{ p: 1.5, borderRadius: 1.5 }} data-testid={`bulk-eo-row-${index + 1}`}>
-                    <Stack spacing={1.25}>
+                  <Paper key={row.id} variant="outlined" sx={{ p: 1.5, borderRadius: 1.5, minWidth: 0 }} data-testid={`bulk-eo-row-${index + 1}`}>
+                    <Stack spacing={1.25} sx={{ minWidth: 0 }}>
                       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={1}>
                         <Stack direction="row" alignItems="center" gap={1} flexWrap="wrap">
                           <Typography variant="subtitle2" fontWeight={800}>#{index + 1}</Typography>
@@ -441,11 +506,12 @@ export default function BulkEoMissingDialog({
                           <DeleteOutlineIcon fontSize="small" />
                         </IconButton>
                       </Stack>
-                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.25}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} sx={{ minWidth: 0 }}>
                         <TextField
                           label="Номер ЕО"
                           size="small"
                           fullWidth
+                          sx={{ minWidth: 0, flex: 1 }}
                           value={row.eoNumber}
                           disabled={locked}
                           error={!EO_NUMBER_PATTERN.test(String(row.eoNumber ?? "").trim())}
@@ -461,6 +527,7 @@ export default function BulkEoMissingDialog({
                           getOptionLabel={recipientOptionLabel}
                           filterSelectedOptions
                           fullWidth
+                          sx={{ minWidth: 0, flex: 1 }}
                           renderInput={(params) => (
                             <TextField
                               {...params}
@@ -491,201 +558,150 @@ export default function BulkEoMissingDialog({
                 );
               })}
             </Box>
-            {rows.length === 0 && <Alert severity="warning">Все строки удалены. Вернитесь к вставке и распознайте данные заново.</Alert>}
-            {recipientLoadStatus === "error" && (
-              <Alert severity="error">Список получателей не загрузился, сопоставление невозможно. Закройте диалог и попробуйте снова.</Alert>
-            )}
-          </Stack>
-        )}
+          )}
 
-        {step === "settings" && (
-          <Stack spacing={2}>
-            <Alert severity="info">
-              Общие параметры применятся ко всем {requestCountLabel(rows.length)}. Для каждой пары будет создан отдельный элемент.
-            </Alert>
-            <Stack direction="row" flexWrap="wrap" gap={1}>
-              {rows.map((row, index) => (
-                <Chip
-                  key={row.id}
-                  size="small"
-                  variant={row.requestStatus === "success" ? "filled" : "outlined"}
-                  color={row.requestStatus === "success" ? "success" : row.requestStatus === "uncertain" ? "warning" : "default"}
-                  label={`${index + 1}. ${row.eoNumber || "ЕО не указана"}`}
-                />
-              ))}
-            </Stack>
-            <FormControl fullWidth required>
-              <InputLabel id="bulk-problems-label">Проблемы для всех заявок</InputLabel>
-              <Select
-                labelId="bulk-problems-label"
-                multiple
-                value={selectedProblems}
-                onChange={handleProblemsChange}
-                label="Проблемы для всех заявок"
-                renderValue={(selected) => (
-                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                    {selected.map((value) => <Chip key={value} size="small" label={value} />)}
-                  </Box>
-                )}
-              >
-                {problemOptions.map((choice) => (
-                  <MenuItem key={choice} value={choice} disabled={choice === EO_MISSING_PROBLEM}>
-                    <Checkbox checked={selectedProblems.includes(choice)} />
-                    <ListItemText primary={choice} />
-                  </MenuItem>
-                ))}
-              </Select>
-              <FormHelperText>«Не найдена» обязательна для этой массовой отправки; при необходимости добавьте другие проблемы.</FormHelperText>
-            </FormControl>
-            <TextField
-              label="Местоположение для всех заявок"
-              value={location}
-              onChange={(event) => setLocation(event.target.value)}
-              required
-              fullWidth
-              disabled={isSending}
-              error={!String(location || "").trim()}
-            />
-            {!String(location || "").trim() && <Alert severity="error">Укажите общее местоположение.</Alert>}
-            {isTransportationRequired && (
-              <>
-                <TextField
-                  label="Транспортировка для всех заявок"
-                  value={shipment}
-                  onChange={(event) => setShipment(event.target.value.replace(/\D/g, ""))}
-                  required
-                  fullWidth
-                  disabled={isSending}
-                  error={!String(shipment || "").trim()}
-                  inputProps={{ inputMode: "numeric" }}
-                />
-                {!String(shipment || "").trim() && <Alert severity="error">Введите номер транспортировки для всех заявок.</Alert>}
-              </>
-            )}
-            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1.5 }}>
-              <Stack spacing={0.5}>
-                <Typography variant="body2"><strong>РЦ:</strong> {dcThu || "не определён"}</Typography>
-                <Typography variant="body2"><strong>Дата начала смены:</strong> {formatOperationDate(operationDateIso)}</Typography>
-              </Stack>
-            </Paper>
-            {!String(dcThu || "").trim() && (
-              <Alert severity="error">Не определён РЦ. Закройте диалог, задайте РЦ в главной форме и откройте массовую отправку снова.</Alert>
-            )}
-            {!operationDateIso && (
-              <Alert severity="error">Не выбрана дата начала смены. Выберите её в верхней панели и повторите отправку.</Alert>
-            )}
-            {conflictReviewForCurrent?.conflicts?.length > 0 && (
-              <Alert severity="warning">
-                <Typography variant="subtitle2" fontWeight={800}>По некоторым ЕО уже есть заявки с другими проблемами:</Typography>
-                <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>
-                  {conflictReviewForCurrent.conflicts.map((conflict) => {
-                    const previousProblems = conflict.existing?.Problems?.results
-                      || conflict.existing?.Problems
-                      || [];
-                    const problemText = Array.isArray(previousProblems)
-                      ? previousProblems.join(", ")
-                      : String(previousProblems || "другая проблема");
-                    return (
-                      <li key={`${conflict.rowId}-${conflict.eoNumber}`}>
-                        <Typography component="span" variant="body2">
-                          ЕО {conflict.eoNumber}: {problemText || "другая проблема"}
-                          {conflict.existing?.Location1 ? ` — ${conflict.existing.Location1}` : ""}
-                        </Typography>
-                      </li>
-                    );
-                  })}
+          <Divider />
+          <Typography variant="subtitle1" fontWeight={800}>Общие параметры для всех ЕО</Typography>
+          <FormControl fullWidth required>
+            <InputLabel id="bulk-problems-label">Проблемы для всех заявок</InputLabel>
+            <Select
+              labelId="bulk-problems-label"
+              multiple
+              value={selectedProblems}
+              onChange={handleProblemsChange}
+              label="Проблемы для всех заявок"
+              renderValue={(selected) => (
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                  {selected.map((value) => <Chip key={value} size="small" label={value} />)}
                 </Box>
-                <Typography variant="body2">Если вы проверили данные и ЕО действительно не найдена, нажмите «Подтвердить и отправить».</Typography>
-              </Alert>
-            )}
-            {!selectedProblems.includes(EO_MISSING_PROBLEM) && (
-              <Alert severity="error">Для массовой отправки требуется проблема «Не найдена».</Alert>
-            )}
-            {pendingIssues.length > 0 && (
-              <Alert severity="warning">
-                Перед отправкой исправьте строки с ошибками или вернитесь и удалите их. Готовых строк: {readyToSendRows.length}; требуют исправления: {pendingRows.length - readyToSendRows.length}.
-              </Alert>
-            )}
-            {batchSummary && (
-              <Alert severity={batchSummary.failedCount || batchSummary.uncertainCount ? "warning" : "success"}>
-                Создано: {batchSummary.createdCount}. Ошибок: {batchSummary.failedCount}. Требуют проверки: {batchSummary.uncertainCount}.
-                {batchSummary.failedCount > 0 ? " Можно повторить только строки с подтверждённой ошибкой." : ""}
-              </Alert>
-            )}
-            {sendError && <Alert severity="error">{sendError}</Alert>}
-            {isCheckingConflicts && (
-              <Alert icon={<CircularProgress size={18} />} severity="info">
-                Проверяем недавние заявки по ЕО…
-              </Alert>
-            )}
-            {isSending && !isCheckingConflicts && (
-              <Alert icon={<CircularProgress size={18} />} severity="info">
-                Отправка: {sendProgress.completed} из {sendProgress.total}.
-              </Alert>
-            )}
-            {allRowsFinished && !isSending && (
-              rows.some((row) => row.requestStatus === "uncertain") ? (
-                <Alert severity="warning">Отправка завершена, но часть строк требует ручной проверки в SharePoint. Не отправляйте их повторно, пока не проверите результат.</Alert>
-              ) : (
-                <Alert severity="success">Все заявки созданы. Уже отправленные строки повторно не отправляются.</Alert>
-              )
-            )}
-          </Stack>
-        )}
+              )}
+            >
+              {problemOptions.map((choice) => (
+                <MenuItem key={choice} value={choice} disabled={choice === EO_MISSING_PROBLEM}>
+                  <Checkbox checked={selectedProblems.includes(choice)} />
+                  <ListItemText primary={choice} />
+                </MenuItem>
+              ))}
+            </Select>
+            <FormHelperText>«Не найдена» выбрана автоматически и обязательна для массовой отправки.</FormHelperText>
+          </FormControl>
+          <TextField
+            label="Местоположение для всех заявок"
+            value={location}
+            onChange={(event) => setLocation(event.target.value)}
+            required
+            fullWidth
+            disabled={isSending || isCheckingConflicts}
+            error={!String(location || "").trim()}
+            inputProps={{ "data-testid": "bulk-eo-location" }}
+          />
+          {!String(location || "").trim() && <Alert severity="error">Укажите общее местоположение.</Alert>}
+          {isTransportationRequired && (
+            <>
+              <TextField
+                label="Транспортировка для всех заявок"
+                value={shipment}
+                onChange={(event) => setShipment(event.target.value.replace(/\D/g, ""))}
+                required
+                fullWidth
+                disabled={isSending || isCheckingConflicts}
+                error={!String(shipment || "").trim()}
+                inputProps={{ inputMode: "numeric" }}
+              />
+              {!String(shipment || "").trim() && <Alert severity="error">Введите номер транспортировки для всех заявок.</Alert>}
+            </>
+          )}
+          <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1.5 }}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={0.5} justifyContent="space-between">
+              <Typography variant="body2"><strong>РЦ:</strong> {dcThu || "не определён"}</Typography>
+              <Typography variant="body2"><strong>Дата начала смены:</strong> {formatOperationDate(operationDateIso)}</Typography>
+            </Stack>
+          </Paper>
+          {!String(dcThu || "").trim() && (
+            <Alert severity="error">Не определён РЦ. Закройте диалог, задайте РЦ в главной форме и откройте массовую отправку снова.</Alert>
+          )}
+          {!operationDateIso && (
+            <Alert severity="error">Не выбрана дата начала смены. Выберите её в верхней панели и повторите отправку.</Alert>
+          )}
+          {conflictReviewForCurrent?.conflicts?.length > 0 && (
+            <Alert severity="warning">
+              <Typography variant="subtitle2" fontWeight={800}>По некоторым ЕО уже есть заявки с другими проблемами:</Typography>
+              <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>
+                {conflictReviewForCurrent.conflicts.map((conflict) => {
+                  const previousProblems = conflict.existing?.Problems?.results
+                    || conflict.existing?.Problems
+                    || [];
+                  const problemText = Array.isArray(previousProblems)
+                    ? previousProblems.join(", ")
+                    : String(previousProblems || "другая проблема");
+                  return (
+                    <li key={`${conflict.rowId}-${conflict.eoNumber}`}>
+                      <Typography component="span" variant="body2">
+                        ЕО {conflict.eoNumber}: {problemText || "другая проблема"}
+                        {conflict.existing?.Location1 ? ` — ${conflict.existing.Location1}` : ""}
+                      </Typography>
+                    </li>
+                  );
+                })}
+              </Box>
+              <Typography variant="body2">Если вы проверили данные и ЕО действительно не найдена, нажмите «Подтвердить и отправить».</Typography>
+            </Alert>
+          )}
+          {!selectedProblems.includes(EO_MISSING_PROBLEM) && (
+            <Alert severity="error">Для массовой отправки требуется проблема «Не найдена».</Alert>
+          )}
+          {pendingIssues.length > 0 && (
+            <Alert severity="warning">
+              Перед отправкой исправьте нераспознанные строки или удалите их. Готовых строк: {readyToSendRows.length}; требуют исправления: {pendingRows.length - readyToSendRows.length}.
+            </Alert>
+          )}
+          {batchSummary && (
+            <Alert severity={batchSummary.failedCount || batchSummary.uncertainCount ? "warning" : "success"}>
+              Создано: {batchSummary.createdCount}. Ошибок: {batchSummary.failedCount}. Требуют проверки: {batchSummary.uncertainCount}.
+              {batchSummary.failedCount > 0 ? " Можно повторить только строки с подтверждённой ошибкой." : ""}
+            </Alert>
+          )}
+          {sendError && <Alert severity="error">{sendError}</Alert>}
+          {isCheckingConflicts && (
+            <Alert icon={<CircularProgress size={18} />} severity="info">
+              Проверяем недавние заявки по ЕО…
+            </Alert>
+          )}
+          {isSending && !isCheckingConflicts && (
+            <Alert icon={<CircularProgress size={18} />} severity="info">
+              Отправка: {sendProgress.completed} из {sendProgress.total}.
+            </Alert>
+          )}
+          {allRowsFinished && !isSending && (
+            rows.some((row) => row.requestStatus === "uncertain") ? (
+              <Alert severity="warning">Отправка завершена, но часть строк требует ручной проверки в SharePoint. Не отправляйте их повторно, пока не проверите результат.</Alert>
+            ) : (
+              <Alert severity="success">Все заявки созданы. Уже отправленные строки повторно не отправляются.</Alert>
+            )
+          )}
+        </Stack>
       </DialogContent>
-      <DialogActions sx={{ px: 3, py: 2, gap: 1, flexWrap: "wrap" }}>
-        <Button onClick={handleClose} disabled={isSending} color="inherit">
-          {allRowsFinished ? "Закрыть" : "Отмена"}
+      <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 2, gap: 1, flexWrap: "wrap" }}>
+        <Button onClick={handleClose} disabled={isSending || isCheckingConflicts} color="inherit">
+          Закрыть
         </Button>
-        {step === "input" && (
+        {!allRowsFinished && (
           <Button
             variant="contained"
-            onClick={handleParse}
-            disabled={!sourceText.trim() || recipientLoadStatus !== "loaded" || recipientOptions.length === 0}
-            endIcon={<ArrowForwardIcon />}
+            onClick={handleSend}
+            disabled={sendDisabled}
+            startIcon={isSending ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
           >
-            Распознать
+            {isCheckingConflicts
+              ? "Проверка…"
+              : isSending
+                ? "Отправка…"
+                : conflictReviewForCurrent?.conflicts?.length > 0
+                  ? `Подтвердить и отправить ${requestCountLabel(requestRowsToSend)}`
+                  : hasAttemptedRows
+                    ? `Повторить ${retryCountLabel(requestRowsToSend)}`
+                    : `Отправить ${requestCountLabel(requestRowsToSend)}`}
           </Button>
-        )}
-        {step === "review" && (
-          <>
-            <Button onClick={() => setStep("input")} startIcon={<ArrowBackIcon />} disabled={isSending}>
-              Изменить вставку
-            </Button>
-            <Button
-              variant="contained"
-              onClick={() => setStep("settings")}
-              disabled={rows.length === 0 || pendingIssues.length > 0 || isSending}
-              endIcon={<ArrowForwardIcon />}
-            >
-              ОК, выбрать проблемы
-            </Button>
-          </>
-        )}
-        {step === "settings" && (
-          <>
-            <Button onClick={() => setStep("review")} startIcon={<ArrowBackIcon />} disabled={isSending}>
-              Назад к списку
-            </Button>
-            {!allRowsFinished && (
-              <Button
-                variant="contained"
-                onClick={handleSend}
-                disabled={sendDisabled}
-                startIcon={isSending ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
-              >
-                {isCheckingConflicts
-                  ? "Проверка…"
-                  : isSending
-                    ? "Отправка…"
-                    : conflictReviewForCurrent?.conflicts?.length > 0
-                      ? `Подтвердить и отправить ${requestCountLabel(requestRowsToSend)}`
-                      : hasAttemptedRows
-                        ? `Повторить ${retryCountLabel(requestRowsToSend)}`
-                        : `Отправить ${requestCountLabel(requestRowsToSend)}`}
-              </Button>
-            )}
-          </>
         )}
       </DialogActions>
     </Dialog>

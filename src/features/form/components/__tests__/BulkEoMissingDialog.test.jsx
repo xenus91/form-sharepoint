@@ -54,6 +54,15 @@ async function clickButton(text) {
   });
 }
 
+async function pasteSource(source, text) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+  await act(async () => {
+    setter.call(source, text);
+    source.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await wait(320);
+  });
+}
+
 describe("BulkEoMissingDialog", () => {
   let host;
   let root;
@@ -112,21 +121,19 @@ describe("BulkEoMissingDialog", () => {
 
     const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
     expect(source).not.toBeNull();
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    await act(async () => {
-      setter.call(source, "0294\n808117004022047365\n\n0295\n808117004022002852");
-      source.dispatchEvent(new window.Event("input", { bubbles: true }));
-    });
+    await pasteSource(source, "0294\n808117004022047365\n\n0295\n808117004022002852");
 
-    await clickButton("Распознать");
-    expect(document.body.textContent).toContain("Найдено пар:");
+    expect(document.body.textContent).toContain("Автоматически распознано пар:");
     expect(document.body.querySelector('[aria-label="Номер ЕО, строка 1"]').value).toBe("808117004022047365");
     expect(document.body.querySelector('[aria-label="Номер ЕО, строка 2"]').value).toBe("808117004022002852");
     expect(document.body.textContent).toContain("Сопоставлен автоматически");
-
-    await clickButton("ОК, выбрать проблемы");
+    expect(findButton("Распознать")).toBeUndefined();
+    expect(findButton("ОК, выбрать проблемы")).toBeUndefined();
     expect(document.body.textContent).toContain("Проблемы для всех заявок");
     expect(document.body.textContent).toContain("Не найдена");
+    expect(document.body.querySelector('[data-testid="bulk-eo-location"]').value).toBe("Не найдена в зоне отгрузки");
+    expect(source.getAttribute("wrap")).toBe("soft");
+    expect(source.style.overflowX).toBe("hidden");
 
     await clickButton("Отправить 2 заявки");
     expect(mocks.createBulkProblemsPalletItems).toHaveBeenCalledTimes(1);
@@ -153,13 +160,7 @@ describe("BulkEoMissingDialog", () => {
     await act(async () => { await wait(5); });
 
     const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    await act(async () => {
-      setter.call(source, "0294\n808117004022047365");
-      source.dispatchEvent(new window.Event("input", { bubbles: true }));
-    });
-    await clickButton("Распознать");
-    await clickButton("ОК, выбрать проблемы");
+    await pasteSource(source, "0294\n808117004022047365");
     await clickButton("Отправить 1 заявка");
 
     expect(onCheckEoConflict).toHaveBeenCalledWith("808117004022047365");
