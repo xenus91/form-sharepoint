@@ -57,7 +57,7 @@ describe("createBulkProblemsPalletItems", () => {
     const [url, body, config] = client.post.mock.calls[0];
     expect(url).toBe("/$batch");
     expect(typeof body).toBe("string");
-    expect(config.headers.Accept).toBe("multipart/mixed");
+    expect(config.headers.Accept).toBe("application/json;odata=verbose");
     expect(config.headers["Content-Type"]).toMatch(/^multipart\/mixed; boundary=/);
     expect(config.transformRequest).toHaveLength(1);
     expect(body.match(/Content-ID: /g)).toHaveLength(2);

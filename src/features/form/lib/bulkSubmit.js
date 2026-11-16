@@ -56,7 +56,9 @@ const sendSharePointBatch = async (client, operations) => {
   const request = buildSharePointBatchBody(operations);
   return client.post("/$batch", request.body, {
     headers: {
-      Accept: "multipart/mixed",
+      // SharePoint expects JSON negotiation on the outer REST call; the
+      // $batch response body itself is multipart/mixed.
+      Accept: "application/json;odata=verbose",
       "Content-Type": request.contentType,
     },
     // Не дать Axios сериализовать multipart-тело как JSON.

@@ -87,7 +87,9 @@ export async function findOtherProblemsForEos({
       const request = buildSharePointBatchBody(operations);
       const response = await client.post("/$batch", request.body, {
         headers: {
-          Accept: "multipart/mixed",
+          // Negotiation applies to the outer REST call; SharePoint still
+          // returns the batch envelope as multipart/mixed.
+          Accept: "application/json;odata=verbose",
           "Content-Type": request.contentType,
         },
         transformRequest: [(data) => data],
