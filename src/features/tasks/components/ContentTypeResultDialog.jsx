@@ -1,0 +1,868 @@
+// src/features/tasks/components/ContentTypeResultDialog.jsx
+// Диалог закрытия задачи: форма строится ИСКЛЮЧИТЕЛЬНО по типу контента и типам
+// колонок SharePoint (см. tasks/contentTypeFields.js).
+//
+//   • DobSearchResult (и любой «Результирующий выбор») — кнопки результата;
+//   • DescriptionCheckResult (Note) — рич-текст (RichEditor), обязательность из SP;
+//   • ErrorTypeValidation (Choice) — автокомплит с подстановкой своего значения;
+//   • ErrorCountValidation (Number) — числовое поле «Кол-во ошибок»;
+//   • Guilty (Пользователь или группа) — автокомплит по учётной записи,
+//     многократный выбор, подпись «Имя — Должность».
+//
+// Обязательные поля (Required=true в SharePoint) не дают отправить форму:
+// показываем список того, что нужно заполнить. Значения уходят в completeTask
+// (Result + поля типа контента + Status/PercentComplete=1).
+
+/* eslint-disable react/prop-types */
+import React from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Alert, Autocomplete, Box, Checkbox, Button, CircularProgress, Dialog, DialogActions,
+  DialogContent, DialogTitle, FormControlLabel, MenuItem, Stack, TextField, ToggleButton,
+  ToggleButtonGroup, Typography,
+} from "@mui/material";
+import RichEditor from "./RichEditor";
+import PersonFieldAutocomplete from "./PersonFieldAutocomplete";
+import { toDisplayImages, toStorageImages } from "../lib/attachmentUrl";
+import { removeImgByFileName } from "../lib/richImages";
+import { listApiForGuid } from "../../../tasks/config";
+import { getUserPositions, searchSiteUsers } from "../../../tasks/userSearch";
+import {
+  FORM_ACTIONS_SX,
+  FORM_FIELD_FULL_SX,
+  FORM_FIELD_GRID_SX,
+  FORM_FIELD_WIDE_SX,
+  FORM_INVALID_SECTION_SX,
+  FORM_NUMBER_FIELD_SX,
+  FORM_PRIMARY_BUTTON_SX,
+  FORM_SECONDARY_BUTTON_SX,
+  FORM_SECTION_BAR_SX,
+  FORM_SECTION_HEAD_SX,
+  FORM_SECTION_SX,
+  FORM_SECTION_TITLE_SX,
+  RESULT_TOGGLE_GROUP_SX,
+} from "../lib/formStyles";
+import {
+  buildContentTypeForm,
+  normalizeChoiceValue,
+  normalizeChoiceValues,
+  fetchContentTypeFieldsDetailed,
+  plainText,
+  validateRequiredFields,
+} from "../../../tasks/contentTypeFields";
+
+/**
+ * Контрол не заполнен? Логика та же, что в validateRequiredFields (rich-текст
+ * сравниваем по тексту без тегов, множественный выбор — по длине списка), но
+ * результат нужен по каждому полю: подсветить ИМЕННО незаполненные блоки.
+ */
+function isControlEmpty(control, value) {
+  if (value === undefined || value === null) return true;
+  if (Array.isArray(value)) return normalizeChoiceValues(value).length === 0;
+  if (typeof value === "number") return Number.isNaN(value);
+  if (typeof value === "object") return Object.keys(value).length === 0;
+  const text = control?.kind === "richtext" ? plainText(value) : String(value).trim();
+  return text.length === 0;
+}
+
+function readTaskValue(task, internal) {
+  if (!task || !internal) return undefined;
+  // Карточка/строка несут исходный элемент SharePoint в raw — поля типа контента
+  // (DescriptionCheckResult, Guilty и т.п.) легче всего достать оттуда.
+  const sources = [task, task.raw];
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    if (source[internal] !== undefined) return source[internal];
+    if (source[`OData__${internal}`] !== undefined) return source[`OData__${internal}`];
+  }
+  return undefined;
+}
+
+function asUserList(raw) {
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : (Array.isArray(raw.results) ? raw.results : [raw]);
+  return list
+    .map((u) => {
+      if (!u) return null;
+      if (typeof u === "object") {
+        const id = Number(u.Id ?? u.ID);
+        return {
+          Id: Number.isFinite(id) ? id : undefined,
+          Title: String(u.Title || u.Name || "").trim(),
+          LoginName: String(u.LoginName || "").trim(),
+          Email: String(u.Email || u.EMail || "").trim(),
+        };
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+const toISODate = (value) => {
+  if (!value) return "";
+  try {
+    if (typeof value === "string" && value.startsWith("/Date(")) {
+      const ms = Number(String(value).replace(/[^0-9]/g, ""));
+      const d = new Date(ms);
+      return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+    }
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? String(value).slice(0, 10) : d.toISOString().slice(0, 10);
+  } catch (_e) {
+    void _e;
+    return "";
+  }
+};
+
+export default function ContentTypeResultDialog({
+  open = false,
+  task = null,
+  contentTypeId = "",
+  contentTypeName = "",
+  resultFieldInternalName = "",
+  resultChoices = [],
+  initialResult = "",
+  confirmTexts = null,
+  submitLabel = "",
+  cancelLabel = "",
+  submitting = false,
+  // readOnly: задача ЗАВЕРШЕНА — форму показываем, но править нельзя: все
+  // контролы недоступны, «Сохранить» нет, остаётся только «Закрыть».
+  readOnly = false,
+  onSubmit,
+  onClose,
+  // inline: та же форма, но не в модальном окне — её показывает форма ДОБ
+  // (страница #dob_requests/<id>), чтобы задача «Результат проверки ООБ» закрывалась
+  // кнопками результата прямо на экране задачи.
+  inline = false,
+  // submitRef: страница (#dob_requests/<id>) кладёт в него submit формы — кнопка
+  // «Сохранить» в шапке страницы работает так же, как в форме заявки ДОБ.
+  submitRef = null,
+  // listGuid — список ЗАДАЧИ: поля типа контента читаем у него (а не у основного
+  // списка) и, если в FieldLinks нет колонки результата, берём её из метаданных
+  // списка (resultField) — иначе форма оставалась без кнопок результата.
+  listGuid = "",
+  resultField = null,
+  // Картинки в rich-тексте сохраняются ВЛОЖЕНИЯМИ задачи (их может быть сколько
+  // угодно): страница даёт свои обработчики загрузки/прогресса.
+  onUploadImage = null,
+  onDeleteImage = null,
+  isUploading = false,
+  // Значения формы «наружу» — страница следит за картинками в rich-тексте
+  // (удалили картинку из текста → вложение тоже удаляем).
+  onValuesChange = null,
+  // «Пульт» для страницы-владельца формы (#dob_requests/<id>): попросить убрать
+  // картинку удалённого вложения из rich-текста. Значения формы живут ВНУТРИ
+  // диалога, поэтому снаружи их можно изменить только так — иначе каскад
+  // «удалили вложение из блока вложений» не доходил бы до текста.
+  valuesControlRef = null,
+  // Блок вложений задачи показывается ВНУТРИ rich-поля (внутри рамки CKEditor):
+  // картинки из текста лежат вложениями, удалять их удобно рядом с текстом.
+  richFooter = null,
+  // Ошибка валидации «наружу» — страница показывает snackbar с предупреждением.
+  onValidationError = null,
+}) {
+  const [result, setResult] = React.useState(initialResult || "");
+  const [values, setValues] = React.useState({});
+  // Актуальные значения — для setValue/«пульта»: React-состояние доступно только
+  // в следующем рендере, а обработчики редактора приходят пачками.
+  const valuesRef = React.useRef(values);
+  // Колбэк наружу держим в ref: у вызывающей стороны он может быть inline-функцией
+  // (новая на каждом рендере), и если бы он был в зависимостях эффекта инициализации,
+  // получился бы цикл «эффект → onValuesChange → ререндер родителя → эффект».
+  const onChangeRef = React.useRef(onValuesChange);
+  React.useEffect(() => { onChangeRef.current = onValuesChange; }, [onValuesChange]);
+  const [problems, setProblems] = React.useState([]);
+  const [touched, setTouched] = React.useState(false);
+  // Прокрутка к первому незаполненному блоку при ошибке валидации.
+  const contentRef = React.useRef(null);
+
+  const fieldsQ = useQuery({
+    queryKey: ["ct-fields-detailed", contentTypeId, listGuid || "main"],
+    // Поля читаем у ТОГО списка, в котором лежит задача (у внешних списков свои
+    // типы контента и свои колонки). Берём DETAILED-вариант: он сообщает, ОТКУДА
+    // пришли поля. Без этого фолбэк «все колонки списка» молча рисовал форму
+    // закрытия из чужих полей (задача из RequestsTask — «полей как будто все»).
+    // Список задачи — на этом же сайте, поэтому читаем своим клиентом
+            // (кросс-сайтовых запросов в приложении нет).
+    queryFn: () =>
+      fetchContentTypeFieldsDetailed(
+        contentTypeId,
+        listGuid ? { listApi: listApiForGuid(listGuid) } : undefined,
+      ),
+    enabled: Boolean((open || inline) && contentTypeId),
+    staleTime: 30 * 60 * 1000,
+    retry: 1,
+  });
+  // "fieldlinks" — состав типа; "ct-fields" — поля типа без FieldLinks;
+  // "list-fields" — ФОЛБЭК: все колонки списка (тип не найден).
+  const ctFields = React.useMemo(() => fieldsQ.data?.fields || [], [fieldsQ.data]);
+  // Поля «Пользователь или группа»: сайт поиска — по списку задачи.
+  // Поиск людей — свой сайт: те же функции, что и у остального приложения.
+  const personSearch = React.useMemo(
+    () => ({ search: searchSiteUsers, getPositions: getUserPositions }),
+    [],
+  );
+  const ctSource = fieldsQ.data?.source || "";
+
+  const form = React.useMemo(
+    () => buildContentTypeForm(ctFields, {
+      resultFieldInternalNames: [
+        resultFieldInternalName,
+        resultField?.internalName,
+      ].filter(Boolean),
+      fallbackResultField: resultField,
+    }),
+    [ctFields, resultFieldInternalName, resultField],
+  );
+
+  // Инициализация значений из задачи + результата из Behaviour/карточки
+  React.useEffect(() => {
+    if (!open && !inline) return;
+    const next = {};
+    for (const control of form.controls) {
+      const raw = readTaskValue(task, control.internalName);
+      if (control.kind === "person") next[control.internalName] = asUserList(raw);
+      else if (control.kind === "boolean") next[control.internalName] = raw === true || raw === 1 || String(raw).toLowerCase() === "true";
+      else if (control.kind === "number") next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
+      else if (control.kind === "date") next[control.internalName] = toISODate(raw);
+      else if (control.kind === "multichoice") next[control.internalName] = normalizeChoiceValues(raw);
+      // Rich-текст: в SharePoint хранится серверный путь вложения, а в редакторе
+      // картинка должна открываться (dev — через прокси, prod — origin).
+      else if (control.kind === "richtext") next[control.internalName] = toDisplayImages(raw === undefined || raw === null ? "" : String(raw));
+      else if (control.kind === "select" || control.kind === "choice" || control.kind === "autocomplete") {
+        next[control.internalName] = normalizeChoiceValue(raw);
+      } else next[control.internalName] = raw === undefined || raw === null ? "" : String(raw);
+    }
+    valuesRef.current = next;
+    setValues(next);
+    setProblems([]);
+    setTouched(false);
+    // Владелец формы (страница #dob_requests/<id>) следит за картинками в тексте:
+    // сообщаем ему стартовые значения, чтобы он видел ПОСЛЕДУЮЩИЕ удаления.
+    onChangeRef.current?.(next);
+  }, [open, inline, task, form.controls]);
+
+  React.useEffect(() => {
+    if (open || inline) setResult(initialResult || "");
+  }, [open, inline, initialResult]);
+
+  // Имя колонки результата из метаданных списка (проп resultField) — отдельной
+  // переменной, чтобы её можно было положить в зависимости хука.
+  const listResultFieldName = resultField?.internalName || "";
+
+  const choices = React.useMemo(() => {
+    const list = (Array.isArray(resultChoices) ? resultChoices : []).map((c) => String(c)).filter(Boolean);
+    if (list.length > 0) return list;
+    if (form.resultBlock?.choices?.length) return form.resultBlock.choices;
+    return (resultField?.choices || []).map((c) => String(c)).filter(Boolean);
+  }, [resultChoices, form.resultBlock, resultField]);
+
+  // Сообщение про результат — ОДНО и только здесь. Раньше результат проверялся
+  // дважды: validateRequiredFields давал «Укажите «Результат проверки»» (по
+  // Required из SharePoint), а следом жёстко добавлялся ещё один, зашитый в код
+  // «Выберите результат проверки» — в списке ошибок одно и то же поле выходило
+  // двумя строками.
+  const resultProblem = React.useMemo(() => {
+    if (result) return "";
+    // Колонка результата обязательна в SharePoint — сообщаем её названием.
+    if (form.resultBlock?.required) return `Укажите «${form.resultBlock.title}»`;
+    // Не обязательна, но кнопки на форме есть: закрывать задачу без результата
+    // нельзя — это единственное сообщение про результат.
+    return choices.length > 0 ? "Выберите результат проверки" : "";
+  }, [result, form.resultBlock, choices.length]);
+
+  const setValue = (internal, value) => {
+    const next = { ...valuesRef.current, [internal]: value };
+    valuesRef.current = next;
+    setValues(next);
+    // ВАЖНО: onValuesChange вызываем ЗДЕСЬ, а не внутри setValues(updater):
+    // React выполняет updater во время рендера, и обновление родителя попадало
+    // в рендер («Cannot update a component (DobTaskEditView) while rendering a
+    // different component (ContentTypeResultDialog)»).
+    onChangeRef.current?.(next);
+    if (touched && problems.length > 0) setProblems([]);
+  };
+
+  // Каскадное удаление: страница просит убрать из rich-текста картинку файла,
+  // вложение которого удалили (или наоборот — см. removedImgSrcs в RichEditor).
+  React.useEffect(() => {
+    if (!valuesControlRef) return undefined;
+    valuesControlRef.current = {
+      removeImagesByFileName: (fileName) => {
+        const prev = valuesRef.current || {};
+        let changed = false;
+        const next = { ...prev };
+        for (const [key, value] of Object.entries(prev)) {
+          if (typeof value !== "string" || !value.includes("<img")) continue;
+          // Значения в редакторе — в АДРЕСАХ ПОКАЗА (`…/$value` через прокси), а
+          // сравнение идёт по серверному пути, иначе имя файла из адреса не
+          // вытащить. После чистки возвращаем рабочий адрес редактору.
+          const cleaned = toDisplayImages(removeImgByFileName(toStorageImages(value), fileName));
+          if (cleaned !== value) {
+            next[key] = cleaned;
+            changed = true;
+          }
+        }
+        if (!changed) return;
+        valuesRef.current = next;
+        setValues(next);
+        onChangeRef.current?.(next);
+      },
+    };
+    return () => {
+      if (valuesControlRef) valuesControlRef.current = null;
+    };
+  }, [valuesControlRef]);
+
+  const handleSubmit = React.useCallback(() => {
+    // Завершённую задачу править нельзя — форма только на просмотр.
+    if (readOnly) return;
+    setTouched(true);
+    // resultBlock не передаём: про результат сообщает resultProblem (один раз).
+    const found = validateRequiredFields(form.controls, values, null, result);
+    if (resultProblem) found.unshift(resultProblem);
+    if (found.length > 0) {
+      setProblems(found);
+      // Страница (#dob_requests/<id>) показывает snackbar с предупреждением — форма
+      // сама про ошибку молчит только списком под полями.
+      onValidationError?.(found);
+      return;
+    }
+    const payload = {};
+    for (const control of form.controls) {
+      const value = values[control.internalName];
+      if (control.kind === "person") {
+        const list = asUserList(value).filter((u) => u.Id != null);
+        if (list.length > 0 || (control.required && list.length === 0)) {
+          payload[control.internalName] = { __userIds: list.map((u) => u.Id), __userMulti: control.multiple };
+        }
+        continue;
+      }
+      if (control.kind === "boolean") {
+        payload[control.internalName] = value === true;
+        continue;
+      }
+      if (control.kind === "number") {
+        const text = String(value ?? "").trim();
+        if (text === "") {
+          if (control.required) payload[control.internalName] = null;
+          continue;
+        }
+        const num = Number(text.replace(",", "."));
+        payload[control.internalName] = Number.isFinite(num) ? num : text;
+        continue;
+      }
+      // Выбор: MultiChoice SharePoint принимает строкой «a;#b», одиночный — строкой.
+      if (control.kind === "multichoice") {
+        const list = normalizeChoiceValues(value);
+        if (list.length === 0) {
+          if (control.required) payload[control.internalName] = "";
+          continue;
+        }
+        payload[control.internalName] = list.join(";#");
+        continue;
+      }
+      const text = (control.kind === "select" || control.kind === "choice" || control.kind === "autocomplete")
+        ? normalizeChoiceValue(value)
+        : String(value ?? "");
+      if (text.trim() === "" && !control.required) continue;
+      payload[control.internalName] = text;
+    }
+    // resultField — имя колонки результата (нужно форме ДОБ, чтобы записать MERGE)
+    // Наружу отдаём значения в виде для ХРАНЕНИЯ: ссылки на вложения — серверным
+    // путём (`/sites/…`), а не адресом dev-прокси `/dob-api/…`.
+    const stored = {};
+    for (const [key, value] of Object.entries(payload)) {
+      stored[key] = typeof value === "string" ? toStorageImages(value) : value;
+    }
+    // Колонка, в которую пишется результат: поле типа контента → явно заданное
+    // имя → колонка «Результирующий выбор» из метаданных списка. Пустая строка
+    // означает «колонка не определена» — владелец формы тогда не пишет результат
+    // в выдуманное поле.
+    onSubmit?.({
+      result,
+      values: stored,
+      resultField: form.resultBlock?.internalName || resultFieldInternalName || listResultFieldName || "",
+    });
+  }, [form, values, result, resultProblem, resultFieldInternalName, listResultFieldName, onSubmit, onValidationError, readOnly]);
+
+  // Отдаём submit наружу (кнопка «Сохранить» в шапке страницы — как у заявки ДОБ).
+  React.useEffect(() => {
+    if (!submitRef) return undefined;
+    submitRef.current = handleSubmit;
+    return () => { submitRef.current = null; };
+  }, [submitRef, handleSubmit]);
+
+  // Главный рич-текст («Описание результата проверки») показываем отдельной
+  // секцией сразу после результата: это основное поле формы, а не «остальное».
+  const mainControl = React.useMemo(
+    () => form.controls.find((c) => c.kind === "richtext") || null,
+    [form.controls],
+  );
+  const gridControls = React.useMemo(
+    () => form.controls.filter((c) => c !== mainControl),
+    [form.controls, mainControl],
+  );
+
+  // Незаполненные обязательные поля — после попытки сохранить (touched). Нужны,
+  // чтобы акцентировать конкретные поля И блоки (результат / описание / остальные).
+  const missingControls = React.useMemo(() => {
+    if (!touched) return [];
+    return form.controls.filter((c) => c.required && isControlEmpty(c, values[c.internalName]));
+  }, [touched, form.controls, values]);
+  const resultInvalid = touched && Boolean(resultProblem);
+  const mainInvalid = missingControls.includes(mainControl);
+  const otherInvalid = missingControls.some((c) => c !== mainControl);
+
+  // Ошибка валидации: прокручиваем к первому незаполненному блоку — в длинной
+  // форме «Остальные поля» уезжают за экран и ошибку не видно.
+  React.useEffect(() => {
+    if (problems.length === 0) return;
+    const root = contentRef.current;
+    if (!root || typeof root.querySelector !== "function") return;
+    const node = root.querySelector('[data-ct-invalid="true"]');
+    if (!node || typeof node.scrollIntoView !== "function") return;
+    try {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch {
+      node.scrollIntoView();
+    }
+  }, [problems]);
+
+  const title = confirmTexts?.title || `Закрытие задачи #${task?.Id ?? ""}`.trim();
+  const message = confirmTexts?.message || "";
+
+  const body = (
+    <>
+        {message && (
+          <Typography variant="body2" sx={{ mb: 1.5, color: "text.secondary" }}>{message}</Typography>
+        )}
+        {fieldsQ.isLoading && (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 2 }}>
+            <CircularProgress size={18} />
+            <Typography variant="body2" color="text.secondary">Загружаю поля типа контента…</Typography>
+          </Box>
+        )}
+        {fieldsQ.isError && (
+          <Alert severity="error" sx={{ mb: 1.5 }}>
+            Не удалось получить поля типа контента — форма построена по частичным данным.
+          </Alert>
+        )}
+        {ctSource === "list-fields" && (
+          <Alert severity="warning" data-testid="ct-fallback-warning" sx={{ mb: 1.5 }}>
+            Состав полей типа контента «{contentTypeName}» получить не удалось — показаны
+            все колонки списка, а не поля типа. Так быть не должно: проверьте, что тип
+            контента существует в этом списке.
+          </Alert>
+        )}
+        {(ctSource === "ct-fields" || ctSource === "fieldlinks") && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }} data-testid="ct-source-caption">
+            {ctSource === "ct-fields"
+              ? `Поля взяты у типа контента «${contentTypeName}» (состав типа в списке не отдался).`
+              : `Поля формы — состав типа контента «${contentTypeName}».`}
+          </Typography>
+        )}
+
+        {!fieldsQ.isLoading && (
+          <Stack spacing={1.25} ref={contentRef}>
+            {choices.length > 0 && (
+              <Box
+                sx={{ ...FORM_SECTION_SX, ...(resultInvalid ? FORM_INVALID_SECTION_SX : null) }}
+                data-testid="ct-result-block"
+                data-ct-invalid={resultInvalid ? "true" : undefined}
+              >
+                <Box sx={FORM_SECTION_HEAD_SX}>
+                  <Box sx={FORM_SECTION_BAR_SX} />
+                  <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
+                    {form.resultBlock?.title || "Результат"}
+                    {form.resultBlock?.required ? " *" : ""}
+                  </Typography>
+                </Box>
+                {/* Результирующий выбор — группа кнопок (button group), как в форме ДОБ */}
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={result || null}
+                  disabled={submitting || readOnly}
+                  onChange={(_e, next) => {
+                    if (next === null) return;
+                    setResult(next);
+                    if (problems.length) setProblems([]);
+                  }}
+                  sx={RESULT_TOGGLE_GROUP_SX}
+                >
+                  {choices.map((choice) => (
+                    <ToggleButton key={choice} value={choice} data-testid={`ct-result-choice-${choice}`}>
+                      {choice}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+              </Box>
+            )}
+
+            {mainControl && (
+              <Box
+                sx={{ ...FORM_SECTION_SX, ...(mainInvalid ? FORM_INVALID_SECTION_SX : null) }}
+                data-testid="ct-main-field"
+                data-ct-invalid={mainInvalid ? "true" : undefined}
+              >
+                <Box sx={FORM_SECTION_HEAD_SX}>
+                  <Box sx={FORM_SECTION_BAR_SX} />
+                  <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>
+                    {mainControl.title}{mainControl.required ? " *" : ""}
+                  </Typography>
+                </Box>
+                <RichEditor
+                  value={values[mainControl.internalName] || ""}
+                  readOnly={submitting || readOnly}
+                  onChange={(html) => setValue(mainControl.internalName, html)}
+                  onUploadImage={onUploadImage}
+                  onDeleteImage={onDeleteImage}
+                  isUploading={isUploading}
+                  invalid={mainInvalid}
+                  footer={richFooter}
+                />
+                {mainControl.description && (
+                  <Typography variant="caption" color="text.secondary">{mainControl.description}</Typography>
+                )}
+              </Box>
+            )}
+
+            {gridControls.length > 0 && (
+              <Box
+                sx={{ ...FORM_SECTION_SX, ...(otherInvalid ? FORM_INVALID_SECTION_SX : null) }}
+                data-testid="ct-other-fields"
+                data-ct-invalid={otherInvalid ? "true" : undefined}
+              >
+                <Box sx={FORM_SECTION_HEAD_SX}>
+                  <Box sx={FORM_SECTION_BAR_SX} />
+                  <Typography variant="subtitle1" sx={FORM_SECTION_TITLE_SX}>Остальные поля</Typography>
+                </Box>
+                <Box sx={FORM_FIELD_GRID_SX}>
+                {gridControls.map((control) => {
+              const value = values[control.internalName];
+              // Подсветка ИМЕННО незаполненного обязательного поля (после попытки
+              // сохранить) — список problems объясняет, что именно не так.
+              const invalid = missingControls.includes(control);
+              const helper = control.description || (invalid ? "Обязательное поле" : "");
+              // ВАЖНО: key НЕ кладём в общий объект — React требует передавать его
+              // напрямую в JSX (<TextField key=… {...common} />), иначе варнинг
+              // «A props object containing a "key" prop is being spread into JSX».
+              // disabled включает и readOnly: этот объект раскладывается во ВСЕ
+              // текстовые/select/число/дату-поля, и раньше режим просмотра
+              // (завершённая задача) закрывал только часть из них — те, у которых
+              // readOnly/disabled проставлялись вручную.
+              const common = { size: "small", fullWidth: true, disabled: submitting || readOnly };
+
+              if (control.kind === "richtext") {
+                return (
+                  <Box key={control.internalName} sx={FORM_FIELD_FULL_SX}>
+                    <Typography variant="caption" sx={{ display: "block", mb: 0.5, fontWeight: 700, color: invalid ? "#c62828" : "text.primary" }}>
+                      {control.title}{control.required ? " *" : ""}
+                    </Typography>
+                    <RichEditor
+                      value={value || ""}
+                      readOnly={submitting || readOnly}
+                      onChange={(html) => setValue(control.internalName, html)}
+                      onUploadImage={onUploadImage}
+                      onDeleteImage={onDeleteImage}
+                      isUploading={isUploading}
+                      invalid={Boolean(invalid)}
+                      footer={richFooter}
+                    />
+                    {control.description && (
+                      <Typography variant="caption" color="text.secondary">{control.description}</Typography>
+                    )}
+                    {invalid && (
+                      <Typography variant="caption" sx={{ display: "block", color: "#c62828", fontWeight: 600 }}>
+                        Обязательное поле
+                      </Typography>
+                    )}
+                  </Box>
+                );
+              }
+
+              if (control.kind === "person") {
+                return (
+                  // «Пользователь или группа» — широкая ячейка, чтобы имя и чипы
+                  // не выезжали за края формы.
+                  <Box key={control.internalName} sx={FORM_FIELD_WIDE_SX}>
+                    <PersonFieldAutocomplete
+                      // Люди ищутся на сайте того списка, в котором лежит задача.
+                      search={personSearch.search}
+                      getPositions={personSearch.getPositions}
+                      label={control.title}
+                      value={value || []}
+                      onChange={(next) => setValue(control.internalName, next)}
+                      multiple={control.multiple !== false}
+                      required={control.required}
+                      disabled={submitting || readOnly}
+                      error={Boolean(invalid)}
+                      helperText={helper}
+                    />
+                  </Box>
+                );
+              }
+
+              // Поле выбора без свободного ввода — настоящий select (как в форме ДОБ).
+              if (control.kind === "select") {
+                return (
+                  <TextField
+                    key={control.internalName}
+                    select
+                    {...common}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                    value={normalizeChoiceValue(value)}
+                    onChange={(e) => setValue(control.internalName, e.target.value)}
+                    error={Boolean(invalid)}
+                    helperText={helper}
+                  >
+                    <MenuItem value=""><em>— не выбрано —</em></MenuItem>
+                    {(control.choices || []).map((choice) => (
+                      <MenuItem key={choice} value={choice}>{choice}</MenuItem>
+                    ))}
+                  </TextField>
+                );
+              }
+
+              // Многократный выбор: с FillInChoice — автокомплит (можно ввести своё),
+              // без — select с множественным выбором.
+              if (control.kind === "multichoice") {
+                const selected = normalizeChoiceValues(value);
+                if (control.allowFillIn === true) {
+                  return (
+                    <Autocomplete
+                      key={control.internalName}
+                      multiple
+                      freeSolo
+                      disableCloseOnSelect
+                      disabled={submitting || readOnly}
+                      options={control.choices || []}
+                      value={selected}
+                      onChange={(_e, next) => setValue(
+                        control.internalName,
+                        (Array.isArray(next) ? next : []).map((v) => String(v)).filter(Boolean),
+                      )}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label={`${control.title}${control.required ? " *" : ""}`}
+                          error={Boolean(invalid)}
+                          helperText={helper}
+                          size="small"
+                          fullWidth
+                        />
+                      )}
+                    />
+                  );
+                }
+                return (
+                  <TextField
+                    key={control.internalName}
+                    select
+                    {...common}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                    value={selected}
+                    onChange={(e) => setValue(control.internalName, e.target.value)}
+                    error={Boolean(invalid)}
+                    helperText={helper}
+                    SelectProps={{ multiple: true, renderValue: (sel) => (Array.isArray(sel) ? sel : []).join(", ") }}
+                  >
+                    {(control.choices || []).map((choice) => (
+                      <MenuItem key={choice} value={choice}>{choice}</MenuItem>
+                    ))}
+                  </TextField>
+                );
+              }
+
+              if (control.kind === "autocomplete" || control.kind === "choice") {
+                const freeSolo = control.kind === "autocomplete" && control.allowFillIn !== false;
+                return (
+                  <Autocomplete
+                    key={control.internalName}
+                    freeSolo={freeSolo}
+                    multiple={control.multiple === true}
+                    disabled={submitting || readOnly}
+                    options={control.choices}
+                    value={control.multiple
+                      ? normalizeChoiceValues(value)
+                      : normalizeChoiceValue(value)}
+                    onChange={(_e, next) => setValue(control.internalName, next)}
+                    onInputChange={freeSolo ? (_e, next, reason) => { if (reason === "input" && typeof value === "string") setValue(control.internalName, next); } : undefined}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label={`${control.title}${control.required ? " *" : ""}`}
+                        error={Boolean(invalid)}
+                        helperText={helper}
+                        size="small"
+                        fullWidth
+                      />
+                    )}
+                  />
+                );
+              }
+
+              if (control.kind === "number") {
+                return (
+                  // Высота — как у остальных однострочных полей (см. FORM_NUMBER_FIELD_SX):
+                  // у <input type="number"> свой внутренний размер из-за «спиннера».
+                  <TextField
+                    key={control.internalName}
+                    {...common}
+                    sx={FORM_NUMBER_FIELD_SX}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                    type="number"
+                    value={value ?? ""}
+                    onChange={(e) => setValue(control.internalName, e.target.value)}
+                    error={Boolean(invalid)}
+                    helperText={helper}
+                  />
+                );
+              }
+
+              if (control.kind === "date") {
+                return (
+                  <TextField
+                    key={control.internalName}
+                    {...common}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                    type="date"
+                    value={value || ""}
+                    onChange={(e) => setValue(control.internalName, e.target.value)}
+                    error={Boolean(invalid)}
+                    helperText={helper}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                );
+              }
+
+              if (control.kind === "boolean") {
+                return (
+                  <FormControlLabel
+                    key={control.internalName}
+                    control={(
+                      <Checkbox
+                        checked={value === true}
+                        disabled={submitting || readOnly}
+                        onChange={(e) => setValue(control.internalName, e.target.checked)}
+                      />
+                    )}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                  />
+                );
+              }
+
+              if (control.kind === "multiline") {
+                return (
+                  <TextField
+                    key={control.internalName}
+                    {...common}
+                    label={`${control.title}${control.required ? " *" : ""}`}
+                    multiline
+                    minRows={2}
+                    maxRows={6}
+                    value={value || ""}
+                    onChange={(e) => setValue(control.internalName, e.target.value)}
+                    error={Boolean(invalid)}
+                    helperText={helper}
+                  />
+                );
+              }
+
+              return (
+                <TextField
+                  key={control.internalName}
+                  {...common}
+                  label={`${control.title}${control.required ? " *" : ""}`}
+                  value={value || ""}
+                  onChange={(e) => setValue(control.internalName, e.target.value)}
+                  error={Boolean(invalid)}
+                  helperText={helper}
+                />
+              );
+                })}
+                </Box>
+              </Box>
+            )}
+
+            {form.controls.length === 0 && !fieldsQ.isLoading && (
+              <Alert severity="info">
+                В типе контента нет полей, доступных для заполнения — выберите результат и сохраните.
+              </Alert>
+            )}
+
+            {problems.length > 0 && (
+              <Alert severity="warning" data-testid="ct-result-dialog-problems">
+                <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.25 }}>
+                  Заполните обязательные поля (настроены в SharePoint):
+                </Typography>
+                {problems.map((p) => (
+                  <Typography key={p} variant="body2">• {p}</Typography>
+                ))}
+              </Alert>
+            )}
+
+          </Stack>
+        )}
+    </>
+  );
+
+  const actions = readOnly ? (
+    <Button onClick={onClose} variant="outlined" sx={FORM_SECONDARY_BUTTON_SX} data-testid="ct-result-dialog-close">
+      Закрыть
+    </Button>
+  ) : (
+    <>
+      <Button onClick={onClose} disabled={submitting} variant="outlined" sx={FORM_SECONDARY_BUTTON_SX}>
+        {cancelLabel || "Отмена"}
+      </Button>
+      <Button
+        onClick={handleSubmit}
+        disabled={submitting || fieldsQ.isLoading}
+        variant="contained"
+        startIcon={submitting ? <CircularProgress size={16} sx={{ color: "#fff" }} /> : null}
+        sx={{ ...FORM_PRIMARY_BUTTON_SX, minWidth: 140 }}
+        data-testid="ct-result-dialog-save"
+      >
+        {submitLabel || "Сохранить"}
+      </Button>
+    </>
+  );
+
+  // ⭐ Страница формы (#dob_requests/<id>) — тот же формат, что у заявки ДОБ:
+  // секции с заголовками, компактные поля и кнопки внизу, без «диалоговой» рамки.
+  if (inline) {
+    return (
+      <Box
+        data-testid="ct-result-dialog"
+        sx={{ width: "100%", minWidth: 0, display: "flex", flexDirection: "column", gap: 0.75 }}
+      >
+        {body}
+        <Box sx={FORM_ACTIONS_SX}>{actions}</Box>
+      </Box>
+    );
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={submitting ? undefined : onClose}
+      fullWidth
+      maxWidth="md"
+      PaperProps={{ sx: { borderRadius: 1 }, "data-testid": "ct-result-dialog" }}
+    >
+      <DialogTitle sx={{ fontWeight: 800, pb: 0.5 }}>
+        {title}
+        {contentTypeName && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 500 }}>
+            {contentTypeName}
+          </Typography>
+        )}
+      </DialogTitle>
+      <DialogContent dividers>{body}</DialogContent>
+      <DialogActions sx={{ px: 2, py: 1.25 }}>{actions}</DialogActions>
+    </Dialog>
+  );
+}

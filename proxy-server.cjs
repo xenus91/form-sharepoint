@@ -22,7 +22,7 @@ const config = {
   workstation: process.env.VITE_SP_WORKSTATION || "",
 };
 
-const sharepointBaseUrl = process.env.VITE_SP_SITE + "/_api";
+const sharepointBaseUrl = (process.env.VITE_SP_SITE || process.env.VITE_PROXY_BASE_URL || "") + "/_api";
 
 console.log("🚀 NTLM Proxy запущен");
 console.log("🔹 SharePoint Base URL:", sharepointBaseUrl);
@@ -33,16 +33,21 @@ console.log("🔹 Домен NTLM:", config.domain);
 // Вспомогательные
 // ──────────────────────────────────────────────────────────────────────────────
 function ensureApiUrl(originalUrl = "") {
-  // на входе: /api/..., на выходе: https://.../_api/...
-  const fixed = sharepointBaseUrl + originalUrl.replace(/^\/api/, "");
+  // Обычные SharePoint REST вызовы идут под /_api. CSOM ProcessQuery находится
+  // в /_vti_bin рядом с _api, поэтому для него снимаем суффикс _api с базы.
+  const relativeUrl = originalUrl.replace(/^\/api/, "");
+  const isProcessQuery = /^\/_vti_bin\/client\.svc\/ProcessQuery(?:[?#]|$)/i.test(relativeUrl);
+  const baseUrl = isProcessQuery ? sharepointBaseUrl.replace(/\/_api\/?$/i, "") : sharepointBaseUrl;
+  const fixed = baseUrl + relativeUrl;
   console.log(`🔹 Проксируем в: ${fixed}`);
   return fixed;
 }
 
-// Бинарные GET: файл контента (картинки/документы), а не JSON
-function isBinaryRequest(url = "") {
-  return /\/\$value(\?|$)/i.test(url) || /OpenBinaryStream/i.test(url);
-}
+// Бинарные GET: файл контента (картинки/документы), а не JSON.
+// Разбор — в scripts/spProxyUrl.cjs (покрыт тестом): помимо `$value` бинарём
+// считается ПРЯМАЯ ссылка на вложение/файл (`/sites/.../Attachments/1/a.png`) —
+// иначе картинка из rich-текста приезжает в браузер битой.
+const { isBinaryRequest } = require("./scripts/spProxyUrl.cjs");
 
 // Нужен ли X-RequestDigest: для POST/MERGE/DELETE и т.п.
 // (GET без тела — не требует)
@@ -53,8 +58,8 @@ function needsDigest(method, override) {
 }
 
 // Получение FormDigest (X-RequestDigest) как Promise
-function getRequestDigest() {
-  const url = `${sharepointBaseUrl}/contextinfo`;
+function getRequestDigest(baseUrl = sharepointBaseUrl) {
+  const url = `${baseUrl}/contextinfo`;
   return new Promise((resolve) => {
     httpntlm.post(
       {
@@ -103,6 +108,8 @@ function getOverride(req) {
 // ──────────────────────────────────────────────────────────────────────────────
 app.use("/api/*", async (req, res) => {
   const spUrl = ensureApiUrl(req.originalUrl);
+  const isProcessQuery = /\/_vti_bin\/client\.svc\/ProcessQuery(?:[?#]|$)/i.test(spUrl);
+  const isBatchRequest = /\/\$batch(?:[?#]|$)/i.test(spUrl);
   const method = req.method.toUpperCase();
   const override = getOverride(req);
 
@@ -111,8 +118,13 @@ app.use("/api/*", async (req, res) => {
 
   // Базовые заголовки к SP — по умолчанию ждём JSON
   const headers = {
-    Accept: "application/json;odata=verbose",
+    Accept: isBatchRequest && req.headers.accept
+      ? req.headers.accept
+      : "application/json;odata=verbose",
   };
+  if (isBatchRequest && req.headers["content-type"]) {
+    headers["Content-Type"] = req.headers["content-type"];
+  }
 
   // Протаскиваем важные заголовки «как есть», если заданы клиентом
   if (req.headers["if-match"]) headers["IF-MATCH"] = req.headers["if-match"];
@@ -212,8 +224,13 @@ app.use("/api/*", async (req, res) => {
     bodyToSend = "";
     console.log("🔹 DELETE override: пустое тело");
   } else {
-    // Обычный JSON POST/MERGE (тело пришло как Buffer из raw-парсера)
-    headers["Content-Type"] = "application/json;odata=verbose";
+    // ProcessQuery принимает XML; остальные REST POST/MERGE — JSON.
+    headers["Content-Type"] = isProcessQuery
+      ? (req.headers["content-type"] || "text/xml; charset=utf-8")
+      : isBatchRequest
+        ? (req.headers["content-type"] || "multipart/mixed")
+        : "application/json;odata=verbose";
+    if (isProcessQuery && req.headers.accept) headers.Accept = req.headers.accept;
     if (Buffer.isBuffer(req.body)) {
       const str = req.body.toString("utf8") || "";
       bodyToSend = str || "{}";
@@ -224,7 +241,7 @@ app.use("/api/*", async (req, res) => {
     } else {
       bodyToSend = "{}";
     }
-    console.log(`🔹 JSON POST, длина: ${bodyToSend.length}`);
+    console.log(`${isProcessQuery ? "🔹 ProcessQuery XML POST" : isBatchRequest ? "🔹 SharePoint $batch POST" : "🔹 JSON POST"}, длина: ${bodyToSend.length}`);
   }
 
   requestOptions.body = bodyToSend;
@@ -251,7 +268,9 @@ app.use("/api/*", async (req, res) => {
       }
     }
 
-    // На случай не-JSON ответа от _api — просто пробрасываем
+    // Для $batch важен boundary в Content-Type ответа: браузерный клиент
+    // разбирает multipart-секции по нему.
+    if (ct) res.setHeader("Content-Type", ct);
     return res.status(statusCode).send(body);
   });
 });

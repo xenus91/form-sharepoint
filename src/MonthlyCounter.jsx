@@ -40,6 +40,8 @@ const MonthlyCounterBar = forwardRef(
       position = "fixed",
       labelWidth = 120,
       extraContent = null,
+      sx: outerSx = {},
+      leftOffset = null,
     },
     ref
   ) => {
@@ -166,7 +168,7 @@ const MonthlyCounterBar = forwardRef(
 
     const positionSx =
       position === "fixed"
-        ? { position: "fixed", top: 8, left: 8, right: 8 } // контент уедет ПОД панель
+        ? { position: "fixed", top: 8, left: leftOffset ?? 8, right: 8 } // контент уедет ПОД панель
         : { position: "sticky", top: 0, left: 0 };          // если всё же нужен sticky
 
    return (
@@ -194,6 +196,7 @@ const MonthlyCounterBar = forwardRef(
       gap: 2,
       px: 3,   // лёгкая «воздушка»
       py: 0.5,
+      ...outerSx,
     }}
   >
     {/* всё интерактивное внутри — снова включаем события */}

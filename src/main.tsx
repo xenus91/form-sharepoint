@@ -1,0 +1,43 @@
+// main.jsx
+import React, { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "./queryClient";
+import AppWithOverlay from "./AppWithOverlay.jsx";
+import "./index.css";
+import NotificationsProvider from "./NotificationsProvider";
+
+
+// Метка сборки: помогает отличить «не починилось» от «браузер открыл старую сборку».
+// Если этой строки нет в консоли при загрузке — работает старый бандл (нужен
+// перезапуск dev-сервера / жёсткая перезагрузка страницы).
+// eslint-disable-next-line no-console
+console.info(
+  "[form-sharepoint] ct-detect v11: задача ДОБ — по записи TaskBehaviour (IsDobTask), картинки rich-текста — вложением " +
+  "(ошибка PrimitiveValue/StartObject), валидация обязательных полей с акцентом и snackbar, " +
+  "картинки rich-текста — вложениями внутри CKEditor, ровная высота числового поля",
+);
+
+
+// Метка сборки — всегда в консоли: по ней видно, какой бандл реально загружен.
+declare const __BUILD_TIME__: string;
+declare const __BUILD_ID__: string;
+try {
+  const stamp = typeof __BUILD_TIME__ !== "undefined" ? __BUILD_TIME__ : "dev";
+  const id = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "";
+  // eslint-disable-next-line no-console
+  console.info(`[app] build ${stamp}${id ? ` (#${id})` : ""}`);
+} catch {}
+
+createRoot(document.getElementById("root")).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <NotificationsProvider>
+        {/* Приложение смонтировано ВСЕГДА: ?ID=<Id> связанного элемента
+            рисуется поверх него, а не вместо — иначе список задач
+            размонтировался бы и при возврате грузился заново. */}
+        <AppWithOverlay />
+      </NotificationsProvider>
+    </QueryClientProvider>
+  </StrictMode>
+);
