@@ -64,7 +64,7 @@ describe("findOtherProblemsForEos", () => {
     expect(body).toContain("808117004022047365");
     expect(body).toContain("Created%20ge%20datetime");
     expect(body).not.toContain("DC_THU%20eq");
-    expect(config.headers.Accept).toBe("application/json;odata=verbose");
+    expect(config.headers.Accept).toBe("multipart/mixed");
     expect(results.get("row-1")).toEqual({
       otherProblem: conflict,
       notFoundDuplicate,
