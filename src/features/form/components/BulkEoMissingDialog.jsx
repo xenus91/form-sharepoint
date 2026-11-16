@@ -106,6 +106,14 @@ const getRowIssues = (row, duplicateMessage = "") => {
   return issues;
 };
 
+const buildConflictSignature = ({ dcThu, problems, rows }) => JSON.stringify({
+  dcThu: String(dcThu || "").trim(),
+  problems: [...(Array.isArray(problems) ? problems : [])].sort(),
+  pairs: (Array.isArray(rows) ? rows : [])
+    .map((row) => `${String(row?.eoNumber ?? "").trim()}|${String(row?.recipientId ?? "").trim()}`)
+    .sort(),
+});
+
 const recipientOptionId = (recipient) => recipient?.id ?? recipient?.ID ?? recipient?.Id;
 
 /**
@@ -145,6 +153,7 @@ export default function BulkEoMissingDialog({
   const [sendProgress, setSendProgress] = useState({ completed: 0, total: 0 });
   const [isCheckingConflicts, setIsCheckingConflicts] = useState(false);
   const [conflictReview, setConflictReview] = useState(null);
+  const [selectedConflictRowIds, setSelectedConflictRowIds] = useState([]);
   const [batchSummary, setBatchSummary] = useState(null);
   const latestInitialValues = useRef({ initialProblems, initialLocation });
   latestInitialValues.current = { initialProblems, initialLocation };
@@ -189,6 +198,7 @@ export default function BulkEoMissingDialog({
     setSendProgress({ completed: 0, total: 0 });
     setIsCheckingConflicts(false);
     setConflictReview(null);
+    setSelectedConflictRowIds([]);
     setBatchSummary(null);
   }, [open]);
 
@@ -236,6 +246,7 @@ export default function BulkEoMissingDialog({
       setBatchSummary(null);
       setSendError("");
       setConflictReview(null);
+      setSelectedConflictRowIds([]);
       setIsParsing(false);
     }, 250);
 
@@ -256,14 +267,20 @@ export default function BulkEoMissingDialog({
   const readyToSendRows = pendingRows.filter((row) =>
     getRowIssues(row, duplicateMessages.get(row.id)).length === 0,
   );
-  const conflictSignature = JSON.stringify({
-    dcThu: String(dcThu || "").trim(),
-    problems: [...selectedProblems].sort(),
-    pairs: readyToSendRows
-      .map((row) => `${String(row.eoNumber).trim()}|${String(row.recipientId ?? "").trim()}`)
-      .sort(),
-  });
+  const conflictSignature = buildConflictSignature({ dcThu, problems: selectedProblems, rows: readyToSendRows });
   const conflictReviewForCurrent = conflictReview?.signature === conflictSignature ? conflictReview : null;
+  const hasConflictReviewItems = Boolean(
+    conflictReviewForCurrent?.conflicts?.length || conflictReviewForCurrent?.duplicates?.length,
+  );
+  const selectedConflictRowIdSet = new Set(selectedConflictRowIds);
+  const readyToSendRowIdSet = new Set(readyToSendRows.map((row) => row.id));
+  const conflictReviewRowIdSet = new Set([
+    ...(conflictReviewForCurrent?.conflicts || []),
+    ...(conflictReviewForCurrent?.duplicates || []),
+  ].map((row) => row.rowId));
+  const rowsToSend = hasConflictReviewItems
+    ? readyToSendRows.filter((row) => selectedConflictRowIdSet.has(row.id))
+    : readyToSendRows;
   const isTransportationRequired = /отгружен/i.test(String(location));
   const sendDisabled =
     isParsing ||
@@ -271,6 +288,7 @@ export default function BulkEoMissingDialog({
     isCheckingConflicts ||
     rows.length === 0 ||
     readyToSendRows.length === 0 ||
+    rowsToSend.length === 0 ||
     readyToSendRows.length !== pendingRows.length ||
     !selectedProblems.includes(EO_MISSING_PROBLEM) ||
     !String(location || "").trim() ||
@@ -304,6 +322,7 @@ export default function BulkEoMissingDialog({
     setParseError("");
     setBatchSummary(null);
     setConflictReview(null);
+    setSelectedConflictRowIds([]);
     setSendError("");
   };
 
@@ -312,6 +331,8 @@ export default function BulkEoMissingDialog({
       ? { ...row, ...update, requestStatus: row.requestStatus === "failed" ? "ready" : row.requestStatus, requestMessage: "" }
       : row));
     setBatchSummary(null);
+    setConflictReview(null);
+    setSelectedConflictRowIds([]);
   };
 
   const handleRecipientChange = (row, recipient) => {
@@ -334,12 +355,22 @@ export default function BulkEoMissingDialog({
     setEditingEoRowId((previous) => (previous === rowId ? null : previous));
     setBatchSummary(null);
     setConflictReview(null);
+    setSelectedConflictRowIds([]);
   };
 
   const handleProblemsChange = (event) => {
     const rawValue = event.target.value;
     const values = typeof rawValue === "string" ? rawValue.split(",") : rawValue;
     setSelectedProblems([...new Set([EO_MISSING_PROBLEM, ...(values || [])])]);
+    setConflictReview(null);
+    setSelectedConflictRowIds([]);
+  };
+
+  const handleConflictRowSelectionChange = (rowId, selected) => {
+    setSelectedConflictRowIds((previous) => {
+      if (selected) return previous.includes(rowId) ? previous : [...previous, rowId];
+      return previous.filter((id) => id !== rowId);
+    });
   };
 
   const handleSend = async () => {
@@ -347,12 +378,14 @@ export default function BulkEoMissingDialog({
     setIsSending(true);
     setSendError("");
     setBatchSummary(null);
-    setSendProgress({ completed: 0, total: readyToSendRows.length });
+    setSendProgress({ completed: 0, total: rowsToSend.length });
     const previouslyCreated = rows.filter((row) => row.requestStatus === "success").length;
     const previouslyUncertain = rows.filter((row) => row.requestStatus === "uncertain").length;
     try {
       const hasConflictChecker = typeof onCheckEoConflicts === "function"
         || typeof onCheckEoConflict === "function";
+      let conflictsForReview = conflictReviewForCurrent?.conflicts || [];
+      let duplicatesForReview = conflictReviewForCurrent?.duplicates || [];
       if (hasConflictChecker && !conflictReviewForCurrent) {
         setIsCheckingConflicts(true);
         let checkedRows;
@@ -390,13 +423,19 @@ export default function BulkEoMissingDialog({
         }
         const conflicts = checkedRows.filter((row) => row.existing);
         const duplicates = checkedRows.filter((row) => row.duplicate);
+        conflictsForReview = conflicts;
+        duplicatesForReview = duplicates;
+        const conflictedRowIds = new Set([...conflicts, ...duplicates].map((row) => row.rowId));
         setConflictReview({ signature: conflictSignature, conflicts, duplicates });
+        setSelectedConflictRowIds(checkedRows
+          .filter((row) => !conflictedRowIds.has(row.rowId))
+          .map((row) => row.rowId));
         setIsCheckingConflicts(false);
         if (conflicts.length > 0 || duplicates.length > 0) return;
       }
 
       const results = await createBulkProblemsPalletItems({
-        rows: readyToSendRows,
+        rows: rowsToSend,
         dcThu,
         operationDateIso,
         problems: selectedProblems,
@@ -424,6 +463,23 @@ export default function BulkEoMissingDialog({
         uncertainCount,
       });
       if (newlyCreatedCount > 0 && typeof onCreated === "function") onCreated(newlyCreatedCount);
+      const resultByRowId = new Map(results.map((result) => [result.rowId, result]));
+      const remainingRows = readyToSendRows.filter((row) => {
+        const result = resultByRowId.get(row.id);
+        return !result || !["success", "uncertain"].includes(result.status);
+      });
+      if (hasConflictChecker && remainingRows.length > 0) {
+        const remainingRowIds = new Set(remainingRows.map((row) => row.id));
+        setConflictReview({
+          signature: buildConflictSignature({ dcThu, problems: selectedProblems, rows: remainingRows }),
+          conflicts: conflictsForReview.filter((row) => remainingRowIds.has(row.rowId)),
+          duplicates: duplicatesForReview.filter((row) => remainingRowIds.has(row.rowId)),
+        });
+        setSelectedConflictRowIds((previous) => previous.filter((rowId) => remainingRowIds.has(rowId)));
+      } else {
+        setConflictReview(null);
+        setSelectedConflictRowIds([]);
+      }
       const newlySucceededRowIds = new Set(results
         .filter((result) => result.status === "success")
         .map((result) => result.rowId));
@@ -444,7 +500,7 @@ export default function BulkEoMissingDialog({
     if (!isSending && !isCheckingConflicts && typeof onClose === "function") onClose();
   };
 
-  const requestRowsToSend = readyToSendRows.length;
+  const requestRowsToSend = rowsToSend.length;
   const hasAttemptedRows = rows.some((row) => row.requestStatus !== "ready");
   const allRowsFinished = rows.length > 0 && pendingRows.length === 0;
 
@@ -684,6 +740,8 @@ export default function BulkEoMissingDialog({
                 const recipientTitle = row.recipientId
                   ? row.recipientMatchStatus === "matched" ? "Сопоставлен автоматически" : "Получатель выбран вручную"
                   : row.recipientMatchStatus === "ambiguous" ? "Найдено несколько получателей — выберите нужного" : "Выберите получателя";
+                const canSelectForConflictSend = hasConflictReviewItems && readyToSendRowIdSet.has(row.id);
+                const rowHasConflict = conflictReviewRowIdSet.has(row.id);
                 return (
                   <Box key={row.id} data-testid={`bulk-eo-row-${index + 1}`} sx={{ width: "100%", minWidth: 0, maxWidth: "100%" }}>
                     <Paper
@@ -699,6 +757,22 @@ export default function BulkEoMissingDialog({
                         bgcolor: "background.paper",
                       }}
                     >
+                      {canSelectForConflictSend && (
+                        <Checkbox
+                          size="small"
+                          checked={selectedConflictRowIdSet.has(row.id)}
+                          onChange={(_, checked) => handleConflictRowSelectionChange(row.id, checked)}
+                          disabled={isSending || isCheckingConflicts}
+                          data-testid={`bulk-eo-conflict-select-${index + 1}`}
+                          inputProps={{
+                            "aria-label": `Отправить заявку по ЕО ${row.eoNumber}`,
+                            title: rowHasConflict
+                              ? "Найден конфликт или повторная заявка; строка снята с выбора по умолчанию"
+                              : "Конфликтов не найдено; строка выбрана для отправки",
+                          }}
+                          sx={{ flexShrink: 0, p: 0.25, width: 26, height: 26 }}
+                        />
+                      )}
                       {isEditingEo ? (
                         <TextField
                           autoFocus
@@ -911,7 +985,7 @@ export default function BulkEoMissingDialog({
                   );
                 })}
               </Box>
-              <Typography variant="body2">Если вы проверили данные и ЕО действительно не найдена, нажмите «Подтвердить и отправить».</Typography>
+              <Typography variant="body2">Строки с конфликтами сняты с выбора. Отметьте их только если проверили данные и действительно хотите отправить повторную заявку.</Typography>
             </Alert>
           )}
           {conflictReviewForCurrent?.duplicates?.length > 0 && (
@@ -936,8 +1010,13 @@ export default function BulkEoMissingDialog({
                   );
                 })}
               </Box>
-              <Typography variant="body2">Проверьте, что это не повторная отправка. Для продолжения нажмите «Подтвердить и отправить».</Typography>
+              <Typography variant="body2">Проверьте, что это не повторная отправка. Конфликтные строки сняты с выбора; отметьте нужные вручную, чтобы отправить их.</Typography>
             </Alert>
+          )}
+          {hasConflictReviewItems && (
+            <Typography variant="caption" color="text.secondary" data-testid="bulk-eo-conflict-selection-summary">
+              Выбрано для отправки: {rowsToSend.length} из {readyToSendRows.length}.
+            </Typography>
           )}
           {!selectedProblems.includes(EO_MISSING_PROBLEM) && (
             <Alert severity="error">Для массовой отправки требуется проблема «Не найдена».</Alert>
@@ -998,8 +1077,10 @@ export default function BulkEoMissingDialog({
               ? "Проверка…"
               : isSending
                 ? "Отправка…"
-                : (conflictReviewForCurrent?.conflicts?.length > 0 || conflictReviewForCurrent?.duplicates?.length > 0)
-                  ? `Подтвердить и отправить ${requestCountLabel(requestRowsToSend)}`
+                : hasConflictReviewItems
+                  ? requestRowsToSend > 0
+                    ? `Подтвердить и отправить ${requestCountLabel(requestRowsToSend)}`
+                    : "Выберите заявки"
                   : hasAttemptedRows
                     ? `Повторить ${retryCountLabel(requestRowsToSend)}`
                     : `Отправить ${requestCountLabel(requestRowsToSend)}`}

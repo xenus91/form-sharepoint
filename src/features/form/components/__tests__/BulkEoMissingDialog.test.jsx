@@ -54,6 +54,16 @@ async function clickButton(text) {
   });
 }
 
+async function clickCheckbox(testId) {
+  const checkbox = document.body.querySelector(`[data-testid="${testId}"] input[type="checkbox"]`)
+    || document.body.querySelector(`input[data-testid="${testId}"]`);
+  if (!checkbox) throw new Error(`Чекбокс «${testId}» не найден`);
+  await act(async () => {
+    checkbox.click();
+    await wait(5);
+  });
+}
+
 async function pasteSource(source, text) {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
   await act(async () => {
@@ -296,6 +306,51 @@ describe("BulkEoMissingDialog", () => {
     expect(onCreated).toHaveBeenCalledWith(4);
   });
 
+  it("по умолчанию выбирает прошедшие проверку строки и отправляет только их", async () => {
+    const eos = [
+      "808117004022047365",
+      "808117004022002852",
+      "808117004022002853",
+      "808117004022002854",
+      "808117004022002855",
+    ];
+    const duplicate = {
+      Id: 93,
+      THU: eos[4],
+      RecipientId: 1,
+      Created: "2026-10-10T06:00:00.000Z",
+      Problems: { results: ["Не найдена"] },
+    };
+    const onCheckEoConflicts = vi.fn(async (rows) => new Map(rows.map((row) => [row.id, {
+      otherProblem: null,
+      notFoundDuplicate: row.eoNumber === duplicate.THU ? duplicate : null,
+    }])));
+    await render({ onCheckEoConflicts });
+
+    const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
+    await pasteSource(source, eos.map((eo, index) => `${index % 2 === 0 ? "0294" : "0295"}\n${eo}`).join("\n"));
+    await clickButton("Отправить 5 заявок");
+
+    expect(onCheckEoConflicts).toHaveBeenCalledTimes(1);
+    expect(mocks.createBulkProblemsPalletItems).not.toHaveBeenCalled();
+    const checkboxes = [...document.body.querySelectorAll('[data-testid^="bulk-eo-conflict-select-"] input[type="checkbox"]')];
+    expect(checkboxes).toHaveLength(5);
+    expect(checkboxes.map((checkbox) => checkbox.checked)).toEqual([true, true, true, true, false]);
+    expect(document.body.querySelector('[data-testid="bulk-eo-conflict-selection-summary"]').textContent)
+      .toContain("Выбрано для отправки: 4 из 5");
+
+    await clickButton("Подтвердить и отправить 4 заявки");
+
+    const options = mocks.createBulkProblemsPalletItems.mock.calls[0][0];
+    expect(options.rows.map((row) => row.eoNumber)).toEqual(eos.slice(0, 4));
+    expect(onCreated).toHaveBeenCalledWith(4);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-testid="bulk-eo-notfound-duplicates"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="bulk-eo-conflict-select-5"] input[type="checkbox"]')?.checked)
+      .toBe(false);
+    expect(findButton("Выберите заявки").disabled).toBe(true);
+  });
+
   it("предупреждает о дубликате пары ЕО-получатель за 12 часов и ждёт подтверждения", async () => {
     const duplicate = {
       Id: 93,
@@ -317,7 +372,11 @@ describe("BulkEoMissingDialog", () => {
     expect(document.body.querySelector('[data-testid="bulk-eo-notfound-duplicates"]')).not.toBeNull();
     expect(document.body.textContent).toContain("За последние 12 часов уже есть заявки «Не найдена»");
     expect(mocks.createBulkProblemsPalletItems).not.toHaveBeenCalled();
+    const duplicateCheckbox = document.body.querySelector('[data-testid="bulk-eo-conflict-select-1"] input[type="checkbox"]');
+    expect(duplicateCheckbox?.checked).toBe(false);
+    expect(findButton("Выберите заявки").disabled).toBe(true);
 
+    await clickCheckbox("bulk-eo-conflict-select-1");
     await clickButton("Подтвердить и отправить 1 заявка");
     expect(mocks.createBulkProblemsPalletItems).toHaveBeenCalledTimes(1);
     expect(onCreated).toHaveBeenCalledWith(1);
@@ -340,7 +399,9 @@ describe("BulkEoMissingDialog", () => {
     expect(onCheckEoConflict).toHaveBeenCalledWith("808117004022047365");
     expect(mocks.createBulkProblemsPalletItems).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("По некоторым ЕО уже есть заявки с другими проблемами");
+    expect(document.body.querySelector('[data-testid="bulk-eo-conflict-select-1"] input[type="checkbox"]')?.checked).toBe(false);
 
+    await clickCheckbox("bulk-eo-conflict-select-1");
     await clickButton("Подтвердить и отправить 1 заявка");
     expect(mocks.createBulkProblemsPalletItems).toHaveBeenCalledTimes(1);
     expect(onCreated).toHaveBeenCalledWith(1);
