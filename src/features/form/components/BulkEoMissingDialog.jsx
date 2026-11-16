@@ -480,13 +480,10 @@ export default function BulkEoMissingDialog({
         setConflictReview(null);
         setSelectedConflictRowIds([]);
       }
-      const newlySucceededRowIds = new Set(results
-        .filter((result) => result.status === "success")
-        .map((result) => result.rowId));
-      const allRowsSucceeded = rows.every((row) =>
-        row.requestStatus === "success" || newlySucceededRowIds.has(row.id),
-      );
-      if (allRowsSucceeded && typeof onClose === "function") onClose();
+      const allSubmittedRowsSucceeded = results.length === rowsToSend.length
+        && rowsToSend.length > 0
+        && results.every((result) => result.status === "success");
+      if (allSubmittedRowsSucceeded && typeof onClose === "function") onClose();
     } catch (error) {
       console.error("Ошибка массовой отправки:", error);
       setSendError(error?.message || "Не удалось начать отправку. Проверьте соединение и попробуйте ещё раз.");

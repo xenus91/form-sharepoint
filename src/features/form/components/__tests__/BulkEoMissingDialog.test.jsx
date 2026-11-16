@@ -344,11 +344,7 @@ describe("BulkEoMissingDialog", () => {
     const options = mocks.createBulkProblemsPalletItems.mock.calls[0][0];
     expect(options.rows.map((row) => row.eoNumber)).toEqual(eos.slice(0, 4));
     expect(onCreated).toHaveBeenCalledWith(4);
-    expect(onClose).not.toHaveBeenCalled();
-    expect(document.body.querySelector('[data-testid="bulk-eo-notfound-duplicates"]')).not.toBeNull();
-    expect(document.body.querySelector('[data-testid="bulk-eo-conflict-select-5"] input[type="checkbox"]')?.checked)
-      .toBe(false);
-    expect(findButton("Выберите заявки").disabled).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("предупреждает о дубликате пары ЕО-получатель за 12 часов и ждёт подтверждения", async () => {
