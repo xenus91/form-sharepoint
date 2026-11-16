@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBulkProblemsPalletItems } from "../bulkSubmit";
+import { SHAREPOINT_BATCH_SIZE } from "../sharepointBatch";
 
 const common = {
   rows: [
@@ -12,27 +13,61 @@ const common = {
   location: "Не найдена в зоне отгрузки",
 };
 
-const digestResponse = {
-  data: { d: { GetContextWebInformation: { FormDigestValue: "digest-value" } } },
-};
+function makeBatchResponse(items, boundary = "batchresponse_test") {
+  const lines = [];
+  items.forEach((item, index) => {
+    const changesetBoundary = `changesetresponse_${index + 1}`;
+    const statusText = item.status === 201 ? "Created" : item.status === 400 ? "Bad Request" : "Error";
+    lines.push(
+      `--${boundary}`,
+      `Content-Type: multipart/mixed; boundary="${changesetBoundary}"`,
+      "",
+      `--${changesetBoundary}`,
+      "Content-Type: application/http",
+      "Content-Transfer-Encoding: binary",
+      `Content-ID: ${item.contentId ?? index + 1}`,
+      "",
+      `HTTP/1.1 ${item.status} ${statusText}`,
+      "Content-Type: application/json;odata=verbose",
+      "",
+      JSON.stringify(item.body),
+      `--${changesetBoundary}--`,
+    );
+  });
+  lines.push(`--${boundary}--`);
+  return {
+    status: 200,
+    data: lines.join("\r\n"),
+    headers: { "content-type": `multipart/mixed; boundary=${boundary}` },
+  };
+}
+
+const successfulItem = (id) => ({ status: 201, body: { d: { Id: id } } });
 
 describe("createBulkProblemsPalletItems", () => {
-  it("создаёт отдельный элемент на каждую пару и выставляет финальный статус", async () => {
-    let nextId = 100;
+  it("создаёт каждую заявку в SharePoint $batch и задаёт итоговый статус при создании", async () => {
     const client = {
-      post: vi.fn(async (url) => {
-        if (url === "/contextinfo") return digestResponse;
-        if (url.endsWith("/items")) return { data: { d: { Id: nextId++ } } };
-        return { data: {} };
-      }),
+      post: vi.fn(async () => makeBatchResponse([successfulItem(100), successfulItem(101)])),
     };
     const onRowResult = vi.fn();
 
     const results = await createBulkProblemsPalletItems({ ...common, client, onRowResult });
 
-    const creates = client.post.mock.calls.filter(([url]) => url.endsWith("/items"));
-    expect(creates).toHaveLength(2);
-    expect(creates.map(([, payload]) => payload)).toEqual([
+    expect(client.post).toHaveBeenCalledTimes(1);
+    const [url, body, config] = client.post.mock.calls[0];
+    expect(url).toBe("/$batch");
+    expect(typeof body).toBe("string");
+    expect(config.headers.Accept).toBe("multipart/mixed");
+    expect(config.headers["Content-Type"]).toMatch(/^multipart\/mixed; boundary=/);
+    expect(config.transformRequest).toHaveLength(1);
+    expect(body.match(/Content-ID: /g)).toHaveLength(2);
+    expect(body.match(/Content-Type: multipart\/mixed; boundary=/g)).toHaveLength(2);
+    expect(body).toContain("POST web/lists/getbytitle('ProblemsPallet')/items HTTP/1.1");
+
+    const payloads = body.split(/\r?\n/)
+      .filter((line) => line.startsWith("{") && line.endsWith("}"))
+      .map((line) => JSON.parse(line));
+    expect(payloads).toEqual([
       expect.objectContaining({
         Title: "8117_808117004022047365",
         THU: "808117004022047365",
@@ -40,101 +75,81 @@ describe("createBulkProblemsPalletItems", () => {
         RecipientId: 17,
         Location1: "Не найдена в зоне отгрузки",
         OperationDate: common.operationDateIso,
+        Status: "Выполнено",
         Problems: { __metadata: { type: "Collection(Edm.String)" }, results: ["Не найдена"] },
       }),
-      expect.objectContaining({ Title: "8117_808117004022002852", RecipientId: 21 }),
+      expect.objectContaining({ Title: "8117_808117004022002852", RecipientId: 21, Status: "Выполнено" }),
     ]);
+    expect(body).not.toContain("X-HTTP-Method: MERGE");
     expect(results.map((result) => result.status)).toEqual(["success", "success"]);
     expect(results.map((result) => result.itemId)).toEqual([100, 101]);
     expect(onRowResult).toHaveBeenCalledTimes(2);
-
-    const statusUpdates = client.post.mock.calls.filter(([, payload]) => payload?.Status === "Выполнено");
-    expect(statusUpdates).toHaveLength(2);
-    expect(statusUpdates[0][2].headers["X-HTTP-Method"]).toBe("MERGE");
   });
 
-  it("держит не больше четырёх строк в отправке одновременно и возвращает результат в исходном порядке", async () => {
-    const rows = Array.from({ length: 5 }, (_, index) => ({
-      id: `row-${index + 1}`,
-      eoNumber: `80811700402204736${index + 1}`,
-      recipientId: 17 + index,
-    }));
-    let nextId = 100;
-    let activeCreates = 0;
-    let maxActiveCreates = 0;
-    const createReleases = [];
+  it("сохраняет частичные результаты: 4xx одной операции можно безопасно повторить", async () => {
     const client = {
-      post: vi.fn((url) => {
-        if (url === "/contextinfo") return Promise.resolve(digestResponse);
-        if (url.endsWith("/items")) {
-          activeCreates += 1;
-          maxActiveCreates = Math.max(maxActiveCreates, activeCreates);
-          return new Promise((resolve) => {
-            createReleases.push(() => {
-              activeCreates -= 1;
-              resolve({ data: { d: { Id: nextId++ } } });
-            });
-          });
-        }
-        return Promise.resolve({ data: {} });
-      }),
-    };
-
-    const submission = createBulkProblemsPalletItems({ ...common, rows, client });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(createReleases).toHaveLength(4);
-    expect(maxActiveCreates).toBe(4);
-
-    createReleases[0]();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(createReleases).toHaveLength(5);
-    for (const release of createReleases.slice(1)) release();
-
-    const results = await submission;
-    expect(results.map((result) => result.rowId)).toEqual(rows.map((row) => row.id));
-    expect(results.map((result) => result.itemId)).toEqual([100, 101, 102, 103, 104]);
-    expect(results.every((result) => result.status === "success")).toBe(true);
-    expect(maxActiveCreates).toBe(4);
-  });
-
-  it("возвращает результат по каждой строке, а не прерывает всю пачку при ошибке", async () => {
-    let createCount = 0;
-    const client = {
-      post: vi.fn(async (url) => {
-        if (url === "/contextinfo") return digestResponse;
-        if (url.endsWith("/items")) {
-          createCount += 1;
-          if (createCount === 2) {
-            const error = new Error("bad request");
-            error.response = { status: 400, data: { error: { message: { value: "Некорректный получатель" } } } };
-            throw error;
-          }
-          return { data: { d: { Id: 200 } } };
-        }
-        return { data: {} };
-      }),
+      post: vi.fn(async () => makeBatchResponse([
+        successfulItem(200),
+        { status: 400, body: { error: { message: { value: "Некорректный получатель" } } } },
+      ])),
     };
 
     const results = await createBulkProblemsPalletItems({ ...common, client });
 
     expect(results).toEqual([
-      expect.objectContaining({ rowId: "row-1", status: "success", itemId: 200 }),
-      expect.objectContaining({ rowId: "row-2", status: "failed", retryable: true, message: "Некорректный получатель" }),
+      expect.objectContaining({ rowId: "row-1", status: "success", itemId: 200, retryable: false }),
+      expect.objectContaining({
+        rowId: "row-2",
+        status: "failed",
+        itemId: null,
+        retryable: true,
+        message: "Некорректный получатель",
+      }),
     ]);
   });
 
-  it("не предлагает повторять запрос, если сетевой результат неоднозначен", async () => {
+  it("делит отправку на пакеты максимум по 15 элементов", async () => {
+    const rows = Array.from({ length: 17 }, (_, index) => ({
+      id: `row-${index + 1}`,
+      eoNumber: `808117004022047${String(index).padStart(3, "0")}`,
+      recipientId: 17 + index,
+    }));
+    let nextId = 300;
     const client = {
-      post: vi.fn(async (url) => {
-        if (url === "/contextinfo") return digestResponse;
-        const error = new Error("timeout");
-        throw error;
+      post: vi.fn(async (_url, body) => {
+        const count = (body.match(/Content-ID: /g) || []).length;
+        return makeBatchResponse(Array.from({ length: count }, () => successfulItem(nextId++)));
       }),
     };
 
-    const [result] = await createBulkProblemsPalletItems({ ...common, rows: common.rows.slice(0, 1), client });
+    const results = await createBulkProblemsPalletItems({ ...common, rows, client });
 
-    expect(result).toMatchObject({ status: "uncertain", retryable: false });
-    expect(result.message).toContain("Проверьте список");
+    expect(SHAREPOINT_BATCH_SIZE).toBe(15);
+    expect(client.post).toHaveBeenCalledTimes(2);
+    expect(client.post.mock.calls.map(([, body]) => (body.match(/Content-ID: /g) || []).length)).toEqual([15, 2]);
+    expect(results).toHaveLength(17);
+    expect(results.map((result) => result.itemId)).toEqual(Array.from({ length: 17 }, (_, index) => 300 + index));
+    expect(results.every((result) => result.status === "success")).toBe(true);
+  });
+
+  it("не предлагает повторять строки, если результат всего пакета неоднозначен", async () => {
+    const client = { post: vi.fn(async () => { throw new Error("timeout"); }) };
+
+    const results = await createBulkProblemsPalletItems({ ...common, client });
+
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.status === "uncertain" && result.retryable === false)).toBe(true);
+    expect(results[0].message).toContain("Проверьте список");
+  });
+
+  it("помечает отсутствующий ответ операции как неоднозначный", async () => {
+    const client = {
+      post: vi.fn(async () => makeBatchResponse([successfulItem(400)])),
+    };
+
+    const results = await createBulkProblemsPalletItems({ ...common, client });
+
+    expect(results[0]).toMatchObject({ status: "success", itemId: 400 });
+    expect(results[1]).toMatchObject({ status: "uncertain", retryable: false });
   });
 });

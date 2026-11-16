@@ -109,6 +109,7 @@ function getOverride(req) {
 app.use("/api/*", async (req, res) => {
   const spUrl = ensureApiUrl(req.originalUrl);
   const isProcessQuery = /\/_vti_bin\/client\.svc\/ProcessQuery(?:[?#]|$)/i.test(spUrl);
+  const isBatchRequest = /\/\$batch(?:[?#]|$)/i.test(spUrl);
   const method = req.method.toUpperCase();
   const override = getOverride(req);
 
@@ -117,8 +118,13 @@ app.use("/api/*", async (req, res) => {
 
   // Базовые заголовки к SP — по умолчанию ждём JSON
   const headers = {
-    Accept: "application/json;odata=verbose",
+    Accept: isBatchRequest && req.headers.accept
+      ? req.headers.accept
+      : "application/json;odata=verbose",
   };
+  if (isBatchRequest && req.headers["content-type"]) {
+    headers["Content-Type"] = req.headers["content-type"];
+  }
 
   // Протаскиваем важные заголовки «как есть», если заданы клиентом
   if (req.headers["if-match"]) headers["IF-MATCH"] = req.headers["if-match"];
@@ -221,7 +227,9 @@ app.use("/api/*", async (req, res) => {
     // ProcessQuery принимает XML; остальные REST POST/MERGE — JSON.
     headers["Content-Type"] = isProcessQuery
       ? (req.headers["content-type"] || "text/xml; charset=utf-8")
-      : "application/json;odata=verbose";
+      : isBatchRequest
+        ? (req.headers["content-type"] || "multipart/mixed")
+        : "application/json;odata=verbose";
     if (isProcessQuery && req.headers.accept) headers.Accept = req.headers.accept;
     if (Buffer.isBuffer(req.body)) {
       const str = req.body.toString("utf8") || "";
@@ -233,7 +241,7 @@ app.use("/api/*", async (req, res) => {
     } else {
       bodyToSend = "{}";
     }
-    console.log(`${isProcessQuery ? "🔹 ProcessQuery XML POST" : "🔹 JSON POST"}, длина: ${bodyToSend.length}`);
+    console.log(`${isProcessQuery ? "🔹 ProcessQuery XML POST" : isBatchRequest ? "🔹 SharePoint $batch POST" : "🔹 JSON POST"}, длина: ${bodyToSend.length}`);
   }
 
   requestOptions.body = bodyToSend;
@@ -260,7 +268,9 @@ app.use("/api/*", async (req, res) => {
       }
     }
 
-    // На случай не-JSON ответа от _api — просто пробрасываем
+    // Для $batch важен boundary в Content-Type ответа: браузерный клиент
+    // разбирает multipart-секции по нему.
+    if (ct) res.setHeader("Content-Type", ct);
     return res.status(statusCode).send(body);
   });
 });

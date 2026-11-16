@@ -66,6 +66,9 @@ import { fetchDistributionDepartments } from "./tasks/distribution";
 import { canSwitchTaskDepartment } from "./features/navigation/taskDepartmentAccess";
 import { EO_MISSING_LOCATION, EO_MISSING_PROBLEM, isEoMissingRoute } from "./features/form/lib/eoMissingRoute";
 import BulkEoMissingDialog from "./features/form/components/BulkEoMissingDialog";
+import { findOtherProblemsForEos as findBulkOtherProblemsForEos } from "./features/form/lib/bulkConflictCheck";
+import { NOT_FOUND_DUPLICATE_LOOKBACK_HOURS } from "./features/form/lib/notFoundDuplicate";
+import { findRecentNotFoundRecipientDuplicate } from "./features/form/lib/notFoundDuplicateCheck";
 import {
   OTHER_PROBLEM_DIALOG_TITLE,
   eoCheckKindForProblems,
@@ -449,6 +452,9 @@ const App = () => {
   // Состояния для дубликатов ЕО
   const [duplicateEoDialogOpen, setDuplicateEoDialogOpen] = useState(false);
   const [duplicateEoItem, setDuplicateEoItem] = useState(null);
+  const [duplicateEoDialogKind, setDuplicateEoDialogKind] = useState("recent-self");
+  const [duplicateEoPairKey, setDuplicateEoPairKey] = useState("");
+  const answeredNotFoundRecipientDuplicatesRef = useRef(new Set());
   // По этому же ЕО за последние 48 часов на этом же РЦ уже регистрировали ДРУГУЮ
   // проблему — «Не найдена» скорее всего ошибочна, просим подтвердить.
   const [otherProblemItem, setOtherProblemItem] = useState(null);
@@ -773,6 +779,8 @@ const App = () => {
       if (response.data.d.results.length > 0) {
         const item = response.data.d.results[0];
         setDuplicateEoItem(item);
+        setDuplicateEoDialogKind("recent-self");
+        setDuplicateEoPairKey("");
         setDuplicateEoDialogOpen(true);
         return item;
       }
@@ -814,6 +822,18 @@ const App = () => {
       return null;
     }
   };
+
+  /** Дубликат пары ЕО + получатель с проблемой «Не найдена» за 12 часов. */
+  const findNotFoundDuplicateForEoRecipient = (eoNumber, recipientId) =>
+    findRecentNotFoundRecipientDuplicate({ eoNumber, recipientId, editingItemId });
+
+  // Массовая форма одним $batch проверяет конфликт по проблеме и дубликат пары
+  // ЕО + получатель; в каждом запросе не более 15 уникальных ЕО.
+  const findOtherProblemsForBulkEos = (rows) => findBulkOtherProblemsForEos({
+    rows,
+    dcThu: getEffectiveDcThu(),
+    editingItemId,
+  });
 
   /**
    * Проверка номера ЕО. Какая именно — зависит от выбранной проблемы, и только
@@ -858,6 +878,13 @@ const App = () => {
   const markEoCheckAnswered = () => {
     answeredCheckSigRef.current = pendingCheckSigRef.current;
     pendingCheckSigRef.current = null;
+  };
+
+  const markDuplicateEoCheckAnswered = () => {
+    if (duplicateEoDialogKind === "notfound-recipient" && duplicateEoPairKey) {
+      answeredNotFoundRecipientDuplicatesRef.current.add(duplicateEoPairKey);
+    }
+    markEoCheckAnswered();
   };
 
   /**
@@ -1417,11 +1444,35 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
 
     // Страховка: если проверку не прошли на выборе проблемы (например, номер ЕО
     // ввели позже) — спрашиваем здесь. На уже отвеченную подпись не спрашиваем.
-    if (answeredCheckSigRef.current !== eoCheckSignature(eoNumber, problems)) {
+    const checkSignature = eoCheckSignature(eoNumber, problems);
+    if (answeredCheckSigRef.current !== checkSignature) {
       const hit = await runEoChecks(eoNumber, problems);
       if (hit) {
         isSubmittingRef.current = false;
         return;
+      }
+    }
+
+    // Для «Не найдена» повторная заявка по той же паре ЕО + получатель за 12 часов
+    // требует отдельного подтверждения. Проверяем именно при отправке, когда оба
+    // значения уже валидны и получатель точно выбран.
+    if (!editingItemId && problems.includes(EO_MISSING_PROBLEM)) {
+      const pairKey = `${String(eoNumber).trim()}|${String(selectedRecipient).trim()}`;
+      if (answeredNotFoundRecipientDuplicatesRef.current.has(pairKey)) {
+        // Одноразовый пропуск после явного подтверждения в диалоге. Удаляем до
+        // отправки, чтобы при сетевой ошибке следующая попытка снова проверилась.
+        answeredNotFoundRecipientDuplicatesRef.current.delete(pairKey);
+      } else {
+        const duplicate = await findNotFoundDuplicateForEoRecipient(eoNumber, selectedRecipient);
+        if (duplicate) {
+          setDuplicateEoItem(duplicate);
+          setDuplicateEoDialogKind("notfound-recipient");
+          setDuplicateEoPairKey(pairKey);
+          pendingCheckSigRef.current = checkSignature;
+          setDuplicateEoDialogOpen(true);
+          isSubmittingRef.current = false;
+          return;
+        }
       }
     }
 
@@ -1605,6 +1656,9 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
       setKey((prevKey) => prevKey + 1);
       setSelectedRadioValue("");
       setEditingItemId(null);
+      answeredCheckSigRef.current = null;
+      pendingCheckSigRef.current = null;
+      answeredNotFoundRecipientDuplicatesRef.current.clear();
     } catch (err) {
       console.error("Ошибка отправки данных:", err);
       try {
@@ -2600,7 +2654,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
         initialLocation={location}
         dcThu={getEffectiveDcThu()}
         operationDateIso={operationDateIso}
-        onCheckEoConflict={(eo) => findOtherProblemForEo(eo)}
+        onCheckEoConflicts={(eos) => findOtherProblemsForBulkEos(eos)}
         onCreated={(count) => {
           monthlyCounterRef.current?.refresh?.();
           notify(`Создано ${count} заявок массовой отправкой`, { severity: "success" });
@@ -3086,10 +3140,14 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             sx: { borderRadius: EO_DIALOG_RADIUS, p: 1 }
           }}
         >
-          <DialogTitle sx={{ fontWeight: 800 }}>Дубликат ЕО</DialogTitle>
+          <DialogTitle sx={{ fontWeight: 800 }}>
+            {duplicateEoDialogKind === "notfound-recipient" ? "Недавний дубликат заявки" : "Дубликат ЕО"}
+          </DialogTitle>
           <DialogContent>
             <DialogContentText>
-              Вы уже отправляли заявку с этим номером ЕО ({duplicateEoItem?.THU}) за последние 24 часа. Хотите изменить её?
+              {duplicateEoDialogKind === "notfound-recipient"
+                ? `За последние ${NOT_FOUND_DUPLICATE_LOOKBACK_HOURS} часов уже есть заявка «Не найдена» по ЕО (${duplicateEoItem?.THU}) для этого получателя. Хотите изменить её или создать ещё одну?`
+                : `Вы уже отправляли заявку с этим номером ЕО (${duplicateEoItem?.THU}) за последние 24 часа. Хотите изменить её?`}
             </DialogContentText>
           </DialogContent>
           <DialogActions sx={{ pb: 2, px: 3 }}>
@@ -3110,7 +3168,7 @@ const operationDateNowLabel = `${datePart} ${timePart}`;
             <Button
               onClick={() => {
                 // Осознанно создаём новую заявку — без повторного вопроса.
-                markEoCheckAnswered();
+                markDuplicateEoCheckAnswered();
                 setDuplicateEoDialogOpen(false);
                 handleFormSubmit({ preventDefault: () => {} });
               }}

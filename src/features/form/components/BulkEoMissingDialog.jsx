@@ -72,9 +72,11 @@ const getDuplicateRowIds = (rows) => {
   for (const row of rows) {
     const eo = String(row?.eoNumber ?? "").trim();
     if (!EO_NUMBER_PATTERN.test(eo)) continue;
-    const ids = groups.get(eo) || [];
+    const recipient = String(row?.recipientId ?? row?.recipientCode ?? "").trim().toLocaleLowerCase("ru-RU");
+    const pairKey = `${eo}|${recipient}`;
+    const ids = groups.get(pairKey) || [];
     ids.push(row.id);
-    groups.set(eo, ids);
+    groups.set(pairKey, ids);
   }
   const duplicates = new Map();
   for (const ids of groups.values()) {
@@ -82,7 +84,7 @@ const getDuplicateRowIds = (rows) => {
     const rowNumbers = ids.map((id) => rows.findIndex((row) => row.id === id) + 1);
     ids.forEach((id, index) => {
       const otherRows = rowNumbers.filter((_, otherIndex) => otherIndex !== index);
-      duplicates.set(id, `Эта ЕО повторяется в строке${otherRows.length > 1 ? "ах" : "е"} ${otherRows.join(", ")}.`);
+      duplicates.set(id, `Эта пара ЕО и получатель повторяется в строке${otherRows.length > 1 ? "ах" : "е"} ${otherRows.join(", ")}.`);
     });
   }
   return duplicates;
@@ -120,6 +122,7 @@ export default function BulkEoMissingDialog({
   dcThu = "",
   operationDateIso = null,
   onCheckEoConflict,
+  onCheckEoConflicts,
   onCreated,
 }) {
   const [sourceText, setSourceText] = useState("");
@@ -256,7 +259,9 @@ export default function BulkEoMissingDialog({
   const conflictSignature = JSON.stringify({
     dcThu: String(dcThu || "").trim(),
     problems: [...selectedProblems].sort(),
-    eos: readyToSendRows.map((row) => String(row.eoNumber).trim()).sort(),
+    pairs: readyToSendRows
+      .map((row) => `${String(row.eoNumber).trim()}|${String(row.recipientId ?? "").trim()}`)
+      .sort(),
   });
   const conflictReviewForCurrent = conflictReview?.signature === conflictSignature ? conflictReview : null;
   const isTransportationRequired = /отгружен/i.test(String(location));
@@ -346,21 +351,48 @@ export default function BulkEoMissingDialog({
     const previouslyCreated = rows.filter((row) => row.requestStatus === "success").length;
     const previouslyUncertain = rows.filter((row) => row.requestStatus === "uncertain").length;
     try {
-      if (typeof onCheckEoConflict === "function" && !conflictReviewForCurrent) {
+      const hasConflictChecker = typeof onCheckEoConflicts === "function"
+        || typeof onCheckEoConflict === "function";
+      if (hasConflictChecker && !conflictReviewForCurrent) {
         setIsCheckingConflicts(true);
-        const checkedRows = await mapWithConcurrency(
-          readyToSendRows,
-          BULK_EO_CONCURRENCY_LIMIT,
-          async (row) => ({
-            rowId: row.id,
-            eoNumber: row.eoNumber,
-            existing: await onCheckEoConflict(row.eoNumber),
-          }),
-        );
+        let checkedRows;
+        if (typeof onCheckEoConflicts === "function") {
+          const rowsToCheck = readyToSendRows.map(({ id, eoNumber, recipientId }) => ({ id, eoNumber, recipientId }));
+          const checksByRow = await onCheckEoConflicts(rowsToCheck);
+          checkedRows = readyToSendRows.map((row) => {
+            const check = checksByRow instanceof Map
+              ? checksByRow.get(row.id) ?? checksByRow.get(row.eoNumber)
+              : checksByRow?.[row.id] ?? checksByRow?.[row.eoNumber];
+            const hasSeparateResults = check && typeof check === "object"
+              && (Object.prototype.hasOwnProperty.call(check, "otherProblem")
+                || Object.prototype.hasOwnProperty.call(check, "notFoundDuplicate"));
+            return {
+              rowId: row.id,
+              eoNumber: row.eoNumber,
+              recipientId: row.recipientId,
+              recipientCode: row.recipientCode,
+              existing: hasSeparateResults ? check.otherProblem || null : check || null,
+              duplicate: hasSeparateResults ? check.notFoundDuplicate || null : null,
+            };
+          });
+        } else {
+          // Совместимость с прежним callback: новый путь приложения проверяет
+          // все ЕО одним $batch, legacy-callback вызывается по одной ЕО.
+          checkedRows = await mapWithConcurrency(
+            readyToSendRows,
+            BULK_EO_CONCURRENCY_LIMIT,
+            async (row) => ({
+              rowId: row.id,
+              eoNumber: row.eoNumber,
+              existing: await onCheckEoConflict(row.eoNumber),
+            }),
+          );
+        }
         const conflicts = checkedRows.filter((row) => row.existing);
-        setConflictReview({ signature: conflictSignature, conflicts });
+        const duplicates = checkedRows.filter((row) => row.duplicate);
+        setConflictReview({ signature: conflictSignature, conflicts, duplicates });
         setIsCheckingConflicts(false);
-        if (conflicts.length > 0) return;
+        if (conflicts.length > 0 || duplicates.length > 0) return;
       }
 
       const results = await createBulkProblemsPalletItems({
@@ -392,6 +424,13 @@ export default function BulkEoMissingDialog({
         uncertainCount,
       });
       if (newlyCreatedCount > 0 && typeof onCreated === "function") onCreated(newlyCreatedCount);
+      const newlySucceededRowIds = new Set(results
+        .filter((result) => result.status === "success")
+        .map((result) => result.rowId));
+      const allRowsSucceeded = rows.every((row) =>
+        row.requestStatus === "success" || newlySucceededRowIds.has(row.id),
+      );
+      if (allRowsSucceeded && typeof onClose === "function") onClose();
     } catch (error) {
       console.error("Ошибка массовой отправки:", error);
       setSendError(error?.message || "Не удалось начать отправку. Проверьте соединение и попробуйте ещё раз.");
@@ -875,6 +914,31 @@ export default function BulkEoMissingDialog({
               <Typography variant="body2">Если вы проверили данные и ЕО действительно не найдена, нажмите «Подтвердить и отправить».</Typography>
             </Alert>
           )}
+          {conflictReviewForCurrent?.duplicates?.length > 0 && (
+            <Alert severity="warning" data-testid="bulk-eo-notfound-duplicates">
+              <Typography variant="subtitle2" fontWeight={800}>
+                За последние 12 часов уже есть заявки «Не найдена» по той же паре ЕО и получатель:
+              </Typography>
+              <Box component="ul" sx={{ my: 0.5, pl: 2.5 }}>
+                {conflictReviewForCurrent.duplicates.map((duplicate) => {
+                  const item = duplicate.duplicate;
+                  const recipient = duplicate.recipientCode || `ID ${duplicate.recipientId}`;
+                  const created = item?.Created ? new Date(item.Created) : null;
+                  const createdLabel = created && !Number.isNaN(created.getTime())
+                    ? ` от ${created.toLocaleString("ru-RU")}`
+                    : "";
+                  return (
+                    <li key={`${duplicate.rowId}-${duplicate.eoNumber}-${duplicate.recipientId}`}>
+                      <Typography component="span" variant="body2">
+                        ЕО {duplicate.eoNumber}, получатель {recipient}: заявка № {item?.Id || "найдена"}{createdLabel}.
+                      </Typography>
+                    </li>
+                  );
+                })}
+              </Box>
+              <Typography variant="body2">Проверьте, что это не повторная отправка. Для продолжения нажмите «Подтвердить и отправить».</Typography>
+            </Alert>
+          )}
           {!selectedProblems.includes(EO_MISSING_PROBLEM) && (
             <Alert severity="error">Для массовой отправки требуется проблема «Не найдена».</Alert>
           )}
@@ -934,7 +998,7 @@ export default function BulkEoMissingDialog({
               ? "Проверка…"
               : isSending
                 ? "Отправка…"
-                : conflictReviewForCurrent?.conflicts?.length > 0
+                : (conflictReviewForCurrent?.conflicts?.length > 0 || conflictReviewForCurrent?.duplicates?.length > 0)
                   ? `Подтвердить и отправить ${requestCountLabel(requestRowsToSend)}`
                   : hasAttemptedRows
                     ? `Повторить ${retryCountLabel(requestRowsToSend)}`

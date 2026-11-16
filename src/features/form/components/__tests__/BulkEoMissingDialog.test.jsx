@@ -68,12 +68,14 @@ describe("BulkEoMissingDialog", () => {
   let host;
   let root;
   let onCreated;
+  let onClose;
 
   beforeEach(() => {
     host = document.createElement("div");
     document.body.appendChild(host);
     root = createRoot(host);
     onCreated = vi.fn();
+    onClose = vi.fn();
     mocks.fetchBulkRecipientOptions.mockResolvedValue(recipients);
     mocks.createBulkProblemsPalletItems.mockImplementation(async ({ rows, onRowResult }) => {
       const results = rows.map((row, index) => ({
@@ -95,19 +97,20 @@ describe("BulkEoMissingDialog", () => {
     vi.clearAllMocks();
   });
 
-  async function render({ onCheckEoConflict } = {}) {
+  async function render({ onCheckEoConflict, onCheckEoConflicts, onClose: closeHandler = onClose } = {}) {
     await act(async () => {
       root.render(
         <ThemeProvider theme={createTheme()}>
           <BulkEoMissingDialog
             open
-            onClose={() => {}}
+            onClose={closeHandler}
             choices={["Не найдена", "Повреждение"]}
             initialProblems={[]}
             initialLocation=""
             dcThu="8117"
             operationDateIso="2026-10-10T00:00:00.000Z"
             onCheckEoConflict={onCheckEoConflict}
+            onCheckEoConflicts={onCheckEoConflicts}
             onCreated={onCreated}
           />
         </ThemeProvider>,
@@ -160,7 +163,47 @@ describe("BulkEoMissingDialog", () => {
     expect(options.problems).toContain("Не найдена");
     expect(options.location).toBe("Не найдена в зоне отгрузки");
     expect(onCreated).toHaveBeenCalledWith(2);
+    expect(onClose).toHaveBeenCalledTimes(1);
     expect(document.body.textContent).toContain("Все заявки созданы");
+  });
+
+  it("оставляет диалог открытым, если отправка завершилась частично", async () => {
+    mocks.createBulkProblemsPalletItems.mockImplementationOnce(async ({ rows, onRowResult }) => {
+      const results = rows.map((row, index) => ({
+        rowId: row.id,
+        status: index === 0 ? "success" : "failed",
+        itemId: index === 0 ? 100 : null,
+        retryable: index !== 0,
+        message: index === 0 ? "" : "Ошибка SharePoint",
+      }));
+      results.forEach((result) => onRowResult?.(result));
+      return results;
+    });
+    await render();
+    const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
+    await pasteSource(source, "0294\\n808117004022047365\\n0295\\n808117004022002852");
+    await clickButton("Отправить 2 заявки");
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Ошибок: 1");
+  });
+
+  it("разрешает одну ЕО для разных получателей, но оставляет отдельную заявку на каждую пару", async () => {
+    await render();
+    const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
+    await pasteSource(source, "0294\\n808117004022047365\\n0295\\n808117004022047365");
+
+    expect(document.body.querySelectorAll('[data-testid^="bulk-eo-row-"]')).toHaveLength(2);
+    expect(document.body.querySelector('[data-testid="bulk-eo-send"]').disabled).toBe(false);
+    await clickButton("Отправить 2 заявки");
+
+    const options = mocks.createBulkProblemsPalletItems.mock.calls[0][0];
+    expect(options.rows).toHaveLength(2);
+    expect(options.rows.map((row) => row.eoNumber)).toEqual([
+      "808117004022047365",
+      "808117004022047365",
+    ]);
+    expect(options.rows.map((row) => row.recipientId)).toEqual([1, 2]);
   });
 
   it("позволяет исправить номер нажатием на чип и удалить пару красной кнопкой", async () => {
@@ -222,10 +265,10 @@ describe("BulkEoMissingDialog", () => {
     expect(document.body.textContent).toContain("Не сопоставлен получатель 02941.");
   });
 
-  it("проверяет конфликты нескольких ЕО параллельно перед отправкой", async () => {
-    const checkResolvers = [];
-    const onCheckEoConflict = vi.fn(() => new Promise((resolve) => checkResolvers.push(resolve)));
-    await render({ onCheckEoConflict });
+  it("проверяет конфликты пачкой после разбора и перед отправкой", async () => {
+    let resolveConflictCheck;
+    const onCheckEoConflicts = vi.fn(() => new Promise((resolve) => { resolveConflictCheck = resolve; }));
+    await render({ onCheckEoConflicts });
 
     const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
     await pasteSource(
@@ -234,15 +277,51 @@ describe("BulkEoMissingDialog", () => {
     );
     await clickButton("Отправить 4 заявки");
 
-    expect(onCheckEoConflict).toHaveBeenCalledTimes(4);
+    expect(onCheckEoConflicts).toHaveBeenCalledTimes(1);
+    const rowsToCheck = onCheckEoConflicts.mock.calls[0][0];
+    expect(rowsToCheck.map((row) => row.eoNumber)).toEqual([
+      "808117004022047365",
+      "808117004022002852",
+      "808117004022002853",
+      "808117004022002854",
+    ]);
+    expect(rowsToCheck.every((row) => row.id && row.recipientId)).toBe(true);
     expect(mocks.createBulkProblemsPalletItems).not.toHaveBeenCalled();
     await act(async () => {
-      checkResolvers.forEach((resolve) => resolve(null));
+      resolveConflictCheck(new Map());
       await wait(20);
     });
 
     expect(mocks.createBulkProblemsPalletItems).toHaveBeenCalledTimes(1);
     expect(onCreated).toHaveBeenCalledWith(4);
+  });
+
+  it("предупреждает о дубликате пары ЕО-получатель за 12 часов и ждёт подтверждения", async () => {
+    const duplicate = {
+      Id: 93,
+      THU: "808117004022047365",
+      RecipientId: 1,
+      Created: "2026-10-10T06:00:00.000Z",
+      Problems: { results: ["Не найдена"] },
+    };
+    const onCheckEoConflicts = vi.fn(async (rows) => new Map(rows.map((row) => [row.id, {
+      otherProblem: null,
+      notFoundDuplicate: row.eoNumber === duplicate.THU ? duplicate : null,
+    }])));
+    await render({ onCheckEoConflicts });
+
+    const source = document.body.querySelector('[data-testid="bulk-eo-source"]');
+    await pasteSource(source, "0294\n808117004022047365");
+    await clickButton("Отправить 1 заявка");
+
+    expect(document.body.querySelector('[data-testid="bulk-eo-notfound-duplicates"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("За последние 12 часов уже есть заявки «Не найдена»");
+    expect(mocks.createBulkProblemsPalletItems).not.toHaveBeenCalled();
+
+    await clickButton("Подтвердить и отправить 1 заявка");
+    expect(mocks.createBulkProblemsPalletItems).toHaveBeenCalledTimes(1);
+    expect(onCreated).toHaveBeenCalledWith(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("перед отправкой предупреждает о конфликтующей заявке и требует явного подтверждения", async () => {
